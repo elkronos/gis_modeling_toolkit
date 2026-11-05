@@ -1914,6 +1914,79 @@ old behaviour where there is a way.
   row does, and the zone's figure is the stations'.  The extent from which
   the candidates are built still reads the row.
 
+* **The projection chosen for a small lon/lat MULTIPOINT layer depended on
+  the order of the points in each feature.**  A layer of features that
+  are not points, with fewer than 40 distinct locations, is scored on its
+  features' vertices too, with points added along the edges between them.  A MULTIPOINT has no
+  edges, but points were added on the segments between consecutive members
+  of each feature, at places the layer does not have, and they moved with
+  the order of the members: two MULTIPOINTs of five points each scored
+  0.75 percent in UTM zone 14 in one order and 0.78 percent in another.  A
+  MULTIPOINT layer is now scored on its member points with nothing added
+  between them, which is the score of the same points as a POINT layer.
+  For such a layer the CRS, `attr(, "crs_choice")` and the logged figures
+  can differ from before; MULTIPOINT layers with 40 distinct locations or
+  more score as before.
+
+* **A lon/lat layer that mixes geometry types or holds
+  GEOMETRYCOLLECTIONs was scored without its outline, and across 180
+  degrees `ensure_projected()` stopped on it.**  `sf::st_coordinates()`
+  refuses such a layer (class `sfc_GEOMETRY` or `sfc_GEOMETRYCOLLECTION`,
+  as `rbind()`, `c()`, `sf::st_make_valid()` and `sf::st_intersection()`
+  can give), so the vertices that score a layer of fewer than 40 features
+  were not read.  Two boxes, one listed as a MULTIPOLYGON, were scored on
+  the one pair between their interior points and got a Lambert azimuthal
+  CRS with "0.12% against the zone's 0.47%", where the same boxes as
+  MULTIPOLYGONs get an Albers CRS with "1.13% against the zone's 6.57%";
+  a box over the conterminous United States listed as one
+  GEOMETRYCOLLECTION scored `NA` for every candidate and kept UTM zone 15.
+  The test for a layer that straddles longitude 180 read the coordinates
+  the same way, outside any handler, so `ensure_projected()`, and the
+  builders and fits that project a lon/lat layer through it, stopped with
+  sf's "not implemented for objects of class sfc_GEOMETRY" on such a layer
+  across 180.  Such a layer is now read feature by feature, each collection
+  unpacked into its members, so it scores, chooses and logs as the same
+  features in one type.  The points of a POINT or MULTIPOINT among them
+  are not filled between either.  `sf::st_is_empty()` calls a
+  GEOMETRYCOLLECTION, MULTIPOLYGON or MULTILINESTRING empty when its first
+  part is empty, and such a feature was left out of the score: a box
+  listed after an empty line in one GEOMETRYCOLLECTION scored `NA` for
+  every candidate.  Empty parts are now dropped before empty features, so
+  such a feature is scored on its other parts.  Layers of one geometry
+  type with no empty part score as before.
+
+* **`ensure_projected()` read a small CRS-less layer of mixed geometry
+  types as planar, and gave a layer of mixed types that s2 refuses
+  EPSG:3857.**  With no CRS, a layer under one degree across is taken as
+  lon/lat when its coordinates have fractional degrees, and that test
+  read the coordinates with `sf::st_coordinates()`, which refuses a layer
+  of mixed types or of collections: two boxes of 0.3 degrees in Germany,
+  one listed as a MULTIPOLYGON, were returned with no CRS and
+  `crs_assumed` `"none"`, where the same boxes as MULTIPOLYGONs are taken
+  as EPSG:4326 and projected to UTM zone 32.  A layer whose only feature
+  has an empty first part, which `sf::st_is_empty()` calls empty, was read
+  as planar too.  When s2
+  refuses a lon/lat layer even after the repair (a bowtie polygon), its
+  centre is the mean of its vertices, which were read the same way: a
+  bowtie beside a MULTIPOLYGON got no centre and EPSG:3857, where the same
+  features as MULTIPOLYGONs get a CRS centred on them.  Both now read such
+  a layer feature by feature, as the same features in one type.
+
+* **A lon/lat layer with Z or M coordinates was not scored as its XY
+  copy.**  The outline of a layer of fewer than 40 features is read ring by
+  ring, and the key of a ring read Z and M as well, so an edge between two
+  vertices with other Z or M was not filled: a box over the conterminous
+  United States whose corners differ in Z got a Lambert azimuthal CRS with
+  "0.97% against the zone's 5.42%", where its XY copy gets an Albers CRS
+  with "1.13% against the zone's 6.71%".  A line with Z kept its Z on the
+  point that represents it beside XY vertices, and GEOS refuses M, so on a
+  LINESTRING Z, or on a layer of lines, polygons or MULTIPOINTs with M,
+  every candidate scored `NA` and the UTM zone was kept.  The layer is now
+  scored in x and y, and the ring key reads the ring and part columns
+  alone, so such a layer scores, chooses and logs as its `sf::st_zm()`
+  copy.  The layer returned keeps its Z and
+  M.  Layers in XY score as before.
+
 * **`summarize_by_cell(area = TRUE)` refused projected cells when s2
   refused one of them in degrees.**  The area check compares the cells'
   planar areas with their geodesic areas, which s2 measures on the cells'

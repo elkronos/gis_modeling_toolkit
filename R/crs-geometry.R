@@ -59,7 +59,11 @@
   if (is.null(ctr))
     ctr <- tryCatch(.with_s2(centre_of(.safe_make_valid(g))), error = function(e) NULL)
   if (is.null(ctr)) {
-    xy <- tryCatch(sf::st_coordinates(g)[, 1:2, drop = FALSE],
+    # Read feature by feature on a layer of mixed types or of collections
+    # (.vertex_coords()), which sf::st_coordinates() refuses: the refusal
+    # left no vertex, and a bowtie beside a MULTIPOLYGON got no centre and
+    # EPSG:3857, where the same features as MULTIPOLYGONs get a local CRS.
+    xy <- tryCatch(.vertex_coords(g)[, 1:2, drop = FALSE],
                    error = function(e) matrix(numeric(0), 0L, 2L))
     xy <- xy[is.finite(xy[, 1L]) & is.finite(xy[, 2L]), , drop = FALSE]
     lam <- xy[, 1L] * pi / 180; phi <- xy[, 2L] * pi / 180
@@ -214,7 +218,11 @@
   # apart and every distance downstream -- variogram range, block size, GWR
   # bandwidth, GP length-scale -- is destroyed.
   if (is.finite(span_lon) && span_lon > 180) {
-    lons  <- sf::st_coordinates(sf::st_geometry(x_ll))[, 1L]
+    # Read feature by feature on a layer of mixed types or of collections,
+    # which sf::st_coordinates() refuses: the refusal stopped
+    # ensure_projected() on a box across 180 listed as a POLYGON beside a
+    # MULTIPOLYGON.
+    lons  <- .vertex_coords(sf::st_geometry(x_ll))[, 1L]
     lons  <- sort(lons[is.finite(lons)])
     wrapped <- FALSE
     if (length(lons) > 1L) {
@@ -481,7 +489,10 @@
 #'   edge is filled from the same end whichever way its ring runs, and an
 #'   added point within about 1e-9 degrees of a point listed before it is
 #'   left out, so an edge two features share, or a vertex on another
-#'   feature's edge, adds no pair of points a few bits apart.
+#'   feature's edge, adds no pair of points a few bits apart.  A MULTIPOINT
+#'   adds its member points and nothing between them.  The layer is read in
+#'   x and y, and a layer of mixed types or of collections is read feature
+#'   by feature (\code{.vertex_coords()}).
 #' @param crs Candidate \code{sf::crs}.
 #' @param max_n Maximum number of points to sample.  Default 40 (780 pairs).
 #' @return Numeric worst-case \code{|d_planar / d_geodesic - 1|} over the
@@ -492,20 +503,31 @@
 #' @noRd
 .crs_distance_error <- function(x_ll, crs, max_n = 40L) {
   tryCatch({
-    g <- sf::st_geometry(x_ll)
+    # Empty parts are dropped before empty features: sf::st_is_empty() calls
+    # a GEOMETRYCOLLECTION, MULTIPOLYGON or MULTILINESTRING empty when its
+    # first part is empty, and a box listed after an empty line in one
+    # GEOMETRYCOLLECTION was left out, so every candidate scored NA.  An
+    # empty part inside a line feature also segfaults GEOS below (see
+    # .drop_empty_parts()), and tryCatch() cannot catch a crash, so any
+    # lon/lat line layer with a null part took ensure_projected() down.
+    g <- .drop_empty_parts(sf::st_geometry(x_ll))
     g <- g[!sf::st_is_empty(g)]
+    # Scored in x and y.  With Z or M kept, the ring key read Z and M, so the
+    # edges of a POLYGON Z whose vertices differ in Z were not filled (a box
+    # over the conterminous United States chose another CRS than its XY
+    # copy); the interior point of a LINESTRING Z kept its Z beside XY
+    # vertices, so sf::st_transform() stopped, and GEOS refuses M: every
+    # candidate scored NA and the UTM zone was kept.
+    if (any(.geom_dims(g) != "XY")) g <- sf::st_zm(g, drop = TRUE, what = "ZM")
     # Representative POINTS, not the geometries themselves.  st_coordinates()
     # returns one row per VERTEX, so for a polygon or line layer the projected
     # distance vector was a different length from the geodesic one: the
     # comparison recycled, R raised "longer object length is not a multiple of
     # shorter object length" at the caller, every candidate scored NA, and the
     # selection silently fell back to the UTM zone while the log line reported
-    # "NA% vs NA%".  Every county-polygon layer took that path.  The empty
-    # parts go first: one inside a line feature segfaults GEOS here (see
-    # .drop_empty_parts()), and tryCatch() cannot catch a crash, so any
-    # lon/lat line layer with a null part took ensure_projected() down.
+    # "NA% vs NA%".  Every county-polygon layer took that path.
     if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT")) {
-      g_full <- .drop_empty_parts(g)
+      g_full <- g
       g <- suppressWarnings(sf::st_point_on_surface(g_full))
       # GEOS reads a feature that crosses +-180 the long way round, so its
       # interior point landed on the far side of the globe ((-0.5, -17) for a
@@ -539,13 +561,15 @@
       # where a zone distorts most.  So below `max_n` points, add the
       # outline's own vertices, densified along each edge until there are
       # about `max_n` of them (a box has only its four corners).  Layers with
-      # `max_n` distinct points or more are measured on those points, and so
-      # is a GEOMETRYCOLLECTION layer, whose vertices st_coordinates()
-      # refuses.  Exact copies of a feature are read once: they add no
+      # `max_n` distinct points or more are measured on those points.  A
+      # layer of mixed types or of collections is read feature by feature
+      # (.vertex_coords()): sf::st_coordinates() refuses it, and a box listed
+      # as one GEOMETRYCOLLECTION scored NA for every candidate.  Exact
+      # copies of a feature are read once: they add no
       # vertex, and each copy's ring was densified again, which cost 0.9 s
       # per candidate on 10,000 copies of a box.
       xy <- if (length(g) < max_n)
-        tryCatch(sf::st_coordinates(g_full[!duplicated(unclass(g_full))]),
+        tryCatch(.vertex_coords(g_full[!duplicated(unclass(g_full))]),
                  error = function(e) NULL)
       # Only about `max_n` of these points are measured (the evenly spaced
       # subsample below), so thin a detailed outline to a few times that
@@ -580,13 +604,25 @@
                    drop = FALSE]
       }
       if (!is.null(xy)) {
-        ring <- if (ncol(xy) > 2L)
-          do.call(paste, as.data.frame(xy[, -(1:2), drop = FALSE])) else rep("1", nrow(xy))
+        # The ring key is read from the L columns alone, so that no other
+        # coordinate can end an edge.
+        lc   <- grepl("^L[0-9]+$", colnames(xy))
+        ring <- if (any(lc))
+          do.call(paste, as.data.frame(xy[, lc, drop = FALSE])) else rep("1", nrow(xy))
         xy <- xy[, 1:2, drop = FALSE]
         ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L])
         xy <- xy[ok, , drop = FALSE]; ring <- ring[ok]
         if (nrow(xy) > 0L) {
-          per_edge <- if (thinned) 0L else
+          # A MULTIPOINT has no edges: its member points are added as they
+          # are, and nothing is filled between them.  st_coordinates() gives
+          # the members of a feature one L1 value, which the ring key read as
+          # a ring, and points were added on the segments between consecutive
+          # members, at places the layer does not have, moving with the order
+          # of the members: two MULTIPOINTs of five points scored 0.75% in
+          # UTM zone 14 in one order and 0.78% in another.  The points of a
+          # POINT or MULTIPOINT inside a layer of mixed types each get a ring
+          # key of their own (.vertex_coords()).
+          per_edge <- if (thinned || inherits(g_full, "sfc_MULTIPOINT")) 0L else
             max(0L, ceiling(max_n / max(1L, nrow(unique(xy)))) - 1L)
           if (per_edge > 0L && nrow(xy) > 1L) {
             same <- ring[-1L] == ring[-length(ring)]
@@ -697,6 +733,61 @@
     if (!any(keep)) return(NA_real_)
     max(abs(d_prj[keep] / d_geo[keep] - 1))
   }, error = function(e) NA_real_)
+}
+
+
+#' The vertices of a layer of any geometry class, with their ring keys
+#'
+#' \code{sf::st_coordinates()} for a layer of one geometry type.  A layer
+#' that mixes types (class \code{sfc_GEOMETRY}) or holds collections
+#' (\code{sfc_GEOMETRYCOLLECTION}), which \code{sf::st_coordinates()}
+#' refuses, is read part by part: each collection is unpacked into its
+#' members, and every part that is not a collection is a leaf, numbered in
+#' the order of the layer.  The leaves are read one geometry type at a time
+#' and put back in that order.  \code{L1} is the leaf, \code{L2} numbers the
+#' points of a POINT or MULTIPOINT leaf (0 for other leaves), so that no two
+#' of them share a ring key and nothing is filled between them, and
+#' \code{L3} and \code{L4} are the leaf's own ring and part (0 where it has
+#' none).  Empty parts and empty leaves are left out, and Z and M are
+#' dropped from such a layer.
+#'
+#' @param g An sfc.
+#' @return A numeric matrix with columns \code{X} and \code{Y} first, then
+#'   the columns of \code{sf::st_coordinates()} or \code{L1} to \code{L4};
+#'   one row per vertex.
+#' @keywords internal
+#' @noRd
+.vertex_coords <- function(g) {
+  if (!inherits(g, c("sfc_GEOMETRY", "sfc_GEOMETRYCOLLECTION")))
+    return(sf::st_coordinates(g))
+  if (any(.geom_dims(g) != "XY")) g <- sf::st_zm(g, drop = TRUE, what = "ZM")
+  # Empty parts first: sf::st_is_empty() calls a MULTIPOLYGON or
+  # MULTILINESTRING leaf empty when its first part is empty.
+  g <- .drop_empty_parts(g)
+  leaves_of <- function(s)
+    if (inherits(s, "GEOMETRYCOLLECTION"))
+      unlist(lapply(unclass(s), leaves_of), recursive = FALSE)
+    else list(s)
+  leaves <- unlist(lapply(unclass(g), leaves_of), recursive = FALSE)
+  leaves <- leaves[!vapply(leaves, sf::st_is_empty, logical(1))]
+  cols   <- c("X", "Y", "L1", "L2", "L3", "L4")
+  if (!length(leaves)) return(matrix(numeric(0), 0L, length(cols), dimnames = list(NULL, cols)))
+  ty   <- vapply(leaves, function(s) class(s)[2L], character(1))
+  out  <- lapply(unique(ty), function(t) {
+    idx <- which(ty == t)
+    cc  <- sf::st_coordinates(sf::st_sfc(leaves[idx]))
+    lc  <- which(grepl("^L[0-9]+$", colnames(cc)))
+    # The last L column numbers the leaves of this type; those before it
+    # are the leaf's own rings and parts.
+    leaf <- if (length(lc)) idx[cc[, lc[length(lc)]]] else idx
+    own  <- cbind(cc[, lc[-length(lc)], drop = FALSE], matrix(0, nrow(cc), 2L))[, 1:2, drop = FALSE]
+    pt   <- if (t %in% c("POINT", "MULTIPOINT")) seq_len(nrow(cc)) else rep(0L, nrow(cc))
+    cbind(cc[, 1L], cc[, 2L], leaf, pt, own)
+  })
+  out <- do.call(rbind, out)
+  out <- out[order(out[, 3L]), , drop = FALSE]
+  dimnames(out) <- list(NULL, cols)
+  out
 }
 
 
@@ -1017,7 +1108,12 @@
 #' (or XYM) geometries in XY: \code{sf::st_coordinates()} reads such a layer
 #' in the dimension of its first geometry and stops on it, which made a
 #' layer in degrees look planar.  It leaves empty geometries out: an empty
-#' polygon stops \code{sf::st_coordinates()} too.
+#' polygon stops \code{sf::st_coordinates()} too.  Empty parts go first, as
+#' \code{sf::st_is_empty()} calls a GEOMETRYCOLLECTION, MULTIPOLYGON or
+#' MULTILINESTRING empty when its first part is empty.  A layer that mixes
+#' geometry types or holds collections, which \code{sf::st_coordinates()}
+#' refuses, is read feature by feature (\code{.vertex_coords()}): the
+#' refusal made a layer in degrees that mixes types look planar.
 #'
 #' @param x An sf/sfc object with no CRS.
 #' @return A list: \code{lonlat} (logical) and \code{bb} (the bbox, or
@@ -1040,9 +1136,10 @@
     xc <- x
     if (inherits(x, c("sf", "sfc"))) {
       xc <- sf::st_geometry(x)
+      xc <- .drop_empty_parts(xc)
       xc <- .xy_if_mixed(xc[!sf::st_is_empty(xc)])
     }
-    coords_mat <- try(sf::st_coordinates(xc), silent = TRUE)
+    coords_mat <- try(.vertex_coords(xc), silent = TRUE)
     if (!inherits(coords_mat, "try-error") && nrow(coords_mat) > 0) {
       frac <- abs(c(coords_mat[, 1], coords_mat[, 2]) %% 1)
       has_geo_precision <- any(frac > 0.001 & frac < 0.999)
