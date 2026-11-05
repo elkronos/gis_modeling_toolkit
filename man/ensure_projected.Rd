@@ -90,9 +90,11 @@ a Lambert azimuthal equal-area centred on the data and (where its
 standard parallels do not degenerate) an Albers conic are each scored by
 projecting representative points of the data (a non-POINT layer is
 reduced to one point per feature, plus the vertices of its outline when
-it has fewer than 40 features, so a single study-area polygon is scored
-too) and comparing planar with geodesic pairwise distances, and the one
-that distorts least is used.
+fewer than 40 distinct points remain, so a single study-area polygon is
+scored too, however many rows repeat it; copies of one location count
+once, and rows without a finite location are left out) and comparing
+planar with geodesic distances over the pairs at least 1 mm apart, and
+the one that distorts least is used.
 The choice, both error figures and this argument are \strong{logged} (see the
 logging note under \code{\link[=spatialkit_quiet]{spatialkit_quiet()}}); they are not R warnings, so
 \code{tryCatch(warning = )} does not see them.}

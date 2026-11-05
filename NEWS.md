@@ -1807,9 +1807,10 @@ old behaviour where there is a way.
 
 * **A small lon/lat layer whose features share edges, or meet another
   feature's edge at a corner, got its projection chosen on rounding
-  noise.**  When a layer of fewer than 40 polygons or lines lists at most
-  160 vertices, fewer than 40 of them distinct, `ensure_projected()` scores
-  the candidates on points added along each edge of its outlines as well.
+  noise.**  When a polygon or line layer has fewer than 40 distinct
+  feature points and fewer than 40 distinct vertices, `ensure_projected()`
+  scores the candidates on points added along each edge of its outlines as
+  well.
   An edge two features share was filled once from each end, some copies of
   an added point differed in their last bits, and the pair, about 1e-9 m
   apart, set the worst-case distance error of every candidate.  Two boxes of
@@ -1830,6 +1831,88 @@ old behaviour where there is a way.
   the CRS, `attr(, "crs_choice")` and the logged figures can differ from
   before, and the points added along an edge no longer depend on the
   direction in which its ring is listed.
+
+* **The projection chosen for a lon/lat polygon or line layer depended on
+  how many rows repeat one feature.**  `ensure_projected()` scores the
+  candidates on one point per row, plus the outline's vertices when there
+  are fewer than 40 such points, and it thinned an outline of more than 160
+  vertex rows without filling its edges.  A layer that lists one polygon
+  once per year was scored by the number of years: a box of 52 by 22
+  degrees over the conterminous United States got a Lambert azimuthal CRS
+  with "1.76% against the zone's 10.87%" on one row, "1.28% against the
+  zone's 8.33%" on 33 rows, and from 40 rows every candidate scored `NA`
+  and UTM zone 15 was kept "because the candidate projections could not be
+  scored on this layer".  Copies of one point now count once, before the
+  count of 40 and in the sample of 40 points, and an outline is thinned
+  only when it has more than 160 distinct vertices.  A layer whose features
+  lie on distinct points, and whose outline lists more than 160 vertex rows
+  only when it has 40 distinct vertices or more, scores as before.  For
+  the others the CRS, `attr(, "crs_choice")` and the logged figures can
+  differ from before.
+
+* **The projection chosen for a lon/lat point layer depended on how many
+  rows list one location.**  `ensure_projected()` scores the candidates on
+  40 points taken at even spacing along the rows sorted by coordinate, and
+  repeat visits to one station took places in that sample from the other
+  stations.  39 stations scored 5.07 percent in UTM zone 14 and 0.61
+  percent in the Albers CRS chosen; with station 1 listed 100 times, 4.59
+  and 0.45 percent, and listed 1,001 times, 2.32 and 0.35 percent, the
+  sample holding 4 of the 39 stations.  The sample is now taken over the
+  distinct locations.  A layer with no location listed twice scores as
+  before; for the others the CRS, `attr(, "crs_choice")` and the logged
+  figures can differ from before.
+
+* **Two listings of one place a few bits apart, or at longitudes 180 and
+  -180, set the distance error of every candidate CRS.**
+  `ensure_projected()` scores each candidate on the worst ratio of planar
+  to geodesic length over pairs of sampled points, and it took every pair
+  longer than 0.  A corner two features share, written `-107.2` in one and
+  `-110.6 + 3.4` in the other, a point listed twice a few bits apart, and
+  a layer whose features meet at longitude 180, which lists (180, y) and
+  (-180, y), each gave a pair about 1e-9 m long whose planar length is
+  rounding noise, or the width of the world in Web Mercator.  Two boxes
+  side by side, typed that way, scored 13.7 percent in UTM zone 13 and
+  24.5 percent in EPSG:5070, where their outline as one box scores 0.26
+  and 0.97 percent, and got an Albers CRS.  Two boxes either side of 180
+  reported a distance error of 1 for their one candidate.  Pairs under 1
+  mm are now left out: the two boxes score 0.25 and 0.97 percent and get
+  their outline's Lambert azimuthal CRS, and the boxes either side of 180
+  report 0.35 percent.  A layer with no pair 1 mm or longer is scored `NA`,
+  as a layer of one location is.  A layer whose sampled pairs are all 1 mm
+  or longer scores as before; for the others the CRS, `attr(,
+  "crs_choice")` and the logged figures can differ from before.
+
+* **The geodesic distances that score candidate projections came out
+  short on east-west pairs of a few millimetres.**  `ensure_projected()`
+  compares planar distances with WGS84 ellipsoidal ones from Vincenty's
+  formula, whose iteration stopped once a pass moved its longitude on the
+  auxiliary sphere by less than 1e-12 radians.  On an east-west pair under
+  about 2 mm at the equator, 2.5 mm at latitude 40 and 11 mm at latitude
+  80, the first pass already moved it by less, and the distance came out
+  up to 0.34 percent short; pairs up to about a metre long stopped after
+  the second pass, up to 1.1e-5 short.  The shortest pair can set the
+  worst-case distance error of every candidate: 30 points between
+  latitudes 33 and 41 score 0.04 percent in UTM zone 13, and scored 0.20
+  percent with a 31st point 1.8 mm east of one of them.  The iteration now
+  stops once a pass moves the longitude by no more than 1e-12 of the
+  pair's longitude difference, taken the short way round (of 1 radian for
+  pairs 1 radian or more apart), and such pairs agree with the ellipsoid
+  to 1e-9, across longitude 180 too.  Nearly antipodal pairs still fall
+  back to the spherical distance.  Pairs a degree or more long move by
+  less than 1e-10 of their length, and other pairs by up to 1.1e-5 of
+  theirs, the error the old test left on them; the distance errors in
+  `attr(, "crs_choice")` and the log move by about as much, and the CRS
+  chosen changes only where two candidates score that close.
+
+* **One row of a lon/lat layer at a coordinate that is not finite made
+  every candidate projection score `NA`.**  The geodesic distances stopped
+  with "NAs are not allowed in subscripted assignments" on the pairs of
+  that row, the scorer turned the stop into `NA`, and 39 stations over the
+  conterminous United States with a 40th row at longitude `Inf` were put
+  in UTM zone 14 with an `NA` in `attr(, "crs_choice")`, where the 39 get
+  an Albers CRS.  Such a row now takes no part in the scores, as an empty
+  row does, and the zone's figure is the stations'.  The extent from which
+  the candidates are built still reads the row.
 
 * **`summarize_by_cell(area = TRUE)` refused projected cells when s2
   refused one of them in degrees.**  The area check compares the cells'

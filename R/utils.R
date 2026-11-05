@@ -609,23 +609,41 @@
 #' dependency).
 #'
 #' @param lon1,lat1,lon2,lat2 Numeric vectors in decimal degrees, recycled.
-#' @return Distances in metres.  Nearly antipodal pairs, where the iteration
-#'   does not converge, fall back to the spherical distance.
+#' @return Distances in metres, \code{NA} for a pair with a coordinate that
+#'   is not finite.  Nearly antipodal pairs, where the iteration does not
+#'   converge, fall back to the spherical distance.
 #' @keywords internal
 #' @noRd
 .geod_distance <- function(lon1, lat1, lon2, lat2) {
   a <- 6378137; f <- 1 / 298.257223563; b <- a * (1 - f)
   rad <- pi / 180
+  # A pair with a coordinate that is not finite is left out of the
+  # iteration and given NA.  Its test below was NA, and the update of
+  # `active` stopped with "NAs are not allowed in subscripted assignments",
+  # so one such row made every candidate CRS score NA.  Its latitudes are
+  # set to 0 so that tan() gives no warning on them.
+  n <- max(length(lon1), length(lat1), length(lon2), length(lat2))
+  lon1 <- rep_len(lon1, n); lat1 <- rep_len(lat1, n)
+  lon2 <- rep_len(lon2, n); lat2 <- rep_len(lat2, n)
+  fin <- is.finite(lon1 + lat1 + lon2 + lat2)
+  lat1[!fin] <- 0; lat2[!fin] <- 0
   U1 <- atan((1 - f) * tan(lat1 * rad)); U2 <- atan((1 - f) * tan(lat2 * rad))
-  L  <- (lon2 - lon1) * rad
+  # A pair whose longitudes differ by more than 180 degrees is measured the
+  # short way round, so that the stopping test below reads its true
+  # longitude difference: a pair a few millimetres across longitude 180 has
+  # a difference close to 360 degrees as written.  Each part is taken from
+  # its own side of 180, where the subtraction is exact, so the difference
+  # keeps the precision of a pair away from 180.
+  dlon <- lon2 - lon1
+  w <- which(fin & dlon < -180)
+  dlon[w] <- (lon2[w] + 180) + (180 - lon1[w])
+  e <- which(fin & dlon > 180)
+  dlon[e] <- (lon2[e] - 180) - (lon1[e] + 180)
+  L  <- dlon * rad
   sU1 <- sin(U1); cU1 <- cos(U1); sU2 <- sin(U2); cU2 <- cos(U2)
-  n <- max(length(U1), length(U2), length(L))
-  lambda <- rep_len(L, n); U1 <- rep_len(U1, n); U2 <- rep_len(U2, n)
-  sU1 <- rep_len(sU1, n); cU1 <- rep_len(cU1, n)
-  sU2 <- rep_len(sU2, n); cU2 <- rep_len(cU2, n)
-  L   <- rep_len(L, n)
+  lambda <- L
   sinSigma <- cosSigma <- sigma <- cosSqAlpha <- cos2SigmaM <- numeric(n)
-  active <- rep(TRUE, n)
+  active <- fin
   for (iter in seq_len(200L)) {
     sl <- sin(lambda[active]); cl <- cos(lambda[active])
     ss <- sqrt((cU2[active] * sl)^2 +
@@ -640,7 +658,16 @@
       (sg + C * ss * (c2sm + C * cs * (-1 + 2 * c2sm^2)))
     sinSigma[active] <- ss; cosSigma[active] <- cs; sigma[active] <- sg
     cosSqAlpha[active] <- csa; cos2SigmaM[active] <- c2sm
-    done <- abs(lambda_new - lambda[active]) < 1e-12
+    # The change is measured against L, not in radians: each pass shrinks
+    # it by about f cos^2 U, so on an east-west pair under about
+    # 1e-12 / (f cos^2 U) rad the first pass already moved lambda by less
+    # than 1e-12, and sigma, taken from the starting lambda, was short by
+    # f cos^2 U (0.34% at the equator, on pairs of a few millimetres).  A
+    # pair 1 rad or more apart in longitude keeps the test in radians, so
+    # nearly antipodal pairs fall back to the sphere as before.  A pair
+    # along a meridian (L = 0) stops on the first pass, as does a pair at
+    # longitudes 180 and -180 on one parallel.
+    done <- abs(lambda_new - lambda[active]) <= 1e-12 * pmin(1, abs(L[active]))
     lambda[active] <- lambda_new
     active[active] <- !done
     if (!any(active)) break
@@ -654,12 +681,13 @@
   d <- b * A * (sigma - dSigma)
   # Non-converged (near-antipodal) pairs: spherical fallback.
   if (any(active)) {
-    la1 <- rep_len(lat1, n)[active] * rad; la2 <- rep_len(lat2, n)[active] * rad
+    la1 <- lat1[active] * rad; la2 <- lat2[active] * rad
     dl  <- L[active]
     d[active] <- 6371008.8 * acos(pmin(1, pmax(-1,
       sin(la1) * sin(la2) + cos(la1) * cos(la2) * cos(dl))))
   }
-  d[rep_len(lon1, n) == rep_len(lon2, n) & rep_len(lat1, n) == rep_len(lat2, n)] <- 0
+  d[fin & lon1 == lon2 & lat1 == lat2] <- 0
+  d[!fin] <- NA_real_
   d
 }
 

@@ -120,21 +120,47 @@ test_that("a few detailed outlines get one CRS, and one score per candidate, in 
                      .crs_distance_error(outl, sf::st_crs(code)))
 })
 
-test_that("a thinned outline is not densified, so a border two features share scores the same in either order", {
-  # Two boxes that share a side, 17 copies of each: 34 features and 170
-  # vertices, so the outlines are thinned, to their 6 distinct vertices.  Of
-  # a vertex on the shared side, the copy kept is the one of whichever box
-  # comes first.  Were the vertices kept densified as if they were
-  # neighbours along a ring, the points added would follow that copy: in Web
-  # Mercator the error would be 0.417 with the left box first and 0.414 with
-  # the right one.
+test_that("copies of two boxes that share a side score as the two boxes once, in either order", {
+  # Two boxes that share a side, 17 copies of each: 34 features, 170
+  # vertex rows and 6 distinct vertices.  Counted by row, the outlines were
+  # thinned, to their 6 distinct vertices, and not densified; the outline is
+  # now thinned on its distinct vertices, so these are filled as the two
+  # boxes once are.
   box <- function(x0, y0, w, h)
     sf::st_polygon(list(rbind(c(x0, y0), c(x0 + w, y0), c(x0 + w, y0 + h), c(x0, y0 + h), c(x0, y0))))
   a <- box(-110, 30, 12, 15); b <- box(-98, 30, 14, 15)
   lay <- function(gs) sf::st_sf(id = seq_along(gs), geometry = sf::st_sfc(gs, crs = 4326))
   ab <- lay(c(rep(list(a), 17), rep(list(b), 17)))
   ba <- lay(c(rep(list(b), 17), rep(list(a), 17)))
-  expect_gt(nrow(sf::st_coordinates(ab)), 160)
+  v <- sf::st_coordinates(ab)[, 1:2]
+  expect_gt(nrow(v), 160)
+  expect_identical(sum(!duplicated(v)), 6L)
+  for (code in c(3857, 32613, 5070)) {
+    e <- .crs_distance_error(lay(list(a, b)), sf::st_crs(code))
+    expect_true(is.finite(e))
+    expect_identical(.crs_distance_error(ab, sf::st_crs(code)), e, info = paste("EPSG", code))
+    expect_identical(.crs_distance_error(ba, sf::st_crs(code)), e, info = paste("EPSG", code))
+  }
+})
+
+test_that("a thinned outline is not densified, so a border two features share scores the same in either order", {
+  # Two boxes of 12 by 15 and 14 by 15 degrees with 24 points on each side,
+  # sharing a side: 194 vertex rows and 167 distinct vertices, so the
+  # outline is thinned.  Of a vertex on the shared side, the copy kept is
+  # the one of whichever box comes first.  Were the vertices kept densified
+  # as if they were neighbours along a ring, the points added would follow
+  # that copy.
+  dbox <- function(x0, y0, w, h, k) {
+    t <- seq(0, 1, length.out = k + 1L)[-(k + 1L)]
+    m <- rbind(cbind(x0 + w * t, y0), cbind(x0 + w, y0 + h * t), cbind(x0 + w * (1 - t), y0 + h),
+               cbind(x0, y0 + h * (1 - t)))
+    sf::st_polygon(list(rbind(m, m[1, ])))
+  }
+  lay <- function(gs) sf::st_sf(id = seq_along(gs), geometry = sf::st_sfc(gs, crs = 4326))
+  a <- dbox(-110, 30, 12, 15, 24); b <- dbox(-98, 30, 14, 15, 24)
+  ab <- lay(list(a, b)); ba <- lay(list(b, a))
+  v <- sf::st_coordinates(ab)[, 1:2]
+  expect_gt(sum(!duplicated(v)), 160)
   for (code in c(3857, 32613, 5070)) {
     e <- .crs_distance_error(ab, sf::st_crs(code))
     expect_true(is.finite(e))

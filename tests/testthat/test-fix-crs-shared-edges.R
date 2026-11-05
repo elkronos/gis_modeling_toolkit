@@ -248,7 +248,10 @@ test_that("layers with no added point on another feature's point score as before
   # Two boxes apart and two that touch at a corner, where no point added
   # along an edge can fall on another point, and the T and the apex, where
   # the added point and the corner it falls on were the same double before
-  # the change.  The figures are those recorded before the change.
+  # the change.  The figures are those recorded before the change, with the
+  # geodesic's stopping test measured against the pair's longitude
+  # difference (test-fix-geod-short-pairs.R), which moved the Albers
+  # figures of `apart` and `corner` by 2.6e-9.
   aea <- sf::st_crs(paste("+proj=aea +lat_1=35 +lat_2=55 +lat_0=40 +lon_0=-104",
                           "+datum=WGS84 +units=m +no_defs"))
   apart  <- sf::st_sf(id = 1:2, geometry = sf::st_sfc(box(-110, 30, 5, 5), box(-100, 40, 4, 3),
@@ -257,10 +260,10 @@ test_that("layers with no added point on another feature's point score as before
                                                       crs = 4326))
   expect_equal(.crs_distance_error(apart, sf::st_crs(32613)), 0.0068189865459915566,
                tolerance = 1e-9)
-  expect_equal(.crs_distance_error(apart, aea), 0.015469862203692619, tolerance = 1e-9)
+  expect_equal(.crs_distance_error(apart, aea), 0.015469862162994286, tolerance = 1e-9)
   expect_equal(.crs_distance_error(corner, sf::st_crs(32613)), 0.0024495482006103853,
                tolerance = 1e-9)
-  expect_equal(.crs_distance_error(corner, aea), 0.015470787865162761, tolerance = 1e-9)
+  expect_equal(.crs_distance_error(corner, aea), 0.015470787824463095, tolerance = 1e-9)
   t <- tee(-109.7, 31.3, 6.1, 7.3)
   a <- apex(-105.7, 31.4, 6, 6.8)
   expect_equal(.crs_distance_error(t, sf::st_crs(32613)), 0.0058229730051715389, tolerance = 1e-9)

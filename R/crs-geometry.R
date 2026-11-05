@@ -464,24 +464,30 @@
 #'
 #' The sample is taken at even spacing along the points sorted by coordinate
 #' (no RNG, and no dependence on the order of the rows), so the result is
-#' reproducible; \code{max_n} keeps the pairwise work bounded.  A detailed
-#' outline is thinned the same way first, along its distinct vertices sorted
-#' by coordinate.
+#' reproducible; \code{max_n} keeps the pairwise work bounded.  Copies of one
+#' location count once, and rows without a finite location are left out with
+#' the empty ones, so the sample does not depend on how many rows list a
+#' place.  A detailed outline, more than \code{4 * max_n} distinct vertices,
+#' is thinned the same way first, along its distinct vertices sorted by
+#' coordinate.
 #'
 #' @param x_ll An sf/sfc object in a geographic CRS.  Non-POINT geometry is
 #'   reduced to representative points first, so the two distance vectors are
 #'   the same length (\code{st_coordinates()} yields one row per vertex).
-#'   With fewer than \code{max_n} features the outline's vertices, densified
-#'   along its edges, are added to those points, so that a single study-area
-#'   polygon is measured across its extent rather than not at all.  Each
+#'   With fewer than \code{max_n} distinct points the outline's vertices,
+#'   densified along its edges, are added to those points, so that a single
+#'   study-area polygon is measured across its extent rather than not at
+#'   all, however many rows repeat it.  Each
 #'   edge is filled from the same end whichever way its ring runs, and an
 #'   added point within about 1e-9 degrees of a point listed before it is
 #'   left out, so an edge two features share, or a vertex on another
 #'   feature's edge, adds no pair of points a few bits apart.
 #' @param crs Candidate \code{sf::crs}.
 #' @param max_n Maximum number of points to sample.  Default 40 (780 pairs).
-#' @return Numeric worst-case \code{|d_planar / d_geodesic - 1|}, or \code{NA}
-#'   when it cannot be computed (which the caller treats as "unusable").
+#' @return Numeric worst-case \code{|d_planar / d_geodesic - 1|} over the
+#'   sampled pairs 1 mm or more apart on the ellipsoid, or \code{NA} when it
+#'   cannot be computed or no pair is that long (which the caller treats as
+#'   "unusable").
 #' @keywords internal
 #' @noRd
 .crs_distance_error <- function(x_ll, crs, max_n = 40L) {
@@ -517,6 +523,13 @@
           tryCatch(.with_s2(sf::st_centroid(g_full[wide])), error = function(e) NULL)
         if (!is.null(ctr)) g[wide] <- ctr
       }
+      # One point per distinct location.  A long-format layer lists one
+      # polygon over many rows, and each row gave a copy of one point: from
+      # 40 rows no outline was added and every pair had zero length, so every
+      # candidate scored NA and the UTM zone was kept (a box over the
+      # conterminous United States, 1.76% in the Lambert azimuthal CRS on one
+      # row); below that the copies took places in the sample.
+      g <- .distinct_located_points(g)
       # One point per feature is nothing to measure on a study-area outline:
       # a single polygon gave one point, every candidate scored NA, and the
       # selector kept the UTM zone at any extent -- a CONUS outline got zone
@@ -526,10 +539,14 @@
       # where a zone distorts most.  So below `max_n` points, add the
       # outline's own vertices, densified along each edge until there are
       # about `max_n` of them (a box has only its four corners).  Layers with
-      # `max_n` features or more are measured as before, and so is a
-      # GEOMETRYCOLLECTION layer, whose vertices st_coordinates() refuses.
+      # `max_n` distinct points or more are measured on those points, and so
+      # is a GEOMETRYCOLLECTION layer, whose vertices st_coordinates()
+      # refuses.  Exact copies of a feature are read once: they add no
+      # vertex, and each copy's ring was densified again, which cost 0.9 s
+      # per candidate on 10,000 copies of a box.
       xy <- if (length(g) < max_n)
-        tryCatch(sf::st_coordinates(g_full), error = function(e) NULL)
+        tryCatch(sf::st_coordinates(g_full[!duplicated(unclass(g_full))]),
+                 error = function(e) NULL)
       # Only about `max_n` of these points are measured (the evenly spaced
       # subsample below), so thin a detailed outline to a few times that
       # first, at even spacing along its distinct vertices sorted by
@@ -546,16 +563,21 @@
       # ensure_projected() 14 s; one sort costs a few hundredths of a second
       # there.  A thinned outline is not densified: the rows kept are not
       # neighbours along a ring, so there is no edge between them to fill.
+      # The outline is thinned when more than `4 * max_n` distinct vertices
+      # remain.  Counted by row, 33 copies of a box listed 165 rows of 4
+      # vertices, and the box was thinned to its corners and not filled.
       # `%in% TRUE` drops the comparisons that are NA, at non-finite
       # vertices, which the `ok` filter below would drop anyway.
-      thinned <- !is.null(xy) && nrow(xy) > 4L * max_n
-      if (thinned) {
+      thinned <- FALSE
+      if (!is.null(xy) && nrow(xy) > 0L) {
         o  <- order(xy[, 1L], xy[, 2L])
         s  <- xy[o, 1:2, drop = FALSE]
         o  <- o[c(TRUE, s[-1L, 1L] != s[-nrow(s), 1L] |
                         s[-1L, 2L] != s[-nrow(s), 2L]) %in% TRUE]
-        xy <- xy[sort(o[unique(round(seq(1, length(o), length.out = 4L * max_n)))]), ,
-                 drop = FALSE]
+        thinned <- length(o) > 4L * max_n
+        if (thinned)
+          xy <- xy[sort(o[unique(round(seq(1, length(o), length.out = 4L * max_n)))]), ,
+                   drop = FALSE]
       }
       if (!is.null(xy)) {
         ring <- if (ncol(xy) > 2L)
@@ -609,7 +631,9 @@
             # cell under one of the four pairings of the grids, so copies a
             # few bits apart are never kept either side of a cell's border;
             # points 1e-9 degrees or more apart in one coordinate are both
-            # kept.  The vertices stay as they are.  The added points go in
+            # kept.  The vertices stay as they are: two that differ in their
+            # last bits are left to the floor on a pair's length below.  The
+            # added points go in
             # sorted by coordinate, so the copy kept does not depend on the
             # order of the features.
             add <- cbind(lon, lat)
@@ -627,6 +651,14 @@
             crs = sf::st_crs(g))))
         }
       }
+    } else {
+      # One point per distinct location, as for the points of other layers.
+      # The sample of `max_n` was taken over rows: 39 stations with station
+      # 1 listed 1,001 times (repeat visits) sampled 4 of the 39, and the
+      # zone's error read 2.32% where the stations score 5.07%.  A row at a
+      # coordinate that is not finite made .geod_distance() stop, and every
+      # candidate scored NA.
+      g <- .distinct_located_points(g)
     }
     n <- length(g)
     if (n < 2L) return(NA_real_)
@@ -650,10 +682,45 @@
                             ll[ij[, 1], 1], ll[ij[, 1], 2])
     d_prj <- as.numeric(stats::dist(
       sf::st_coordinates(sf::st_transform(g, crs))[, 1:2, drop = FALSE]))
-    keep  <- is.finite(d_geo) & is.finite(d_prj) & d_geo > 0
+    # Pairs under 1 mm are left out.  Two listings of one place that are not
+    # the same double (a corner two features share, written -107.2 in one
+    # and -110.6 + 3.4 in the other; a point listed twice a few bits apart;
+    # (180, y) and (-180, y)) made a pair about 1e-9 m long whose planar
+    # length is rounding noise, or 40,075 km in Web Mercator, and that one
+    # ratio set the score of every candidate: two boxes side by side, their
+    # shared corners typed that way, scored 13.7% in UTM zone 13, where
+    # their outline as one box scores 0.26%.  Planar coordinates up to 2e7 m
+    # from the origin carry rounding of a few 1e-9 m, a few parts in 1e6 of
+    # 1 mm.  A layer with no pair 1 mm or longer scores NA, as a layer of
+    # one location does.
+    keep  <- is.finite(d_geo) & is.finite(d_prj) & d_geo >= 1e-3
     if (!any(keep)) return(NA_real_)
     max(abs(d_prj[keep] / d_geo[keep] - 1))
   }, error = function(e) NA_real_)
+}
+
+
+#' One point per distinct location, rows without a finite one left out
+#'
+#' Keyed on exact coordinates through a sort on x and then y, not
+#' \code{unique()} on the coordinate matrix.  The rows kept keep their
+#' order, and of the copies of one location the first is kept.  An object
+#' whose coordinates are not one row per point is returned as it came.
+#'
+#' @param g An sfc of non-empty points.
+#' @return \code{g} without copies and without rows at a coordinate that is
+#'   not finite.
+#' @keywords internal
+#' @noRd
+.distinct_located_points <- function(g) {
+  cc <- tryCatch(sf::st_coordinates(g), error = function(e) NULL)
+  if (is.null(cc) || nrow(cc) != length(g)) return(g)
+  ok <- which(is.finite(cc[, 1L]) & is.finite(cc[, 2L]))
+  if (!length(ok)) return(g[0L])
+  o <- ok[order(cc[ok, 1L], cc[ok, 2L])]
+  s <- cc[o, 1:2, drop = FALSE]
+  keep <- o[c(TRUE, s[-1L, 1L] != s[-nrow(s), 1L] | s[-1L, 2L] != s[-nrow(s), 2L])]
+  if (length(keep) == length(g)) g else g[sort(keep)]
 }
 
 
@@ -1064,9 +1131,11 @@
 #'     standard parallels do not degenerate) an Albers conic are each scored by
 #'     projecting representative points of the data (a non-POINT layer is
 #'     reduced to one point per feature, plus the vertices of its outline when
-#'     it has fewer than 40 features, so a single study-area polygon is scored
-#'     too) and comparing planar with geodesic pairwise distances, and the one
-#'     that distorts least is used.
+#'     fewer than 40 distinct points remain, so a single study-area polygon is
+#'     scored too, however many rows repeat it; copies of one location count
+#'     once, and rows without a finite location are left out) and comparing
+#'     planar with geodesic distances over the pairs at least 1 mm apart, and
+#'     the one that distorts least is used.
 #'     The choice, both error figures and this argument are **logged** (see the
 #'     logging note under [spatialkit_quiet()]); they are not R warnings, so
 #'     `tryCatch(warning = )` does not see them.}
