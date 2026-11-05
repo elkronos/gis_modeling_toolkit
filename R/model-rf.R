@@ -921,6 +921,12 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
   # geometry, so an XYZ first row stopped the move into the fit's CRS with
   # "OGR error".  Only predictions are returned, so nothing is said.
   newdata <- .xy_if_mixed(newdata)
+  # A row with a coordinate that is not finite or lies beyond .POOL_XY_MAX
+  # has no location, and is emptied here, as given: the move into the fit's
+  # CRS below can bring it back finite (a northing of 1e200 in EPSG:32616
+  # lands at a finite point in EPSG:32617), and it was then predicted there.
+  # prep_model_data() drops it, so it comes back NA as the same row emptied.
+  newdata <- .empty_unlocated(newdata)
   newdata <- .replay_crs_assumption(newdata, object$data_sf, "predict.rf_fit")
   newdata <- ensure_projected(newdata, target_crs = .crs_or_null(object$data_sf))
   newdata$..orig_row_id.. <- seq_len(n_orig)

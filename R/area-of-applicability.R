@@ -242,15 +242,30 @@
   # its first geometry, and GEOS does not read M.  The points are this
   # function's own, so nothing is said.  A POINT layer keeps its geometry;
   # its coordinates are read from a copy in XY when it mixes dimensions.
+  # A feature with a vertex that is not finite or lies beyond .POOL_XY_MAX
+  # has no location (.unlocated_features()): it is emptied before it is
+  # pointized, and its point is an empty one.
   if (inherits(data_sf, "sf") &&
       !all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT"))
-    data_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed_or_m(data_sf), "auto"))
+    data_sf <- .xy_if_mixed(coerce_to_points(
+      .empty_unlocated(.xy_if_mixed_or_m(data_sf)), "auto"))
   crd <- sf::st_coordinates(.xy_if_mixed(data_sf))
   if (ncol(crd) < 2L)
     stop("area_of_applicability(): could not extract X/Y coordinates.",
          call. = FALSE)
-  data_sf[["..x"]] <- as.numeric(crd[, 1L])
-  data_sf[["..y"]] <- as.numeric(crd[, 2L])
+  # A row without a location (an empty point, or a coordinate that is not
+  # finite or lies beyond .POOL_XY_MAX, the test .values_at_xy() applies)
+  # has NA coordinates, as an empty point has: a coordinate of 1e200 is
+  # finite, and read as a predictor it put the row a long way from every
+  # training row where the same row emptied has no index.
+  x <- as.numeric(crd[, 1L])
+  y <- as.numeric(crd[, 2L])
+  off <- !(is.finite(x) & is.finite(y) &
+           abs(x) <= .POOL_XY_MAX & abs(y) <= .POOL_XY_MAX)
+  x[off] <- NA_real_
+  y[off] <- NA_real_
+  data_sf[["..x"]] <- x
+  data_sf[["..y"]] <- y
   data_sf
 }
 
@@ -591,9 +606,17 @@
 #' to representative points.  A geographic CRS is refused: the index is a
 #' map distance, and a degree of longitude is not a fixed one.
 #'
+#' A row without a location (an empty geometry, or a coordinate that is not
+#' finite or lies beyond \code{.POOL_XY_MAX}) is \code{NA}.  The bound is
+#' read on the coordinates as given, before the move, and again after it: a
+#' move between CRSs can bring a coordinate beyond it back finite, and a
+#' transform of it is not a place the caller gave.  Those rows are emptied
+#' before the move (\code{.empty_unlocated()}), so they are read as the same
+#' rows empty to begin with.
+#'
 #' @param why A clause naming why location is measured, for the messages.
 #' @return A list of two two-column matrices, \code{train} and \code{new},
-#'   row for row with the layers; a row with an empty geometry is \code{NA}.
+#'   row for row with the layers; a row without a location is \code{NA}.
 #' @keywords internal
 #' @noRd
 .aoa_location_coords <- function(train_sf, newdata, why) {
@@ -611,8 +634,9 @@
   # before it is moved or pointized (sf reads a layer in the dimension of
   # its first geometry, and GEOS does not read M), and so are the points
   # when they mix dimensions.
-  train_sf <- .xy_if_mixed_or_m(train_sf)
-  newdata  <- .xy_if_mixed_or_m(newdata)
+  # A row without a location as given is emptied before the move.
+  train_sf <- .empty_unlocated(.xy_if_mixed_or_m(train_sf))
+  newdata  <- .empty_unlocated(.xy_if_mixed_or_m(newdata))
   tr_crs <- sf::st_crs(train_sf)
   if (!is.na(tr_crs)) {
     if (!identical(sf::st_crs(newdata), tr_crs))
@@ -637,6 +661,9 @@
            "pair per row.", call. = FALSE)
     m <- cbind(as.numeric(crd[, 1L]), as.numeric(crd[, 2L]))
     colnames(m) <- c("x", "y")
+    # The bound read again, after the move.
+    m[!(is.finite(m[, 1L]) & is.finite(m[, 2L]) &
+        abs(m[, 1L]) <= .POOL_XY_MAX & abs(m[, 2L]) <= .POOL_XY_MAX), ] <- NA_real_
     m
   }
   list(train = xy(train_sf), new = xy(newdata))
@@ -890,7 +917,7 @@
 #' Line the folds up with a training layer prep_model_data() removed rows from
 #'
 #' A fit's \code{data_sf} is the \code{prep_model_data()} output: rows with a
-#' missing or non-finite modelling value or an empty geometry are gone, and
+#' missing or non-finite modelling value or no location are gone, and
 #' it carries no \code{..row_id} unless its input did.  Folds built on the
 #' layer the model was fitted FROM -- the ones passed to \code{cv_*()} -- name
 #' the input's rows.  The \code{"dropped"} record says which those were, so
@@ -1308,6 +1335,17 @@
 #' returns such a layer; the points that non-\code{POINT} \code{newdata} is
 #' reduced to are in XY when they would mix dimensions or carry M.
 #'
+#' A row without a location (an empty geometry, or a coordinate that is not
+#' finite or lies beyond 1e150) is read as one both as given and after a
+#' move into the other layer's CRS, which can bring a coordinate of 1e200
+#' back finite. Such a row of \code{newdata} gets \code{NA} in
+#' \code{DI_location}, and for a forest fitted with
+#' \code{include_coords = TRUE} in \code{"..x"} and \code{"..y"} and so in
+#' \code{DI}; such a training row is left out of the reference distances,
+#' with a log line. A row of \code{newdata} without a location as given that
+#' is reprojected into the training CRS comes back in \code{aoa} with an
+#' empty geometry.
+#'
 #' @param newdata Prediction locations: an \code{sf} object (typically from
 #'   \code{\link{predict_surface}}) or a data.frame, carrying the predictor
 #'   columns. When location is measured (a \code{gwr_fit}, a
@@ -1358,7 +1396,7 @@
 #'   one entry per training row. Default \code{NULL} (plain nearest neighbour).
 #'   The folds you passed to \code{cv_*()}, built on the layer \code{model}
 #'   was fitted from, may name rows that \code{prep_model_data()} removed
-#'   (a missing or non-finite value, an empty geometry): as in \code{cv_*()},
+#'   (a missing or non-finite value, or no location): as in \code{cv_*()},
 #'   they are dropped from the folds, and a label vector with one entry per
 #'   row of that layer loses theirs. Also
 #'   as in \code{cv_*()}, a \code{make_folds()} result built on other data --
@@ -1639,18 +1677,29 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
     # in XY with the warning of class spatialkit_zm_dropped; the training
     # data is not returned and is flattened without a word.  `newdata`
     # already in the training CRS, or stamped with it, keeps its Z.
+    # A row without a location as given (an empty geometry, or a coordinate
+    # that is not finite or lies beyond .POOL_XY_MAX) stays without one: a
+    # move between CRSs can bring a coordinate of 1e200 back finite.  The
+    # training rows are emptied before the move (they are not returned); a
+    # row of `newdata` moved here comes back empty in `aoa`, and one not
+    # moved keeps its geometry.  Their ..x and ..y are NA either way
+    # (.aoa_add_coords()).
+    train_sf <- .empty_unlocated(train_sf)
     tr_crs <- sf::st_crs(train_sf)
     if (!is.na(tr_crs)) {
       if (!identical(sf::st_crs(newdata), tr_crs)) {
-        if (!is.na(sf::st_crs(newdata)) ||
-            isTRUE(.looks_like_lonlat(newdata)$lonlat))
+        moves <- !is.na(sf::st_crs(newdata)) ||
+          isTRUE(.looks_like_lonlat(newdata)$lonlat)
+        if (moves)
           newdata <- .xy_if_mixed_warn(
             newdata, "area_of_applicability", "newdata",
             why = paste0("which sf::st_transform() reads wrongly, so Z and M ",
                          "are dropped and its rows are returned in XY in ",
                          "`aoa`"))
+        unloc_nw <- which(.unlocated_features(sf::st_geometry(newdata)))
         newdata <- .transform_or_stamp(newdata, tr_crs, what = "newdata",
                                        caller = "area_of_applicability")
+        if (moves) newdata <- .empty_unlocated(newdata, unloc_nw)
       }
     } else if (!is.na(sf::st_crs(newdata))) {
       train_sf <- .transform_or_stamp(.xy_if_mixed(train_sf),
@@ -1697,16 +1746,22 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   if (!is.null(loc_xy))
     tr_ok <- tr_ok & is.finite(loc_xy$train[, 1L]) & is.finite(loc_xy$train[, 2L])
   if (!all(tr_ok)) {
+    # The texts name a location when one is measured: a training row without
+    # one (an empty point, or a coordinate that is not finite or lies beyond
+    # 1e150) is left out for that reason, whatever its predictors hold.
     if (sum(tr_ok) < 2L)
       stop("area_of_applicability(): fewer than two training rows with finite ",
-           "values for every predictor.", call. = FALSE)
+           "values for every predictor",
+           if (!is.null(loc_xy)) " and a location" else "", ".", call. = FALSE)
     .log_warn("area_of_applicability(): dropping %d training row(s) with missing or non-finite predictor values%s.",
               sum(!tr_ok),
               if (!is.null(loc_xy)) " or no usable location" else "")
     if (!is.null(folds))
-      stop("area_of_applicability(): the training data has missing predictor ",
-           "values, so `folds` row positions can no longer be matched. Remove ",
-           "the incomplete rows before building folds.", call. = FALSE)
+      stop("area_of_applicability(): the training data has rows with missing ",
+           "or non-finite predictor values",
+           if (!is.null(loc_xy)) " or no location" else "",
+           ", so `folds` row positions can no longer be matched. Remove ",
+           "those rows before building folds.", call. = FALSE)
     X_tr_full <- X_tr_full[tr_ok, , drop = FALSE]
     if (!is.null(loc_xy)) loc_xy$train <- loc_xy$train[tr_ok, , drop = FALSE]
     # Unreachable when folds were supplied (the branch above stops), but keeps

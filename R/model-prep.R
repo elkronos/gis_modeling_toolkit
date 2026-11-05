@@ -1,10 +1,14 @@
 #' Prepare and sanitize an sf dataset for spatial modeling
 #'
 #' Ensures point geometry, projected CRS, and removes rows with missing or
-#' non-finite values in modeling columns, \emph{including} rows whose
-#' geometry is empty or whose coordinates are not finite, which no model
-#' backend can use.  All non-POINT geometries (including MULTIPOINT) are
-#' coerced to representative points via \code{coerce_to_points()}, so
+#' non-finite values in modeling columns, \emph{including} rows without a
+#' location: an empty geometry, or a coordinate that is not finite or lies
+#' beyond 1e150, which no model backend can use.  The bound is read on the
+#' coordinates as given, before the projection, and again after it: a move
+#' between CRSs can bring a coordinate beyond it back finite, and that point
+#' is not a place the caller gave.  All non-POINT geometries (including
+#' MULTIPOINT) are coerced to representative points via
+#' \code{coerce_to_points()}, so
 #' downstream coordinate extraction always aligns one row per observation.
 #' Any Z or M coordinate (POINT Z from a GPS, a GeoPackage or KML) is
 #' dropped, because every backend works in 2-D map distance.
@@ -46,11 +50,12 @@
 #'   required to be present (useful for out-of-sample prediction where the
 #'   response is unknown).  Default TRUE.
 #' @return An sf object with 2-D (XY) POINT geometry, cleaned of rows
-#'   carrying missing or non-finite values in the modelling columns or in the
-#'   coordinates.  What
+#'   carrying missing or non-finite values in the modelling columns and of
+#'   rows without a location.  What
 #'   was removed is recorded on the attribute \code{"dropped"}, a list with
-#'   \code{n} (rows dropped), \code{n_geometry} (how many of them for an
-#'   empty or non-finite geometry), \code{which} (their positions in
+#'   \code{n} (rows dropped), \code{n_geometry} (how many of them for no
+#'   location: an empty point, or a coordinate that is not finite or lies
+#'   beyond 1e150), \code{which} (their positions in
 #'   \code{data_sf}), \code{row_id} (their \code{..row_id} values when the
 #'   layer carries that column, else \code{NULL}) and \code{reason} (one per
 #'   dropped row: \code{"geometry"}, \code{"missing"} or
@@ -206,9 +211,13 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   # When s2 refuses a polygon of `data_sf` that coerce_to_points() cannot
   # take a centroid of, its error is raised again in this function's words
   # (.pointize_refused()).
+  # A feature with a vertex that is not finite or lies beyond .POOL_XY_MAX
+  # has no location (.unlocated_features()), so it is emptied before the
+  # coerce and comes back as an empty point, dropped below with the
+  # geometry count.
   if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")) {
     data_sf <- .xy_if_mixed(tryCatch(
-      coerce_to_points(.xy_if_mixed_or_m(data_sf), pointize),
+      coerce_to_points(.empty_unlocated(.xy_if_mixed_or_m(data_sf)), pointize),
       spatialkit_features_degenerate = function(e)
         .pointize_refused(e, "prep_model_data", pointize)))
   }
@@ -222,6 +231,17 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   # wrong prediction locations, with no error.  make_folds(),
   # estimate_sac_range() and the fold-separation check already drop ZM.
   data_sf <- .drop_zm(data_sf)
+
+  # A point with a coordinate that is not finite or lies beyond .POOL_XY_MAX
+  # has no location, and the bound is read here, on the coordinates as
+  # given, before the projection: a move between CRSs can bring such a
+  # coordinate back finite (a northing of 1e200 in EPSG:32616 lands at a
+  # finite point in EPSG:32617), and the fits, the block-size sweep and the
+  # prediction grid then read a place the caller never gave.  Those rows are
+  # emptied, so they take no part in the projection and are dropped below
+  # with the rows whose geometry is empty: the layer is read as it is read
+  # with those rows empty.
+  data_sf <- .empty_unlocated(data_sf)
 
   if (!is.null(boundary)) {
     bnd <- if (inherits(boundary, "sfc")) sf::st_as_sf(boundary) else boundary
@@ -261,17 +281,21 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   # where one infinite coordinate makes max(Xgp) infinite, so the GP boundary
   # is infinite and EVERY basis function on the surface is NaN.  make_folds()
   # already drops these rows and says how many; do the same here.
+  # The bound .POOL_XY_MAX is read again after the projection (the test
+  # .values_at_xy() applies), so a row the move put beyond it is dropped too.
+  located <- function(m) is.finite(m[, 1L]) & is.finite(m[, 2L]) &
+    abs(m[, 1L]) <= .POOL_XY_MAX & abs(m[, 2L]) <= .POOL_XY_MAX
   xy_mat  <- sf::st_coordinates(sf::st_geometry(data_sf))
   ok_geom <- rep(TRUE, nrow(data_sf))
   if (nrow(xy_mat) == nrow(data_sf) && ncol(xy_mat) >= 2L) {
-    ok_geom <- is.finite(xy_mat[, 1L]) & is.finite(xy_mat[, 2L])
+    ok_geom <- located(xy_mat)
   } else if (nrow(data_sf) > 0L) {
     # Empty geometries drop out of st_coordinates() entirely, so the row
     # counts disagree; fall back to the per-feature test.
     ok_geom <- !sf::st_is_empty(sf::st_geometry(data_sf))
     xy_ok <- sf::st_coordinates(sf::st_geometry(data_sf)[ok_geom])
     if (nrow(xy_ok) == sum(ok_geom) && ncol(xy_ok) >= 2L)
-      ok_geom[ok_geom] <- is.finite(xy_ok[, 1L]) & is.finite(xy_ok[, 2L])
+      ok_geom[ok_geom] <- located(xy_ok)
   }
 
   keep <- ok_cc & ok_fin & ok_geom
@@ -339,8 +363,9 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
       .warn_classed(
         "spatialkit_rows_dropped",
         paste0("prep_model_data(): dropped %d of %d row(s) (%.1f%%): %d with ",
-               "a missing value, %d with a non-finite value, %d with an empty ",
-               "or non-finite geometry. Rows affected by column: %s.%s The ",
+               "a missing value, %d with a non-finite value and %d without a ",
+               "location (an empty point, or a coordinate that is not finite ",
+               "or lies beyond 1e150). Rows affected by column: %s.%s The ",
                "fit uses the %d row(s) that remain; attr(, \"dropped\") lists ",
                "the rows removed."),
         dropped, nrow(data_sf), 100 * dropped / nrow(data_sf),
@@ -351,8 +376,9 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
       # would fire on every chunk of a predict_surface() grid with covariate
       # gaps.  The log line and the record stay.
       .log_warn(paste0("prep_model_data(): dropping %d row(s) with non-finite or ",
-                       "missing values (%d of them with an empty or non-finite ",
-                       "geometry). Rows affected by column: %s."),
+                       "missing values (%d of them without a location: an ",
+                       "empty point, or a coordinate that is not finite or ",
+                       "lies beyond 1e150). Rows affected by column: %s."),
                 dropped, dropped_geo, cols_txt)
     }
   }
@@ -488,7 +514,10 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 #'
 #' @param coords_xy Numeric matrix or data.frame of coordinates with at least
 #'   two columns; the first two are used, and replicated rows are collapsed
-#'   before the distance quantiles are taken.  \code{brms::gp()} defaults to
+#'   before the distance quantiles are taken.  A row with a coordinate that
+#'   is missing, not finite or beyond 1e150 has no location: it is left out,
+#'   with a warning of class \code{spatialkit_rows_dropped} that gives the
+#'   count.  \code{brms::gp()} defaults to
 #'   \code{gr = TRUE} and reduces its covariates to unique rows, so a
 #'   heavily-sampled station would otherwise weight the quantile by how often it
 #'   was measured rather than by where the sites are.
@@ -500,8 +529,8 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 #' @param max_n Maximum number of \emph{distinct} points to use in the distance
 #'   computation.  Default 1000. Set to \code{Inf} to use all of them.
 #' @return Named numeric vector \code{c(lower, upper)} on the length-scale;
-#'   \code{c(lower = 0.001, upper = 1)} when fewer than two distinct locations
-#'   or no positive distances remain.
+#'   \code{c(lower = 0.001, upper = 1)} when fewer than two distinct located
+#'   rows or no positive distances remain.
 #' @family model fitting
 #' @examples
 #' set.seed(1)
@@ -528,6 +557,24 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
   # returns X, Y, Z, so the documented entry point silently returned 3-D
   # bounds in mixed units (elevation metres mixed into map metres).
   coords_xy <- as.matrix(coords_xy)[, 1:2, drop = FALSE]
+
+  # A row with a coordinate that is missing, not finite or beyond
+  # .POOL_XY_MAX has no location (the test .values_at_xy() applies): no
+  # distance can be taken from it.  An NA row stopped quantile() with base
+  # R's message, and an Inf or 1e200 row made the upper bound Inf.  The
+  # bounds are those of the other rows, and the warning gives the count.
+  located <- is.finite(coords_xy[, 1L]) & is.finite(coords_xy[, 2L]) &
+    abs(coords_xy[, 1L]) <= .POOL_XY_MAX & abs(coords_xy[, 2L]) <= .POOL_XY_MAX
+  if (!all(located)) {
+    .warn_classed(
+      "spatialkit_rows_dropped",
+      paste0("gp_lengthscale_bounds(): %d of %d row(s) of `coords_xy` have no ",
+             "location (an empty point, or a coordinate that is not finite or ",
+             "lies beyond 1e150); the bounds are taken from the other %d."),
+      sum(!located), length(located), sum(located),
+      data = list(n = sum(!located), which = which(!located)))
+    coords_xy <- coords_xy[located, , drop = FALSE]
+  }
 
   # brms::gp() defaults to gr = TRUE and reduces its covariates to their
   # UNIQUE rows before doing anything else, so replicated locations (repeat

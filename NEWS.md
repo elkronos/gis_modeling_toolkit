@@ -1974,6 +1974,63 @@ old behaviour where there is a way.
   a geographic CRS, is now refused with an error that says so; it was given
   the points' CRS and refused later as "not polygonal".
 
+* **`prep_model_data()` kept a row with a coordinate beyond 1e150 as a
+  located row.**  It dropped a row whose geometry was empty or whose
+  coordinates were not finite, but a point at (5e5, 1e200) in EPSG:32617
+  was kept, and so was the same point in EPSG:32616 beside a boundary in
+  EPSG:32617, which the move put at a finite northing of 5,766,270.  The
+  fits read it as a location (`fit_gwr_model()` fitted 200 locations where
+  the same layer with the row empty gives 199), and the grid of
+  `predict_surface()` and the extent check of `cv_block_size_sweep()` read
+  the extent of the prepared layer with the row in it.  The bound is now
+  read on the coordinates as given, before the projection, and again after
+  it, so such a row is dropped with the rows whose geometry is empty, as
+  the same row emptied is, and every fitter and `cv_*()` function that
+  prepares its data here reads the layer without it.  A polygon or line
+  with such a vertex is dropped the same way.  The `predict()` methods of
+  `rf_fit`, `gwr_fit` and `bayesian_fit` moved `newdata` into the fit's CRS
+  before this reading, so a row of `newdata` at (5e5, 1e200) in EPSG:32616
+  beside a fit in EPSG:32617 was predicted at the finite point the move gave
+  it (0.391 from a forest on the coordinates, where the same row emptied
+  gives `NA`).  They now empty such rows as given, before the move, and
+  return `NA` for them; so does `predict_surface()` for such a row of a
+  `grid` that is moved into the fit's CRS or reduced from polygons (the row
+  comes back empty), and a row of `covariates` without a location is no
+  longer taken as the nearest feature of a grid point.  The drop warning, and
+  the log line of `require_response = FALSE`, count these rows as rows
+  "without a location (an empty point, or a coordinate that is not finite
+  or lies beyond 1e150)", where they said "an empty or non-finite
+  geometry".
+
+* **`area_of_applicability()` gave a location index to a row beyond
+  1e150, and refused training data with one for a false reason.**  With
+  location measured (`coords = "yes"`, or a fit whose predictions depend
+  on it), a row of `newdata` at (5e5, 1e200) in the training CRS got a
+  `DI_location` of 2.6e149 and `AOA = FALSE`, and the same row in
+  EPSG:32616 beside training data in EPSG:32617, moved to a finite point,
+  got 15.1; the same row emptied gets `NA` in both.  Such a row in
+  `train_sf` stopped the call with "every training row is at the same
+  location", which was false.  The bound is now read on the coordinates as
+  given and again after the move, so such a row of `newdata` gets `NA` in
+  `DI_location` and `AOA`, and such a training row is left out of the
+  reference distances, as the same rows emptied are.  For a forest fitted
+  with `include_coords = TRUE` the row's `"..x"` and `"..y"` are `NA`
+  (they held 1e200, or `Inf` for an infinite coordinate), and a row of
+  `newdata` reprojected into the training CRS comes back with an empty
+  geometry.  The refusals for too few usable training rows, and for
+  `folds` beside training rows that are left out, now name a missing
+  location as a cause where location is measured; the second said
+  "missing predictor values" for a row with an infinite predictor or no
+  location.
+
+* **`gp_lengthscale_bounds()` read every row of `coords_xy`.**  A row of
+  `NA` stopped it with base R's "missing values and NaN's not allowed if
+  'na.rm' is FALSE", and a row at `Inf` or 1e200 made the upper bound
+  `Inf` with no warning.  A row with a coordinate that is missing, not
+  finite or beyond 1e150 is now left out, with a warning of class
+  `spatialkit_rows_dropped` that gives the count, and the bounds are those
+  of the other rows.
+
 * **The projection chosen for a small lon/lat MULTIPOINT layer depended on
   the order of the points in each feature.**  A layer of features that
   are not points, with fewer than 40 distinct locations, is scored on its

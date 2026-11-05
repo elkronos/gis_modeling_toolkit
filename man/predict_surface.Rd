@@ -42,7 +42,10 @@ returned with its rows as given, Z and M included; one that mixes
 dimensions and is reprojected into the fit's CRS comes back in XY with a
 warning of class \code{"spatialkit_zm_dropped"}.
 The points a grid of polygons is reduced to are in XY when its
-geometries mix dimensions or carry M.}
+geometries mix dimensions or carry M.  A row without a location (an
+empty geometry, or a coordinate that is not finite or lies beyond
+1e150) gets an \code{NA} prediction; in a grid that is reprojected, or
+reduced from polygons, it comes back as an empty point.}
 
 \item{cell_size}{Grid resolution in CRS units.  Ignored when \code{grid} is
 supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
@@ -71,7 +74,9 @@ Required when the model has predictors and \code{grid} does not already
 contain them.  Values are taken from the nearest feature.  Aligned to
 the fit's CRS as \code{grid} is, with the same warning when it has no
 CRS.  Read in x and y: a layer whose geometries mix XY with XYZ or XYM,
-or carry M, is read without its Z and M, with no warning.}
+or carry M, is read without its Z and M, with no warning.  A row
+without a location (an empty geometry, or a coordinate that is not
+finite or lies beyond 1e150) is never the nearest feature.}
 
 \item{chunk_size}{Rows per prediction call. Default 5000.  A pure
 performance knob: rows do not interact, and for a \code{bayesian_fit} the

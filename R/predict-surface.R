@@ -141,7 +141,10 @@
 #'   dimensions and is reprojected into the fit's CRS comes back in XY with a
 #'   warning of class \code{"spatialkit_zm_dropped"}.
 #'   The points a grid of polygons is reduced to are in XY when its
-#'   geometries mix dimensions or carry M.
+#'   geometries mix dimensions or carry M.  A row without a location (an
+#'   empty geometry, or a coordinate that is not finite or lies beyond
+#'   1e150) gets an \code{NA} prediction; in a grid that is reprojected, or
+#'   reduced from polygons, it comes back as an empty point.
 #' @param cell_size Grid resolution in CRS units.  Ignored when \code{grid} is
 #'   supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
 #'   would produce more than 5,000,000 cells is refused, naming the implied
@@ -166,7 +169,9 @@
 #'   contain them.  Values are taken from the nearest feature.  Aligned to
 #'   the fit's CRS as \code{grid} is, with the same warning when it has no
 #'   CRS.  Read in x and y: a layer whose geometries mix XY with XYZ or XYM,
-#'   or carry M, is read without its Z and M, with no warning.
+#'   or carry M, is read without its Z and M, with no warning.  A row
+#'   without a location (an empty geometry, or a coordinate that is not
+#'   finite or lies beyond 1e150) is never the nearest feature.
 #' @param chunk_size Rows per prediction call. Default 5000.  A pure
 #'   performance knob: rows do not interact, and for a \code{bayesian_fit} the
 #'   GP boundary is held at its fitted value whatever the chunk holds; see
@@ -316,14 +321,24 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
       isTRUE(.looks_like_lonlat(g)$lonlat)
     }
     grid_points <- all(sf::st_geometry_type(grid, by_geometry = TRUE) == "POINT")
+    moves <- grid_points && grid_moves(grid)
     if (!grid_points)
       grid <- .xy_if_mixed_or_m(grid)
-    else if (grid_moves(grid))
+    else if (moves)
       grid <- .xy_if_mixed_warn(
         grid, "predict_surface", "grid",
         why = paste0("so it is read in x and y before it is brought into ",
                      "the fit's CRS: Z and M are dropped and the surface is ",
                      "returned in XY"))
+    # A row with a coordinate that is not finite or lies beyond .POOL_XY_MAX
+    # has no location.  It is emptied as given, before the move into the
+    # fit's CRS, which can bring it back finite (a northing of 1e200 in
+    # EPSG:32616 lands at a finite point in EPSG:32617), and before a grid of
+    # polygons is reduced to points; such a row was predicted at the point
+    # the move gave it.  It comes back empty with an NA prediction, as the
+    # same row emptied.  A POINT grid that stays where it is keeps the row as
+    # given, and predict() gives it NA.
+    if (!grid_points || moves) grid <- .empty_unlocated(grid)
     grid <- .replay_crs_assumption(grid, train, "predict_surface", "grid")
     grid <- .align_to_fit(grid, "grid")
     # A polygon grid -- create_grid_polygons() output, say -- was used as it
@@ -391,8 +406,14 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
     # XYZ (or XYM) geometries, or whose geometries carry M, is read in XY
     # before it is moved, so ensure_projected() has no copy of it to warn
     # about, and before GEOS reads it.
-    covariates <- .replay_crs_assumption(.xy_if_mixed_or_m(covariates), train,
-                                        "predict_surface", "covariates")
+    # A row of `covariates` without a location (a coordinate that is not
+    # finite or lies beyond .POOL_XY_MAX) is emptied as given, before the
+    # move, which can bring it back finite, where it was taken as the nearest
+    # feature of the grid points around it.  An empty row is never the
+    # nearest feature.
+    covariates <- .replay_crs_assumption(
+      .empty_unlocated(.xy_if_mixed_or_m(covariates)), train,
+      "predict_surface", "covariates")
     covariates <- .align_to_fit(covariates, "covariates")
     nn  <- sf::st_nearest_feature(grid_xy(), covariates)
     cdf <- sf::st_drop_geometry(covariates)[nn, missing_preds, drop = FALSE]

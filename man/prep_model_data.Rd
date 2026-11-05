@@ -46,11 +46,12 @@ response is unknown).  Default TRUE.}
 }
 \value{
 An sf object with 2-D (XY) POINT geometry, cleaned of rows
-carrying missing or non-finite values in the modelling columns or in the
-coordinates.  What
+carrying missing or non-finite values in the modelling columns and of
+rows without a location.  What
 was removed is recorded on the attribute \code{"dropped"}, a list with
-\code{n} (rows dropped), \code{n_geometry} (how many of them for an
-empty or non-finite geometry), \code{which} (their positions in
+\code{n} (rows dropped), \code{n_geometry} (how many of them for no
+location: an empty point, or a coordinate that is not finite or lies
+beyond 1e150), \code{which} (their positions in
 \code{data_sf}), \code{row_id} (their \code{..row_id} values when the
 layer carries that column, else \code{NULL}) and \code{reason} (one per
 dropped row: \code{"geometry"}, \code{"missing"} or
@@ -88,10 +89,14 @@ data are planar.
 }
 \description{
 Ensures point geometry, projected CRS, and removes rows with missing or
-non-finite values in modeling columns, \emph{including} rows whose
-geometry is empty or whose coordinates are not finite, which no model
-backend can use.  All non-POINT geometries (including MULTIPOINT) are
-coerced to representative points via \code{coerce_to_points()}, so
+non-finite values in modeling columns, \emph{including} rows without a
+location: an empty geometry, or a coordinate that is not finite or lies
+beyond 1e150, which no model backend can use.  The bound is read on the
+coordinates as given, before the projection, and again after it: a move
+between CRSs can bring a coordinate beyond it back finite, and that point
+is not a place the caller gave.  All non-POINT geometries (including
+MULTIPOINT) are coerced to representative points via
+\code{coerce_to_points()}, so
 downstream coordinate extraction always aligns one row per observation.
 Any Z or M coordinate (POINT Z from a GPS, a GeoPackage or KML) is
 dropped, because every backend works in 2-D map distance.

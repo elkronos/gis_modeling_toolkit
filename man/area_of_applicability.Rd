@@ -76,7 +76,7 @@ list of \code{train}/\code{test} splits, or a vector of fold labels with
 one entry per training row. Default \code{NULL} (plain nearest neighbour).
 The folds you passed to \code{cv_*()}, built on the layer \code{model}
 was fitted from, may name rows that \code{prep_model_data()} removed
-(a missing or non-finite value, an empty geometry): as in \code{cv_*()},
+(a missing or non-finite value, or no location): as in \code{cv_*()},
 they are dropped from the folds, and a label vector with one entry per
 row of that layer loses theirs. Also
 as in \code{cv_*()}, a \code{make_folds()} result built on other data --
@@ -443,6 +443,17 @@ reprojected into the training CRS comes back in XY, with a warning of
 class \code{"spatialkit_zm_dropped"}, as \code{\link{ensure_projected}()}
 returns such a layer; the points that non-\code{POINT} \code{newdata} is
 reduced to are in XY when they would mix dimensions or carry M.
+
+A row without a location (an empty geometry, or a coordinate that is not
+finite or lies beyond 1e150) is read as one both as given and after a
+move into the other layer's CRS, which can bring a coordinate of 1e200
+back finite. Such a row of \code{newdata} gets \code{NA} in
+\code{DI_location}, and for a forest fitted with
+\code{include_coords = TRUE} in \code{"..x"} and \code{"..y"} and so in
+\code{DI}; such a training row is left out of the reference distances,
+with a log line. A row of \code{newdata} without a location as given that
+is reprojected into the training CRS comes back in \code{aoa} with an
+empty geometry.
 }
 
 \examples{

@@ -37,7 +37,7 @@ test_that("dropped rows raise a classed warning with the counts", {
   msg <- conditionMessage(r$warnings[[1]])
   expect_match(msg, sprintf("dropped %d of 1000 row(s) (%.1f%%)", n_na, n_na / 10),
                fixed = TRUE)
-  expect_match(msg, sprintf("%d with a missing value, 0 with a non-finite value, 0 with an empty or non-finite geometry",
+  expect_match(msg, sprintf("%d with a missing value, 0 with a non-finite value and 0 without a location (an empty point, or a coordinate that is not finite or lies beyond 1e150)",
                             n_na), fixed = TRUE)
   expect_match(msg, sprintf("Rows affected by column: p1 %d.", n_na), fixed = TRUE)
   expect_match(msg, sprintf("The fit uses the %d row(s) that remain", 1000L - n_na),
@@ -70,7 +70,7 @@ test_that("the drop warning counts each reason and each column", {
   r <- .fbp_warnings(prep_model_data(d, "resp", "pred"))
   expect_identical(r$classes, "spatialkit_rows_dropped")
   msg <- conditionMessage(r$warnings[[1]])
-  expect_match(msg, "dropped 4 of 10 row(s) (40.0%): 2 with a missing value, 1 with a non-finite value, 1 with an empty or non-finite geometry",
+  expect_match(msg, "dropped 4 of 10 row(s) (40.0%): 2 with a missing value, 1 with a non-finite value and 1 without a location (an empty point, or a coordinate that is not finite or lies beyond 1e150)",
                fixed = TRUE)
   expect_match(msg, "Rows affected by column: resp 2, pred 1, (geometry) 1.", fixed = TRUE)
   dr <- attr(r$value, "dropped")
