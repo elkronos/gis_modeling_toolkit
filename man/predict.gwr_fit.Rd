@@ -11,7 +11,9 @@
 
 \item{newdata}{An sf object with the same predictors.
 The response variable need not be present (true out-of-sample prediction
-is supported).  NULL = fitted values.}
+is supported).  NULL = fitted values.  A layer whose geometries mix XY
+with XYZ or XYM (as \code{rbind()} of an XY and an XYZ layer gives) is
+read in x and y.}
 
 \item{se.fit}{Logical; also return standard errors.  Default \code{FALSE}.}
 

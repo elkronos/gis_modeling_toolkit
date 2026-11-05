@@ -132,7 +132,16 @@
 #'   (\code{\link{create_grid_polygons}()} output, say) is reduced to one
 #'   representative point per cell, as \code{\link{coerce_to_points}()} does,
 #'   so covariates are taken at the location predicted for; \code{boundary}
-#'   then keeps the cells whose point falls inside it.
+#'   then keeps the cells whose point falls inside it.  The grid is read in x
+#'   and y: one whose geometries mix XY with XYZ or XYM (as \code{rbind()}
+#'   of an XY and an XYZ layer gives), or carry M (XYM or XYZM), is read
+#'   without its Z and M.  A POINT grid whose coordinates are not moved (one
+#'   in the fit's CRS, or one without a CRS that is stamped with it) is
+#'   returned with its rows as given, Z and M included; one that mixes
+#'   dimensions and is reprojected into the fit's CRS comes back in XY with a
+#'   warning of class \code{"spatialkit_zm_dropped"}.
+#'   The points a grid of polygons is reduced to are in XY when its
+#'   geometries mix dimensions or carry M.
 #' @param cell_size Grid resolution in CRS units.  Ignored when \code{grid} is
 #'   supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
 #'   would produce more than 5,000,000 cells is refused, naming the implied
@@ -150,11 +159,14 @@
 #'   \code{grid}.  One still without a CRS after the replay is taken as
 #'   EPSG:4326 and reprojected when its coordinates look like lon/lat, and
 #'   is otherwise stamped with the fit's CRS, with a warning either way.
+#'   Read in x and y: a boundary whose geometries mix XY with XYZ or XYM, or
+#'   carry M, is read without its Z and M.
 #' @param covariates Optional \code{sf} layer carrying the model's predictors.
 #'   Required when the model has predictors and \code{grid} does not already
 #'   contain them.  Values are taken from the nearest feature.  Aligned to
 #'   the fit's CRS as \code{grid} is, with the same warning when it has no
-#'   CRS.
+#'   CRS.  Read in x and y: a layer whose geometries mix XY with XYZ or XYM,
+#'   or carry M, is read without its Z and M, with no warning.
 #' @param chunk_size Rows per prediction call. Default 5000.  A pure
 #'   performance knob: rows do not interact, and for a \code{bayesian_fit} the
 #'   GP boundary is held at its fitted value whatever the chunk holds; see
@@ -271,6 +283,47 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
     # from the correctly-reprojected covariates.  st_nearest_feature() then
     # handed every cell the same covariate row and the whole surface collapsed
     # to one constant -- silently, with no error anywhere.
+    # A grid that mixes XY and XYZ (or XYM) geometries is read in x and y:
+    # sf reads a layer in the dimension of its first geometry, so a move
+    # into the fit's CRS stopped with "OGR error", and GEOS stopped on its
+    # polygons ("ParseException", "Points of LinearRing do not form a closed
+    # linestring") or on any that carry M.  A POINT grid is returned as the
+    # surface: one whose coordinates are moved into the fit's CRS below
+    # comes back in XY with the warning of class spatialkit_zm_dropped, as
+    # ensure_projected() returns such a layer, under this function's name.
+    # One whose coordinates stay as they are (already in that CRS, or
+    # without a CRS and stamped with it or left in a CRS-less fit's space)
+    # keeps its rows as given, as area_of_applicability() keeps stamped
+    # `newdata`, and the joins below read a copy of it in XY.  The points a
+    # grid of polygons is reduced to are this function's own, so that grid,
+    # and one that carries M, are read in XY without a word.
+    grid_moves <- function(g) {
+      gcrs <- sf::st_crs(g)
+      if (!is.na(gcrs)) {
+        if (identical(gcrs, target_crs)) return(FALSE)
+        # ensure_projected() with no target moves only a lon/lat layer.
+        if (is.na(target_crs)) return(isTRUE(sf::st_is_longlat(g)))
+        return(TRUE)
+      }
+      if (is.na(target_crs)) return(FALSE)
+      # The replay below gives a CRS-less grid the fit's assumption, which
+      # ensure_projected() then moves into the fit's CRS; without one,
+      # .align_to_fit() reprojects it when it looks like lon/lat and stamps
+      # it otherwise.
+      assumed <- attr(train, "crs_assumed")
+      if (!is.null(assumed) && !identical(assumed, "none"))
+        return(!identical(sf::st_crs(assumed), target_crs))
+      isTRUE(.looks_like_lonlat(g)$lonlat)
+    }
+    grid_points <- all(sf::st_geometry_type(grid, by_geometry = TRUE) == "POINT")
+    if (!grid_points)
+      grid <- .xy_if_mixed_or_m(grid)
+    else if (grid_moves(grid))
+      grid <- .xy_if_mixed_warn(
+        grid, "predict_surface", "grid",
+        why = paste0("so it is read in x and y before it is brought into ",
+                     "the fit's CRS: Z and M are dropped and the surface is ",
+                     "returned in XY"))
     grid <- .replay_crs_assumption(grid, train, "predict_surface", "grid")
     grid <- .align_to_fit(grid, "grid")
     # A polygon grid -- create_grid_polygons() output, say -- was used as it
@@ -282,15 +335,22 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
     # 4.7.  Reduce it to representative points first, as
     # area_of_applicability() does, so the surface is the POINT layer the
     # manual promises.
-    if (!all(sf::st_geometry_type(grid, by_geometry = TRUE) == "POINT"))
-      grid <- coerce_to_points(grid, "auto")
+    if (!grid_points)
+      grid <- .xy_if_mixed(coerce_to_points(grid, "auto"))
   }
   res <- attr(grid, "cell_size")
+  # The joins below read the grid's points in x and y; a grid returned with
+  # its rows as given can still mix dimensions or carry M.
+  grid_xy <- function() .xy_if_mixed_or_m(sf::st_geometry(grid))
 
   # ---- clip ----------------------------------------------------------------
   if (!is.null(boundary)) {
-    bnd <- .replay_crs_assumption(sf::st_geometry(boundary), train,
-                                  "predict_surface", "boundary")
+    # Read only for its x and y: a boundary that mixes XY and XYZ (or XYM)
+    # geometries, or whose geometries carry M, is read in XY before it is
+    # moved (sf::st_transform() stopped with "OGR error" on an XYZ first
+    # row) and before GEOS reads it.
+    bnd <- .replay_crs_assumption(.xy_if_mixed_or_m(sf::st_geometry(boundary)),
+                                  train, "predict_surface", "boundary")
     # A boundary still without a CRS is aligned to the fit's as other
     # functions align one: an R warning naming this function and argument.
     # ensure_projected()'s stamp was a log line naming neither.
@@ -298,7 +358,7 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
       ensure_projected(bnd)
     else .transform_or_stamp(bnd, target_crs, what = "boundary",
                              caller = "predict_surface")
-    keep <- lengths(sf::st_intersects(grid, bnd)) > 0L
+    keep <- lengths(sf::st_intersects(grid_xy(), bnd)) > 0L
     grid <- grid[keep, , drop = FALSE]
     if (nrow(grid) == 0L)
       stop("predict_surface(): no grid points fall inside `boundary`.",
@@ -327,10 +387,14 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
       stop("predict_surface(): `covariates` lacks column(s) ",
            paste(sQuote(cov_missing), collapse = ", "), ".", call. = FALSE)
 
-    covariates <- .replay_crs_assumption(covariates, train, "predict_surface",
-                                        "covariates")
+    # Read only for its x and y and its columns: a layer that mixes XY and
+    # XYZ (or XYM) geometries, or whose geometries carry M, is read in XY
+    # before it is moved, so ensure_projected() has no copy of it to warn
+    # about, and before GEOS reads it.
+    covariates <- .replay_crs_assumption(.xy_if_mixed_or_m(covariates), train,
+                                        "predict_surface", "covariates")
     covariates <- .align_to_fit(covariates, "covariates")
-    nn  <- sf::st_nearest_feature(grid, covariates)
+    nn  <- sf::st_nearest_feature(grid_xy(), covariates)
     cdf <- sf::st_drop_geometry(covariates)[nn, missing_preds, drop = FALSE]
     for (cn in missing_preds) grid[[cn]] <- cdf[[cn]]
   }

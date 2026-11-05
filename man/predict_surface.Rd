@@ -33,7 +33,16 @@ CRS, with a warning either way.  A grid of polygons
 (\code{\link{create_grid_polygons}()} output, say) is reduced to one
 representative point per cell, as \code{\link{coerce_to_points}()} does,
 so covariates are taken at the location predicted for; \code{boundary}
-then keeps the cells whose point falls inside it.}
+then keeps the cells whose point falls inside it.  The grid is read in x
+and y: one whose geometries mix XY with XYZ or XYM (as \code{rbind()}
+of an XY and an XYZ layer gives), or carry M (XYM or XYZM), is read
+without its Z and M.  A POINT grid whose coordinates are not moved (one
+in the fit's CRS, or one without a CRS that is stamped with it) is
+returned with its rows as given, Z and M included; one that mixes
+dimensions and is reprojected into the fit's CRS comes back in XY with a
+warning of class \code{"spatialkit_zm_dropped"}.
+The points a grid of polygons is reduced to are in XY when its
+geometries mix dimensions or carry M.}
 
 \item{cell_size}{Grid resolution in CRS units.  Ignored when \code{grid} is
 supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
@@ -53,13 +62,16 @@ supplied.  The grid you pass is used verbatim.}
 it are dropped.  Put through the same CRS replay and reprojection as
 \code{grid}.  One still without a CRS after the replay is taken as
 EPSG:4326 and reprojected when its coordinates look like lon/lat, and
-is otherwise stamped with the fit's CRS, with a warning either way.}
+is otherwise stamped with the fit's CRS, with a warning either way.
+Read in x and y: a boundary whose geometries mix XY with XYZ or XYM, or
+carry M, is read without its Z and M.}
 
 \item{covariates}{Optional \code{sf} layer carrying the model's predictors.
 Required when the model has predictors and \code{grid} does not already
 contain them.  Values are taken from the nearest feature.  Aligned to
 the fit's CRS as \code{grid} is, with the same warning when it has no
-CRS.}
+CRS.  Read in x and y: a layer whose geometries mix XY with XYZ or XYM,
+or carry M, is read without its Z and M, with no warning.}
 
 \item{chunk_size}{Rows per prediction call. Default 5000.  A pure
 performance knob: rows do not interact, and for a \code{bayesian_fit} the

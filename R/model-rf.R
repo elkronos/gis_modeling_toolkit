@@ -879,7 +879,9 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
 #'   or logical: ranger would otherwise factor-code a character column and apply
 #'   the numeric split thresholds to the codes, predicting confidently from
 #'   nonsense, so a character column is refused instead.  (ranger sees a logical
-#'   as 0/1, so either form is accepted for one.)
+#'   as 0/1, so either form is accepted for one.)  A layer whose geometries
+#'   mix XY with XYZ or XYM (as \code{rbind()} of an XY and an XYZ layer
+#'   gives) is read in x and y.
 #' @param ... Passed to \code{ranger}'s predict method. Arguments that make
 #'   \code{ranger} return a matrix (\code{predict.all = TRUE},
 #'   \code{type = "quantiles"}, \code{type = "se"} with \code{predict.all})
@@ -914,6 +916,11 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
   .check_predict_newdata(newdata, object, "predict.rf_fit")
 
   n_orig  <- nrow(newdata)
+  # newdata is read in x and y when it mixes XY and XYZ (or XYM) geometries:
+  # sf::st_transform() reads such a layer in the dimension of its first
+  # geometry, so an XYZ first row stopped the move into the fit's CRS with
+  # "OGR error".  Only predictions are returned, so nothing is said.
+  newdata <- .xy_if_mixed(newdata)
   newdata <- .replay_crs_assumption(newdata, object$data_sf, "predict.rf_fit")
   newdata <- ensure_projected(newdata, target_crs = .crs_or_null(object$data_sf))
   newdata$..orig_row_id.. <- seq_len(n_orig)

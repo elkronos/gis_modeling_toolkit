@@ -134,6 +134,8 @@ when it is not. \code{points}, \code{newdata} and \code{seeds} are transformed t
 points, or the points taken from its other features, do not all have
 the same dimensions (some with a Z or M coordinate) is read without its
 Z and M, since sf reads a layer in the dimension of its first point.
+So is a layer of polygons or lines in \code{newdata} or \code{points} whose
+geometries carry M (XYM or XYZM), which GEOS does not read.
 So are the polygons of \code{values} when they do not all have the same
 dimensions.
 When neither \code{points} nor \code{newdata} has a CRS the coordinates are used

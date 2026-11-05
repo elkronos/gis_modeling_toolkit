@@ -3,6 +3,11 @@
 #' Builds a layered ggplot2 map of polygon tessellations and optional
 #' overlays for a study boundary, seed points, and additional features.
 #'
+#' Every layer is drawn in x and y: a layer whose geometries mix XY with XYZ
+#' or XYM (as \code{rbind()} of an XY and an XYZ layer gives) is drawn
+#' without its Z and M.  The labels are placed in x and y, also on cells
+#' whose geometries carry M (XYM or XYZM).
+#'
 #' @param tessellation_sf An sf POLYGON/MULTIPOLYGON layer. Required.
 #' @param boundary Optional sf/sfc polygon outline layer.
 #' @param seeds_sf Optional sf/sfc point layer of seed locations.
@@ -162,6 +167,12 @@ plot_tessellation_map <- function(tessellation_sf,
     if (inherits(x, "sfc")) x <- sf::st_as_sf(x)
     if (!inherits(x, c("sf", "sfc")))
       stop("plot_tessellation_map(): all layers must be sf/sfc when provided.")
+    # A layer that mixes XY and XYZ (or XYM) geometries is drawn in x and y:
+    # sf reads a layer in the dimension of its first geometry, so its move
+    # into the plot's CRS stopped with "OGR error" (an XYZ first row) or drew
+    # an XYZ ring among XY rows far from its place, and GEOS stopped on the
+    # labels' points.  The plot returns no geometry, so nothing is said.
+    x <- .xy_if_mixed(x)
     if (is.na(plot_crs)) return(x)
     x_crs <- sf::st_crs(x)
     # Returning a CRS-less overlay untouched was dead code, not a pass-through:
@@ -248,7 +259,10 @@ plot_tessellation_map <- function(tessellation_sf,
       .log_warn("plot_tessellation_map(): label_col '%s' not found; skipping labels.",
                 label_col)
     } else if (nrow(tess) > 0L && !all(sf::st_is_empty(tess))) {
-      centers <- suppressWarnings(sf::st_point_on_surface(.drop_empty_parts(tess)))
+      # GEOS does not read M, and stopped on cells that carry it; the label
+      # points are this function's own and are taken in x and y.
+      centers <- suppressWarnings(sf::st_point_on_surface(
+        .drop_empty_parts(.xy_if_mixed_or_m(tess))))
       # An st_area() label column (class units) failed at print with "units
       # package is not attached", as a units fill column once did; drawn as
       # text, a units or difftime value keeps its unit.

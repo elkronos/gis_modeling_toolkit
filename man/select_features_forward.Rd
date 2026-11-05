@@ -26,7 +26,10 @@ select_features_forward(
 )
 }
 \arguments{
-\item{train_sf}{Training data (\code{sf}).}
+\item{train_sf}{Training data (\code{sf}).  With \code{select_on =
+"split"} a feature that is not a point is reduced to one, and a layer
+whose geometries mix XY with XYZ or XYM, or carry M (XYM or XYZM), is
+read in x and y.}
 
 \item{response_var}{Character(1).}
 

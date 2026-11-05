@@ -49,14 +49,15 @@
 #'   with \code{layer}.  A feature that is not a point is reduced to one by
 #'   \code{coerce_to_points(, "auto")}, whose conditions are passed on; an
 #'   empty geometry stays an empty point.  A layer whose geometries do not
-#'   all have one dimension is read in XY (\code{.xy_if_mixed()}), and so is
+#'   all have one dimension, or whose geometries carry M, which GEOS does not
+#'   read, is read in XY (\code{.xy_if_mixed_or_m()}), and so is
 #'   the point layer reduced from it when its points do not: the point on the
 #'   surface of a POLYGON Z, and the empty point of an empty LINESTRING Z, are
 #'   XY beside the POINT Z rows that are kept.
 #' @keywords internal
 #' @noRd
 .values_at_points <- function(layer) {
-  g <- .xy_if_mixed(sf::st_sf(geometry = sf::st_geometry(layer)))
+  g <- .xy_if_mixed_or_m(sf::st_sf(geometry = sf::st_geometry(layer)))
   if (nrow(g) > 0L && !all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
     g <- .xy_if_mixed(coerce_to_points(g, "auto"))
   g
@@ -459,6 +460,8 @@
 #'    points, or the points taken from its other features, do not all have
 #'    the same dimensions (some with a Z or M coordinate) is read without its
 #'    Z and M, since sf reads a layer in the dimension of its first point.
+#'    So is a layer of polygons or lines in `newdata` or `points` whose
+#'    geometries carry M (XYM or XYZM), which GEOS does not read.
 #'    So are the polygons of `values` when they do not all have the same
 #'    dimensions.
 #'    When neither `points` nor `newdata` has a CRS the coordinates are used

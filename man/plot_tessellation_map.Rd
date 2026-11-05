@@ -115,6 +115,12 @@ A ggplot2 object.
 Builds a layered ggplot2 map of polygon tessellations and optional
 overlays for a study boundary, seed points, and additional features.
 }
+\details{
+Every layer is drawn in x and y: a layer whose geometries mix XY with XYZ
+or XYM (as \code{rbind()} of an XY and an XYZ layer gives) is drawn
+without its Z and M.  The labels are placed in x and y, also on cells
+whose geometries carry M (XYM or XYZM).
+}
 \examples{
 if (requireNamespace("ggplot2", quietly = TRUE)) {
   library(sf)

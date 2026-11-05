@@ -63,6 +63,16 @@ Z and M are dropped, the points come back in XY, and a warning of class
 points for any layer, with no warning.  A layer in one dimension, XY or
 XYZ throughout, is read as it is, and so is a layer whose only
 geometries of another dimension than the first are empty and not points.
+
+GEOS does not read M coordinates.  When the mode reduces a geometry that
+carries M (XYM or XYZM) to a point (any such geometry under
+\code{"centroid"}, \code{"point_on_surface"} and \code{"line_midpoint"}, any that is
+not a POINT under \code{"auto"}), the layer is reduced in x and y: Z and M
+are dropped from every geometry, the points come back in XY, and a
+warning of class \code{spatialkit_zm_dropped} says so, with the rows whose
+geometry carries M as its \code{rows}.  Empty geometries are not counted.
+A POINT layer that carries M is returned as it is under \code{"auto"}, and
+\code{"bbox_center"} gives XY points with no warning, as for any layer.
 }
 \examples{
 library(sf)

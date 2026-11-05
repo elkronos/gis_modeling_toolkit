@@ -25,7 +25,9 @@ compare_models_cv(
 )
 }
 \arguments{
-\item{data_sf}{An sf object.}
+\item{data_sf}{An sf object.  When the folds are built here, a feature
+that is not a point is reduced to one, and a layer whose geometries mix
+XY with XYZ or XYM, or carry M (XYM or XYZM), is read in x and y.}
 
 \item{response_var}{Response column name.}
 

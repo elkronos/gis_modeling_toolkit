@@ -44,7 +44,8 @@
 #'   \code{residuals(x)}; for a custom subclass with no \code{residuals()}
 #'   method (optional, see \code{\link{new_spatial_fit}()}) they are the
 #'   response minus \code{fitted(x)}, which is what the built-in backends'
-#'   methods return.
+#'   methods return.  The maps are drawn in x and y: a \code{data_sf} whose
+#'   geometries mix XY with XYZ or XYM is drawn without its Z and M.
 #' @param type One of:
 #'   \describe{
 #'     \item{\code{"residuals"}}{Residuals mapped at the training locations.
@@ -165,6 +166,13 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
   if (!inherits(dat, "sf"))
     stop("plot.spatial_fit(): the fit carries no training geometry.",
          call. = FALSE)
+  # Drawn in x and y: a layer that mixes XY and XYZ (or XYM) geometries (a
+  # custom fit's own layer; the package's fitters keep the points
+  # prep_model_data() read in x and y) is read in XY, since sf reads a layer
+  # in the dimension of its first geometry and coord_sf() moved it when the
+  # plot was built ("OGR error" with a Z or M row first, an XYZ ring among
+  # XY rows drawn far from its place).
+  dat <- .xy_if_mixed(dat)
   if (length(res) != nrow(dat))
     stop("plot.spatial_fit(): residual length (", length(res),
          ") does not match the training data (", nrow(dat), ").", call. = FALSE)
@@ -258,6 +266,7 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
   dat <- x$data_sf
   if (!inherits(dat, "sf"))
     stop("plot.spatial_fit(): the fit carries no training geometry.", call. = FALSE)
+  dat <- .xy_if_mixed(dat)
   cf <- stats::coef(x)
   if (!is.data.frame(cf) || !nrow(cf))
     stop("plot.spatial_fit(type = \"coefficients\"): coef() returned no local ",
@@ -667,7 +676,10 @@ plot.sac_range <- function(x, ...) {
 #' the prediction distances.
 #'
 #' @param folds A list returned by \code{make_folds()}.
-#' @param points_sf The \code{sf} layer the folds were built from.
+#' @param points_sf The \code{sf} layer the folds were built from.  Drawn in
+#'   x and y: a layer whose geometries mix XY with XYZ or XYM (as
+#'   \code{rbind()} of an XY and an XYZ layer gives) is drawn without its Z
+#'   and M, and so are \code{boundary} and the blocks.
 #' @param boundary Optional polygonal \code{sf}/\code{sfc} to draw underneath.
 #' @param blocks Logical; draw the block polygons when \code{folds} carries
 #'   them.  Default \code{TRUE}.
@@ -703,7 +715,13 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
     stop("plot_folds(): the fold assignment table lacks `row_id`/`fold`.",
          call. = FALSE)
 
-  dat <- points_sf
+  # Drawn in x and y: a layer that mixes XY and XYZ (or XYM) geometries is
+  # read in XY, since sf reads a layer in the dimension of its first
+  # geometry, and coord_sf() moved it into the plot's CRS when the plot was
+  # built (an XYZ first row stopped with "OGR error"; an XYZ ring among XY
+  # rows was drawn far from its place).  The plot returns no geometry, so
+  # nothing is said.
+  dat <- .xy_if_mixed(points_sf)
   if (!("..row_id" %in% names(dat))) dat$..row_id <- seq_len(nrow(dat))
   dat$.fold <- factor(asg$fold[match(dat$..row_id, asg$row_id)])
 
@@ -724,6 +742,8 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
   # make_folds() did.
   blk <- folds$params$blocks
   if (!(isTRUE(blocks) && inherits(blk, "sf") && nrow(blk) > 0L)) blk <- NULL
+  if (!is.null(blk)) blk <- .xy_if_mixed(blk)
+  if (inherits(boundary, c("sf", "sfc"))) boundary <- .xy_if_mixed(boundary)
   plot_crs <- sf::st_crs(dat)
   if (is.na(plot_crs) && is.character(folds$params$crs) &&
       length(folds$params$crs) == 1L && !is.na(folds$params$crs))

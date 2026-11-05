@@ -2555,6 +2555,89 @@ old behaviour where there is a way.
   a boundary is now read in x and y before it is projected, with no
   warning, and the data are projected as for the same boundary in XY.
 
+* **`area_of_applicability()`, `predict_surface()`, `predict()`,
+  `plot_tessellation_map()`, `plot_folds()`, `plot()` of a fit and
+  `residual_morans_i()` stopped with a bare message from base R, sf or
+  GEOS, or read other coordinates, on layers that mixed XY and XYZ (or
+  XYM) geometries.**  sf reads a layer in the dimension of its first
+  geometry.
+  `area_of_applicability()`, wherever it measures location (a forest
+  fitted with `include_coords = TRUE`, a GWR or Bayesian fit, or
+  `coords = "yes"`), read the coordinates of such points in `newdata` or
+  `train_sf` out of step, with base R's "data length is not a
+  sub-multiple" warning as the only sign, when the first point had Z or
+  M, and stopped with base R's "length of 'dimnames' [2] not equal to
+  array extent" when a later one had; `newdata` in another CRS with a Z
+  or M point first stopped it with sf's "OGR error".
+  `predict_surface()` stopped with "OGR error" or "Points of LinearRing
+  do not form a closed linestring" on such a `boundary`, with
+  "ParseException: Unexpected EOF parsing WKB" (or "OGR error", given a
+  `boundary`) on such `covariates` or a POINT `grid` with an XYZ point
+  first, and with "GEOS does not support XYM or XYZM geometries" with an
+  XYM point first, and raised
+  `ensure_projected()`'s warning about a copy it does not return for
+  such `covariates` in another CRS.  `predict()` on a forest, a GWR or a
+  Bayesian fit, and through it `evaluate_insample()`, `compare_models()`
+  and `model_metrics()`, stopped with "OGR error" on `newdata` in another
+  CRS with an XYZ or XYM row first; once `ensure_projected()` read such a
+  layer in x and y (above), they raised its warning about a copy they do
+  not return.
+  `plot_tessellation_map()` stopped with "OGR error" on any such layer
+  with a Z or M row first, and drew a later XYZ cell or boundary far from
+  its place, or stopped with GEOS's message when it labels the cells;
+  `plot_folds()` stopped with "OGR error" when the plot was printed, or
+  drew the boundary elsewhere, and so did `plot()` of a custom fit (built
+  with `new_spatial_fit()`) on its `data_sf`.  A polygon or line layer
+  that mixed dimensions, given to `area_of_applicability()` or as the
+  `grid` of `predict_surface()`, and the layer of a custom fit given to
+  `residual_morans_i()`, raised the warning `coerce_to_points()` gives
+  about its `x`, an argument of a function the caller did not call.
+  These layers are now read in x and y, and give what the same rows in XY
+  give, with no warning, save where a copy of the caller's rows comes
+  back: `newdata` that `area_of_applicability()` reprojects into the
+  training CRS for a forest fitted with `include_coords = TRUE`, and a
+  POINT `grid` that `predict_surface()` reprojects into the fit's CRS, are
+  returned in XY with a warning of class `spatialkit_zm_dropped`, as
+  `ensure_projected()` returns such a layer.  Rows returned in their own
+  CRS, or without a CRS and stamped with the fit's, keep their geometry,
+  Z and M included.  A layer XY or XYZ
+  throughout is read as before.
+
+* **`coerce_to_points()` stopped with GEOS's "GEOS does not support XYM or
+  XYZM geometries" on geometries that carry M, and so did the functions
+  that reduce the caller's polygons to points.**  In a projected CRS
+  `"auto"`, `"centroid"` and `"point_on_surface"` stopped on polygons
+  whose geometries all carry M (XYM or XYZM), `"auto"` on such
+  multipoints, `"centroid"` and `"point_on_surface"` on such points and
+  lines, and `"line_midpoint"` on such geometries that are not lines; in
+  degrees `"auto"` stopped on such polygons and `"point_on_surface"` on
+  all of them.  `"auto"` and `"line_midpoint"` gave lines XY midpoints
+  without a word, and so did `"centroid"` in degrees for every geometry.
+  `plot_tessellation_map(labels = TRUE)` stopped the same way on cells
+  that carry M.
+  `compare_models_cv()`, `select_features_forward(select_on = "split")`,
+  `cell_values_at()` (polygon `newdata` or `points`),
+  `summarize_by_cell()` with `deff = "variogram"` or `estimate =
+  "pooled"`, `area_of_applicability()` where it measures location, and
+  `predict_surface()` with a polygon `grid` stopped the same way on such
+  polygons, `predict_surface()` also on such a `boundary`, `covariates`
+  or POINT `grid`, `kriging_adequacy()` on such multipoints, and
+  `residual_morans_i()` on a custom fit with such polygons returned
+  `NULL` with "coordinate extraction failed".  The same layers
+  XYZ throughout ran, as GEOS's points of a POLYGON Z are XY.  When the
+  mode reduces a geometry that carries M, `coerce_to_points()` now drops
+  Z and M from the layer and returns XY points with a warning of class
+  `spatialkit_zm_dropped` that carries the rows with M as `rows`; empty
+  geometries are not counted, and when they are the only ones the mode
+  reduces that carry M, Z and M are dropped from them alone, without a
+  warning.  POINT rows under `"auto"` are returned as they are, with
+  their M, and `"bbox_center"` is unchanged.  The
+  functions above read such a layer in x and y before they reduce it, with
+  no warning, and give what the same rows in XY give; a POINT `grid` of
+  `predict_surface()` in the fit's CRS keeps its M.  The labels of
+  `plot_tessellation_map()` are taken in x and y.  A layer XY or XYZ
+  throughout is read as before.
+
 * **`cell_values_at()` without `seeds` gave every location the value `NA`,
   marked filled, when `values` had no cell ID.**  A `values` whose ID
   column is all `NA` placed no location in a cell, so every location was

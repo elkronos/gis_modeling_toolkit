@@ -24,7 +24,9 @@ kriging_adequacy(
 \code{\link{assign_features_to_polygons}()} returns.  A layer whose
 points, or the points taken from its multipoints, do not all have the
 same dimensions (some with a Z or M coordinate) is read without its Z
-and M, since sf reads a layer in the dimension of its first geometry.}
+and M, since sf reads a layer in the dimension of its first geometry.
+Multipoints whose geometries carry M (XYM or XYZM) are reduced to
+points in x and y, since GEOS does not read M.}
 
 \item{response_var}{The response column: numeric or logical. A logical
 column is kriged as 0/1, so its cell mean is a share. Any other class

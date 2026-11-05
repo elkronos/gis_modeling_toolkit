@@ -93,7 +93,9 @@ Kish's, the uncorrected ones where Kish's own ICC is 0 and \code{NA}
 where it cannot be estimated; the
 \code{deff_method} column says which on every row (see "Value"). The
 variogram route needs an identified range, which a layer does not
-always have, so read \code{deff_method} for the fallback. A model with
+always have, so read \code{deff_method} for the fallback. A layer whose
+geometries carry M (XYM or XYZM), which GEOS does not read, is
+read in x and y too. A model with
 no structured component (a pure
 nugget) implies that distinct observations are uncorrelated, so it
 is applied as a design effect of 1 in every cell, not treated as a
@@ -245,7 +247,8 @@ own CRS. When the input carries the record of its cells' count (see
 worked in, the distances are measured in it, whatever CRS the layer is
 in. The distances are taken in x and y: a layer whose features, or the
 points taken from them, do not all have the same dimensions (some with a
-Z or M coordinate) is read without its Z and M. The value is matched as \code{\link[=match.arg]{match.arg()}} matches a choice, so an
+Z or M coordinate) is read without its Z and M. So is a layer whose
+geometries carry M (XYM or XYZM), which GEOS does not read. The value is matched as \code{\link[=match.arg]{match.arg()}} matches a choice, so an
 abbreviation (\code{"m"}) is accepted and \code{NULL} is the default. See "Pooled
 values" for what the pooled value estimates and what its numbers rest
 on, "Value" for the columns and the attributes, and "Conditions" for

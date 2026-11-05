@@ -9,7 +9,10 @@ plot_folds(folds, points_sf, boundary = NULL, blocks = TRUE)
 \arguments{
 \item{folds}{A list returned by \code{make_folds()}.}
 
-\item{points_sf}{The \code{sf} layer the folds were built from.}
+\item{points_sf}{The \code{sf} layer the folds were built from.  Drawn in
+x and y: a layer whose geometries mix XY with XYZ or XYM (as
+\code{rbind()} of an XY and an XYZ layer gives) is drawn without its Z
+and M, and so are \code{boundary} and the blocks.}
 
 \item{boundary}{Optional polygonal \code{sf}/\code{sfc} to draw underneath.}
 

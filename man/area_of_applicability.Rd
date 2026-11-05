@@ -36,7 +36,8 @@ whether its predictions depend on location. Optional if \code{train_sf}
 and \code{predictor_vars} are given directly, which lets this be used
 with any model.}
 
-\item{train_sf}{Training data, if not taken from \code{model}.}
+\item{train_sf}{Training data, if not taken from \code{model}. When
+location is measured it is read in x and y, as \code{newdata} is.}
 
 \item{predictor_vars}{Predictor names, if not taken from \code{model}.}
 
@@ -433,7 +434,15 @@ a CRS the other is brought into it: reprojected when its coordinates look
 like longitude/latitude, stamped otherwise, with a warning either way. This
 is done because degrees fed into a metre-space index silently understate the
 distances. The location index is a map distance and refuses training data
-in a geographic CRS.
+in a geographic CRS. Both layers are read in x and y for the location: a
+layer whose geometries mix XY with XYZ or XYM (as \code{rbind()} of an XY
+and an XYZ layer gives), or carry M (XYM or XYZM), is read without its Z
+and M. Only one change reaches the result: for a forest fitted with
+\code{include_coords = TRUE}, \code{newdata} that mixes dimensions and is
+reprojected into the training CRS comes back in XY, with a warning of
+class \code{"spatialkit_zm_dropped"}, as \code{\link{ensure_projected}()}
+returns such a layer; the points that non-\code{POINT} \code{newdata} is
+reduced to are in XY when they would mix dimensions or carry M.
 }
 
 \examples{

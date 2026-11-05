@@ -1571,6 +1571,54 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   sf::st_zm(x, drop = TRUE, what = "ZM")
 }
 
+#' A layer about to be reduced to points, in XY when a geometry the mode
+#' reduces carries M
+#'
+#' For \code{coerce_to_points()}, after its flatten of a layer that mixes
+#' dimensions.  GEOS does not read M, so its centroid and interior point
+#' stop on a geometry that carries it.  When the mode reduces such a
+#' geometry to a point (any under \code{"centroid"},
+#' \code{"point_on_surface"} and \code{"line_midpoint"}; any that is not a
+#' POINT under \code{"auto"}), Z and M are dropped from the whole layer
+#' with a warning of class \code{"spatialkit_zm_dropped"}, which carries the
+#' rows whose geometry carries M as \code{rows}.  Empty geometries are not
+#' counted.  When the only geometries the mode reduces that carry M are
+#' empty, Z and M are dropped from those alone, without a warning: they hold
+#' no coordinates, so nothing is lost, and GEOS refuses them all the same.
+#' Any other layer is returned as it came.
+#'
+#' @param x An sf object.
+#' @param mode The mode of \code{coerce_to_points()}, after
+#'   \code{"surface"} is read as \code{"point_on_surface"}.
+#' @return \code{x}, or its copy in XY.
+#' @keywords internal
+#' @noRd
+.xy_if_reduced_m <- function(x, mode) {
+  g <- sf::st_geometry(x)
+  d <- vapply(g, function(s) class(s)[1L], character(1), USE.NAMES = FALSE)
+  has_m <- d %in% c("XYM", "XYZM")
+  if (!any(has_m)) return(x)
+  reduced <- if (identical(mode, "auto"))
+    has_m & !vapply(g, inherits, logical(1), "POINT")
+  else has_m
+  if (!any(reduced)) return(x)
+  has_m <- has_m & !sf::st_is_empty(g)
+  if (!any(reduced & has_m)) {
+    lst <- as.list(g)
+    lst[reduced] <- lapply(lst[reduced], sf::st_zm, drop = TRUE, what = "ZM")
+    return(sf::st_set_geometry(x, sf::st_sfc(lst, crs = sf::st_crs(g),
+                                             precision = sf::st_precision(g))))
+  }
+  rows <- which(has_m)
+  .warn_classed("spatialkit_zm_dropped",
+                paste0("coerce_to_points(): %d of the %d geometries of `x` ",
+                       "carry M coordinates, which GEOS does not read, so Z ",
+                       "and M are dropped and the points are returned in XY. ",
+                       "Drop them with sf::st_zm() first to silence this."),
+                length(rows), length(d), data = list(rows = rows))
+  sf::st_zm(x, drop = TRUE, what = "ZM")
+}
+
 #' Fast center points of per-feature bounding boxes
 #'
 #' @param x An sf object.
@@ -1687,6 +1735,16 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' XYZ throughout, is read as it is, and so is a layer whose only
 #' geometries of another dimension than the first are empty and not points.
 #'
+#' GEOS does not read M coordinates.  When the mode reduces a geometry that
+#' carries M (XYM or XYZM) to a point (any such geometry under
+#' `"centroid"`, `"point_on_surface"` and `"line_midpoint"`, any that is
+#' not a POINT under `"auto"`), the layer is reduced in x and y: Z and M
+#' are dropped from every geometry, the points come back in XY, and a
+#' warning of class `spatialkit_zm_dropped` says so, with the rows whose
+#' geometry carries M as its `rows`.  Empty geometries are not counted.
+#' A POINT layer that carries M is returned as it is under `"auto"`, and
+#' `"bbox_center"` gives XY points with no warning, as for any layer.
+#'
 #' @param x An sf object.
 #' @param mode One of "auto", "centroid", "point_on_surface", "surface",
 #'   "line_midpoint", "bbox_center".
@@ -1747,6 +1805,19 @@ coerce_to_points <- function(
                          why = paste0("so it is read in x and y: Z and M are ",
                                       "dropped and the points are returned ",
                                       "in XY"))
+  # GEOS does not read M: its centroid, interior point and the rest stopped
+  # with sf's "GEOS does not support XYM or XYZM geometries" on a layer whose
+  # geometries carry M.  When the mode reduces such a geometry to a point
+  # (every one under "centroid", "point_on_surface" and "line_midpoint",
+  # every one that is not a POINT under "auto"), Z and M are dropped from
+  # the whole layer and the points come back in XY, with the warning of
+  # class spatialkit_zm_dropped.  GEOS's points of a POLYGON Z are XY too,
+  # so no measure is lost that a point could carry.  POINT rows under
+  # "auto" are returned as they are, with their M.  Empty geometries hold no
+  # coordinates and are not counted; when they are the only ones the mode
+  # reduces that carry M, Z and M are dropped from them alone, without a
+  # word, since GEOS refuses an empty XYM polygon too.
+  x <- .xy_if_reduced_m(x, mode)
   g <- sf::st_geometry(x)
 
   # -- direct ops ---

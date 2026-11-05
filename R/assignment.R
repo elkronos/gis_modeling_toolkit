@@ -2028,7 +2028,9 @@ assign_features_to_polygons <- function(
 #'       where it cannot be estimated; the
 #'       `deff_method` column says which on every row (see "Value"). The
 #'       variogram route needs an identified range, which a layer does not
-#'       always have, so read `deff_method` for the fallback. A model with
+#'       always have, so read `deff_method` for the fallback. A layer whose
+#'       geometries carry M (XYM or XYZM), which GEOS does not read, is
+#'       read in x and y too. A model with
 #'       no structured component (a pure
 #'       nugget) implies that distinct observations are uncorrelated, so it
 #'       is applied as a design effect of 1 in every cell, not treated as a
@@ -2174,7 +2176,8 @@ assign_features_to_polygons <- function(
 #'   worked in, the distances are measured in it, whatever CRS the layer is
 #'   in. The distances are taken in x and y: a layer whose features, or the
 #'   points taken from them, do not all have the same dimensions (some with a
-#'   Z or M coordinate) is read without its Z and M. The value is matched as [match.arg()] matches a choice, so an
+#'   Z or M coordinate) is read without its Z and M. So is a layer whose
+#'   geometries carry M (XYM or XYZM), which GEOS does not read. The value is matched as [match.arg()] matches a choice, so an
 #'   abbreviation (`"m"`) is accepted and `NULL` is the default. See "Pooled
 #'   values" for what the pooled value estimates and what its numbers rest
 #'   on, "Value" for the columns and the attributes, and "Conditions" for
@@ -3322,8 +3325,10 @@ summarize_by_cell <- function(assigned_points_sf,
       # CRS and again after the coerce, whose points can mix dimensions: sf
       # reads such a layer in the dimension of its first geometry, so the
       # move stopped with "OGR error" or st_coordinates() below read other
-      # coordinates.  These points are not returned, so nothing is said.
-      pts_for_deff <- .xy_if_mixed(assigned_points_sf)
+      # coordinates.  So is a layer whose geometries carry M, which GEOS
+      # does not read (.xy_if_mixed_or_m()): the coerce stopped on its
+      # polygons.  These points are not returned, so nothing is said.
+      pts_for_deff <- .xy_if_mixed_or_m(assigned_points_sf)
       if (!all(sf::st_geometry_type(pts_for_deff, by_geometry = TRUE) == "POINT"))
         pts_for_deff <- .xy_if_mixed(coerce_to_points(pts_for_deff, "auto"))
 
@@ -3866,11 +3871,12 @@ summarize_by_cell <- function(assigned_points_sf,
 #' read as it is read with those rows empty.  The warning sf raises when it takes a
 #' point on the surface of a lon/lat polygon is not passed on: the point is
 #' one of the polygon's, and it is projected before any distance is taken.
-#' A layer that mixes XY and XYZ (or XYM) geometries is read in XY
-#' (\code{.xy_if_mixed()}), since sf reads a layer in the dimension of its
-#' first geometry, and so are the points reduced from a layer whose points do
-#' not all have one dimension; no geometry is returned, so the caller's keep
-#' their Z.
+#' A layer that mixes XY and XYZ (or XYM) geometries is read in XY, since sf
+#' reads a layer in the dimension of its first geometry, and so is a layer
+#' whose geometries carry M, which GEOS does not read
+#' (\code{.xy_if_mixed_or_m()}); so are the points reduced from a layer whose
+#' points do not all have one dimension.  No geometry is returned, so the
+#' caller's keep their Z and M.
 #'
 #' @param layer The assigned layer.
 #' @param crs \code{NULL}, or the projected CRS to measure in: the one the
@@ -3886,10 +3892,12 @@ summarize_by_cell <- function(assigned_points_sf,
   if (nrow(layer) == 0L)
     return(list(xy = matrix(numeric(0), 0L, 2L), crs = sf::st_crs(layer)))
   # A layer that mixes XY and XYZ (or XYM) geometries is read in XY: sf reads
-  # a layer in the dimension of its first geometry.  The points reduced from
-  # a layer in one dimension can mix them (the point on the surface of a
-  # POLYGON Z is XY beside the POINT Z rows kept), so they are tested again.
-  layer <- .xy_if_mixed(layer)
+  # a layer in the dimension of its first geometry.  So is a layer whose
+  # geometries carry M, which GEOS does not read (.xy_if_mixed_or_m()).  The
+  # points reduced from a layer in one dimension can mix them (the point on
+  # the surface of a POLYGON Z is XY beside the POINT Z rows kept), so they
+  # are tested again.
+  layer <- .xy_if_mixed_or_m(layer)
   if (!all(sf::st_geometry_type(layer, by_geometry = TRUE) == "POINT"))
     layer <- .xy_if_mixed(withCallingHandlers(
       coerce_to_points(layer, "auto"),

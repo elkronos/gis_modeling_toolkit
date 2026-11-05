@@ -574,7 +574,11 @@
 #' randomisation null without correcting it.
 #'
 #' @param fit A \code{spatial_fit} object (from \code{fit_gwr_model},
-#'   \code{fit_bayesian_spatial_model} or \code{fit_rf_model}).
+#'   \code{fit_bayesian_spatial_model} or \code{fit_rf_model}).  The
+#'   locations are read from its \code{data_sf}, a feature that is not a
+#'   point reduced to one as \code{\link{coerce_to_points}(, "auto")}
+#'   does.  A layer whose geometries mix XY with XYZ or XYM, or carry M
+#'   (XYM or XYZM), is read in x and y, with no warning.
 #' @param alternative Character: \code{"two.sided"} (default),
 #'   \code{"greater"} (positive autocorrelation), or \code{"less"}.
 #' @param weights Optional user-supplied n x n weight matrix: a base
@@ -779,8 +783,14 @@ residual_morans_i <- function(fit,
     return(NULL)
   }
 
+  # The fit's layer is read in x and y when it mixes XY and XYZ (or XYM)
+  # geometries or its geometries carry M (.xy_if_mixed_or_m()), and so are
+  # the points reduced from it when they mix dimensions: sf reads a layer in
+  # the dimension of its first geometry, and GEOS does not read M.  No
+  # points are returned, so nothing is said.
   coords <- tryCatch({
-    pts <- ensure_projected(coerce_to_points(fit$data_sf, "auto"))
+    pts <- ensure_projected(.xy_if_mixed(coerce_to_points(
+      .xy_if_mixed_or_m(fit$data_sf), "auto")))
     sf::st_coordinates(pts)[, 1:2, drop = FALSE]
   }, error = function(e) NULL)
 
@@ -1629,7 +1639,9 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' perform fitting (inside CV folds), because CV inherently requires
 #' repeated fitting.
 #'
-#' @param data_sf An sf object.
+#' @param data_sf An sf object.  When the folds are built here, a feature
+#'   that is not a point is reduced to one, and a layer whose geometries mix
+#'   XY with XYZ or XYM, or carry M (XYM or XYZM), is read in x and y.
 #' @param response_var Response column name.
 #' @param predictor_vars Predictor column names.
 #' @param models Character vector: any subset of \code{c("GWR", "Bayesian",
@@ -1862,10 +1874,11 @@ compare_models_cv <- function(
   .warn_fold_args_ignored(folds, block_size, auto_range, "compare_models_cv")
   if (is.null(folds)) {
     pointized <- !all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")
-    # A layer that mixes XY and XYZ (or XYM) geometries is pointized in x
-    # and y, as prep_model_data() pointizes it.
+    # A layer that mixes XY and XYZ (or XYM) geometries, or whose
+    # geometries carry M, which GEOS does not read, is pointized in x and y,
+    # as prep_model_data() pointizes it.
     fold_src  <- if (pointized)
-      .xy_if_mixed(coerce_to_points(.xy_if_mixed(data_sf), pointize))
+      .xy_if_mixed(coerce_to_points(.xy_if_mixed_or_m(data_sf), pointize))
     else data_sf
     folds <- tryCatch(
       make_folds(fold_src, k = k, method = "block_kfold",

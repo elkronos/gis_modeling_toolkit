@@ -1007,7 +1007,9 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #' @param object A \code{gwr_fit} object.
 #' @param newdata An sf object with the same predictors.
 #'   The response variable need not be present (true out-of-sample prediction
-#'   is supported).  NULL = fitted values.
+#'   is supported).  NULL = fitted values.  A layer whose geometries mix XY
+#'   with XYZ or XYM (as \code{rbind()} of an XY and an XYZ layer gives) is
+#'   read in x and y.
 #' @param se.fit Logical; also return standard errors.  Default \code{FALSE}.
 #' @param ... Ignored.
 #' @return With \code{se.fit = FALSE}, a numeric vector aligned to
@@ -1059,6 +1061,11 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
   # CRS-less newdata first gets the interpretation the TRAINING data got
   # (recorded by ensure_projected() when it assumed lon/lat), so the same rows
   # land where they did at fit time -- see .replay_crs_assumption().
+  # newdata is read in x and y when it mixes XY and XYZ (or XYM) geometries:
+  # sf::st_transform() reads such a layer in the dimension of its first
+  # geometry, so an XYZ first row stopped the move into the fit's CRS with
+  # "OGR error".  Only predictions are returned, so nothing is said.
+  newdata <- .xy_if_mixed(newdata)
   newdata <- .replay_crs_assumption(newdata, object$data_sf, "predict.gwr_fit")
   newdata <- ensure_projected(newdata, target_crs = .crs_or_null(object$data_sf))
 
@@ -1557,7 +1564,8 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
 #' @param object A \code{bayesian_fit} object.
 #' @param newdata An sf object with the same predictors.  The response variable
 #'   need not be present (true out-of-sample prediction is supported).
-#'   NULL = fitted values.
+#'   NULL = fitted values.  A layer whose geometries mix XY with XYZ or XYM
+#'   (as \code{rbind()} of an XY and an XYZ layer gives) is read in x and y.
 #' @param summary "mean" (default) or "median" over posterior draws.
 #' @param type "epred" (default) for expected predictions (no obs noise),
 #'   or "predict" for full posterior predictive draws (includes obs noise).
@@ -1637,6 +1645,11 @@ predict.bayesian_fit <- function(object, newdata = NULL,
   # predict.gwr_fit() and predict.rf_fit().
   n_orig       <- nrow(newdata)
   training_crs <- sf::st_crs(object$data_sf)
+  # newdata is read in x and y when it mixes XY and XYZ (or XYM) geometries:
+  # sf::st_transform() reads such a layer in the dimension of its first
+  # geometry, so an XYZ first row stopped the move into the fit's CRS with
+  # "OGR error".  Only predictions are returned, so nothing is said.
+  newdata      <- .xy_if_mixed(newdata)
   newdata      <- .replay_crs_assumption(newdata, object$data_sf, "predict.bayesian_fit")
   newdata      <- ensure_projected(newdata, target_crs = .crs_or_null(training_crs))
 

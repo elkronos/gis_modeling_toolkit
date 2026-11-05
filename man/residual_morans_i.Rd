@@ -15,7 +15,11 @@ residual_morans_i(
 }
 \arguments{
 \item{fit}{A \code{spatial_fit} object (from \code{fit_gwr_model},
-\code{fit_bayesian_spatial_model} or \code{fit_rf_model}).}
+\code{fit_bayesian_spatial_model} or \code{fit_rf_model}).  The
+locations are read from its \code{data_sf}, a feature that is not a
+point reduced to one as \code{\link{coerce_to_points}(, "auto")}
+does.  A layer whose geometries mix XY with XYZ or XYM, or carry M
+(XYM or XYZM), is read in x and y, with no warning.}
 
 \item{alternative}{Character: \code{"two.sided"} (default),
 \code{"greater"} (positive autocorrelation), or \code{"less"}.}

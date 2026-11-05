@@ -236,10 +236,16 @@
   # with a bare "replacement has 45 rows, data has 9", naming nothing.  Every
   # sibling (make_folds(), estimate_sac_range(), prep_model_data()) pointizes
   # first; do the same.
+  # A layer that mixes XY and XYZ (or XYM) geometries, or whose geometries
+  # carry M, is pointized in x and y (.xy_if_mixed_or_m()), and so are the
+  # points when they mix dimensions: sf reads a layer in the dimension of
+  # its first geometry, and GEOS does not read M.  The points are this
+  # function's own, so nothing is said.  A POINT layer keeps its geometry;
+  # its coordinates are read from a copy in XY when it mixes dimensions.
   if (inherits(data_sf, "sf") &&
       !all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT"))
-    data_sf <- coerce_to_points(data_sf, "auto")
-  crd <- sf::st_coordinates(data_sf)
+    data_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed_or_m(data_sf), "auto"))
+  crd <- sf::st_coordinates(.xy_if_mixed(data_sf))
   if (ncol(crd) < 2L)
     stop("area_of_applicability(): could not extract X/Y coordinates.",
          call. = FALSE)
@@ -600,6 +606,13 @@
                  paste(c(if (!inherits(train_sf, "sf")) "the training data is not",
                          if (!inherits(newdata, "sf")) "`newdata` is not"),
                        collapse = "; ")), call. = FALSE)
+  # Both layers are copies, read only for their x and y: one that mixes XY
+  # and XYZ (or XYM) geometries, or whose geometries carry M, is read in XY
+  # before it is moved or pointized (sf reads a layer in the dimension of
+  # its first geometry, and GEOS does not read M), and so are the points
+  # when they mix dimensions.
+  train_sf <- .xy_if_mixed_or_m(train_sf)
+  newdata  <- .xy_if_mixed_or_m(newdata)
   tr_crs <- sf::st_crs(train_sf)
   if (!is.na(tr_crs)) {
     if (!identical(sf::st_crs(newdata), tr_crs))
@@ -617,7 +630,7 @@
          "ensure_projected(), or pass coords = \"no\".", call. = FALSE)
   xy <- function(x) {
     if (!all(sf::st_geometry_type(x, by_geometry = TRUE) == "POINT"))
-      x <- coerce_to_points(x, "auto")
+      x <- .xy_if_mixed(coerce_to_points(x, "auto"))
     crd <- sf::st_coordinates(x)
     if (ncol(crd) < 2L || nrow(crd) != nrow(x))
       stop("area_of_applicability(): could not extract one X/Y coordinate ",
@@ -1285,7 +1298,15 @@
 #' like longitude/latitude, stamped otherwise, with a warning either way. This
 #' is done because degrees fed into a metre-space index silently understate the
 #' distances. The location index is a map distance and refuses training data
-#' in a geographic CRS.
+#' in a geographic CRS. Both layers are read in x and y for the location: a
+#' layer whose geometries mix XY with XYZ or XYM (as \code{rbind()} of an XY
+#' and an XYZ layer gives), or carry M (XYM or XYZM), is read without its Z
+#' and M. Only one change reaches the result: for a forest fitted with
+#' \code{include_coords = TRUE}, \code{newdata} that mixes dimensions and is
+#' reprojected into the training CRS comes back in XY, with a warning of
+#' class \code{"spatialkit_zm_dropped"}, as \code{\link{ensure_projected}()}
+#' returns such a layer; the points that non-\code{POINT} \code{newdata} is
+#' reduced to are in XY when they would mix dimensions or carry M.
 #'
 #' @param newdata Prediction locations: an \code{sf} object (typically from
 #'   \code{\link{predict_surface}}) or a data.frame, carrying the predictor
@@ -1300,7 +1321,8 @@
 #'   whether its predictions depend on location. Optional if \code{train_sf}
 #'   and \code{predictor_vars} are given directly, which lets this be used
 #'   with any model.
-#' @param train_sf Training data, if not taken from \code{model}.
+#' @param train_sf Training data, if not taken from \code{model}. When
+#'   location is measured it is read in x and y, as \code{newdata} is.
 #' @param predictor_vars Predictor names, if not taken from \code{model}.
 #' @param weights \code{"auto"} (default), \code{NULL}, or a named numeric
 #'   vector of predictor importances. \code{"auto"} uses
@@ -1610,13 +1632,29 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
     # TRAINING data has no CRS the guard short-circuited entirely, so degrees
     # were fed into a metre-space index with nothing said (DI 0.13/0.19 for the
     # same points that gave 0.24/0.34 correctly projected).
+    # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y
+    # before it is moved: sf::st_transform() reads it in the dimension of
+    # its first geometry, so an XYZ first row stopped it with "OGR error".
+    # `newdata` moved here is the copy returned as `aoa`, so it comes back
+    # in XY with the warning of class spatialkit_zm_dropped; the training
+    # data is not returned and is flattened without a word.  `newdata`
+    # already in the training CRS, or stamped with it, keeps its Z.
     tr_crs <- sf::st_crs(train_sf)
     if (!is.na(tr_crs)) {
-      if (!identical(sf::st_crs(newdata), tr_crs))
+      if (!identical(sf::st_crs(newdata), tr_crs)) {
+        if (!is.na(sf::st_crs(newdata)) ||
+            isTRUE(.looks_like_lonlat(newdata)$lonlat))
+          newdata <- .xy_if_mixed_warn(
+            newdata, "area_of_applicability", "newdata",
+            why = paste0("which sf::st_transform() reads wrongly, so Z and M ",
+                         "are dropped and its rows are returned in XY in ",
+                         "`aoa`"))
         newdata <- .transform_or_stamp(newdata, tr_crs, what = "newdata",
                                        caller = "area_of_applicability")
+      }
     } else if (!is.na(sf::st_crs(newdata))) {
-      train_sf <- .transform_or_stamp(train_sf, sf::st_crs(newdata),
+      train_sf <- .transform_or_stamp(.xy_if_mixed(train_sf),
+                                      sf::st_crs(newdata),
                                       what = "the training data",
                                       caller = "area_of_applicability")
     }

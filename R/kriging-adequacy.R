@@ -239,6 +239,8 @@
 #'   points, or the points taken from its multipoints, do not all have the
 #'   same dimensions (some with a Z or M coordinate) is read without its Z
 #'   and M, since sf reads a layer in the dimension of its first geometry.
+#'   Multipoints whose geometries carry M (XYM or XYZM) are reduced to
+#'   points in x and y, since GEOS does not read M.
 #' @param response_var The response column: numeric or logical. A logical
 #'   column is kriged as 0/1, so its cell mean is a share. Any other class
 #'   (a factor, an ordered factor, character, a date) is an error naming the
@@ -436,8 +438,12 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
     pts <- .transform_or_stamp(pts, sf::st_crs(cells_in),
                                what = "assigned_points_sf",
                                caller = "kriging_adequacy")
+  # Multipoints whose geometries carry M are read in XY before they are
+  # reduced (.xy_if_mixed_or_m()): GEOS does not read M, and the warning
+  # coerce_to_points() gives about them names an `x` and points this
+  # function's caller never sees.
   if (!all(sf::st_geometry_type(pts, by_geometry = TRUE) == "POINT"))
-    pts <- .xy_if_mixed(coerce_to_points(pts, "auto"))
+    pts <- .xy_if_mixed(coerce_to_points(.xy_if_mixed_or_m(pts), "auto"))
   # A supplied variogram's range is a length in the CRS it was fitted in, so
   # the points go into that CRS, as summarize_by_cell() puts them.  Projected
   # anew here instead, a sac fitted in metres met points in km (or US feet)

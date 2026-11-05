@@ -21,7 +21,9 @@ was numeric or logical when the forest was grown must also arrive numeric
 or logical: ranger would otherwise factor-code a character column and apply
 the numeric split thresholds to the codes, predicting confidently from
 nonsense, so a character column is refused instead.  (ranger sees a logical
-as 0/1, so either form is accepted for one.)}
+as 0/1, so either form is accepted for one.)  A layer whose geometries
+mix XY with XYZ or XYM (as \code{rbind()} of an XY and an XYZ layer
+gives) is read in x and y.}
 
 \item{...}{Passed to \code{ranger}'s predict method. Arguments that make
 \code{ranger} return a matrix (\code{predict.all = TRUE},

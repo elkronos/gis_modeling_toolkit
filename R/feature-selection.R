@@ -196,7 +196,10 @@
 #' \code{train_sf} and returns the selected set's score on the other as
 #' \code{score_holdout}.
 #'
-#' @param train_sf Training data (\code{sf}).
+#' @param train_sf Training data (\code{sf}).  With \code{select_on =
+#'   "split"} a feature that is not a point is reduced to one, and a layer
+#'   whose geometries mix XY with XYZ or XYM, or carry M (XYM or XYZM), is
+#'   read in x and y.
 #' @param response_var Character(1).
 #' @param candidate_vars Character vector of predictors to choose among.
 #' @param fit_fn A function \code{(train_sf, predictor_vars)} returning a
@@ -506,10 +509,11 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   split <- NULL
   holdout_sf <- NULL
   if (identical(select_on, "split")) {
-    # A layer that mixes XY and XYZ (or XYM) geometries is pointized in x
-    # and y, as prep_model_data() pointizes it.
+    # A layer that mixes XY and XYZ (or XYM) geometries, or whose
+    # geometries carry M, which GEOS does not read, is pointized in x and y,
+    # as prep_model_data() pointizes it.
     if (!all(sf::st_geometry_type(train_sf, by_geometry = TRUE) == "POINT"))
-      train_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed(train_sf), "auto"))
+      train_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed_or_m(train_sf), "auto"))
     split <- .spatial_half_split(train_sf, seed = seed,
                                  caller = "select_features_forward")
     holdout_sf <- train_sf[split$estimation, , drop = FALSE]
