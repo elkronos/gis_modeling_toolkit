@@ -88,15 +88,23 @@ test_that("a response is constant when its spread is rounding, in any unit", {
   rs <- suppressWarnings(estimate_sac_range(d, "v"))
   expect_null(attr(rs, "rejected_reason"))
   expect_equal(as.numeric(rs), as.numeric(r), tolerance = 1e-4)
-  # Constant, and constant up to the last bits, in any unit.
+  # Constant, and constant up to the rounding of the values (a standard
+  # deviation of under 2 units in the last place), in any unit.
   for (level in c(3, 3e-9, 3e9)) {
     d <- L; d$v <- level
     expect_identical(attr(estimate_sac_range(d, "v"), "rejected_reason"),
                      "the response is constant", info = format(level))
     set.seed(1)
-    d$v <- level * (1 + 4 * .Machine$double.eps * stats::rnorm(nrow(L)))
+    d$v <- level * (1 + .Machine$double.eps * stats::rnorm(nrow(L)))
     expect_identical(attr(estimate_sac_range(d, "v"), "rejected_reason"),
                      "the response is constant", info = format(level))
+    # A spread of 6 units in the last place is beyond that rounding: it is
+    # not called constant (BUG-36), and the white noise it is has no
+    # structure to fit.
+    set.seed(1)
+    d$v <- level * (1 + 4 * .Machine$double.eps * stats::rnorm(nrow(L)))
+    expect_false(identical(attr(suppressWarnings(estimate_sac_range(d, "v")), "rejected_reason"),
+                           "the response is constant"), info = format(level))
   }
   # Residuals of an exact fit are rounding against the response they are of.
   d <- L; set.seed(2); d$w <- stats::rnorm(nrow(L)); d$v <- 1e-9 * (2 * d$w + 1)

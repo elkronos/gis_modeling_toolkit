@@ -1074,12 +1074,19 @@
 #'     a profile with an \code{estimate} whose rows are constant too, so are
 #'     \code{loo} and \code{loo_se}, and for pooled values
 #'     \code{own_weight}; the message names them.  \code{summary()} of such a
-#'     profile stops with an error that says the response is constant.  The
-#'     test for \code{cp} reads the raw values, and the estimate's test reads
-#'     them centred on their median and scaled as well: where the second
-#'     finds spread beyond the rounding of the values (1e15 plus a spread of
-#'     1), the message says that \code{loo} is scored, and the print does not
-#'     call the response a constant.}
+#'     profile stops with an error that says the response is constant.  Both
+#'     tests read the raw values and, where those show no spread, the values
+#'     centred on their median and scaled, so 1e15 plus a spread of 1 is not
+#'     constant while values that differ only by their rounding (0.1 beside
+#'     0.3 / 3) are; residuals are read against the rounding of the
+#'     regression and of the response, and where the residuals of the raw
+#'     values show no spread, they are those of a fit to the response less
+#'     its median.  The test for \code{cp} reads the scored rows of the
+#'     subsample and the estimate's every row of the layer (of its selection
+#'     half under \code{select_on = "split"}) with a value: where the first
+#'     finds the response constant and the second does not, the message
+#'     says that \code{loo} is scored, and the print does not call the
+#'     response a constant.}
 #'   \item{\code{spatialkit_empty_cells}}{\code{resolution_profile()},
 #'     \code{\link{get_voronoi_seeds}()} and
 #'     \code{\link{voronoi_seeds_kmeans}()} under \code{partition =
@@ -1627,8 +1634,9 @@
 #'   the values centred on their median and scaled, so that 1e15 plus a
 #'   spread of 1 is not constant while values that differ only by their
 #'   rounding, 0.1 beside 0.3 / 3, are; \code{FALSE} for fewer than two rows;
-#'   \code{one_cell$constant}, the test for \code{cp}, reads the raw values
-#'   alone), \code{loo_one_cell}
+#'   \code{one_cell$constant}, the test for \code{cp}, reads the scored rows
+#'   of the subsample the same way, and residuals against the rounding of
+#'   the regression and of the response), \code{loo_one_cell}
 #'   and \code{loo_one_cell_se} (the same error with one mean for all those
 #'   rows, the reference a level has to beat; \code{NA} for a constant
 #'   response, for fewer than two rows and for values beyond the arithmetic
@@ -2082,12 +2090,20 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # predictors leave of it.  Rows with a non-finite value drop out of the RSS
   # and the Moran statistic but stay in the geometry, and so, under
   # select_on = "split", do the rows of the estimation half.
+  # A response whose raw values lose their spread to rounding (1e15 plus a
+  # spread of 1) is scored about its centre (.regression_centre()), so that
+  # the OLS fit and Moran's regression on an intercept do not work on the
+  # rounding of the offset.  Nothing read off `y` changes under a shift.
+  # The centre is 0 for every other response, except where the residuals of
+  # the raw values show no spread (below).
   variable <- NA_character_
   y <- NULL
+  y_centre <- 0
   if (has_resp) {
     use <- if (is.null(in_sel)) resp_ok else resp_ok & in_sel
     y <- rep(NA_real_, n)
-    y[use] <- resp[use]
+    y_centre <- .regression_centre(resp[use])
+    y[use] <- resp[use] - y_centre
     variable <- "response"
     if (has_pred) {
       # Fitted on the complete rows only.  lm.fit() refuses any NA, and a
@@ -2095,8 +2111,29 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       # failed": the raw response, trend and all, was then scored against a
       # variogram estimate_sac_range() had fitted to the residuals.
       fit <- if (sum(use) > ncol(pred) + 1L)
-        try(stats::lm.fit(x = cbind(1, pred[use, , drop = FALSE]), y = resp[use]),
+        try(stats::lm.fit(x = cbind(1, pred[use, , drop = FALSE]), y = resp[use] - y_centre),
             silent = TRUE)
+      # A response whose raw values show their spread through a trend (1e15
+      # plus 1e5 times a predictor plus a spread of 1) is fitted on its raw
+      # values, and the rounding of that fit at the offset is of the order
+      # of the spread.  So where its residuals show no spread to the test
+      # for `cp` below, the fit is taken again about the response's centre
+      # (.residual_centre()), and those residuals are scored and tested.
+      # Where they show spread nothing changes.
+      if (!is.null(fit) && !inherits(fit, "try-error") && y_centre == 0) {
+        e0 <- fit$residuals
+        if (isTRUE(sum((e0 - mean(e0))^2) <= 100 * .Machine$double.eps^2 *
+                     max(sum(e0^2), sum(resp[use]^2)))) {
+          c0 <- .residual_centre(resp[use])
+          fit0 <- if (c0 != 0)
+            try(stats::lm.fit(x = cbind(1, pred[use, , drop = FALSE]), y = resp[use] - c0),
+                silent = TRUE)
+          if (!is.null(fit0) && !inherits(fit0, "try-error")) {
+            fit <- fit0
+            y_centre <- c0
+          }
+        }
+      }
       if (!is.null(fit) && !inherits(fit, "try-error")) {
         y[use] <- fit$residuals
         variable <- "residuals"
@@ -2645,31 +2682,52 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     # (Cp was then computed with a noise variance of 7.9e-31).
     one_cell$constant <- one_cell$rss <=
       100 * .Machine$double.eps^2 * max(sum(y1^2), sum(resp[is.finite(y)]^2))
+    # On raw values far from 0 that bound calls a column constant that is not
+    # (1e15 plus a spread of 1, eight units in the last place), so where it
+    # finds no spread the column is read again: the response as the
+    # estimate's test reads it, centred and scaled (.constant_column()), with
+    # values beyond the arithmetic left constant, as they were, for the
+    # warning after the sweep; residuals against the rounding of the
+    # regression and of the raw response (.residuals_rounding()), so the
+    # residuals of an exact fit stay constant.  Where the raw values show
+    # spread nothing changes.
+    if (isTRUE(one_cell$constant)) {
+      r1 <- resp[is.finite(y)]
+      one_cell$constant <- if (identical(variable, "residuals"))
+        .residuals_rounding(y1, r1, r1 - y_centre)
+      else {
+        sc1 <- .spread_scaled(r1)
+        .constant_column(r1, sc1) || .pool_out_of_range(r1, sc1)
+      }
+    }
     is_const <- isTRUE(one_cell$constant)
     # Nothing is scored on a constant: `cp`, `moran_i` and `moran_z` stay NA
-    # (see the sweep), which is what the message says.  A response of
-    # 1e6 + 1e-9 x noise was called constant here and then given a finite
-    # `cp` computed from its rounding error, and a count of 2.  The
+    # (see the sweep), which is what the message says.  A response called
+    # constant here was once given a finite `cp` computed from its rounding
+    # error, and a count of 2.  The
     # estimate's `loo` and `loo_se`, and the pooled value's `own_weight`, are
     # NA too when the estimate's own test finds the column constant; the
     # message names them then, and only then, since the two tests read
-    # different rows.  Where the estimate's test, which also reads the values
-    # centred and scaled, finds spread, the two tests disagree, and the
-    # message says what each found: on values that vary only in their last
-    # bits (1e15 plus a spread of 1) `loo` is scored; on values beyond the
-    # arithmetic (1e200 times a spread of 1) the warning of those values,
-    # after the sweep, names `cp`'s columns too.
+    # different rows.  The two tests read the values the same way, so they
+    # disagree where they read different rows: the test for `cp` the scored
+    # rows of the subsample, the estimate's every row of the layer with a
+    # value (of the selection half under the split).  Where the subsample is
+    # constant and the layer is not, `loo` is scored, and the message says
+    # so.  On values beyond the arithmetic (1e200 times a spread of 1) the
+    # warning of those values, after the sweep, names `cp`'s columns too.
     est_spread <- !is.null(est_sc) && !est_const
     if (is_const && est_spread && !est_range)
       .warn_classed("spatialkit_constant_response",
-                    paste0("resolution_profile(): the test for `cp`, which reads the raw ",
-                           "values, finds the response constant over the %d scored row(s) ",
-                           "(its total sum of squares, %.3g, is rounding error at most on ",
-                           "their scale), so `cp`, `moran_i` and `moran_z` are NA at every ",
-                           "level. The estimate's test also reads the values centred on ",
-                           "their median and scaled, and finds spread beyond their ",
-                           "rounding: `loo` is scored."),
-                    one_cell$n, one_cell$rss, data = list(n = one_cell$n))
+                    paste0("resolution_profile(): the test for `cp` finds the response ",
+                           "constant over the %d scored row(s)%s (its total sum of squares, ",
+                           "%.3g, is rounding error at most on their scale), so `cp`, ",
+                           "`moran_i` and `moran_z` are NA at every level. The estimate ",
+                           "reads the %d row(s) %s with a value, and finds spread there: ",
+                           "`loo` is scored."),
+                    one_cell$n, if (n < n_all) " of the subsample" else "", one_cell$rss,
+                    length(lay$y),
+                    if (is.null(in_sel)) "of the layer" else "of the layer's selection half",
+                    data = list(n = one_cell$n))
     else if (is_const && !est_spread)
       .warn_classed("spatialkit_constant_response",
                     paste0("resolution_profile(): the %s is constant over the %d ",
@@ -3458,12 +3516,13 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
     # rss and cp in one notation (.one_notation()).
     with_cp <- !isTRUE(one$constant) && is.finite(one$cp %||% NA_real_)
     nums <- .one_notation(c(one$rss, if (with_cp) one$cp), digits)
-    # A response the test for `cp` finds constant and the estimate's does not
-    # is not called a constant beside a `loo` that is scored.
+    # A response the test for `cp` finds constant on the subsample and the
+    # estimate's does not on the layer is not called a constant beside a
+    # `loo` that is scored.
     case <- .cp_constant_case(one, attr(x, "estimate", exact = TRUE))
     cat(sprintf("  one cell    : rss %s%s (one mean for the layer; a level has to beat it)\n",
                 nums[1L],
-                if (identical(case, "last bits")) ", constant to the test for cp"
+                if (identical(case, "rows")) ", constant on the rows the test for cp reads"
                 else if (identical(case, "beyond")) ", values out of range"
                 else if (isTRUE(one$constant)) ", a constant"
                 else if (with_cp) sprintf(", cp %s", nums[2L])
@@ -4041,8 +4100,8 @@ select_resolution <- function(profile,
   # A constant response is its own case: Cp is NA because no level fits a
   # constant better than another, and the message used to ask for "a level
   # whose cells hold two scored rows", which every level of that profile had.
-  # Where the estimate's test, which also reads the values centred and
-  # scaled, finds spread, the message says what each test found.
+  # Where the estimate's test finds spread on the rows it reads, the message
+  # says what each test found.
   case <- .cp_constant_case(one, est)
   if (!any(ok) && criterion %in% c("cp", "moran_z") && identical(case, "beyond"))
     stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because the values ",
@@ -4052,14 +4111,13 @@ select_resolution <- function(profile,
                         "ten to within that, the response is scored."),
                  criterion, .bound_text(.POOL_Y_MAX), .bound_text(.POOL_Y_MIN)),
          call. = FALSE)
-  if (!any(ok) && criterion %in% c("cp", "moran_z") && identical(case, "last bits"))
+  if (!any(ok) && criterion %in% c("cp", "moran_z") && identical(case, "rows"))
     stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because the test ",
-                        "for `cp`, which reads the raw values, finds the response ",
-                        "constant: its total sum of squares is rounding error at most on ",
-                        "their scale. The estimate's test also reads the values centred on ",
-                        "their median and scaled, and finds spread beyond their rounding, ",
-                        "so `loo` is scored: select_resolution(criterion = \"loo\") reads it."),
-                 criterion),
+                        "for `cp` finds the response constant on the %d scored row(s) it ",
+                        "reads: its total sum of squares is rounding error at most on their ",
+                        "scale. The estimate reads %d row(s), and finds spread there, so ",
+                        "`loo` is scored: select_resolution(criterion = \"loo\") reads it."),
+                 criterion, as.integer(one$n), as.integer(est$n)),
          call. = FALSE)
   if (!any(ok) && criterion %in% c("cp", "moran_z") && is.list(one) && isTRUE(one$constant))
     stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because the %s is ",
@@ -4411,13 +4469,14 @@ select_resolution <- function(profile,
 # (`one`, the "one_cell" attribute) finds the response constant: "constant"
 # when the estimate's test agrees or there is no estimate of two rows or
 # more to ask; "beyond" when the estimate's values lie beyond the engine's
-# arithmetic (.estimate_beyond_range()); "last bits" when the estimate's
-# test, which also reads the values centred and scaled, finds spread, so
-# that `loo` is scored.  NA when the test for `cp` does not find it constant.
+# arithmetic (.estimate_beyond_range()); "rows" when the estimate's test
+# finds spread on the rows it reads (every row of the layer with a value,
+# where the test for `cp` reads the subsample's), so that `loo` is scored.
+# NA when the test for `cp` does not find it constant.
 .cp_constant_case <- function(one, est) {
   if (!(is.list(one) && isTRUE(one$constant))) return(NA_character_)
   if (.estimate_beyond_range(est)) "beyond"
-  else if (is.list(est) && isFALSE(est$constant) && isTRUE(est$n >= 2L)) "last bits"
+  else if (is.list(est) && isFALSE(est$constant) && isTRUE(est$n >= 2L)) "rows"
   else "constant"
 }
 

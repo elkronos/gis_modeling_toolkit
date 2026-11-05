@@ -126,10 +126,12 @@ test_that("resolution_profile() lets nothing through to the console from the var
 })
 
 test_that("a response that is constant to within rounding scores nothing, as the message says", {
-  # 1e6 + 1e-9 x noise: called constant, and then given a finite `cp`
-  # computed from its rounding error, and 2 cells by select_resolution().
+  # A response constant to within rounding was called constant, and then
+  # given a finite `cp` computed from its rounding error, and 2 cells by
+  # select_resolution().  1e6 + 1e-10 x noise is 0.9 units in the last place
+  # (1e6 + 1e-9 x noise, 8.6 units, is a spread and is scored: BUG-36).
   near <- fus_pts(200)
-  near$z <- 1e6 + 1e-9 * near$z
+  near$z <- 1e6 + 1e-10 * near$z
   out <- fus_catch(resolution_profile(near, "z", n_levels = 5, nstart = 2))
   p <- out$value
   expect_true("spatialkit_constant_response" %in% out$classes)
@@ -140,24 +142,27 @@ test_that("a response that is constant to within rounding scores nothing, as the
   expect_true(is.na(attr(p, "one_cell")$cp))
   # No noise variance is read off rounding error, and none is announced.
   expect_false(any(grepl("takes its noise variance", out$text)))
-  # The profile's pooled estimate also reads the values centred and scaled,
-  # where a spread of 1e-9 at 1e6 is 8.6 units in the last place and is
-  # scored, so the error says what the test for `cp` found and does not say
-  # that no count fits the response better than another (BUG-21).
-  expect_false(attr(p, "estimate")$constant)
-  expect_error(select_resolution(p, "cp"),
-               "because the test for `cp`, which reads the raw values, finds the response constant",
-               fixed = TRUE)
+  # The estimate's test finds it constant too, and the errors say so.
+  expect_true(attr(p, "estimate")$constant)
+  expect_error(select_resolution(p, "cp"), "because the response is constant")
   expect_error(select_resolution(p, "moran_z", diagnostic = TRUE),
-               "because the test for `cp`, which reads the raw values, finds the response constant",
-               fixed = TRUE)
-  # Without an estimate the test for `cp` is the only one, and the error
-  # says the response is constant.
+               "because the response is constant")
   q <- suppressWarnings(resolution_profile(near, "z", n_levels = 5, nstart = 2,
                                            estimate = NULL))
   expect_error(select_resolution(q, "cp"), "because the response is constant")
   expect_error(select_resolution(q, "moran_z", diagnostic = TRUE),
                "because the response is constant")
+  # 1e6 + 1e-9 x noise is scored by both tests, with a noise variance read
+  # off its spread.
+  far <- fus_pts(200)
+  far$z <- 1e6 + 1e-9 * far$z
+  out <- fus_catch(resolution_profile(far, "z", n_levels = 5, nstart = 2))
+  p <- out$value
+  expect_false("spatialkit_constant_response" %in% out$classes)
+  expect_false(attr(p, "one_cell")$constant)
+  expect_true(all(is.finite(p$cp)))
+  expect_false(is.null(attr(p, "cp_noise")))
+  expect_true(select_resolution(p, "cp")$best %in% p$levels)
 
   # A response the predictors fit exactly leaves residuals that are rounding
   # error on the response's scale.  Against their own sum of squares they

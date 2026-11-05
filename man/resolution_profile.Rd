@@ -404,8 +404,9 @@ over those rows by the estimate's test, which reads the raw values and
 the values centred on their median and scaled, so that 1e15 plus a
 spread of 1 is not constant while values that differ only by their
 rounding, 0.1 beside 0.3 / 3, are; \code{FALSE} for fewer than two rows;
-\code{one_cell$constant}, the test for \code{cp}, reads the raw values
-alone), \code{loo_one_cell}
+\code{one_cell$constant}, the test for \code{cp}, reads the scored rows
+of the subsample the same way, and residuals against the rounding of
+the regression and of the response), \code{loo_one_cell}
 and \code{loo_one_cell_se} (the same error with one mean for all those
 rows, the reference a level has to beat; \code{NA} for a constant
 response, for fewer than two rows and for values beyond the arithmetic
@@ -1005,12 +1006,19 @@ predictors fit exactly leaves such residuals), so \code{cp},
 a profile with an \code{estimate} whose rows are constant too, so are
 \code{loo} and \code{loo_se}, and for pooled values
 \code{own_weight}; the message names them.  \code{summary()} of such a
-profile stops with an error that says the response is constant.  The
-test for \code{cp} reads the raw values, and the estimate's test reads
-them centred on their median and scaled as well: where the second
-finds spread beyond the rounding of the values (1e15 plus a spread of
-1), the message says that \code{loo} is scored, and the print does not
-call the response a constant.}
+profile stops with an error that says the response is constant.  Both
+tests read the raw values and, where those show no spread, the values
+centred on their median and scaled, so 1e15 plus a spread of 1 is not
+constant while values that differ only by their rounding (0.1 beside
+0.3 / 3) are; residuals are read against the rounding of the
+regression and of the response, and where the residuals of the raw
+values show no spread, they are those of a fit to the response less
+its median.  The test for \code{cp} reads the scored rows of the
+subsample and the estimate's every row of the layer (of its selection
+half under \code{select_on = "split"}) with a value: where the first
+finds the response constant and the second does not, the message
+says that \code{loo} is scored, and the print does not call the
+response a constant.}
 \item{\code{spatialkit_empty_cells}}{\code{resolution_profile()},
 \code{\link{get_voronoi_seeds}()} and
 \code{\link{voronoi_seeds_kmeans}()} under \code{partition =

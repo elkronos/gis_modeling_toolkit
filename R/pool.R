@@ -231,7 +231,9 @@
 #' the values from counting as spread (\code{.scaled_rounding()}), and the
 #' test of a constant column of \code{resolution_profile()}'s estimate reads
 #' both (\code{.constant_column()}).  The profile's test of a constant
-#' response for \code{cp} is its own, on the raw values.
+#' response for \code{cp} applies it to the raw values, and where it finds
+#' no spread there reads the column again in the same way, or for residuals
+#' with \code{.residuals_rounding()}.
 #'
 #' @param ss A sum of squared deviations of \code{y}.
 #' @param y The values.
@@ -410,9 +412,12 @@
 #' What \code{.pool_fit()} returns as \code{constant} for the same values:
 #' no spread on the raw values, and none on the column centred and scaled
 #' beyond the rounding of its values (\code{.scaled_rounding()}).
-#' \code{resolution_profile()} reads it for its estimate's columns, and the
-#' Kish ICC of \code{summarize_by_cell()} for a column whose standard
-#' deviation is below \code{.Machine$double.eps} or not finite.
+#' \code{resolution_profile()} reads it for its estimate's columns and, where
+#' the raw values show no spread, for the test of a constant response for
+#' \code{cp}; \code{estimate_sac_range()} where its floor finds no spread on
+#' the raw response (\code{.regression_centre()}); and the Kish ICC of
+#' \code{summarize_by_cell()} for a column whose standard deviation is below
+#' \code{.Machine$double.eps} or not finite.
 #'
 #' @param y The values, at least one.
 #' @param sc \code{.spread_scaled(y)}.
@@ -422,6 +427,115 @@
 .constant_column <- function(y, sc = .spread_scaled(y))
   .no_spread(sum((y - mean(y))^2), y) &&
     .scaled_rounding(sum((sc$y - mean(sc$y))^2), length(y) - 1L, sc)
+
+
+#' One unit in the last place of the largest absolute value of a column
+#'
+#' @param y The values.
+#' @return The power of two at or below \code{max(abs(y))} times
+#'   \code{.Machine$double.eps}; 0 for a column of zeros.
+#' @keywords internal
+#' @noRd
+.ulp_of <- function(y) {
+  a <- max(abs(y))
+  if (!(a > 0)) return(0)
+  # As in .spread_scaled(): log2() of the largest doubles rounds up to 1024,
+  # and of a value just below a power of two can round up to it.
+  p <- 2^min(floor(log2(a)), 1023)
+  if (p > a) p <- p / 2
+  p * .Machine$double.eps
+}
+
+
+#' The value a response is regressed about where its raw values lose their
+#' spread
+#'
+#' A response at a large offset (1e15 plus a spread of 1) is stored to an
+#' eighth, and a regression on an intercept of the raw values works on the
+#' rounding of the offset, which there is larger than the spread: OLS
+#' residuals with a sum of squares of 90,000 where the spread gives 614.
+#' Residuals, Moran's I of cell means and the test for spatial structure do
+#' not change under a shift, so such a response is regressed about the
+#' centre of \code{.spread_scaled()}.  That is where its raw values show no
+#' spread (a standard deviation of at most 1e-12 of the largest absolute
+#' value, \code{estimate_sac_range()}'s floor) and the column centred and
+#' scaled does (\code{.constant_column()}).  Everywhere else the centre is
+#' 0, so a response whose raw values show their spread is computed as
+#' before, and so is a constant one.
+#'
+#' @param y The values; non-finite ones are left out.
+#' @param bounded \code{TRUE} to return 0 also for values beyond what the
+#'   pooling's arithmetic holds (\code{.pool_out_of_range()}), whose columns
+#'   \code{resolution_profile()} leaves \code{NA} for that reason.
+#' @return The centre, in the units of \code{y}, or 0.
+#' @keywords internal
+#' @noRd
+.regression_centre <- function(y, bounded = TRUE) {
+  y <- y[is.finite(y)]
+  if (length(y) < 2L) return(0)
+  a <- max(abs(y))
+  if (!(a > 0) || isTRUE(stats::sd(y / a) > 1e-12)) return(0)
+  sc <- .spread_scaled(y)
+  if (.constant_column(y, sc) || (bounded && .pool_out_of_range(y, sc))) return(0)
+  sc$centre
+}
+
+
+#' The value a response is regressed about again where its residuals lose
+#' their spread
+#'
+#' A response whose raw values show their spread through a trend (1e15 plus
+#' 1e5 times a predictor plus a spread of 1) is regressed on its raw values,
+#' and the regression works on the rounding of the offset: its residuals,
+#' which should hold the spread of 1, hold that rounding as well, and the
+#' bound of the regression's rounding on the raw values holds them both.
+#' Where the residuals of the raw values show no spread, the response is
+#' regressed again about the centre of \code{.spread_scaled()}, and the
+#' residuals of that fit are read.  Residuals do not change under a shift,
+#' so this changes nothing but the rounding.
+#'
+#' @param y The values; non-finite ones are left out.
+#' @param bounded \code{TRUE} to return 0 for values beyond what the
+#'   pooling's arithmetic holds (\code{.pool_out_of_range()}), as
+#'   \code{.regression_centre()} does.
+#' @return The centre, in the units of \code{y}, or 0.
+#' @keywords internal
+#' @noRd
+.residual_centre <- function(y, bounded = TRUE) {
+  y <- y[is.finite(y)]
+  if (length(y) < 2L || !(max(abs(y)) > 0)) return(0)
+  sc <- .spread_scaled(y)
+  if (bounded && .pool_out_of_range(y, sc)) return(0)
+  sc$centre
+}
+
+
+#' Whether residuals are no more than the rounding of the response they are
+#' of
+#'
+#' The residuals of a response the predictors fit exactly are rounding: of
+#' the regression, about \code{.Machine$double.eps} times the response as
+#' regressed, and of the values, a few units in the last place of the raw
+#' response.  Either bound holds them.  The first is the bound of
+#' \code{.no_spread()} on the response as regressed (centred by
+#' \code{.regression_centre()} or \code{.residual_centre()}, or raw), the
+#' second \code{.POOL_ULPS} units
+#' in the last place of the raw response's largest absolute value, as a
+#' standard deviation over the residuals' degrees of freedom.  Against the
+#' second alone the residuals of some exact fits count as spread: on the
+#' raw values \code{lm()} leaves those of 7 + 2 w and 1e6 + w - 3 w2 at 3
+#' to 17 units, and about a centre near 0 \code{lm.fit()} leaves those of
+#' w and 1e6 w, on w, above 3.
+#'
+#' @param e The residuals.
+#' @param y The raw response.
+#' @param yd The response as regressed.
+#' @return \code{TRUE} or \code{FALSE}.
+#' @keywords internal
+#' @noRd
+.residuals_rounding <- function(e, y, yd)
+  sum((e - mean(e))^2) <= max(100 * .Machine$double.eps^2 * sum(yd^2),
+                              (length(e) - 1L) * (.POOL_ULPS * .ulp_of(y))^2)
 
 
 #' The mean square of a set of residuals and its standard error over rows

@@ -2630,7 +2630,18 @@ sac_nugget <- function(x) {
 #' in the order of their values, and no step treats the first of them as
 #' special.)  The variogram is computed on the standardised variable, and a
 #' response is called constant only when its standard deviation is under
-#' 1e-12 of its largest absolute value, which no change of unit alters.
+#' 1e-12 of its largest absolute value, which no change of unit alters, and
+#' the values centred on their median and scaled have a standard deviation
+#' of at most three units in the last place of that value.  Residuals of
+#' the predictors are called constant under the same floor when they are
+#' no more than the rounding of the regression or three such units of the
+#' response.  So 1e15 plus a spread of 1, stored to an eighth, is not
+#' constant, and the residuals of a response the predictors fit exactly
+#' are.  A response that loses its spread on the raw values is centred on
+#' its median before the predictors are fitted to it and before the test
+#' for spatial structure, neither of which changes under a shift, and so is
+#' a response whose OLS residuals on the raw values lose their spread (1e15
+#' plus 1e5 times a predictor plus a spread of 1, on that predictor).
 #' And the model is fitted without iteration: the criterion is \pkg{gstat}'s weighted least
 #' squares (weights \eqn{N / h^2}) on lags divided by the cutoff; for each
 #' trial range the nugget and the partial sill are solved exactly, with both
@@ -3455,6 +3466,10 @@ estimate_sac_range <- function(points_sf, response_var,
   pts_df <- sf::st_drop_geometry(pts)
   y_raw  <- as.numeric(pts_df[[response_var]])
   y <- y_raw
+  # Where the raw values lose their spread to rounding (1e15 plus a spread
+  # of 1), the regressions below are taken about the response's centre, so
+  # that they do not work on the rounding of the offset; 0 elsewhere.
+  y_centre <- .regression_centre(y_raw, bounded = FALSE)
   detrended <- FALSE
   detrend_method <- NA_character_
   reml_fit <- NULL
@@ -3464,6 +3479,25 @@ estimate_sac_range <- function(points_sf, response_var,
   if (has_pred) {
     df <- pts_df
     fml <- stats::reformulate(predictor_vars, response_var)
+    # A response whose raw values show their spread through a trend (1e15
+    # plus 1e5 times a predictor plus a spread of 1) is fitted on the raw
+    # values, and the rounding of that fit at the offset is of the order of
+    # the spread.  So where the OLS residuals of the raw values show no
+    # spread to the floor below, the fits are taken about the response's
+    # centre too (.residual_centre()).  Where they show spread nothing
+    # changes.
+    if (y_centre == 0) {
+      fit0 <- try(stats::lm(fml, data = df), silent = TRUE)
+      if (!inherits(fit0, "try-error")) {
+        e0 <- as.numeric(stats::residuals(fit0))
+        y0 <- as.numeric(stats::model.response(stats::model.frame(fit0)))
+        a0 <- if (length(y0) >= 2L) max(abs(y0)) else NA_real_
+        if (all(is.finite(e0)) && is.finite(a0) && a0 > 0 &&
+            !isTRUE(stats::sd(e0 / a0) > 1e-12))
+          y_centre <- .residual_centre(y0, bounded = FALSE)
+      }
+    }
+    if (y_centre != 0) df[[response_var]] <- df[[response_var]] - y_centre
     # REML: trend and covariance fitted together, so the trend is a GLS fit
     # under the fitted correlation and the range is the REML estimate, not a
     # variogram of residuals.  On failure the OLS path below runs instead.
@@ -3568,10 +3602,29 @@ estimate_sac_range <- function(points_sf, response_var,
   # standard deviation smaller than 1.5e-8, and one of standard deviation 1
   # on a mean of 1e8 as well.  The size is divided out before the squares
   # are taken, so neither end of the floating-point range is in the way.
+  # On raw values far from 0 the floor calls a column constant that is not
+  # (1e15 plus a spread of 1, eight units in the last place), so where it
+  # finds no spread the column is read again before it is refused: the
+  # response centred and scaled (.constant_column()), residuals against the
+  # rounding of the regression and of the raw response
+  # (.residuals_rounding()), so that the residuals of an exact fit stay
+  # constant.  Where the OLS fit on the raw values leaves residuals with no
+  # spread, the residuals read here are those of the fit about the
+  # response's centre (`y_centre`, above).  Where the raw floor finds spread
+  # nothing changes.
   y_size <- max(abs(y_raw))
   y_mean <- mean(y)
   y_sd   <- if (is.finite(y_size) && y_size > 0) y_size * stats::sd(y / y_size) else 0
-  if (!is.finite(y_sd) || !(y_sd > 1e-12 * y_size)) {
+  lost   <- !is.finite(y_sd) || !(y_sd > 1e-12 * y_size)
+  spread <- lost && all(is.finite(y_raw)) &&
+    (if (detrended) !.residuals_rounding(y, y_raw, y_raw - y_centre)
+     else !.constant_column(y_raw))
+  if (spread) {
+    yc <- if (detrended) y else y - y_centre
+    yc_size <- max(abs(yc))
+    y_sd <- yc_size * stats::sd(yc / yc_size)
+  }
+  if (lost && !spread) {
     .log_warn(paste0("estimate_sac_range(): the variable being modelled is ",
                      "constant (zero variance%s), so it has no autocorrelation ",
                      "range. Returning NA."),
@@ -3615,7 +3668,7 @@ estimate_sac_range <- function(points_sf, response_var,
   # test is made before any range is believed; see .sac_structure_test().
   # The response and the trend's design go in, so that residuals are judged
   # against the null that fits them.
-  structure_test <- tryCatch(.sac_structure_test(xy, y_raw, X_design),
+  structure_test <- tryCatch(.sac_structure_test(xy, y_raw - y_centre, X_design),
                              error = function(e) {
     .log_info("estimate_sac_range(): the test for spatial structure could not be computed (%s); no range is refused on its account.",
               conditionMessage(e))

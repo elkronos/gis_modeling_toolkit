@@ -342,7 +342,18 @@ do not depend on their order.  (Rows that share a location are therefore
 in the order of their values, and no step treats the first of them as
 special.)  The variogram is computed on the standardised variable, and a
 response is called constant only when its standard deviation is under
-1e-12 of its largest absolute value, which no change of unit alters.
+1e-12 of its largest absolute value, which no change of unit alters, and
+the values centred on their median and scaled have a standard deviation
+of at most three units in the last place of that value.  Residuals of
+the predictors are called constant under the same floor when they are
+no more than the rounding of the regression or three such units of the
+response.  So 1e15 plus a spread of 1, stored to an eighth, is not
+constant, and the residuals of a response the predictors fit exactly
+are.  A response that loses its spread on the raw values is centred on
+its median before the predictors are fitted to it and before the test
+for spatial structure, neither of which changes under a shift, and so is
+a response whose OLS residuals on the raw values lose their spread (1e15
+plus 1e5 times a predictor plus a spread of 1, on that predictor).
 And the model is fitted without iteration: the criterion is \pkg{gstat}'s weighted least
 squares (weights \eqn{N / h^2}) on lags divided by the cutoff; for each
 trial range the nugget and the partial sill are solved exactly, with both

@@ -2486,16 +2486,13 @@ old behaviour where there is a way.
   engine's test, so `loo` is computed for 1e15 plus a spread of 1, and
   values beyond those bounds leave `loo`, `loo_se` and `own_weight` `NA` at
   every level with the same warning; `print()`, `summary()` and
-  `select_resolution(criterion = "loo")` of such a profile say why.  The
-  test of a constant response for `cp` (`attr(, "one_cell")$constant`)
-  still reads the raw values alone.  Where it finds the response constant and the
-  estimate's test does not, the warning, `print()` and
-  `select_resolution(criterion = "cp")` say what each test found and that
-  `loo` is scored, in place of saying that no cell count fits the response
-  better than another; at values beyond the bounds one
+  `select_resolution(criterion = "loo")` of such a profile say why.  At
+  values beyond the bounds the test of a constant response for `cp`
+  (`attr(, "one_cell")$constant`) finds the response constant, one
   `spatialkit_pool_unavailable` warning names `cp`, `moran_i` and `moran_z`
   as well, and `summary()` says the values are out of range rather than
-  constant.
+  constant.  The test for `cp` now reads the values the same way as the
+  estimate's (see the entry on a response at a large offset).
 
 * **`summarize_by_cell(deff = "kish")` called a column in small units
   constant.**  The ICC skipped a column as one that does not vary when its
@@ -2539,6 +2536,49 @@ old behaviour where there is a way.
   `"spatialkit_sd_overflow"` that names the columns and gives the number of
   such cells of each (fields `columns` and `cells`).  Every other standard
   deviation is the one it was.
+
+* **`estimate_sac_range()` and the test for `cp` in `resolution_profile()`
+  called a response at a large offset constant.**  Both read the raw values
+  alone.  `estimate_sac_range()` refused a response whose standard
+  deviation is under 1e-12 of its largest absolute value, so 1e15 plus a
+  spread of 1, eight units in the last place of its values, was "the
+  response is constant" and, with `predictor_vars`, "the residuals on
+  predictor_vars are constant: the predictors explain the response
+  exactly".  The profile left `cp`, `moran_i` and `moran_z` `NA` at every
+  level while it scored `loo`, and `select_resolution(criterion = "cp")`
+  refused.  Where the raw values show no spread, both now read them again,
+  as `summarize_by_cell()` does: a response has spread when, centred on its
+  median and scaled, its standard deviation is above three units in the
+  last place of its largest absolute value; residuals are constant when
+  they are within the rounding of the regression or within three such
+  units of the response.  Such a response is centred on its median before
+  the predictors are fitted to it and before the test for spatial structure
+  and, in `resolution_profile()`, Moran's I of the cell means, none of which
+  change under a shift.  A response whose raw values show their spread
+  through a trend, such as 1e15 plus 1e5 times a predictor plus a spread of
+  1, is fitted on its raw values; where the OLS residuals of that fit show
+  no spread, the predictors are fitted again to the response less its
+  median, and those residuals are read and scored.  On the raw values the
+  rounding of these regressions at 1e15 was larger than the spread:
+  `resolution_profile()` with `predictor_vars` scored `cp` on residuals
+  with a sum of squares about 150 times the spread's, and gave a `cp` to a
+  response the predictors fit exactly.  A response of one
+  value, values that differ only by their rounding (0.1 beside 0.3 / 3) and
+  the residuals of an exact fit stay constant.  Every response whose raw
+  values show their spread, and with `predictor_vars` whose OLS residuals
+  on the raw values show theirs, gives the numbers it gave.  Values whose
+  spread is between three units in the last place and 1e-12 of their size,
+  such as 3 times (1 + 4 eps times noise), were constant to
+  `estimate_sac_range()` and now reach the variogram fit, and so do
+  residuals whose spread is between the rounding of the regression and
+  1e-12 of the response's size, such as those of 1e3 times a predictor
+  plus 1e-11 times a field, on that predictor.  Where the test for `cp`,
+  which reads the scored rows of the subsample, finds the response constant
+  and the estimate, which reads every row of the layer (of its selection
+  half under `select_on = "split"`) with a value, does not, the warning,
+  `print()` and `select_resolution(criterion = "cp")` now say that.  They
+  said that the test for `cp` reads the raw values alone and the estimate's
+  also reads them centred and scaled, which was untrue of that case.
 
 * **The print of a profile of one level read "1 levels" and "WSS rises at 0
   step(s)".**  Every default profile has one level.  The print now reads "1

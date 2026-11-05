@@ -305,9 +305,11 @@ test_that("the profile's loo reads the engine's test of a constant", {
   noise <- (L$z - 1e6) * 1e9
   e1 <- (noise - mean(noise)) * length(noise) / (length(noise) - 1)
   expect_equal(e$loo_one_cell * 1e18, mean(e1^2), tolerance = 1e-12)
-  # Cp's own test reads the raw values, and is unchanged.
-  expect_true(attr(p, "one_cell")$constant)
-  expect_true("spatialkit_constant_response" %in% r$classes)
+  # Cp's test reads the column the same way where the raw values show no
+  # spread, and scores it too (BUG-36).
+  expect_false(attr(p, "one_cell")$constant)
+  expect_false("spatialkit_constant_response" %in% r$classes)
+  expect_true(all(is.finite(p$cp)))
   expect_false("spatialkit_pool_unavailable" %in% r$classes)
   out <- utils::capture.output(print(p))
   expect_false(any(grepl("one cell: loo NA", out, fixed = TRUE)))
@@ -315,34 +317,51 @@ test_that("the profile's loo reads the engine's test of a constant", {
 
 test_that("where the two tests of a constant disagree, the profile says what each found", {
   L <- .xs_layer()
+  # The two tests read the values the same way (BUG-36): 1e15 plus a spread
+  # of 1 is constant to neither.
   L$off <- 1e15 + L$z
   r <- .xs_catch(resolution_profile(L, "off", estimate = "pooled", obs_per_cell = c(18, 4.5),
                                     sac = NULL))
+  expect_false(attr(r$value, "one_cell")$constant)
+  expect_false(attr(r$value, "estimate")$constant)
+  expect_false("spatialkit_constant_response" %in% r$classes)
+  expect_true(all(is.finite(r$value$cp)))
+  # They read different rows: the test for `cp` the subsample's, the
+  # estimate's the layer's.  A response of 5 with one row of 6, and a
+  # subsample of 100 that misses that row.
+  .xs_seed(11)
+  d <- sf::st_as_sf(data.frame(x = stats::runif(600, 0, 4000), y = stats::runif(600, 0, 4000),
+                               v = 5), coords = c("x", "y"), crs = 32615)
+  d$v[17] <- 6
+  r <- .xs_catch(resolution_profile(d, "v", estimate = "pooled", sample_n = 100, n_levels = 3,
+                                    sac = NULL, seed = 1))
   p <- r$value
   expect_true(attr(p, "one_cell")$constant)
+  expect_identical(attr(p, "one_cell")$n, 100L)
   expect_false(attr(p, "estimate")$constant)
+  expect_identical(attr(p, "estimate")$n, 600L)
   expect_true(all(is.finite(p$loo)))
   # The warning no longer says that no cell count fits the response better
-  # than another, beside a `loo` that picks one.
+  # than another, beside a `loo` that picks one, and says why the two differ.
   k <- Filter(function(c) inherits(c, "spatialkit_constant_response"), r$warnings)
   expect_length(k, 1L)
-  expect_identical(k[[1L]]$n, 800L)
-  expect_identical(conditionMessage(k[[1L]]), sprintf(paste0(
-    "resolution_profile(): the test for `cp`, which reads the raw values, finds the response ",
-    "constant over the 800 scored row(s) (its total sum of squares, %.3g, is rounding error at ",
-    "most on their scale), so `cp`, `moran_i` and `moran_z` are NA at every level. The ",
-    "estimate's test also reads the values centred on their median and scaled, and finds ",
-    "spread beyond their rounding: `loo` is scored."), attr(p, "one_cell")$rss))
+  expect_identical(k[[1L]]$n, 100L)
+  expect_identical(conditionMessage(k[[1L]]), paste0(
+    "resolution_profile(): the test for `cp` finds the response constant over the 100 scored ",
+    "row(s) of the subsample (its total sum of squares, 0, is rounding error at most on their ",
+    "scale), so `cp`, `moran_i` and `moran_z` are NA at every level. The estimate reads the 600 ",
+    "row(s) of the layer with a value, and finds spread there: `loo` is scored."))
   expect_false("spatialkit_pool_unavailable" %in% r$classes)
   out <- utils::capture.output(print(p))
-  expect_true(any(grepl("one cell    : rss [^,]+, constant to the test for cp \\(one mean", out)))
+  expect_true(any(grepl(paste0("one cell    : rss [^,]+, constant on the rows the test for cp ",
+                               "reads \\(one mean"), out)))
   expect_false(any(grepl("a constant", out, fixed = TRUE)))
+  expect_false(any(grepl("raw values", c(out, conditionMessage(k[[1L]])), fixed = TRUE)))
   expect_error(select_resolution(p, criterion = "cp"), paste0(
-    "select_resolution(): `cp` is NA at every level because the test for `cp`, which reads the ",
-    "raw values, finds the response constant: its total sum of squares is rounding error at ",
-    "most on their scale. The estimate's test also reads the values centred on their median ",
-    "and scaled, and finds spread beyond their rounding, so `loo` is scored: ",
-    "select_resolution(criterion = \"loo\") reads it."), fixed = TRUE)
+    "select_resolution(): `cp` is NA at every level because the test for `cp` finds the ",
+    "response constant on the 100 scored row(s) it reads: its total sum of squares is rounding ",
+    "error at most on their scale. The estimate reads 600 row(s), and finds spread there, so ",
+    "`loo` is scored: select_resolution(criterion = \"loo\") reads it."), fixed = TRUE)
   expect_error(select_resolution(p, criterion = "moran_z", diagnostic = TRUE),
                "`moran_z` is NA at every level because the test for `cp`", fixed = TRUE)
   expect_true(select_resolution(p, criterion = "loo")$best %in% p$levels)
