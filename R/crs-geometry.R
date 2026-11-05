@@ -38,10 +38,17 @@
 #' \code{quiet}; and with s2 on, a polygon GEOS accepts but s2 rejects (a
 #' repeated vertex, common in real shapefiles) stopped
 #' \code{ensure_projected()} with "Edge 1 is degenerate" although a plain
-#' \code{st_transform()} of it works.  Now s2 is always used; a geometry it
-#' rejects is repaired and tried again; and if that fails too, the centre is
-#' the normalised mean of the vertices' unit vectors (for a point layer
-#' exactly what s2 returns), which needs no valid geometry at all.
+#' \code{st_transform()} of it works.  Now s2 is always used, and a layer s2
+#' rejects is repaired and tried again.  If s2 rejects the repaired layer
+#' too, the features it refuses are repaired one by one (\code{.s2_mend()}:
+#' without their repeated vertices, then with crossing edges split), and the
+#' centre is the centroid of the union of the features s2 then accepts; a
+#' log line names the features s2 still refuses, which are left out.  Only
+#' when s2 accepts none of the features is the centre the normalised mean of
+#' the vertices' unit vectors (for a point layer exactly what s2 returns),
+#' which needs no valid geometry; each ring's closing vertex counts once
+#' there, so the mean does not depend on where a ring starts, and a log
+#' line says it was used.
 #'
 #' @param x_ll An sf/sfc object in a geographic CRS.
 #' @return A 1 x 2 matrix (\code{X}, \code{Y}) in degrees, possibly
@@ -56,23 +63,64 @@
     ctr[1L, 1:2, drop = FALSE]
   }
   ctr <- tryCatch(.with_s2(centre_of(g)), error = function(e) NULL)
-  if (is.null(ctr))
-    ctr <- tryCatch(.with_s2(centre_of(.safe_make_valid(g))), error = function(e) NULL)
-  if (is.null(ctr)) {
-    # Read feature by feature on a layer of mixed types or of collections
-    # (.vertex_coords()), which sf::st_coordinates() refuses: the refusal
-    # left no vertex, and a bowtie beside a MULTIPOLYGON got no centre and
-    # EPSG:3857, where the same features as MULTIPOLYGONs get a local CRS.
-    xy <- tryCatch(.vertex_coords(g)[, 1:2, drop = FALSE],
-                   error = function(e) matrix(numeric(0), 0L, 2L))
-    xy <- xy[is.finite(xy[, 1L]) & is.finite(xy[, 2L]), , drop = FALSE]
-    lam <- xy[, 1L] * pi / 180; phi <- xy[, 2L] * pi / 180
-    v   <- c(sum(cos(phi) * cos(lam)), sum(cos(phi) * sin(lam)), sum(sin(phi)))
-    ctr <- matrix(if (nrow(xy) && sqrt(sum(v^2)) > 1e-12)
-                    c(atan2(v[2L], v[1L]), atan2(v[3L], sqrt(v[1L]^2 + v[2L]^2))) * 180 / pi
-                  else c(NA_real_, NA_real_),
-                  1L, 2L, dimnames = list(NULL, c("X", "Y")))
+  if (!is.null(ctr)) return(ctr)
+  ctr <- tryCatch(.with_s2(centre_of(.safe_make_valid(g))), error = function(e) NULL)
+  if (!is.null(ctr)) return(ctr)
+
+  # One feature s2 refuses even repaired (a bowtie: s2's repair leaves it as
+  # it is) sent the whole layer to the mean of its vertices, in silence: on
+  # 100 one-degree squares, one of them drawn with 4,000 vertices, the
+  # centre moved 4 degrees to that square, and ensure_projected() chose an
+  # Albers CRS centred there in place of UTM zone 14.  The features s2
+  # refuses are repaired one by one, and those it refuses even then are
+  # left out of the centre, with a log line.
+  rows_text <- function(r) {
+    k <- length(r)
+    if (k == 1L) sprintf("row %d", r)
+    else if (k <= 6L) sprintf("rows %s and %d", paste(r[-k], collapse = ", "), r[k])
+    else sprintf("rows %s and %d more", paste(r[1:6], collapse = ", "), k - 6L)
   }
+  full <- which(!sf::st_is_empty(g))
+  m    <- tryCatch(.with_s2(.s2_mend(g, split = TRUE)), error = function(e) NULL)
+  keep <- if (is.null(m)) integer(0) else setdiff(full, m$refused)
+  if (length(keep)) {
+    ctr <- tryCatch(.with_s2(centre_of(m$g[keep])), error = function(e) NULL)
+    # Counted over the features that are not empty: an empty row holds no
+    # location, and counted in, the figures did not add up.
+    if (!is.null(ctr) && length(m$refused))
+      .log_info(paste0(".pick_local_projected_crs(): s2 refuses %d of the %s ",
+                       "in longitude and latitude even repaired (%s); ",
+                       "the centre that places the projection is taken over the ",
+                       "other %d."),
+                length(m$refused),
+                if (length(full) < length(g))
+                  sprintf("%d features that are not empty", length(full))
+                else sprintf("%d features", length(g)),
+                rows_text(m$refused), length(keep))
+    if (!is.null(ctr)) return(ctr)
+  }
+
+  # The mean of the vertices' unit vectors, read feature by feature on a
+  # layer of mixed types or of collections, which sf::st_coordinates()
+  # refuses.  Each ring's closing vertex counts once: counted twice, the
+  # mean moved with the vertex a ring starts at (a bowtie listed from each of
+  # its four corners gave four centres and four Albers CRSs).
+  use <- if (length(keep)) keep else full
+  xy  <- tryCatch(.open_ring_xy(g[use]), error = function(e) matrix(numeric(0), 0L, 2L))
+  lam <- xy[, 1L] * pi / 180; phi <- xy[, 2L] * pi / 180
+  v   <- c(sum(cos(phi) * cos(lam)), sum(cos(phi) * sin(lam)), sum(sin(phi)))
+  ctr <- matrix(if (nrow(xy) && sqrt(sum(v^2)) > 1e-12)
+                  c(atan2(v[2L], v[1L]), atan2(v[3L], sqrt(v[1L]^2 + v[2L]^2))) * 180 / pi
+                else c(NA_real_, NA_real_),
+                1L, 2L, dimnames = list(NULL, c("X", "Y")))
+  if (all(is.finite(ctr)))
+    .log_info(paste0(".pick_local_projected_crs(): %s, so the centre that places ",
+                     "the projection is the mean of the vertices of %s."),
+              if (is.null(m)) "s2 stopped while the features it refuses were repaired"
+              else if (length(keep))
+                sprintf("s2 takes no union of the %d features it accepts", length(keep))
+              else "s2 refuses every feature in longitude and latitude, even repaired",
+              if (length(keep)) "those features" else "the layer")
   ctr
 }
 
@@ -533,17 +581,28 @@
       # interior point landed on the far side of the globe ((-0.5, -17) for a
       # box around Fiji) and the error reported for a projection accurate to
       # 0.02% on the box was 25%.  Such a feature spans more than 180 degrees
-      # of raw longitude; take its spherical centroid instead.
+      # of raw longitude; take its spherical centroid instead.  When s2
+      # refuses one of these features, the centroids are taken feature by
+      # feature (.s2_centroids()): a feature s2 refuses for a repeated vertex
+      # gets the centroid of the same ring, one with crossing edges that of
+      # its rebuild, and only one s2 refuses after both keeps GEOS's point.
+      # Taken in one call, one refusal kept GEOS's point for every wide
+      # feature, and a box around Fiji with one vertex listed twice scored
+      # 25% where the same box without the repeat scores 0.02%.
       bb_all <- sf::st_bbox(g_full)
       if (isTRUE(sf::st_is_longlat(g_full)) && all(is.finite(bb_all)) &&
           bb_all[["xmax"]] - bb_all[["xmin"]] > 180) {
-        wide <- vapply(g_full, function(s) {
+        wide <- which(vapply(g_full, function(s) {
           b <- sf::st_bbox(s)
           isTRUE(b[["xmax"]] - b[["xmin"]] > 180)
-        }, logical(1))
-        ctr <- if (any(wide))
-          tryCatch(.with_s2(sf::st_centroid(g_full[wide])), error = function(e) NULL)
-        if (!is.null(ctr)) g[wide] <- ctr
+        }, logical(1)))
+        ctr <- if (length(wide))
+          tryCatch(.with_s2(.s2_centroids(g_full[wide], split = TRUE)),
+                   error = function(e) NULL)
+        if (!is.null(ctr)) {
+          took <- setdiff(seq_along(wide), ctr$refused)
+          if (length(took)) g[wide[took]] <- ctr$points[took]
+        }
       }
       # One point per distinct location.  A long-format layer lists one
       # polygon over many rows, and each row gave a copy of one point: from
@@ -1008,10 +1067,12 @@
 #' Each ring keeps its first vertex and every vertex whose x or y differs from
 #' the one before it, so the ring's points and the area it encloses are as
 #' they were, and the ring stays closed.  Other coordinates (z, m) are kept
-#' and not compared.  Used by \code{.crs_area_error()} on a probe s2 refuses
-#' in degrees.
+#' and not compared.  In a GEOMETRYCOLLECTION the rings of each polygon
+#' member are treated so, and the other members are kept as they were.  Used
+#' by \code{.crs_area_error()} on a probe s2 refuses in degrees, and by
+#' \code{.s2_mend()}.
 #'
-#' @param g An sfc of one POLYGON or MULTIPOLYGON.
+#' @param g An sfc of one POLYGON, MULTIPOLYGON or GEOMETRYCOLLECTION.
 #' @return The same sfc with each ring's repeats dropped.
 #' @keywords internal
 #' @noRd
@@ -1021,13 +1082,150 @@
     moved <- r[-1L, 1L] != r[-nrow(r), 1L] | r[-1L, 2L] != r[-nrow(r), 2L]
     r[c(TRUE, moved), , drop = FALSE]
   }
-  geom <- g[[1L]]
-  cls  <- class(geom)
-  out  <- if (inherits(geom, "MULTIPOLYGON"))
-    lapply(unclass(geom), function(p) lapply(p, ring))
-  else lapply(unclass(geom), ring)
-  class(out) <- cls
-  sf::st_sfc(out, crs = sf::st_crs(g))
+  one <- function(geom) {
+    cls <- class(geom)
+    out <- if (inherits(geom, "GEOMETRYCOLLECTION")) lapply(unclass(geom), one)
+    else if (inherits(geom, "MULTIPOLYGON"))
+      lapply(unclass(geom), function(p) lapply(p, ring))
+    else if (inherits(geom, "POLYGON")) lapply(unclass(geom), ring)
+    else return(geom)
+    class(out) <- cls
+    out
+  }
+  sf::st_sfc(one(g[[1L]]), crs = sf::st_crs(g))
+}
+
+#' Features of a lon/lat layer that s2 refuses, repaired one by one
+#'
+#' The features s2 refuses (\code{.s2_refused()}) are tried again, each on
+#' its own: first without the vertices that repeat the one before them
+#' (\code{.drop_repeated_vertices()}, also for the polygons inside a
+#' collection), which leaves the ring's points in degrees as they were, and
+#' then, with \code{split}, rebuilt with crossing
+#' edges split (\code{.split_crossing_edges()}).  Every feature s2 accepts is
+#' returned as it was.  Run with s2 on (\code{.with_s2()}): the rebuild is
+#' s2's.
+#'
+#' @param g An sfc in a geographic CRS.
+#' @param split Logical; try the rebuild with crossing edges split for a
+#'   feature s2 still refuses without its repeated vertices.
+#' @return A list: \code{g}, the layer with each feature repaired that a
+#'   retry made s2 accept; \code{refused}, the positions s2 refuses after
+#'   every retry (left as they were); \code{mended}, the positions repaired.
+#' @keywords internal
+#' @noRd
+.s2_mend <- function(g, split = TRUE) {
+  bad <- .s2_refused(g)
+  refused <- integer(0)
+  for (i in bad) {
+    polygonal <- inherits(g[[i]], c("POLYGON", "MULTIPOLYGON", "GEOMETRYCOLLECTION"))
+    if (polygonal) {
+      d <- tryCatch(.drop_repeated_vertices(g[i]), error = function(e) NULL)
+      if (!is.null(d) && !length(.s2_refused(d))) {
+        g[i] <- d
+        next
+      }
+    }
+    if (isTRUE(split)) {
+      f <- .split_crossing_edges(g[i])
+      if (!is.null(f)) {
+        g[i] <- f
+        next
+      }
+    }
+    refused <- c(refused, i)
+  }
+  list(g = g, refused = refused, mended = setdiff(bad, refused))
+}
+
+#' Spherical centroids of a lon/lat layer, feature by feature where s2
+#' refuses one
+#'
+#' \code{sf::st_centroid()} of the whole layer, under the engine sf uses in
+#' the session.  When that stops because s2 refuses a feature, the features
+#' are repaired one by one (\code{.s2_mend()}) and the centroids taken again:
+#' a feature s2 accepts as it is keeps the centroid it has, a feature s2
+#' refuses only for a repeated vertex gets the centroid of the same ring, and
+#' with \code{split} a feature with crossing edges gets the centroid of its
+#' rebuild.  A feature s2 refuses after every retry gets an empty point and
+#' its position in \code{refused}; one refusal no longer takes the centroids
+#' of the other features with it.
+#'
+#' @param g An sfc.
+#' @param split As for \code{.s2_mend()}.
+#' @return A list: \code{points}, an sfc of points row for row with \code{g};
+#'   \code{refused}, the positions s2 refuses after every retry; \code{error},
+#'   s2's error for the features still refused (for the whole layer when
+#'   none is), or \code{NULL}.  An error that is not s2's refusal of a
+#'   feature of \code{g} is raised as it came.
+#' @keywords internal
+#' @noRd
+.s2_centroids <- function(g, split = TRUE) {
+  pts <- tryCatch(suppressWarnings(sf::st_centroid(g)), error = function(e) e)
+  if (!inherits(pts, "error"))
+    return(list(points = pts, refused = integer(0), error = NULL))
+  if (!isTRUE(sf::st_is_longlat(g)) || !isTRUE(sf::sf_use_s2()) ||
+      !.is_s2_ring_error(pts))
+    stop(pts)
+  m <- .s2_mend(g, split)
+  if (!length(m$mended) && !length(m$refused)) stop(pts)
+  keep <- setdiff(seq_along(g), m$refused)
+  out  <- rep(list(sf::st_point()), length(g))
+  if (length(keep))
+    out[keep] <- as.list(suppressWarnings(sf::st_centroid(m$g[keep])))
+  # The error quoted is that of the features still refused: s2's error for
+  # the whole layer named the first feature it refused, which may be one a
+  # retry mended (a repeated vertex beside a bowtie).
+  err <- pts
+  if (length(m$refused)) {
+    e2 <- tryCatch(suppressWarnings(sf::st_centroid(m$g[m$refused])),
+                   error = function(e) e)
+    if (inherits(e2, "error")) err <- e2
+  }
+  list(points = sf::st_sfc(out, crs = sf::st_crs(g)), refused = m$refused,
+       error = err)
+}
+
+#' The vertices of a layer with each ring's closing vertex counted once
+#'
+#' Read feature by feature off the geometry lists, for a layer of any type,
+#' mixed types and collections included.  A ring, or a line, whose last
+#' vertex repeats its first gives that vertex once, so a mean of the
+#' vertices does not depend on where a ring starts.  Coordinates beyond x
+#' and y are not read; rows that are not finite are left out.
+#'
+#' @param g An sfc.
+#' @return A two-column matrix of x and y.
+#' @keywords internal
+#' @noRd
+.open_ring_xy <- function(g) {
+  none <- matrix(numeric(0), 0L, 2L)
+  stack <- function(l) do.call(rbind, c(list(none), l))
+  xy2 <- function(m) {
+    m <- unclass(m)
+    if (!is.matrix(m) || ncol(m) < 2L) return(none)
+    m <- m[, 1:2, drop = FALSE]
+    dimnames(m) <- NULL
+    m
+  }
+  open <- function(m) {
+    m <- xy2(m)
+    k <- nrow(m)
+    if (k >= 2L && isTRUE(m[1L, 1L] == m[k, 1L] && m[1L, 2L] == m[k, 2L]))
+      m[-k, , drop = FALSE] else m
+  }
+  leaf <- function(s) {
+    if (inherits(s, "GEOMETRYCOLLECTION")) return(stack(lapply(unclass(s), leaf)))
+    if (inherits(s, "MULTIPOLYGON"))
+      return(stack(lapply(unclass(s), function(p) stack(lapply(p, open)))))
+    if (inherits(s, c("POLYGON", "MULTILINESTRING"))) return(stack(lapply(unclass(s), open)))
+    if (inherits(s, "LINESTRING")) return(open(s))
+    if (inherits(s, "MULTIPOINT")) return(xy2(s))
+    v <- as.numeric(unclass(s))
+    if (length(v) >= 2L) matrix(v[1:2], 1L) else none
+  }
+  xy <- stack(lapply(g, leaf))
+  xy[is.finite(xy[, 1L]) & is.finite(xy[, 2L]), , drop = FALSE]
 }
 
 #' The area-distortion tolerance below which a CRS is taken as equal-area
@@ -1911,6 +2109,19 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' A POINT layer that carries M is returned as it is under `"auto"`, and
 #' `"bbox_center"` gives XY points with no warning, as for any layer.
 #'
+#' On a layer in longitude and latitude with [sf::sf_use_s2()] on, sf takes
+#' centroids with s2 (under `"centroid"`, for the rows other than
+#' LINESTRINGs under `"line_midpoint"`, and for collections under
+#' `"auto"`), and s2 refuses some polygons GEOS accepts.  A polygon s2
+#' refuses because a vertex repeats the one before it, on its own or inside
+#' a collection, gets the centroid of the same ring without the repeat; the
+#' ring's points are unchanged.  A
+#' polygon s2 refuses for another reason (edges that cross, a figure eight)
+#' stops the call with an error of class `spatialkit_features_degenerate`
+#' that gives its rows of `x` (`rows` on the condition), quotes s2, and
+#' says to transform `x` to a projected CRS or to use another `mode`.  With
+#' s2 off, the centroids are GEOS's, planar in degrees, as before.
+#'
 #' @param x An sf object.
 #' @param mode One of "auto", "centroid", "point_on_surface", "surface",
 #'   "line_midpoint", "bbox_center".
@@ -1986,6 +2197,38 @@ coerce_to_points <- function(
   x <- .xy_if_reduced_m(x, mode)
   g <- sf::st_geometry(x)
 
+  # Centroids of the rows `rows` (positions in g; sub is g[rows]).  On
+  # lon/lat input with s2 on, s2 takes them, and a polygon s2 refuses
+  # stopped the call with s2's bare message ("Loop 0 is not valid: Edge 1 is
+  # degenerate (duplicate vertex)"), which names neither the row nor a way
+  # on, even for a polygon GEOS accepts.  A polygon s2 refuses for a vertex
+  # that repeats the one before it, also inside a collection, gets the
+  # centroid of the same ring without the repeat (.s2_centroids()); a
+  # collection was not retried, so under "auto" and "centroid" it stopped
+  # the call.  One s2 refuses even then (crossing
+  # edges, a figure eight) stops the call with the features' class, naming
+  # its rows of `x`.  It is not repaired: its centroid would be that of
+  # another shape.
+  centroids_of <- function(sub, rows) {
+    sc <- .s2_centroids(sub, split = FALSE)
+    if (length(sc$refused)) {
+      bad  <- rows[sc$refused]
+      why  <- .s2_refused_rows(sub[sc$refused])
+      .raise_cells_degenerate(
+        sc$error, bad,
+        if (!is.null(why) && length(why$reasons) == length(bad)) why$reasons
+        else rep(conditionMessage(sc$error), length(bad)),
+        length(g), "coerce_to_points", "`x`", "sf::st_centroid()",
+        "call coerce_to_points() again; the centroids are then taken in that CRS",
+        of = sprintf("the %d features of `x`", length(g)), kind = "features",
+        more = if (mode == "auto")
+          "Or pass mode = \"point_on_surface\", which takes a point on each geometry with GEOS."
+        else
+          "Or pass mode = \"auto\", which takes a point on the surface of each polygon with GEOS.")
+    }
+    sc$points
+  }
+
   # -- direct ops ---
   # Not spherical-safe, whatever this heading used to say.  On lon/lat input
   # st_centroid() is spherical only while sf_use_s2() is TRUE: with it FALSE
@@ -1993,7 +2236,7 @@ coerce_to_points <- function(
   # from the s2 one) and its warning is suppressed here.  st_point_on_surface()
   # is GEOS, planar in degrees under either setting.
   if (mode == "centroid") {
-    return(sf::st_set_geometry(x, suppressWarnings(sf::st_centroid(g))))
+    return(sf::st_set_geometry(x, centroids_of(g, seq_along(g))))
   }
   if (mode == "point_on_surface") {
     # Empty parts dropped first: GEOS segfaults on an empty line inside a
@@ -2057,7 +2300,7 @@ coerce_to_points <- function(
     }
     # Non-LINESTRING fallback to centroid
     if (length(idx_other)) {
-      ctr <- suppressWarnings(sf::st_centroid(g[idx_other]))
+      ctr <- centroids_of(g[idx_other], idx_other)
       out[idx_other] <- as.list(ctr)
     }
     return(sf::st_set_geometry(x, sf::st_sfc(out, crs = crs)))
@@ -2159,7 +2402,7 @@ coerce_to_points <- function(
   idx_other <- which(!gtypes %in% c("POINT", "MULTIPOINT", "POLYGON",
                                      "MULTIPOLYGON", "LINESTRING", "MULTILINESTRING"))
   if (length(idx_other)) {
-    ctr <- suppressWarnings(sf::st_centroid(g[idx_other]))
+    ctr <- centroids_of(g[idx_other], idx_other)
     out[idx_other] <- as.list(ctr)
   }
 

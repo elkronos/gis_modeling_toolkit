@@ -73,6 +73,19 @@ warning of class \code{spatialkit_zm_dropped} says so, with the rows whose
 geometry carries M as its \code{rows}.  Empty geometries are not counted.
 A POINT layer that carries M is returned as it is under \code{"auto"}, and
 \code{"bbox_center"} gives XY points with no warning, as for any layer.
+
+On a layer in longitude and latitude with \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} on, sf takes
+centroids with s2 (under \code{"centroid"}, for the rows other than
+LINESTRINGs under \code{"line_midpoint"}, and for collections under
+\code{"auto"}), and s2 refuses some polygons GEOS accepts.  A polygon s2
+refuses because a vertex repeats the one before it, on its own or inside
+a collection, gets the centroid of the same ring without the repeat; the
+ring's points are unchanged.  A
+polygon s2 refuses for another reason (edges that cross, a figure eight)
+stops the call with an error of class \code{spatialkit_features_degenerate}
+that gives its rows of \code{x} (\code{rows} on the condition), quotes s2, and
+says to transform \code{x} to a projected CRS or to use another \code{mode}.  With
+s2 off, the centroids are GEOS's, planar in degrees, as before.
 }
 \examples{
 library(sf)

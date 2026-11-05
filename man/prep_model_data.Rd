@@ -34,7 +34,11 @@ geometry.}
 \code{\link{coerce_to_points}}.  One of \code{"auto"} (default),
 \code{"centroid"}, \code{"point_on_surface"}, \code{"surface"} (an alias
 for \code{"point_on_surface"}), \code{"line_midpoint"} or
-\code{"bbox_center"}.}
+\code{"bbox_center"}.  In longitude and latitude with s2 on, a polygon
+whose centroid s2 cannot take even without its repeated vertices (edges
+that cross) stops the call with the error of class
+\code{"spatialkit_features_degenerate"}, which gives its rows of
+\code{data_sf}; see \code{\link{coerce_to_points}}.}
 
 \item{require_response}{Logical; if FALSE the response column is not
 required to be present (useful for out-of-sample prediction where the

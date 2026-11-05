@@ -279,9 +279,12 @@ test_that("a layer in degrees with no CRS is read as lon/lat whatever its geomet
 })
 
 test_that("the vertex-mean centre reads a layer of mixed types", {
-  # s2 refuses a bowtie even after the repair, and the centre falls back to
-  # the mean of the vertices, which sf::st_coordinates() refused on a layer
-  # of mixed types: the centre was NA and the layer went to EPSG:3857.
+  # s2 refuses a bowtie even after the repair of the whole layer.  The centre
+  # fell back to the mean of the vertices, which sf::st_coordinates() refused
+  # on a layer of mixed types: the centre was NA and the layer went to
+  # EPSG:3857.  Since batch s2-centroids the bowtie is rebuilt with its
+  # crossing edges split and the mean is used only where s2 accepts no
+  # feature; test-fix-s2-centroids.R reads a layer of mixed types there.
   bow <- sf::st_polygon(list(rbind(c(-110, 30), c(-90, 45), c(-90, 30), c(-110, 45), c(-110, 30))))
   tri <- sf::st_polygon(list(rbind(c(-100, 32), c(-95, 32), c(-95, 40), c(-100, 32))))
   m  <- sf::st_sfc(bow, sf::st_multipolygon(list(tri)), crs = 4326)

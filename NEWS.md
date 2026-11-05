@@ -2967,6 +2967,75 @@ old behaviour where there is a way.
   `values` and the rows of `values`.  Polygons s2 accepts are joined as
   before, and an error of another kind keeps its own message.
 
+* **`coerce_to_points(mode = "centroid")` and `prep_model_data(pointize =
+  "centroid")` stopped with s2's bare message on a polygon in longitude and
+  latitude that s2 refuses.**  With s2 on, sf takes the centroids of a layer
+  in degrees with s2, which refuses a ring with a vertex listed twice in a
+  row, although GEOS accepts it, and the call stopped with "Loop 0 is not
+  valid: Edge 1 is degenerate (duplicate vertex)", naming neither the row
+  nor a way on; a bowtie and a figure eight stopped it the same way.  The
+  same held for the rows other than LINESTRINGs under `"line_midpoint"`,
+  for collections under `"auto"`, and for the `cv_*()` and `fit_*()`
+  functions that pass `pointize = "centroid"`.  A polygon s2 refuses for a
+  repeated vertex, on its own or inside a collection, now gets the centroid
+  of the same ring without the repeat, whose points are unchanged.  A
+  polygon s2 refuses even then stops
+  the call with an error of class `spatialkit_features_degenerate` that
+  gives its rows (`rows` on the condition), quotes s2, and says to
+  transform the layer to a projected CRS or to pass another `mode` or
+  `pointize`; `prep_model_data()` names `data_sf` and its rows.  Layers s2
+  accepts get the centroids they got, and with s2 off the centroids are
+  GEOS's, as before.
+
+* **The projection `ensure_projected()` chose for a layer in longitude and
+  latitude moved, in silence, when s2 refused one of its polygons even
+  after the repair.**  The centre that places the projection is the
+  centroid of the layer's union on the sphere.  When s2 refused the layer
+  and its repair (a bowtie, which s2's repair leaves as it is), the centre
+  fell back to the mean of every vertex of the layer, and nothing said so:
+  on 100 one-degree squares, one of them drawn with 4,000 vertices, one
+  bowtie moved the centre 4 degrees to that square, and the distance and
+  area CRSs became an Albers CRS centred there, where the layer without the
+  bowtie gets UTM zone 14 and a Lambert azimuthal CRS.  The mean counted
+  each ring's closing vertex twice, so the same bowtie listed from each of
+  its four corners gave four centres and four CRSs.  The features s2
+  refuses are now repaired one by one (without their repeated vertices,
+  then with crossing edges split), and the centre is taken over the
+  features s2 then accepts; a log line names any feature s2 still refuses,
+  which is left out.  The vertex mean is used only when s2 accepts no
+  feature, counts each closing vertex once, and is logged.  Every function
+  that projects a lon/lat layer through `ensure_projected()` reads this
+  centre.  Layers s2 accepts, or whose repair it accepts, get the centre
+  and the CRS they got.
+
+* **The distance score of a candidate projection put every feature that
+  crosses 180 degrees on the far side of the globe when s2 refused one of
+  them.**  Such a feature is scored at its centroid on the sphere, because
+  GEOS reads it the long way round.  The centroids of these features were
+  taken in one call, and when s2 refused one of them (a vertex listed twice
+  in a row) every one kept GEOS's point: a box around Fiji with one vertex
+  listed twice scored 25% in the Lambert azimuthal CRS chosen for it, where
+  the same box without the repeat scores 0.02%, and `crs_choice` and the
+  log reported that figure.  They are now taken feature by feature: a
+  feature s2 refuses for a repeated vertex gets the centroid of the same
+  ring, one whose edges cross that of its rebuild with the crossing edges
+  split, and only a feature s2 refuses after both keeps GEOS's point.
+  Features s2 accepts score as before.
+
+* **Folds saved by spatialkit 2.0.0 were applied to other data in silence
+  when that data held a lon/lat polygon s2 refuses.**  The `cv_*()`
+  functions, `area_of_applicability()` and `fold_separation()` check that
+  `folds` were built on the data they are given by retaking the location
+  of the rows the folds recorded.  A record saved by 2.0.0 (without
+  `kind`) is retaken with the centroid sf takes in the session, and with
+  s2 on a polygon s2 refuses stopped it; the check then passed without a
+  word, so folds built on other data of the same size were applied.  Such
+  a record on such data can only have been taken with s2 off, and it is now
+  retaken that way, so folds from other data are refused as they are with
+  s2 off.  When no location can be taken for the rows at all, the check is
+  skipped with a log line that gives the cause, as it is when one side has
+  a CRS and the other has none.
+
 * **Cells built on seeds placed from lon/lat points could leave observations
   near the edge of a wide layer in no cell.**  The seeding functions attach
   the convex hull of the points they cluster as the seeds' cover, and

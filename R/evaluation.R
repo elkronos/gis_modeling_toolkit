@@ -1878,7 +1878,10 @@ compare_models_cv <- function(
     # geometries carry M, which GEOS does not read, is pointized in x and y,
     # as prep_model_data() pointizes it.
     fold_src  <- if (pointized)
-      .xy_if_mixed(coerce_to_points(.xy_if_mixed_or_m(data_sf), pointize))
+      .xy_if_mixed(tryCatch(
+        coerce_to_points(.xy_if_mixed_or_m(data_sf), pointize),
+        spatialkit_features_degenerate = function(e)
+          .pointize_refused(e, "compare_models_cv", pointize)))
     else data_sf
     folds <- tryCatch(
       make_folds(fold_src, k = k, method = "block_kfold",

@@ -37,7 +37,11 @@
 #'   \code{\link{coerce_to_points}}.  One of \code{"auto"} (default),
 #'   \code{"centroid"}, \code{"point_on_surface"}, \code{"surface"} (an alias
 #'   for \code{"point_on_surface"}), \code{"line_midpoint"} or
-#'   \code{"bbox_center"}.
+#'   \code{"bbox_center"}.  In longitude and latitude with s2 on, a polygon
+#'   whose centroid s2 cannot take even without its repeated vertices (edges
+#'   that cross) stops the call with the error of class
+#'   \code{"spatialkit_features_degenerate"}, which gives its rows of
+#'   \code{data_sf}; see \code{\link{coerce_to_points}}.
 #' @param require_response Logical; if FALSE the response column is not
 #'   required to be present (useful for out-of-sample prediction where the
 #'   response is unknown).  Default TRUE.
@@ -199,8 +203,14 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   # whose geometries carry M, which GEOS refuses in the coerce
   # (.xy_if_mixed_or_m()); .drop_zm() below drops Z and M from the points
   # in any case.
+  # When s2 refuses a polygon of `data_sf` that coerce_to_points() cannot
+  # take a centroid of, its error is raised again in this function's words
+  # (.pointize_refused()).
   if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")) {
-    data_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed_or_m(data_sf), pointize))
+    data_sf <- .xy_if_mixed(tryCatch(
+      coerce_to_points(.xy_if_mixed_or_m(data_sf), pointize),
+      spatialkit_features_degenerate = function(e)
+        .pointize_refused(e, "prep_model_data", pointize)))
   }
 
   # Drop any Z or M coordinate.  Every backend works in 2-D map distance, but
@@ -671,3 +681,35 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 # NOTE: the previously defined .matern_rho() and .safe_ll() helpers were
 # removed as dead code (no callers anywhere in the package); mvtnorm was
 # dropped from Suggests along with .safe_ll().
+
+
+#' Raise coerce_to_points()'s refusal of a polygon in the caller's words
+#'
+#' coerce_to_points() stops with the error of class
+#' \code{"spatialkit_features_degenerate"} when s2 refuses a polygon whose
+#' centroid it takes in degrees.  Raised as it came, the error named
+#' \code{x} and \code{coerce_to_points()}, which the caller of
+#' \code{prep_model_data()} or \code{compare_models_cv()} never called, and
+#' offered a \code{mode}.  The rows are the rows of \code{data_sf}, which the
+#' coerce reads row for row.  The remedy says to run the call again, not to
+#' call this function again: the \code{cv_*()} and \code{fit_*()} functions
+#' reach \code{prep_model_data()} with the \code{data_sf} they were given.
+#'
+#' @param e The condition coerce_to_points() raised.
+#' @param caller The function the error names.
+#' @param pointize The \code{pointize} the caller passed.
+#' @return Does not return.
+#' @keywords internal
+#' @noRd
+.pointize_refused <- function(e, caller, pointize) {
+  .raise_cells_degenerate(
+    e$parent, e$rows, e$reasons, e$n, caller, "`data_sf`", "sf::st_centroid()",
+    "run the call again; the centroids are then taken in that CRS",
+    of = sprintf("the %d features of `data_sf`", e$n), kind = "features",
+    more = if (identical(pointize, "auto"))
+      paste0("Or pass pointize = \"point_on_surface\", which takes a point on ",
+             "each geometry with GEOS.")
+    else
+      paste0("Or pass pointize = \"auto\", which takes a point on the ",
+             "surface of each polygon with GEOS."))
+}

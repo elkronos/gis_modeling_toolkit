@@ -537,6 +537,11 @@
 #'   effectively impossible.
 #' @param legacy Take the centroid under the current \code{sf_use_s2()}
 #'   setting, as probes without a \code{kind} were taken, to check one.
+#'   When s2 refuses a polygon of a lon/lat layer, the probe is taken with
+#'   the planar centroid (\code{kind = "planar_centroid"}): a probe of such
+#'   a layer without a \code{kind} can only have been taken with s2 off.
+#' @param catch When \code{FALSE}, an error is raised as it came, for
+#'   \code{.check_fold_probe()} to name; by default it gives \code{NULL}.
 #' @return A list with \code{row_id} (the IDs as supplied), numeric \code{x}
 #'   and \code{y}, \code{lonlat} (whether the coordinates are in EPSG:4326,
 #'   i.e. the input carried a CRS), \code{kind}, and \code{points} (whether
@@ -545,8 +550,11 @@
 #'   \code{NULL} when no probe can be taken.
 #' @keywords internal
 #' @noRd
-.fold_row_probe <- function(x, max_probe = 64L, legacy = FALSE) {
-  tryCatch({
+.fold_row_probe <- function(x, max_probe = 64L, legacy = FALSE, catch = TRUE) {
+  if (isTRUE(catch))
+    return(tryCatch(.fold_row_probe(x, max_probe, legacy, catch = FALSE),
+                    error = function(e) NULL))
+  {
     if (!inherits(x, "sf") || !("..row_id" %in% names(x)) || nrow(x) == 0L)
       return(NULL)
     ids  <- x[["..row_id"]]
@@ -557,9 +565,22 @@
     # stopped (and the probe was not taken) or the coordinates came out of
     # step.  So are rows that carry M, whose centroids GEOS refuses.
     g    <- .xy_if_mixed_or_m(sf::st_geometry(x)[take])
-    if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
-      g <- if (isTRUE(legacy)) suppressWarnings(sf::st_centroid(g))
-           else .planar_centroid(g)
+    kind <- if (isTRUE(legacy)) "session_centroid" else "planar_centroid"
+    # A legacy probe is retaken under the session's setting, so with s2 on a
+    # lon/lat polygon s2 refuses stopped it, the probe was NULL, and folds
+    # built on other data were applied without a word.  A probe saved by
+    # 2.0.0 on such a layer was taken with s2 off, the only way it could be
+    # taken there, so it is retaken that way.
+    if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT")) {
+      if (isTRUE(legacy)) {
+        s2_on <- isTRUE(sf::st_is_longlat(g)) && isTRUE(sf::sf_use_s2())
+        g <- tryCatch(suppressWarnings(sf::st_centroid(g)), error = function(e) {
+          if (!s2_on || !.is_s2_ring_error(e)) stop(e)
+          kind <<- "planar_centroid"
+          .planar_centroid(g)
+        })
+      } else g <- .planar_centroid(g)
+    }
     cr     <- suppressWarnings(sf::st_crs(x))
     lonlat <- FALSE
     if (!is.na(cr)) {
@@ -569,10 +590,8 @@
     xy <- suppressWarnings(sf::st_coordinates(g))
     if (is.null(xy) || nrow(xy) != length(take)) return(NULL)
     list(row_id = ids[take], x = as.numeric(xy[, 1L]), y = as.numeric(xy[, 2L]),
-         lonlat = lonlat,
-         kind = if (isTRUE(legacy)) "session_centroid" else "planar_centroid",
-         points = all_points)
-  }, error = function(e) NULL)
+         lonlat = lonlat, kind = kind, points = all_points)
+  }
 }
 
 
@@ -649,6 +668,10 @@
 #' version of this package carries no probe and is passed through unchecked,
 #' as is one whose IDs cannot be matched (\code{NA} IDs) or whose coordinate
 #' space cannot be compared (one side carried a CRS and the other did not).
+#' When no location can be taken for the rows of the data (an error on its
+#' geometry), the check is skipped with a log line that gives the cause, as
+#' it is when the coordinate spaces differ; it is not read as a pass in
+#' silence.
 #' When the probe was taken on POINT geometry and the data is not, or the
 #' reverse, a mismatch is refused as that, not as folds from different data.
 #'
@@ -667,9 +690,24 @@
   # A probe with no `kind` predates the planar centroid and was taken under
   # the sf_use_s2() setting of its day; recompute the same way, so folds
   # saved by an older version are not refused for the change of method.
-  now <- .fold_row_probe(data_sf, max_probe = nrow(data_sf),
-                         legacy = is.null(probe$kind))
-  if (is.null(now)) return(invisible(NULL))
+  # When no probe can be taken here the check cannot be made: it is skipped
+  # with a log line that says why.  It returned in silence, so folds built on
+  # other data were applied without a word.
+  why <- "its geometry gave no location for them"
+  now <- tryCatch(.fold_row_probe(data_sf, max_probe = nrow(data_sf),
+                                  legacy = is.null(probe$kind), catch = FALSE),
+                  error = function(e) {
+                    why <<- sprintf("\"%s\"", trimws(strsplit(conditionMessage(e), "\n",
+                                                               fixed = TRUE)[[1L]][1L]))
+                    NULL
+                  })
+  if (is.null(now)) {
+    .log_info(paste0("%s(): the locations of the checked rows of this data could ",
+                     "not be taken (%s), so the supplied `folds` cannot be compared ",
+                     "with them; skipping the provenance check."),
+              caller, why)
+    return(invisible(NULL))
+  }
   if (!identical(isTRUE(probe$lonlat), isTRUE(now$lonlat))) {
     .log_info(paste0("%s(): the supplied `folds` were built on data %s a CRS ",
                      "and this data %s one, so their locations cannot be ",

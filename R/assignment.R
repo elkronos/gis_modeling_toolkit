@@ -964,6 +964,8 @@ assign_features_to_polygons <- function(
 #' @param advise_predicate Whether the join by \code{predicate} runs on these
 #'   layers (with GEOS, s2 off): the message then offers
 #'   \code{largest = FALSE} and does not say that join meets the refusal.
+#' @param more A sentence added after the remedy, or \code{NULL}: another way
+#'   on that the caller offers.
 #' @return Does not return.  The condition carries \code{rows}, \code{n},
 #'   \code{reasons}, \code{parent}, \code{repaired} and \code{s2_forced},
 #'   and \code{features_rows} when \code{also} is given.
@@ -973,7 +975,7 @@ assign_features_to_polygons <- function(
                                     no_crs = FALSE, of = NULL,
                                     kind = c("cells", "features"), repaired = FALSE,
                                     also = NULL, fixable = FALSE, s2_forced = FALSE,
-                                    advise_predicate = FALSE) {
+                                    advise_predicate = FALSE, more = NULL) {
   kind <- match.arg(kind)
   said <- trimws(strsplit(conditionMessage(parent), "\n", fixed = TRUE)[[1L]][1L])
   rows_text <- function(r) {
@@ -1053,6 +1055,7 @@ assign_features_to_polygons <- function(
     remedy <- paste0(remedy, " Or pass largest = FALSE to assign every feature by ",
                      "`predicate` and `tie_break` instead; with sf::sf_use_s2(FALSE), as in ",
                      "this session, that join runs with GEOS.")
+  if (length(more)) remedy <- paste(remedy, more)
   engine <- if (isTRUE(s2_forced))
     "s2, which the package uses here in longitude and latitude whatever sf::sf_use_s2() says,"
   else "s2, the engine sf uses for geometry in longitude and latitude,"
