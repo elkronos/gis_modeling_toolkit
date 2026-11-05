@@ -2682,6 +2682,22 @@ old behaviour where there is a way.
   said that the test for `cp` reads the raw values alone and the estimate's
   also reads them centred and scaled, which was untrue of that case.
 
+* **`kriging_adequacy()` kriged a response at a large offset on the
+  rounding of the offset.**  At 1e15 plus a spread of 1 a double holds the
+  values to an eighth, and the replicate means, the kriged and plain cell
+  means and the cross-validation folds were computed on the raw values, so
+  their rounding was of the order of the difference between a kriged and a
+  plain mean.  On one layer of 800 points and 36 cells, the same stored
+  values gave shifts beyond 1 in 10 cells at 0 and in 14 at 1e15, and
+  `kr_shift` moved by up to 1.  Where the raw values lose their spread, the
+  response is now centred as `estimate_sac_range()` centres it before any
+  of these are computed, and the centre is added back to `mean` and
+  `kr_pred` alone.  `kr_shift`, the counts `print()` gives, the replicates'
+  within-location variance and the cross-validation statistic are those of
+  the same values at 0; `mean` and `kr_pred` are in the response's units,
+  to the precision a double holds them to there.  Every response whose raw
+  values show their spread gives the numbers it gave.
+
 * **The print of a profile of one level read "1 levels" and "WSS rises at 0
   step(s)".**  Every default profile has one level.  The print now reads "1
   level", and leaves out the count of steps the WSS curve rises at when

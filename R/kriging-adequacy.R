@@ -458,7 +458,17 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
     .log_warn("kriging_adequacy(): dropping %d point(s) with a missing response or empty geometry.",
               sum(!ok))
   kp <- pts[ok, , drop = FALSE]
-  kp$..z <- z[ok]
+  # A response whose raw values lose their spread to rounding (1e15 plus a
+  # spread of 1, which a double holds to an eighth) is taken about the centre
+  # estimate_sac_range() regresses it about (.regression_centre()), or the
+  # replicate means, the kriged and plain cell means and the cross-validation
+  # work on the rounding of the offset: kr_shift moved by up to 1 and the
+  # counts of shifts beyond 1 went from 10 to 14 of 36 cells with the stored
+  # values unchanged.  Kriging with a constant mean and a plain mean do not
+  # change under a shift, so the centre is added back to `mean` and `kr_pred`
+  # alone.  It is 0 for every other response, which is computed as before.
+  z_centre <- .regression_centre(z[ok], bounded = FALSE)
+  kp$..z <- z[ok] - z_centre
 
   # --- the variogram model ---
   sac_supplied <- !is.null(sac)
@@ -752,10 +762,11 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
 
   out <- cells[, id_cells, drop = FALSE]
   out$n <- n_c
-  out$mean <- as.numeric(m_c)
+  # In the response's units; kr_shift below reads the centred values.
+  out$mean <- as.numeric(m_c) + z_centre
   out$se <- se_c
   out$plain_var <- plain_var
-  out$kr_pred <- kr_pred
+  out$kr_pred <- kr_pred + z_centre
   out$kr_var <- kr_var
   out$kr_ratio <- ifelse(prior_var > 0, pmin(pmax(kr_var / prior_var, 0), 1), NA_real_)
   # The share of the plain mean's error variance that kriging removes.  gstat's
@@ -776,7 +787,8 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # returns the plain mean and both terms of the ratio are rounding error.
   shift_var <- plain_var - kr_var
   out$kr_shift <- ifelse(is.finite(shift_var) & shift_var > 1e-4 * plain_var,
-                         (kr_pred - out$mean) / sqrt(pmax(shift_var, 0)), NA_real_)
+                         (kr_pred - as.numeric(m_c)) / sqrt(pmax(shift_var, 0)),
+                         NA_real_)
 
   out$kr_n_used <- nb$n_used
 
