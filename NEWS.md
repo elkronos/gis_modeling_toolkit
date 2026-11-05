@@ -3438,6 +3438,52 @@ old behaviour where there is a way.
   place of the draws of every re-run, so the stream after the call no
   longer depends on `top_n`.
 
+* **Moran's I of the cell means was `NA` for a response in small units, and
+  in `determine_optimal_levels()` moved with the response's origin.**
+  Moran's I and its z do not change under a change of unit or origin, but
+  the statistic was refused whenever the residuals of the cell means had a
+  sum of squares under `.Machine$double.eps`, whatever their unit.  A
+  response of standard deviation 0.5 in units of 1e-9 got `moran_i` and
+  `moran_z` `NA` at every level of `resolution_profile()`, with no warning
+  that names them, while `cp` was the same as in units.  Under
+  `determine_optimal_levels(criterion = "morans_i")` every count was `NA`,
+  and the call fell back to the geometric ranking with no diagnostics and a
+  log line that blamed too few cells with a response or a singular
+  regression.  `determine_optimal_levels()` also formed the cell means from
+  the raw response and regressed them, so at an offset of 1e15 they carried
+  the rounding of the offset: on 2000 points in 40 clusters, `"morans_i"`
+  ranked 43 35 38 at that offset and 36 37 35 at 0, from the same
+  spread.  The residuals are now refused when they are within the rounding of
+  the cell means they come from, a bound relative to those means, and a
+  response whose raw values lose their spread is taken about its median
+  first, as `resolution_profile()` already takes it.  A response whose
+  largest absolute value lies outside 2^-255 to 2^255 is divided by a power
+  of two first, which leaves its I and z as they are; in units of 1e200
+  Moran's I came out `NaN`, and in units of 1e-200 `NA`, so
+  `determine_optimal_levels()` fell back there too.  The layer above gets the
+  same counts and the same `moran_z` in units, in units of 1e-9 and at 1e15,
+  and the profile the same `moran_i` and `moran_z` in units and in units of
+  1e-9 and 1e-12.  A constant response, one the predictors fit exactly and
+  cell means that differ by rounding alone still give `NA`, now in any unit:
+  under `determine_optimal_levels(criterion = "morans_i")` a response of
+  1e15 in every row, and one of 1e10 times (3 + 2 w) with `w` the predictor,
+  were ranked by Moran's z of their rounding, and now fall back to the
+  geometric ranking.  Both fallback log lines name cell means that differ by
+  rounding alone among their reasons.  A response whose raw values show their
+  spread, through a predictor (1e15 plus 1e5 times the predictor plus a
+  spread of 1) or at an offset such as 1e11 plus a spread of 1, can still
+  leave residuals small beside the cell means, and the regression of the raw
+  cell means then carried the rounding of the offset: with a predictor the
+  call fell back at 1e15, and Moran's I moved by a relative 4e-4 to 2e-3
+  at 1e13.  Where
+  the residuals' sum of squares is under 1e-12 of the cell means', or they
+  show no spread, the cell means are now formed and regressed again about
+  the response's centre, as `resolution_profile()` takes its fit, and are
+  refused only if those residuals are within the rounding of the regression
+  or of the raw values.  Where a response's residuals are larger than that
+  and its values lie between 2^-255 and 2^255, it gets the same Moran's I as
+  before, unless its cell means differ by rounding alone.
+
 * **`determine_optimal_levels()` blamed the wrong cause when its
   model-aware criteria had nothing to score, and its help page understated
   the fix.**  The model-aware pass scores only the elbow's neighbourhood,

@@ -435,33 +435,60 @@
   n_cells <- length(cell_ids)
   if (n_cells < 4L) return(.morans_na())
 
+  # I and z do not change under a + b * y, so the response is taken where
+  # the arithmetic reads its spread.  A response whose raw values lose their
+  # spread to rounding (1e15 plus a spread of 1) is taken about its centre
+  # (.regression_centre()), or the cell means and their regression work on
+  # the rounding of the offset; the centre is 0 for every other response,
+  # and so for the column resolution_profile() passes, which it has already
+  # centred.  A response whose largest absolute value lies outside 2^-255
+  # to 2^255 is divided by the power of two at or below it, which is exact,
+  # or the squares below overflow or lose their precision.
+  raw <- response
+  centre <- .regression_centre(raw, bounded = FALSE)
+  shift_scale <- function(r) {
+    a <- suppressWarnings(max(abs(r[is.finite(r)])))
+    p <- 1
+    if (is.finite(a) && a > 0 && (a < 2^-255 || a > 2^255)) {
+      p <- 2^min(floor(log2(a)), 1023)
+      if (p > a) p <- p / 2
+    }
+    list(r = r / p, p = p)
+  }
+  rs <- shift_scale(raw - centre)
+  response <- rs$r
+
   if (isTRUE(grouped)) {
     # The means of the loop below from one pass over the rows: sums by cell
     # over counts by cell.  A missing response is left out of its cell's mean,
     # as mean(na.rm = TRUE) leaves it out, and a cell with none gets NaN.
     g    <- match(cluster_ids, cell_ids)
     cnt  <- tabulate(g, nbins = n_cells)
-    seen <- !is.na(response)
-    cell_resp <- as.numeric(rowsum(ifelse(seen, response, 0), g)) /
-      as.numeric(rowsum(as.numeric(seen), g))
+    cell_means <- function(r) {
+      seen <- !is.na(r)
+      as.numeric(rowsum(ifelse(seen, r, 0), g)) / as.numeric(rowsum(as.numeric(seen), g))
+    }
     cell_xy   <- unname(rowsum(xy[, 1:2, drop = FALSE], g)) / cnt
     cell_pred <- if (ncol(predictors)) unname(rowsum(predictors, g)) / cnt
                  else matrix(0, n_cells, 0L)
   } else {
-    cell_resp <- numeric(n_cells)
     cell_xy   <- matrix(0, n_cells, 2)
     cell_pred <- matrix(0, n_cells, ncol(predictors))
+    masks <- lapply(cell_ids, function(id) cluster_ids == id)
+    cell_means <- function(r)
+      vapply(masks, function(mask) mean(r[mask], na.rm = TRUE), numeric(1))
 
     for (j in seq_along(cell_ids)) {
-      mask <- cluster_ids == cell_ids[j]
-      cell_resp[j]    <- mean(response[mask], na.rm = TRUE)
+      mask <- masks[[j]]
       cell_xy[j, ]    <- colMeans(xy[mask, , drop = FALSE])
       cell_pred[j, ]  <- colMeans(predictors[mask, , drop = FALSE])
     }
   }
+  cell_resp <- cell_means(response)
 
   # Fit OLS on cell means
-  ok <- is.finite(cell_resp) & apply(is.finite(cell_pred), 1, all)
+  ok_pred <- apply(is.finite(cell_pred), 1, all)
+  ok <- is.finite(cell_resp) & ok_pred
   if (sum(ok) < 4L) return(.morans_na())
 
   fit <- try(stats::lm.fit(x = cbind(1, cell_pred[ok, , drop = FALSE]),
@@ -469,6 +496,40 @@
              silent = TRUE)
   if (inherits(fit, "try-error")) return(.morans_na())
   resid <- fit$residuals
+
+  # Residuals within the rounding of the cell means they are regressed from
+  # (.no_spread()) leave nothing to correlate: a constant response, or one
+  # the predictors fit exactly.  The bound is relative, so a response in
+  # small units is not refused for its unit.
+  no_spread <- .no_spread(sum(resid^2), cell_resp[ok])
+  # A response whose raw values show their spread is not centred above, but
+  # its residuals can still be small beside the cell means (1e15 plus 1e5
+  # times a predictor plus a spread of 1, or 1e11 plus a spread of 1), and
+  # the regression's rounding is then of the order of the residuals times
+  # .Machine$double.eps over their ratio to the cell means.  Where their
+  # sum of squares is under 1e-12 of the cell means', so that the rounding
+  # can reach 1e-10 of them, or where they show no spread at all, the cell
+  # means are formed and regressed again about the response's centre
+  # (.residual_centre(), as resolution_profile() takes its fit since
+  # BUG-36), and refused only if those residuals are within the rounding of
+  # the regression or of the raw values (.residuals_rounding()).  Residuals
+  # do not change under a shift, so this changes nothing but the rounding.
+  if (centre == 0 && (no_spread || sum(resid^2) <= 1e-12 * sum(cell_resp[ok]^2))) {
+    c0 <- .residual_centre(raw, bounded = FALSE)
+    if (c0 != 0) {
+      rs0 <- shift_scale(raw - c0)
+      cr0 <- cell_means(rs0$r)
+      ok0 <- is.finite(cr0) & ok_pred
+      fit0 <- if (sum(ok0) >= 4L)
+        try(stats::lm.fit(x = cbind(1, cell_pred[ok0, , drop = FALSE]), y = cr0[ok0]),
+            silent = TRUE)
+      if (!is.null(fit0) && !inherits(fit0, "try-error")) {
+        cell_resp <- cr0; ok <- ok0; resid <- fit0$residuals
+        yr <- raw[is.finite(raw)] / rs0$p
+        no_spread <- .residuals_rounding(resid, yr, cell_resp[ok])
+      }
+    }
+  }
   n <- length(resid)
 
   # k-nearest-neighbour weight matrix via shared helper (sparse when possible)
@@ -492,7 +553,7 @@
 
   # Moran's I = (n / S0) * (e' W e) / (e' e)
   S0 <- sum(W)
-  if (S0 < .Machine$double.eps || sum(resid^2) < .Machine$double.eps)
+  if (S0 < .Machine$double.eps || no_spread)
     return(.morans_na())
   resid_c <- resid - mean(resid)
   # sum(resid_c * (W %*% resid_c)) rather than crossprod(): .build_knn_weights()
@@ -1529,8 +1590,9 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     } else if (criterion == "morans_i") {
       .log_warn(paste0("determine_optimal_levels(): Moran's I could not be computed at ",
                        "any k from %d to %d in the elbow's neighbourhood (too few of ",
-                       "the cells hold a row with a response, or the cell-mean ",
-                       "regression is singular); falling back to geometric."),
+                       "the cells hold a row with a response, the cell-mean ",
+                       "regression is singular, or the cell means differ by rounding ",
+                       "alone); falling back to geometric."),
                 max(10L, min(eval_ks)), max(eval_ks))
     } else {
       # "combined" ranks by the sag, which reads no response, so the ranking
@@ -1542,8 +1604,9 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
       # 11 12 10.
       .log_warn(paste0("determine_optimal_levels(): Moran's I could not be computed at ",
                        "any k from %d to %d in the elbow's neighbourhood (too few of ",
-                       "the cells hold a row with a response, or the cell-mean ",
-                       "regression is singular); criterion = 'combined' ranks the ",
+                       "the cells hold a row with a response, the cell-mean ",
+                       "regression is singular, or the cell means differ by rounding ",
+                       "alone); criterion = 'combined' ranks the ",
                        "counts by the sag as usual, with moran_i and moran_z NA in ",
                        "the diagnostics."),
                 max(10L, min(eval_ks)), max(eval_ks))
