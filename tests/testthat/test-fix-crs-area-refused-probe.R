@@ -108,6 +108,8 @@ spread_one_call <- function(cells) {
 }
 # `cells` with each vertex dropped, in the cells' own CRS, whose image in
 # degrees is the image of the vertex before it: a layer s2 accepts whole.
+# Where that vertex is the one that closes the ring, the vertex before it,
+# which has the same image, is dropped instead, so the ring stays closed.
 drop_in_own_crs <- function(cells) {
   g  <- sf::st_geometry(cells)
   ll <- sf::st_transform(g, 4326)
@@ -116,7 +118,9 @@ drop_in_own_crs <- function(cells) {
     d <- unclass(ll[[i]])
     for (j in seq_along(m)) {
       dj <- d[[j]]
-      same <- c(FALSE, dj[-1L, 1L] == dj[-nrow(dj), 1L] & dj[-1L, 2L] == dj[-nrow(dj), 2L])
+      n  <- nrow(dj)
+      same <- c(FALSE, dj[-1L, 1L] == dj[-n, 1L] & dj[-1L, 2L] == dj[-n, 2L])
+      if (same[n]) { same[n] <- FALSE; same[n - 1L] <- TRUE }
       m[[j]] <- m[[j]][!same, , drop = FALSE]
     }
     g[[i]] <- sf::st_polygon(m)

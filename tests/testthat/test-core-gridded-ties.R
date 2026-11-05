@@ -89,9 +89,9 @@
 .gt_cell_of <- function(asg, pts, id = "cell_id") asg[[id]][match(pts$row, asg$row)]
 
 # The profile's rule, written out: each row to the centre the least squared
-# distance away in the record's CRS, of two as near the lower-numbered one
-# (.nearest_exact() replaces the best so far only when a centre is strictly
-# nearer), and the cell build_tessellation() built around that centre.
+# distance away in the record's CRS, of two whose squared distances agree to
+# within .TIE_TOL the lower-numbered one (.nearest_exact()), and the cell
+# build_tessellation() built around that centre.
 .gt_profile_rule <- function(P, pts) {
   rec <- P$sel$count_rule
   cen <- rec$scored$centres
@@ -172,12 +172,12 @@ test_that("on lattices at spacings of 1, 30, 250 and 1000 every row is in the ce
   # Which rows lie on an edge rests on exact ties, which another GEOS or
   # another arithmetic can settle the other way, so the counts are held only
   # on the platform the frozen fixture was recorded on.  There the polygons
-  # alone would place rows of 11 of the 16 lattices in another cell than the
-  # profile's under the density kind, and none under k-means, so on those 11
+  # alone would place rows of 15 of the 16 lattices in another cell than the
+  # profile's under the density kind, and none under k-means, so on those 15
   # the profile's rule decides the rows on an edge.
   if (.gt_same_platform()) {
-    expect_identical(moved$density, c(0L, 1L, 0L, 0L, 2L, 3L, 0L, 2L,
-                                      3L, 1L, 0L, 1L, 1L, 3L, 3L, 3L))
+    expect_identical(moved$density, c(0L, 1L, 2L, 2L, 5L, 3L, 7L, 6L,
+                                      2L, 4L, 3L, 4L, 3L, 3L, 5L, 4L))
     expect_identical(moved$kmeans, rep(0L, 16L))
   }
 })
@@ -236,13 +236,11 @@ test_that("cells returned in EPSG:4326 are joined in the profile's CRS: rows in 
   # apart, which the transform to degrees puts at one point: s2 refuses such
   # a cell, and a join on the sphere stopped.  Which cells that hits rests on
   # the last bits of GEOS's corners and of PROJ, so the counts are held only
-  # on the fixture's platform: there it is every lattice under k-means and 10
-  # of the 16 under the density kind.  (11 while the seeds' cover was the hull
-  # s2 builds: the cells of 40 x 30 at 1 m, clipped to a boundary with fewer
-  # vertices, had one such cell.)
+  # on the fixture's platform: there it is 15 of the 16 lattices under
+  # k-means and 11 of the 16 under the density kind.
   if (.gt_same_platform() && sf::sf_use_s2()) {
-    expect_true(all(refused$kmeans > 0L))
-    expect_identical(sum(refused$density > 0L), 10L)
+    expect_identical(sum(refused$kmeans > 0L), 15L)
+    expect_identical(sum(refused$density > 0L), 11L)
   }
 })
 
@@ -540,19 +538,18 @@ test_that("cells drawn in a projected CRS the caller names are its nearest-seed 
     expect_false(anyNA(by_polygons), info = info)
     off <- which(by_polygons != P$tess$index[two$first])
     expect_true(all(abs(two$d2[off] - two$d1[off]) / two$d1[off] < 1e-6), info = info)
-    # A row the assignment puts in another cell than the profile's is a row
-    # the same distance from two centres in the profile's CRS.
+    # A row the assignment puts in another cell than the profile's is in the
+    # cell of its nearest seed in the CRS named, or of one as near there.
+    # The scale of that CRS varies across the layer, so in the profile's CRS
+    # such a row can be a few parts in a thousand, or more, from a tie.
     rule   <- .gt_profile_rule(P, pts)
     placed <- .gt_cell_of(P$asg, pts)
     expect_false(anyNA(placed), info = info)
     elsewhere <- which(placed != rule$cell)
     if (length(elsewhere)) {
-      d2 <- function(rows, centre) (rule$xy[rows, 1L] - rule$cen[centre, 1L])^2 +
-                                   (rule$xy[rows, 2L] - rule$cen[centre, 2L])^2
-      nearest <- match(rule$cell[elsewhere], P$tess$index)
-      other   <- match(placed[elsewhere], P$tess$index)
-      gap <- abs(d2(elsewhere, other) - d2(elsewhere, nearest)) / d2(elsewhere, nearest)
-      expect_true(all(gap < 1e-6), info = info)
+      tied_there <- abs(two$d2[elsewhere] - two$d1[elsewhere]) / two$d1[elsewhere] < 1e-6
+      expect_true(all(placed[elsewhere] == P$tess$index[two$first[elsewhere]] | tied_there),
+                  info = info)
     }
     # The summary reports such rows, and only then; with the same rows in as
     # many cells, the warning names cells built in another CRS.
@@ -685,11 +682,11 @@ test_that("rows the polygons alone place beside the record are reported, and the
   }
   # Which ties the polygons settle the other way rests on GEOS, so the counts
   # are held only on the platform the frozen fixture was recorded on.  There
-  # the polygons put 3 rows of the 30 m lattice and 3 of the 1000 m one in
-  # the other cell, the first match of sf::st_join() 2 and 1, and every
+  # the polygons put 3 rows of the 30 m lattice and 4 of the 1000 m one in
+  # the other cell, the first match of sf::st_join() 3 and 4, and every
   # warning has `what = "loo"`.
   if (.gt_same_platform()) {
-    expect_identical(unname(n_elsewhere), c(3L, 3L, 2L, 3L, 3L, 1L))
+    expect_identical(unname(n_elsewhere), c(3L, 3L, 3L, 4L, 4L, 4L))
     expect_identical(unname(what), rep("loo", 6L))
   }
 })
@@ -724,10 +721,10 @@ test_that("cells transformed to another projected CRS keep the record and are jo
     what[info] <- .gt_expect_reported(asg, cells, length(elsewhere), clause, info)
     n_elsewhere[info] <- length(elsewhere)
   }
-  # On the platform the frozen fixture was recorded on, 5 rows of the 1000 m
+  # On the platform the frozen fixture was recorded on, 3 rows of the 1000 m
   # lattice are elsewhere in each CRS, each time with `what = "loo"`.
   if (.gt_same_platform()) {
-    expect_identical(unname(n_elsewhere), c(0L, 0L, 5L, 5L))
+    expect_identical(unname(n_elsewhere), c(0L, 0L, 3L, 3L))
     expect_identical(unname(what), c(NA_character_, NA_character_, "loo", "loo"))
   }
 })
@@ -1050,6 +1047,39 @@ test_that("a point on an edge whose nearest centre stands in a third cell keeps 
   expect_identical(got$cell_id, 1L)
 })
 
+test_that("a point two centres tie for goes to the lower-numbered one beyond the margin of an edge, and only such a point", {
+  # Squares at coordinates near 0, so the margin of an edge is 2e-9.  From a
+  # point 5e-8 right of the edge LL|LR the squared distances to the middles
+  # of LL (centre 1) and LR (centre 2) differ by 4e-8 of either: a tie, which
+  # the profile gives to centre 1, though the polygon LR holds the point 25
+  # margins from the edge.
+  sq <- .gt_squares(x0 = 0, y0 = 0)
+  cen <- .gt_middles(x0 = 0, y0 = 0)
+  tol <- .edge_tol(sf::st_bbox(sq))
+  pt <- .gt_points(10 + 5e-8, 5, x0 = 0, y0 = 0)
+  xy <- unname(sf::st_coordinates(pt))
+  expect_gt(5e-8, 10 * tol)
+  expect_identical(.nearest_centre(xy[, 1L], xy[, 2L], cen[, 1L], cen[, 2L]), 1L)
+  expect_identical(.gt_assign(pt, sq)$cell_id, 2L)
+  expect_identical(.gt_assign(pt, .count_rule_put(sq, .gt_record(cen)))$cell_id, 1L)
+  # Beyond the tie, 1e-6 right of the edge, the point is nearer centre 2 and
+  # stays in LR.
+  far <- .gt_points(10 + 1e-6, 5, x0 = 0, y0 = 0)
+  expect_identical(.gt_assign(far, .count_rule_put(sq, .gt_record(cen)))$cell_id, 2L)
+  # A point the rule gives to another centre that is strictly nearer than its
+  # cell's own one gets the margin alone: with centre 2 at x = 15.1 the
+  # bisector is at x = 10.05, and a point at 10.001, in LR and nearer centre
+  # 1, keeps LR, as a point placed by cells drawn in another CRS does.
+  cen2 <- cen; cen2[2L, 1L] <- 15.1
+  off <- .gt_points(10.001, 5, x0 = 0, y0 = 0)
+  oxy <- unname(sf::st_coordinates(off))
+  expect_identical(.nearest_exact(oxy[, 1L], oxy[, 2L], cen2[, 1L], cen2[, 2L]), 1L)
+  expect_identical(.gt_assign(off, .count_rule_put(sq, .gt_record(cen2)))$cell_id, 2L)
+  # Within the margin it goes to centre 1's cell, as before.
+  on <- .gt_points(10 + tol / 2, 5, x0 = 0, y0 = 0)
+  expect_identical(.gt_assign(on, .count_rule_put(sq, .gt_record(cen2)))$cell_id, 1L)
+})
+
 test_that("only points on cells with the scored centres in a CRS the join can measure are placed by the profile's rule", {
   sq <- .gt_squares(); pts <- .gt_six()
   cen <- .gt_middles()[c(4, 3, 2, 1), ]
@@ -1098,24 +1128,29 @@ test_that("only points on cells with the scored centres in a CRS the join can me
   # the cells are joined in that CRS, and a point on an edge goes to its
   # nearest centre, measured on its coordinates there, as the profile
   # measures rows that arrive in degrees.  The round trip through degrees
-  # moves the points by up to 1e-9 m, which settles their ties to the centres.
+  # moves the points by up to 1e-9 m, far less than one part in ten million
+  # of their squared distances, so their ties to the centres stay ties and go
+  # to the lower-numbered centre, as on the points before the round trip.
   ll <- function(x) sf::st_transform(x, 4326)
   xy <- unname(sf::st_coordinates(sf::st_transform(ll(pts), 32617)))
+  xy0 <- unname(sf::st_coordinates(pts))
   nearest <- .nearest_exact(xy[, 1L], xy[, 2L], cen[, 1L], cen[, 2L])
+  expect_identical(nearest, .nearest_exact(xy0[, 1L], xy0[, 2L], cen[, 1L], cen[, 2L]))
   expect_identical(.gt_assign(ll(pts), .count_rule_put(ll(sq), .gt_record(cen)))$cell_id,
                    c(4L, 3L, 2L, 1L)[nearest])
   mids <- .gt_middles()
   from_ll <- .gt_assign(ll(pts), .count_rule_put(ll(sq), .gt_record(mids)))$cell_id
   expect_identical(from_ll, .nearest_exact(xy[, 1L], xy[, 2L], mids[, 1L], mids[, 2L]))
+  expect_identical(from_ll, .nearest_exact(xy0[, 1L], xy0[, 2L], mids[, 1L], mids[, 2L]))
+  expect_identical(from_ll, c(1L, 1L, 1L, 2L, 1L, 4L))
   # On the sphere s2 and `tie_break` place these six points by rules of
   # their own, and for the centres numbered from the upper right they give
   # the profile's cells, so only the centres numbered from the lower left
-  # tell the two apart.  Which way the round trip settles a tie rests on the
-  # last bits of PROJ, so that is held on the fixture's platform.
+  # tell the two apart.  What s2 does rests on its build, so that is held on
+  # the fixture's platform.
   if (.gt_same_platform() && sf::sf_use_s2()) {
     expect_identical(c(4L, 3L, 2L, 1L)[nearest], profile)
     expect_identical(.gt_assign(ll(pts), ll(sq))$cell_id, profile)
-    expect_identical(from_ll, c(2L, 3L, 2L, 2L, 1L, 4L))
   }
   # Two squares of 0.01 degree drawn in degrees on either side of the meridian
   # 80 W, five points on it, and a record in EPSG:32617 whose centres stand
@@ -1305,8 +1340,11 @@ test_that("cell_values_at() places a location on an edge where the assignment pl
   bare <- values; attr(bare, "count_rule") <- NULL
   expect_identical(cell_values_at(newdata, bare, asg, "z", id_col = "cell_id")$cell_id,
                    c(1L, 1L, 1L, 2L, 1L, 4L))
+  # With the seeds, searched as given: the seed moved by 1e-9 is as near as
+  # the others to one part in ten million, so the ties stay ties and go to
+  # the seed that comes first, which here is the lower-numbered centre.
   expect_identical(cell_values_at(newdata, bare, asg, "z", id_col = "cell_id",
-                                  seeds = seeds)$cell_id, c(2L, 3L, 3L, 2L, 1L, 4L))
+                                  seeds = seeds)$cell_id, c(2L, 3L, 4L, 4L, 1L, 4L))
 })
 
 

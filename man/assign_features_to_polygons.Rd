@@ -147,18 +147,25 @@ and holds the centres it scored (\code{count_rule$scored$centres}), a point
 on the edge between two or more of those cells is given the cell
 \code{\link[=resolution_profile]{resolution_profile()}} scored it in: that of its nearest centre,
 measured in the CRS the record names, and of centres the same distance
-away the lower-numbered one. Such points occur on gridded locations
-(raster cell centres, a regular sampling grid), where a row can lie the
-same distance from two centres and the polygons hold it in either cell
-or in both. The rows each cell holds are then the rows its count was
-scored on, and \code{\link[=summarize_by_cell]{summarize_by_cell()}}'s check of them reads \code{"match"}.
-A point counts as on the edge when it lies within a margin of both
-cells: one part in 1e10 of the largest coordinate of the cells, 0.44 mm
-at a UTM northing of 4,400 km. \code{\link[=build_tessellation]{build_tessellation()}} draws such cells
-in the CRS the record names, around the centres as the record holds
-them, whatever CRS the seeds came back in (unless its \code{crs} names
-another projected CRS), so their corners carry only the rounding of
-that computation, far less than the margin. Cells it returns in a
+away the lower-numbered one (two distances count as the same when their
+squares agree to within one part in ten million). Such points occur on
+gridded locations (raster cell centres, a regular sampling grid), where
+a row can lie the same distance from two centres and the polygons hold
+it in either cell or in both. The rows each cell holds are then the rows
+its count was scored on, and \code{\link[=summarize_by_cell]{summarize_by_cell()}}'s check of them reads
+\code{"match"}. A point counts as on the edge when it lies within a margin of
+both cells: one part in 1e10 of the largest coordinate of the cells,
+0.44 mm at a UTM northing of 4,400 km. For a point that two centres tie
+for while the cell holding it is that of the strictly nearer one, the
+margin also takes in the point's distance from the boundary between the
+two, measured in the CRS the record names: midway between centres far
+apart the tie reaches about 1.25e-8 of their distance from the boundary,
+which can exceed one part in 1e10 of the coordinates.
+\code{\link[=build_tessellation]{build_tessellation()}} draws such cells in the CRS the record names,
+around the centres as the record holds them, whatever CRS the seeds came
+back in (unless its \code{crs} names another projected CRS), so their corners
+carry only the rounding of that computation, far less than the margin.
+Cells it returns in a
 geographic \code{crs} are moved back into the record's CRS for the join (see
 Details). In a UTM zone the round trip through degrees moves a corner by
 about 2e-9 m; in the equal-area CRS the profile works in for a layer

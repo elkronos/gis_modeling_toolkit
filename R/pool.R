@@ -53,13 +53,15 @@
 .POOL_NEIGHBOURS <- 8L
 
 # Relative difference up to which two squared distances are a tie in the
-# searches for neighbours.  Centroids of a lattice that tie exactly in one
-# unit differ in their last bits in another, or after a shift of the origin,
-# and each unit in the last place a centroid is off moves its squared
-# distances by about 5e-16 times the coordinates over the spacing.  A
-# centroid summed from many rows can be off by several.  So a tie holds
-# while the spacing is above about a ten-millionth of the coordinates, which
-# leaves room for that.
+# searches for neighbours, here and in the density partition (its neighbour
+# and nearest-centre searches, R/partition.R), and in the nearest-centre
+# searches of the scoring, the assignment and cell_values_at().  Centroids of
+# a lattice that tie exactly in one unit differ in their last bits in
+# another, or after a shift of the origin, and each unit in the last place a
+# centroid is off moves its squared distances by about 5e-16 times the
+# coordinates over the spacing.  A centroid summed from many rows can be off
+# by several.  So a tie holds while the spacing is above about a
+# ten-millionth of the coordinates, which leaves room for that.
 .TIE_TOL <- 1e-7
 
 # Rows per region: the size a count is set by when none is given, and the

@@ -226,7 +226,7 @@ test_that("x values within the tolerance of the distance count as equal, and the
     expect_identical(.region_neighbours(cen2, 1L, f)[1L, 1L], 2L, info = fnt_tag(f))
 })
 
-test_that("the kd-tree's search and the exact search pick by one rule, and the partition keeps exact ties", {
+test_that("the kd-tree's search and the exact search pick by one rule, and the partition counts near ties as ties", {
   # A 0.7 lattice from (0.1, 0.3), moved to UTM-sized coordinates and put
   # in feet: no tie in it is exact.
   g  <- unname(as.matrix(expand.grid(seq(0.1, by = 0.7, length.out = 25),
@@ -242,13 +242,18 @@ test_that("the kd-tree's search and the exact search pick by one rule, and the p
   expect_identical(.knn_tied_rows(u, rows, 8L, tol = .TIE_TOL), exact)
   expect_identical(.knn_tied_rows(u, rows, 1L, tol = .TIE_TOL),
                    .knn_exact_rows(u[, 1], u[, 2], rows, 1L, tol = .TIE_TOL))
-  # With no tolerance, as the partition's searches call them, only exact ties
-  # tie: from (0, 0), (1, 0) is nearer than (0, 1 + 1e-9).
+  # With no tolerance, the default, only exact ties tie: from (0, 0), (1, 0)
+  # is nearer than (0, 1 + 1e-9).
   v <- rbind(c(0, 0), c(0, 1 + 1e-9), c(1, 0), c(5, 5))
   expect_identical(.knn_exact_rows(v[, 1], v[, 2], 1L, 1L), matrix(3L))
   expect_identical(.knn_tied_rows(v, 1L, 1L), matrix(3L))
-  for (f in fnt_paths())
-    expect_identical(.knn_locations(v, 1L, use_fnn = f)$idx[1L, 1L], 3L, info = fnt_tag(f))
+  # The partition's search passes .TIE_TOL: the two tie, and the lower x,
+  # (0, 1 + 1e-9), is taken.  Beyond the tolerance the nearer is taken.
+  for (f in fnt_paths()) {
+    expect_identical(.knn_locations(v, 1L, use_fnn = f)$idx[1L, 1L], 2L, info = fnt_tag(f))
+    w <- rbind(c(0, 0), c(0, 1 + 1e-6), c(1, 0), c(5, 5))
+    expect_identical(.knn_locations(w, 1L, use_fnn = f)$idx[1L, 1L], 3L, info = fnt_tag(f))
+  }
 })
 
 

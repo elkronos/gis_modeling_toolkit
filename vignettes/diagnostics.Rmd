@@ -401,8 +401,9 @@ which means rows sit in other cells, and `"record"` when the assigned layer
 and `cells_sf` carry different records. The usual causes are rows filtered
 after the assignment, a boundary that leaves points in no cell, and a layer
 other than the one profiled. On gridded locations a row can lie the same
-distance from two centres, on the boundary between their cells. The profile
-scores it in the cell of the lower-numbered centre, and
+distance from two centres, on the boundary between their cells (distances
+whose squares agree to one part in ten million count as the same). The
+profile scores it in the cell of the lower-numbered centre, and
 `assign_features_to_polygons()` gives a point there the same cell when the
 cells carry the record of the centres scored, so a lattice passes the check.
 `build_tessellation()` draws those cells in the profile's CRS whatever CRS

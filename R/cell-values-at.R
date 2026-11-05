@@ -176,17 +176,19 @@
 #' The nearest centre of every point, where many points can tie
 #'
 #' The answer of \code{.nearest_centre()}: the nearest centre by squared
-#' distance in R's arithmetic, a tie to the lower centre number.  That
-#' function searches a point whose two nearest centres tie against every
-#' centre, which is the right trade where the centres are a partition's and
-#' few points tie.  Here the centres can be every scored location of a layer
-#' and the points a grid laid over them, so that most points tie; searched
-#' that way the time grows with the points times the centres.  A tied point
-#' is given a longer shortlist from the kd-tree instead, twice as long each
-#' round, until its furthest member is further than its nearest by more than
-#' one part in a thousand million: every centre as near as the nearest is
-#' then on the list, and the lowest-numbered of them is taken.  A point whose
-#' shortlist would hold every centre is searched exactly.
+#' distance in R's arithmetic, squared distances within \code{.TIE_TOL} (one
+#' part in ten million) of the least counting as a tie, and a tie to the
+#' lower centre number.  That function searches a point whose two nearest
+#' centres tie against every centre, which is the right trade where the
+#' centres are a partition's and few points tie.  Here the centres can be
+#' every scored location of a layer and the points a grid laid over them, so
+#' that most points tie; searched that way the time grows with the points
+#' times the centres.  A tied point is given a longer shortlist from the
+#' kd-tree instead, twice as long each round, until its furthest member is
+#' further than its nearest by more than \code{.TIE_TOL} and one part in a
+#' thousand million: every centre that ties with the nearest is then on the
+#' list, and the lowest-numbered of them is taken.  A point whose shortlist
+#' would hold every centre is searched exactly.
 #'
 #' @param x,y Coordinates of the points.
 #' @param cx,cy Coordinates of the centres.
@@ -212,10 +214,10 @@
     d2 <- matrix((qx - cx[nn])^2 + (qy - cy[nn])^2, length(todo), k)
     best <- do.call(pmin, lapply(seq_len(k), function(j) d2[, j]))
     far  <- do.call(pmax, lapply(seq_len(k), function(j) d2[, j]))
-    # The lowest-numbered of the centres at the least distance.
-    nn[d2 > best] <- K + 1L
+    # The lowest-numbered of the centres that tie with the nearest.
+    nn[d2 > best * (1 + .TIE_TOL)] <- K + 1L
     pick <- do.call(pmin, lapply(seq_len(k), function(j) nn[, j]))
-    done <- far > best * (1 + 1e-9)
+    done <- far > best * (1 + .TIE_TOL + 1e-9)
     out[todo[done]] <- pick[done]
     todo <- todo[!done]
     k <- 2L * k
@@ -485,31 +487,33 @@
 #' that class can hold every ID (see Value).
 #'
 #' @section Ties:
-#' A location the same distance from two seeds takes the one that comes
-#' first in `seeds`. For the seeds of a [select_resolution()] result that is
-#' the lower-numbered centre, the rule [resolution_profile()] scores with.
-#' When the summary's record of the count holds the centres the profile
-#' scored and `seeds` are those centres (the seeds a selection carries, or
-#' those a seeding function returns for it), in any order and any CRS, the
-#' distances are taken to the centres as the record holds them, a tie goes
-#' to the lower-numbered centre, and each centre gives the ID of the seed
+#' Two distances count as the same when their squares agree to within one part
+#' in ten million. A location the same distance from two seeds takes the one
+#' that comes first in `seeds`. For the seeds of a [select_resolution()]
+#' result that is the lower-numbered centre, the rule [resolution_profile()]
+#' scores with. When the summary's record of the count holds the centres the
+#' profile scored and `seeds` are those centres (the seeds a selection
+#' carries, or those a seeding function returns for it), in any order and any
+#' CRS, the distances are taken to the centres as the record holds them, a tie
+#' goes to the lower-numbered centre, and each centre gives the ID of the seed
 #' that stands at it. Seeds count as the centres when they are as many and
 #' each lies at a different centre, within a thousandth of its distance from
 #' the next nearest one, so a seed that came back from another CRS with its
 #' coordinates rounded, or seeds sorted by their cell, do not settle a tie
-#' another way. A location on the edge between two such cells then takes
-#' the cell [assign_features_to_polygons()] gives a row there, with `seeds`
-#' and without. Other seeds, among them a subset of the centres, are
-#' searched as given. A
-#' location the same distance from two locations of scored rows takes the
-#' one with the lower x coordinate, then the lower y; among scored rows at
-#' one location that lie in different cells, the cell that comes first in
-#' the order of the IDs (ascending for numbers, the C-locale order for
-#' strings, the order of the levels for a factor). Neither rule depends on
-#' the order of the rows of `points`, or on whether the \pkg{FNN} package is
-#' installed. A tie is a tie between distances computed from the coordinates
-#' in the working CRS, so on gridded locations the same layer in another CRS
-#' or unit can put a location on a boundary in the other cell.
+#' another way. A location on the edge between two such cells then takes the
+#' cell [assign_features_to_polygons()] gives a row there, with `seeds` and
+#' without. Other seeds, among them a subset of the centres, are searched as
+#' given. A location the same distance from two locations of scored rows takes
+#' the one with the lower x coordinate, then the lower y; among scored rows at
+#' one location that lie in different cells, the cell that comes first in the
+#' order of the IDs (ascending for numbers, the C-locale order for strings,
+#' the order of the levels for a factor). Neither rule depends on the order of
+#' the rows of `points`, or on whether the \pkg{FNN} package is installed. A
+#' tie is a tie between distances computed from the coordinates in the working
+#' CRS, so on gridded locations the same layer in another projected CRS can
+#' put a location on a boundary in the other cell; another unit or origin of
+#' the same CRS moves only the last bits of the distances and settles the ties
+#' the same way.
 #'
 #' @section Away from the observations:
 #' The value and the interval describe locations among the observations.

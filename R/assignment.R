@@ -157,18 +157,25 @@
 #'   on the edge between two or more of those cells is given the cell
 #'   [resolution_profile()] scored it in: that of its nearest centre,
 #'   measured in the CRS the record names, and of centres the same distance
-#'   away the lower-numbered one. Such points occur on gridded locations
-#'   (raster cell centres, a regular sampling grid), where a row can lie the
-#'   same distance from two centres and the polygons hold it in either cell
-#'   or in both. The rows each cell holds are then the rows its count was
-#'   scored on, and [summarize_by_cell()]'s check of them reads `"match"`.
-#'   A point counts as on the edge when it lies within a margin of both
-#'   cells: one part in 1e10 of the largest coordinate of the cells, 0.44 mm
-#'   at a UTM northing of 4,400 km. [build_tessellation()] draws such cells
-#'   in the CRS the record names, around the centres as the record holds
-#'   them, whatever CRS the seeds came back in (unless its `crs` names
-#'   another projected CRS), so their corners carry only the rounding of
-#'   that computation, far less than the margin. Cells it returns in a
+#'   away the lower-numbered one (two distances count as the same when their
+#'   squares agree to within one part in ten million). Such points occur on
+#'   gridded locations (raster cell centres, a regular sampling grid), where
+#'   a row can lie the same distance from two centres and the polygons hold
+#'   it in either cell or in both. The rows each cell holds are then the rows
+#'   its count was scored on, and [summarize_by_cell()]'s check of them reads
+#'   `"match"`. A point counts as on the edge when it lies within a margin of
+#'   both cells: one part in 1e10 of the largest coordinate of the cells,
+#'   0.44 mm at a UTM northing of 4,400 km. For a point that two centres tie
+#'   for while the cell holding it is that of the strictly nearer one, the
+#'   margin also takes in the point's distance from the boundary between the
+#'   two, measured in the CRS the record names: midway between centres far
+#'   apart the tie reaches about 1.25e-8 of their distance from the boundary,
+#'   which can exceed one part in 1e10 of the coordinates.
+#'   [build_tessellation()] draws such cells in the CRS the record names,
+#'   around the centres as the record holds them, whatever CRS the seeds came
+#'   back in (unless its `crs` names another projected CRS), so their corners
+#'   carry only the rounding of that computation, far less than the margin.
+#'   Cells it returns in a
 #'   geographic `crs` are moved back into the record's CRS for the join (see
 #'   Details). In a UTM zone the round trip through degrees moves a corner by
 #'   about 2e-9 m; in the equal-area CRS the profile works in for a layer
@@ -826,15 +833,21 @@ assign_features_to_polygons <- function(
 #'
 #' On cells whose record of their count sits beside the centres the profile
 #' scored (\code{.scored_centres()}), \code{resolution_profile()} gave each
-#' row to its nearest centre in the record's CRS, a tie to the lower-numbered
+#' row to its nearest centre in the record's CRS, squared distances within
+#' \code{.TIE_TOL} of each other a tie and a tie to the lower-numbered
 #' centre (\code{.nearest_centre()}), and the polygons hold a row that is the
 #' same distance from two centres in either cell, or in both.  A point the
-#' join placed in a cell, that lies within \code{.edge_tol()} of the edge of
-#' that cell and of the cell of the centre the profile's rule gives it, is
-#' given that cell.  A point farther from that cell than the margin keeps
-#' the cell it has: it is not on their shared edge, so the cells are not the
-#' ones scored there (built in another CRS, say), and the summary's check
-#' says so.
+#' join placed in a cell, that lies within the margin of the edge of that
+#' cell and of the cell of the centre the profile's rule gives it, is given
+#' that cell.  The margin is \code{.edge_tol()}, plus, for a point the rule
+#' gives to another centre than that of the cell it is in, the point's
+#' distance from the bisector of the two centres in the join's CRS: a point
+#' whose squared distances to two centres tie within \code{.TIE_TOL} can lie
+#' farther from their shared edge than \code{.edge_tol()} when the centres
+#' are far apart (by about \code{1.25e-8} of their distance midway between
+#' them).  A point farther from that cell than the margin keeps the cell it
+#' has: it is not on their shared edge, so the cells are not the ones scored
+#' there (built in another CRS, say), and the summary's check says so.
 #'
 #' The cell of a centre is the one cell that holds it, when it holds no
 #' other centre: a Voronoi cell holds its own centre and no other, so cells
@@ -884,22 +897,20 @@ assign_features_to_polygons <- function(
   rows  <- which(!is.na(at) & point[src])
   if (!length(rows)) return(none)
 
-  # Those within the margin of their own cell's edge.  The others lie inside
-  # it, away from every other cell.
+  # Their distance from their own cell's edge.
   gp  <- sf::st_geometry(p)
   tol <- .edge_tol(sf::st_bbox(gp))
   edge <- suppressWarnings(sf::st_boundary(gp))
   d    <- as.numeric(sf::st_distance(gf[src[rows]], edge[at[rows]], by_element = TRUE))
-  rows <- rows[which(d <= tol)]
-  if (!length(rows)) return(none)
 
   # Their nearest centre, from their coordinates in the record's CRS, as the
-  # profile measured them.
+  # profile measured them.  Every point is searched: one inside the band
+  # where two centres tie can lie farther from the edge than `tol`.
   pts <- features[src[rows], , drop = FALSE]
   if (!is.na(crs_r) && !isTRUE(crs_f == crs_r)) pts <- sf::st_transform(pts, crs_r)
   xy <- unname(sf::st_coordinates(pts)[, 1:2, drop = FALSE])
-  ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L])
-  rows <- rows[ok]
+  ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L]) & is.finite(d)
+  rows <- rows[ok]; d <- d[ok]
   if (!length(rows)) return(none)
   g <- .nearest_centre(xy[ok, 1L], xy[ok, 2L], cen[, 1L], cen[, 2L],
                        use_fnn = .has_backend("FNN"))
@@ -933,12 +944,34 @@ assign_features_to_polygons <- function(
     }
   }
 
-  # A point goes to its centre's cell when it lies on that cell's edge too.
+  # A point goes to its centre's cell when it lies on the edge of both
+  # cells.  The margin is `tol`, and for a point the rule gives to a centre
+  # that ties with a strictly nearer one, the centre of the cell it is in,
+  # also the point's distance from the bisector of the two: how far inside
+  # that cell the tie reaches.  It is measured in the record's CRS, where
+  # the two tie, and put in the units of the join's CRS by the ratio of the
+  # centres' distance apart in the two.  For any other point it is `tol`
+  # alone, so a point placed in another cell by cells drawn in another CRS
+  # is not moved.
   to   <- cell[g]
   move <- which(!is.na(to) & to != at[rows])
   if (!length(move)) return(none)
+  h    <- match(at[rows[move]], cell)
+  gm   <- g[move]
+  pxy  <- xy[ok, , drop = FALSE][move, , drop = FALSE]
+  d2g  <- (pxy[, 1L] - cen[gm, 1L])^2 + (pxy[, 2L] - cen[gm, 2L])^2
+  d2h  <- (pxy[, 1L] - cen[h, 1L])^2 + (pxy[, 2L] - cen[h, 2L])^2
+  c_r  <- sqrt((cen[gm, 1L] - cen[h, 1L])^2 + (cen[gm, 2L] - cen[h, 2L])^2)
+  wxy  <- unname(sf::st_coordinates(where)[, 1:2, drop = FALSE])
+  c_j  <- sqrt((wxy[gm, 1L] - wxy[h, 1L])^2 + (wxy[gm, 2L] - wxy[h, 2L])^2)
+  band <- (d2g - d2h) / (2 * c_r) * (c_j / c_r)
+  band[!(!is.na(h) & is.finite(band) & d2h < d2g)] <- 0
+  margin <- tol + band
+  keep <- which(d[move] <= margin)
+  move <- move[keep]; margin <- margin[keep]
+  if (!length(move)) return(none)
   d_to <- as.numeric(sf::st_distance(gf[src[rows[move]]], gp[to[move]], by_element = TRUE))
-  move <- move[which(d_to <= tol)]
+  move <- move[which(d_to <= margin)]
   list(rows = rows[move], ids = ids_p[to[move]])
 }
 
@@ -2252,17 +2285,18 @@ assign_features_to_polygons <- function(
 #'
 #'   A row that is the same distance from two centres lies on the boundary
 #'   between their cells, which happens on gridded locations.
-#'   [resolution_profile()] scores such a row in the cell of the
-#'   lower-numbered centre, and [assign_features_to_polygons()], on cells
-#'   built from the centres the profile scored, gives a point on that
-#'   boundary the same cell, measured in the CRS the record names, so the
-#'   comparison reads `"match"` on gridded locations too. It does so on
-#'   cells that carry the record, for rows that have a CRS when the record
-#'   names one. Rows without a CRS, rows assigned to the cells after they
-#'   lost the record (written to a file and read back, say) and summarised
-#'   with `cells_sf` set to the cells that carry it, and rows given their
-#'   cells by another join are placed by the polygons alone, so a row on a
-#'   boundary can sit in either cell.
+#'   [resolution_profile()] scores such a row in the cell of the lower-numbered
+#'   centre (two distances count as the same when their squares agree to within
+#'   one part in ten million), and [assign_features_to_polygons()], on cells
+#'   built from the centres the profile scored, gives a point on that boundary
+#'   the same cell, measured in the CRS the record names, so the comparison
+#'   reads `"match"` on gridded locations too. It does so on cells that carry
+#'   the record, for rows that have a CRS when the record names one. Rows
+#'   without a CRS, rows assigned to the cells after they lost the record
+#'   (written to a file and read back, say) and summarised with `cells_sf` set
+#'   to the cells that carry it, and rows given their cells by another join are
+#'   placed by the polygons alone, so a row on a boundary can sit in either
+#'   cell.
 #'   [build_tessellation()] draws those cells in the CRS the record names,
 #'   whatever CRS the seeds arrive in, unless its `crs` names another
 #'   projected CRS. Cells built in another projected CRS are the

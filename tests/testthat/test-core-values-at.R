@@ -234,36 +234,57 @@ test_that("the nearest centre is .nearest_centre()'s, a tie to the lower number,
   expect_identical(searched, 0L)
 })
 
-test_that("the nearest centre is the exact one where centres are nearly the same distance away", {
+test_that("centres whose squared distances agree to one part in ten million tie, and the lower number takes the point", {
   skip_if_not_installed("FNN")
   # Among 40 centres, centre 3 is 10 from the query and centre 2 further by two parts in
-  # 1e10: the nearer one has the higher number.
+  # 1e10: a tie, which goes to centre 2.  Further by two parts in ten million (four in
+  # the squared distance) centre 2 is not tied, and the nearer centre 3 has the point.
   cen <- local({
     .va_seed(6302)
     list(x = stats::runif(40, 50, 90), y = stats::runif(40, 50, 90))
   })
-  cen$x[2L] <- 10 * (1 + 2e-10); cen$y[2L] <- 0
-  cen$x[3L] <- 0;                cen$y[3L] <- 10
-  expect_identical(.nearest_exact(0, 0, cen$x, cen$y), 3L)
-  expect_identical(.values_at_nearest(0, 0, cen$x, cen$y, TRUE), 3L)
-  expect_identical(.values_at_nearest(0, 0, cen$x, cen$y, FALSE), 3L)
-  # A ring of 60 centres about the query at radii 100 (1 + j 1e-11), j from 0 to 59 in
-  # an order drawn under seed 6303, alone and among 40 centres far away.  The nearest is
-  # the one with j = 0, which is not the first.
+  cen$x[3L] <- 0; cen$y[3L] <- 10
+  cen$y[2L] <- 0
+  for (off in c(2e-10, 2e-7)) {
+    cen$x[2L] <- 10 * (1 + off)
+    want <- if (off < 1e-8) 2L else 3L
+    expect_identical(.nearest_exact(0, 0, cen$x, cen$y), want, info = format(off))
+    expect_identical(.nearest_centre(0, 0, cen$x, cen$y, use_fnn = TRUE), want, info = format(off))
+    expect_identical(.values_at_nearest(0, 0, cen$x, cen$y, TRUE), want, info = format(off))
+    expect_identical(.values_at_nearest(0, 0, cen$x, cen$y, FALSE), want, info = format(off))
+  }
+  # A ring of 60 centres about the query at radii 100 (1 + j s), j from 0 to 59 in an
+  # order drawn under seed 6303, alone and among 40 centres far away.  At steps s of
+  # 1e-11 every centre of the ring ties and the first has the query; at steps of 1e-6 none
+  # ties and the one with j = 0, which is not the first, has it.
   j <- local({ .va_seed(6303); sample.int(60L) - 1L })
   angle <- seq(0, 2 * pi, length.out = 61L)[-61L]
-  rx <- 100 * (1 + j * 1e-11) * cos(angle)
-  ry <- 100 * (1 + j * 1e-11) * sin(angle)
   expect_gt(which(j == 0L), 1L)
   expect_lt(j[1L], 50L)
   qx <- c(0, 3); qy <- c(0, 4)
-  for (far in list(numeric(0), 1000 + cen$x)) {
-    ax <- c(rx, far); ay <- c(ry, far)
-    exact <- .nearest_exact(qx, qy, ax, ay)
-    expect_identical(exact[1L], which(j == 0L))
-    expect_identical(.values_at_nearest(qx, qy, ax, ay, TRUE), exact)
-    expect_identical(.values_at_nearest(qx, qy, ax, ay, FALSE), exact)
-  }
+  for (step in c(1e-11, 1e-6)) {
+    rx <- 100 * (1 + j * step) * cos(angle)
+    ry <- 100 * (1 + j * step) * sin(angle)
+    for (far in list(numeric(0), 1000 + cen$x)) {
+      ax <- c(rx, far); ay <- c(ry, far)
+      exact <- .nearest_exact(qx, qy, ax, ay)
+      expect_identical(exact[1L], if (step < 1e-8) 1L else which(j == 0L), info = format(step))
+      expect_identical(.nearest_centre(qx, qy, ax, ay, use_fnn = TRUE), exact, info = format(step))
+      expect_identical(.values_at_nearest(qx, qy, ax, ay, TRUE), exact, info = format(step))
+      expect_identical(.values_at_nearest(qx, qy, ax, ay, FALSE), exact, info = format(step))
+    }
+  }  # A shortlist that ends inside the tie: from the query, centre 40 at squared
+  # distance 100, centre 39 at 100 (1 + 2e-8) and centre 1 at 100 (1 + 4e-8), the
+  # other 37 far away.  The kd-tree's first shortlist holds 40 and 39 alone; its
+  # furthest member is within the tie of the nearest, so it is lengthened until
+  # centre 1 is on it, and centre 1, the lowest-numbered of the three, has the query.
+  r <- 10 * sqrt(c(1 + 4e-8, 1 + 2e-8, 1))
+  far <- local({ .va_seed(6304); stats::runif(37, 50, 90) })
+  tx <- c(r[1L], far, 0, 0); ty <- c(0, far, r[2L], -r[3L])
+  expect_identical(.nearest_exact(0, 0, tx, ty), 1L)
+  expect_identical(.nearest_centre(0, 0, tx, ty, use_fnn = TRUE), 1L)
+  expect_identical(.values_at_nearest(0, 0, tx, ty, TRUE), 1L)
+  expect_identical(.values_at_nearest(0, 0, tx, ty, FALSE), 1L)
 })
 
 test_that("a kd-tree that ranks nearly tied centres in another order than R gives the same nearest centre", {

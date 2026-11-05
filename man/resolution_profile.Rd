@@ -528,29 +528,44 @@ the kind \code{"density"} is refined by Lloyd's iteration, for at most 100
 steps: each point goes to its nearest centre, each centre moves to the
 weighted mean of its points, and a centre left without a point stays
 where it is.  \code{iter_max} sets another limit.  The start with the
-lowest sum is kept, and a kept start that was cut off at the limit is
-reported (see "Conditions"): its centres are those of the last step.
+lowest sum is kept (under the density kind a later start replaces an
+earlier one only when its sum is lower by more than one part in ten
+million, so of starts whose sums agree to rounding the first is kept), and
+a kept start that was cut off at the limit is reported (see
+"Conditions"): its centres are those of the last step.
 Large layers can need more than 100 steps: on a simulated layer of 30,000
 points no start of six at 100 and 300 cells took more than 68, and on one
 of 60,000 points three of six took 102 to 152.
 
 The density kind depends on the points alone.  It works on the distinct
-locations in coordinate order, so the order of the rows does not matter.
-Its two tolerances are fractions of the extent of the points (the diagonal
-of their bounding box), so they do not depend on the unit of the
-coordinates: the neighbour distance is not taken below a millionth of the
-extent, and the iteration stops when no centre moves by \eqn{10^{-12}} of
-it.  On gridded locations the cells can still differ in another unit or
-with another origin: the searches count exact ties alone, so ties between
-equally near points are settled by the last bits of the coordinates,
-which move with the unit and the origin.  Points
-at one location count as that many points at it and share a cell; the
-neighbour distance is measured to the \code{density_k}-th nearest
-\emph{other} location, so it is not zero where locations repeat.  The
-neighbour searches use \pkg{FNN} when it is installed.  The result is the
-same without it; the search then takes time that grows with the square of
-the number of points, about thirty times as long for 10,000 points and
-2,000 centres.
+locations in coordinate order (see below for first coordinates equal but
+for their last bits), so the order of the rows does not matter.  Its
+tolerances do not depend on the unit of the coordinates: the neighbour
+distance is not taken below a millionth of the extent of the points (the
+diagonal of their bounding box), the iteration stops when no centre moves
+by \eqn{10^{-12}} of it, and the tie rules below are fractions of the
+extent or of the quantities they compare.  On gridded locations many
+points are equally near two neighbours or two centres, and the last bits
+of the coordinates, which move with the unit and the origin, would settle
+those ties.  So squared distances within one part in ten million of each
+other count as equal, a tie between neighbours goes to the lower first
+coordinate and then the lower second, a tie between centres goes to the
+lower-numbered one, first coordinates within that part of the extent count
+as equal when the rows and the locations are put in order, and so do
+weights within that part of each other when the first k-means++ centre is
+drawn.  The cells are then the same in another unit or with another origin
+as long as no coordinate moves by more than about a forty-millionth of the
+distance between neighbouring locations.  The rounding PROJ leaves when it
+changes the unit or the false origin, about \eqn{10^{-9}} m, is below that
+for locations more than a few centimetres apart.  Coordinates rounded more
+coarsely can give other cells: a lattice at 250 m with its coordinates
+stored in feet to four decimals does.  Points at one location count as
+that many points at it and share a cell; the neighbour distance is
+measured to the \code{density_k}-th nearest \emph{other} location, so it
+is not zero where locations repeat.  The neighbour searches use \pkg{FNN}
+when it is installed.  The result is the same without it; the search then
+takes time that grows with the square of the number of points, about
+thirty times as long for 10,000 points and 2,000 centres.
 
 The columns keep their meaning under \code{"density"}, because each is
 read off the cells and not off the way they were drawn.  \code{wss} is the

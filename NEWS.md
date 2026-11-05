@@ -648,7 +648,8 @@ old behaviour where there is a way.
   the record holds it.  On such cells `assign_features_to_polygons()` gives
   a point on the edge between two cells the cell `resolution_profile()`
   scored it in: its nearest centre in the record's CRS, and of two the same
-  distance away the lower-numbered one.  On gridded locations (raster cell
+  distance away (squared distances within one part in ten million of each
+  other) the lower-numbered one.  On gridded locations (raster cell
   centres, a regular sampling grid) the rows each cell holds are then the
   rows its count was scored on, and the summary's check reads `match`.
   `cell_values_at()` places a location on such an edge in the same cell,
@@ -2329,11 +2330,49 @@ old behaviour where there is a way.
   ten-millionth of its coordinates.  Where three or more cells' centroids
   coincide the values agree to rounding, and where ten or more do, which 8
   of them each takes can still change.  Layers without such ties are
-  unchanged.  Another projection still gives other distances.  On a lattice
-  the regions `resolution_profile()` draws can still differ in another unit
-  or with another origin, since the partition counts exact ties alone, and
-  its leave-one-out errors with them; `?resolution_profile` said the unit
-  did not matter to the density kind, and now says this.
+  unchanged.  Another projection still gives other distances.
+
+* **On gridded locations the density partition depended on the unit and the
+  origin of the coordinates.**  The regions `resolution_profile()`,
+  `get_voronoi_seeds()` and `voronoi_seeds_kmeans()` draw under `partition =
+  "density"`, and with them `rss`, `loo` and the count chosen, differed
+  between metres and feet, or with the origin moved by 0.1 m: on a 40 by 30
+  lattice at 250 m the default profile gave `loo` 0.2978 in EPSG:26915,
+  0.3068 in UTM 15N in US feet and 0.3006 with the false origin moved.  On a
+  lattice many distances tie exactly, and the last bits of the coordinates,
+  which move with the unit and the origin, settled them in four places: the
+  neighbour searches of the density weights and the nearest-centre search of
+  Lloyd's iteration counted exact ties alone; the first k-means++ centre was
+  drawn from weights equal but for their last bits, which `sample.int()`
+  reads as different; the locations, which the random draws index, were put
+  in order by first coordinates equal but for their last bits; and of two
+  starts whose sums agree to rounding, the rounding chose.  Now squared
+  distances within one part in ten million of each other are a tie in those
+  searches, as in the pooling's: a tie between neighbours goes to the lower
+  first coordinate, then the lower second, and a tie between centres to the
+  lower-numbered one.  The first centre is drawn on the weights with those
+  within one part in ten million of each other made equal, first coordinates
+  within that part of the extent count as equal when the rows and the
+  locations are put in order (so a profile that draws a subsample of the
+  rows draws the same locations in every frame), and a later start is kept
+  only when its sum is lower by more than that part.  The regions are the
+  same in another unit or with another origin as long as no coordinate moves
+  by more than about a forty-millionth of the distance between neighbouring
+  locations; coordinates rounded more coarsely can still give other regions.
+  The lattice above gives `loo` 0.3016 and the same regions in all three.
+  The scoring of a profile's levels, the refit of `select_resolution()`, the
+  edge rule of `assign_features_to_polygons()` and `cell_values_at()` take
+  the same tie between centres, so a row the profile scores in the cell of
+  the lower-numbered of two tied centres is assigned there too: for such a
+  row the assignment's margin also takes in its distance from the boundary
+  of the two cells, which midway between centres far apart can exceed one
+  part in 1e10 of the coordinates.  Layers on which no two distances, no two
+  weights, no two first coordinates and no two starts' sums come within one
+  part in ten million of each other are partitioned as before; on others the
+  regions, and every figure drawn from them, can differ from before for the
+  same seed.  `resolution_profile()` puts the rows in this order under
+  `partition = "kmeans"` too, so there a layer with two first coordinates
+  that close can also get other regions for the same seed.
 
 * **`summarize_by_cell()` read columns at extreme scales as having no
   spread.**  The test compared the spread inside the cells with the size of

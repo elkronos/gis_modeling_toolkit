@@ -287,17 +287,18 @@ test_that("on gridded locations the check says match exactly when no row was pla
   # GEOS or another arithmetic can settle the other way, so the counts are
   # held only on the platform the frozen fixture was recorded on.  There the
   # polygons alone put no row of either lattice in another cell than the
-  # profile's under the k-means kind, and 5 and 7 of 3,000 under the density
-  # kind, every one of them on a boundary; the assignment, on cells that
-  # carry the scored centres, gives each of them the cell the profile scored
-  # it in, so no row is elsewhere and the check reads match on all four.
-  # test-core-gridded-ties.R holds the branch that reports rows elsewhere.
+  # profile's under the k-means kind, and under the density kind 2 of 3,000 on
+  # the lattice in whole metres and none on the other, both on a boundary; the
+  # assignment, on cells that carry the scored centres, gives each of them the
+  # cell the profile scored it in, so no row is elsewhere and the check reads
+  # match on all four.  test-core-gridded-ties.R holds the branch that reports
+  # rows elsewhere.
   expect_identical(names(moved_in), c("whole metres kmeans", "whole metres density",
                                       "spacing 0.7 kmeans", "spacing 0.7 density"))
   expect_identical(names(on_edge), names(moved_in))
   recorded <- readRDS(test_path("fixtures", "core-frozen.rds"))$info
   if (core_frozen_same_platform(core_frozen_platform(), recorded)) {
-    expect_identical(unname(on_edge), c(0L, 5L, 0L, 7L))
+    expect_identical(unname(on_edge), c(0L, 2L, 0L, 0L))
     expect_identical(unname(moved_in), c(0L, 0L, 0L, 0L))
   }
 })

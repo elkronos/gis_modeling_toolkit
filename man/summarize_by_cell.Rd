@@ -404,17 +404,18 @@ neither warning.
 
 A row that is the same distance from two centres lies on the boundary
 between their cells, which happens on gridded locations.
-\code{\link[=resolution_profile]{resolution_profile()}} scores such a row in the cell of the
-lower-numbered centre, and \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, on cells
-built from the centres the profile scored, gives a point on that
-boundary the same cell, measured in the CRS the record names, so the
-comparison reads \code{"match"} on gridded locations too. It does so on
-cells that carry the record, for rows that have a CRS when the record
-names one. Rows without a CRS, rows assigned to the cells after they
-lost the record (written to a file and read back, say) and summarised
-with \code{cells_sf} set to the cells that carry it, and rows given their
-cells by another join are placed by the polygons alone, so a row on a
-boundary can sit in either cell.
+\code{\link[=resolution_profile]{resolution_profile()}} scores such a row in the cell of the lower-numbered
+centre (two distances count as the same when their squares agree to within
+one part in ten million), and \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, on cells
+built from the centres the profile scored, gives a point on that boundary
+the same cell, measured in the CRS the record names, so the comparison
+reads \code{"match"} on gridded locations too. It does so on cells that carry
+the record, for rows that have a CRS when the record names one. Rows
+without a CRS, rows assigned to the cells after they lost the record
+(written to a file and read back, say) and summarised with \code{cells_sf} set
+to the cells that carry it, and rows given their cells by another join are
+placed by the polygons alone, so a row on a boundary can sit in either
+cell.
 \code{\link[=build_tessellation]{build_tessellation()}} draws those cells in the CRS the record names,
 whatever CRS the seeds arrive in, unless its \code{crs} names another
 projected CRS. Cells built in another projected CRS are the

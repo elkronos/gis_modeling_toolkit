@@ -282,7 +282,8 @@
 #'   Its last element, \code{centres}, is the matrix of the centres the
 #'   profile scored at the count, in \code{crs} and in the profile's order
 #'   (\code{NULL} when the profile no longer holds them): each scored row was
-#'   given to the nearest of them, a tie to the lower-numbered one, and
+#'   given to the nearest of them, a tie (squared distances within
+#'   \code{.TIE_TOL} of each other) to the lower-numbered one, and
 #'   \code{assign_features_to_polygons()} and \code{cell_values_at()} read
 #'   them to place a point on the edge between two cells the same way.
 #' @keywords internal
