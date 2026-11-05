@@ -280,12 +280,20 @@ test_that("a far row of points with three coordinates is emptied in its own dime
 })
 
 test_that("the warning's entry in the help names the bound", {
-  rd <- tools::parse_Rd(test_path("..", "..", "man", "summarize_by_cell.Rd"))
+  # The source page from the source tree, the installed page under R CMD check,
+  # which runs the tests where there is no man/.
+  read_rd <- function(page) {
+    file <- test_path("..", "..", "man", page)
+    if (file.exists(file)) tools::parse_Rd(file) else tools::Rd_db("spatialkit")[[page]]
+  }
+  rd <- read_rd("summarize_by_cell.Rd")
+  expect_s3_class(rd, "Rd")
   txt <- gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
   expect_match(txt, paste0("rows with a value and a cell have no location: an empty point, or ",
                            "a coordinate that is not finite or lies beyond 1e150, as given or ",
                            "in the CRS the distances are measured in."), fixed = TRUE)
-  rd <- tools::parse_Rd(test_path("..", "..", "man", "cell_values_at.Rd"))
+  rd <- read_rd("cell_values_at.Rd")
+  expect_s3_class(rd, "Rd")
   txt <- gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
   expect_match(txt, paste0("not finite or lies beyond 1e150 as given or in the working CRS, ",
                            "has NA in every column"), fixed = TRUE)

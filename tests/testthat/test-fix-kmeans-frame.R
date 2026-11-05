@@ -132,8 +132,12 @@ test_that("lattices that span a kilometre or more get the same k-means cells in 
 })
 
 test_that("the help states how far the kind \"kmeans\" is the same in another unit or origin", {
+  # The source page from the source tree, the installed page under R CMD check,
+  # which runs the tests where there is no man/.
   txt <- function(f) {
-    rd <- tools::parse_Rd(test_path("..", "..", "man", f))
+    file <- test_path("..", "..", "man", f)
+    rd <- if (file.exists(file)) tools::parse_Rd(file) else tools::Rd_db("spatialkit")[[f]]
+    expect_s3_class(rd, "Rd")
     gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
   }
   rp <- txt("resolution_profile.Rd")
