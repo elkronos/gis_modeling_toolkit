@@ -2383,6 +2383,49 @@ old behaviour where there is a way.
   as well, and `summary()` says the values are out of range rather than
   constant.
 
+* **`summarize_by_cell(deff = "kish")` called a column in small units
+  constant.**  The ICC skipped a column as one that does not vary when its
+  standard deviation was below `.Machine$double.eps` (about 2.2e-16),
+  whatever the size of its values.  A column that varies, in units that make
+  its values of order 1e-16 or smaller, got an ICC of `NA` with the reason
+  "the column does not vary", no design effect and the uncorrected standard
+  errors, without a warning, while the same column in larger units got its
+  correction: on 800 points in 178 cells the ICC was 0.478 at a scale of 1
+  and of 1e-14 and `NA` at 1e-17, where the standard errors came out 2.2
+  times smaller.  Where only the rows with a cell id were that small, the
+  ICC was `NA` with "its values differ only on rows that fall in no cell",
+  and its standard errors `NA`.  Where the standard deviation is below
+  that floor or not finite, the column is now read again centred on its
+  median and scaled, as for the pooled values, and it does not vary only
+  where neither reading finds spread; a column with spread gets its ICC
+  from the scaled column, which is the ICC of the column.  A column whose
+  values are all equal still has an ICC of `NA` and standard errors of 0.
+  A column whose standard deviation is below that floor and whose values
+  differ only by their rounding (0.1 beside 0.3 / 3) still has an ICC of
+  `NA` with "the column does not vary"; its standard errors are 0 in a cell
+  whose values are equal, and of the size of that rounding in a cell whose
+  values differ.  A column whose standard deviation overflows, with values
+  near 1e200, had an ICC of `NA` with "the variance decomposition is
+  undefined"; its ICC is now estimated.  Columns whose standard deviation is
+  finite and at or above the floor give the ICC they gave.
+
+* **`summarize_by_cell()` gave standard errors of `NA` or 0 in silence for a
+  column in very large or very small units.**  The standard deviation inside
+  a cell squared the deviations of the raw values from the cell mean.  For
+  values above about 1e154 the squares overflowed, and in each cell where
+  they did `..sd_*` was `Inf` and the standard errors and intervals were
+  `NA`, under any `deff`, with no warning.  For a spread below about 1e-154 the squares lost
+  their bits, and at a spread of 1e-170 `..sd_*` and the standard errors
+  were 0, which says that the mean has no error.  Where the raw standard
+  deviation is not finite or is below 1e-150, it is now taken on the cell's
+  values centred on their median and divided by powers of two, so
+  `..sd_*`, `..se_*` and the intervals of a column follow its unit.  A cell whose standard
+  deviation is beyond the largest double (a spread of order 1e308) still has
+  `..sd_*` of `Inf` and standard errors of `NA`, now with a warning of class
+  `"spatialkit_sd_overflow"` that names the columns and gives the number of
+  such cells of each (fields `columns` and `cells`).  Every other standard
+  deviation is the one it was.
+
 * **The print of a profile of one level read "1 levels" and "WSS rises at 0
   step(s)".**  Every default profile has one level.  The print now reads "1
   level", and leaves out the count of steps the WSS curve rises at when

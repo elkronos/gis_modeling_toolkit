@@ -403,7 +403,9 @@
 #' What \code{.pool_fit()} returns as \code{constant} for the same values:
 #' no spread on the raw values, and none on the column centred and scaled
 #' beyond the rounding of its values (\code{.scaled_rounding()}).
-#' \code{resolution_profile()} reads it for its estimate's columns.
+#' \code{resolution_profile()} reads it for its estimate's columns, and the
+#' Kish ICC of \code{summarize_by_cell()} for a column whose standard
+#' deviation is below \code{.Machine$double.eps} or not finite.
 #'
 #' @param y The values, at least one.
 #' @param sc \code{.spread_scaled(y)}.

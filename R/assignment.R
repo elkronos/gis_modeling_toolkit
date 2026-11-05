@@ -1121,6 +1121,33 @@ assign_features_to_polygons <- function(
 }
 
 
+#' Standard deviation of a cell's values, in any unit
+#'
+#' \code{sd()} squares the deviations from the mean.  The squares overflow
+#' for values above about 1e154, where \code{sd()} is \code{Inf} (or
+#' \code{NaN} where the mean overflows too), and fall below the smallest
+#' normal double for a spread below about 1e-154, where they lose their bits
+#' and \code{sd()} is 0 or off.  Where the raw standard deviation is not
+#' finite or is below \code{.POOL_Y_MIN}, it is taken on
+#' \code{.spread_scaled()} of the values and multiplied by its scale, a
+#' power of two; elsewhere it is \code{sd()} of the values as they stand.
+#' It is \code{Inf} only where the standard deviation is beyond the largest
+#' double.  The raw reading is \code{sd(x, na.rm = TRUE)} even where
+#' \code{x} has no \code{NA}: \code{sd(x)} takes another path through
+#' \code{cov()} and can differ from it in the last bit.
+#'
+#' @param x Finite values or \code{NA}, at least two that are not \code{NA}.
+#' @return The standard deviation of the values that are not \code{NA}.
+#' @keywords internal
+#' @noRd
+.cell_sd <- function(x) {
+  s <- sd(x, na.rm = TRUE)
+  if (is.finite(s) && s >= .POOL_Y_MIN) return(s)
+  sc <- .spread_scaled(x[!is.na(x)])
+  sd(sc$y) * sc$scale
+}
+
+
 #' Per-cell design effect from a fitted variogram
 #'
 #' For \code{n} observations in a cell with correlation matrix \code{R}, the
@@ -1382,6 +1409,16 @@ assign_features_to_polygons <- function(
 #' the steps of one pipeline agree on a cell's mean. A function in `agg_funs`
 #' therefore never sees an infinite value: `max` returns the largest finite
 #' value, and infinities cannot be counted through `agg_funs`.
+#'
+#' `..sd_*` is the standard deviation of the cell's values in the units of
+#' the column, at any size. Where the raw squares overflow or lose their bits
+#' (a standard deviation that is not finite or is below 1e-150), it is taken
+#' on the values centred on their median and divided by powers of two,
+#' which keeps their spread. A cell whose
+#' standard deviation is beyond the largest double (about 1.8e308) has
+#' `..sd_*` of `Inf` and standard errors and interval of `NA`, with a warning
+#' of class `"spatialkit_sd_overflow"` (the condition carries `columns` and
+#' `cells`, the number of such cells of each column).
 #'
 #' # Spatial autocorrelation and standard-error bias
 #'
@@ -1953,7 +1990,12 @@ assign_features_to_polygons <- function(
 #'       column's standard errors are the uncorrected ones. A column that
 #'       does not vary (all its values equal, those of rows with no cell id
 #'       included) has an ICC of `NA` and standard errors of 0, with no
-#'       warning: its mean has no error whatever the correlation. The
+#'       warning: its mean has no error whatever the correlation. A column
+#'       whose standard deviation is below `.Machine$double.eps` and whose
+#'       values differ only by their rounding (0.1 beside 0.3 / 3) is read
+#'       the same way, as one that does not vary; its standard errors are 0
+#'       in a cell whose values are equal and of the size of that rounding in
+#'       one whose values differ. The
 #'       `"deff_applied"` attribute is attached when any ICC is positive, so
 #'       when all are 0 or `NA` there is none.}
 #'     \item{A positive number}{Applied as a uniform design effect to every
@@ -2545,11 +2587,18 @@ summarize_by_cell <- function(assigned_points_sf,
       # equal too.  Read from the rows with a cell id alone, a column equal
       # on them and varying on the others was taken for one that does not
       # vary, and its no-id row kept the uncorrected standard error.
+      # A standard deviation below .Machine$double.eps is not by itself no
+      # spread: a column in small units has one, and a column near 1e200 has
+      # one that overflows.  There the column is read again by the pool's
+      # test (.constant_column()), and it does not vary only where neither
+      # its raw values nor its values centred and scaled show spread beyond
+      # their rounding.
       x_all <- df[[v]][!is.na(df[[v]])]
       n_all <- n_all + length(x_all)
       s_all <- sd(x_all)
-      if (!is.na(s_all) && s_all < .Machine$double.eps) {
-        # Constant column — skip, contributes no variance information
+      if (!is.na(s_all) && !(s_all >= .Machine$double.eps && is.finite(s_all)) &&
+          .constant_column(x_all)) {
+        # No spread: the column adds no variance information.
         n_const <- n_const + 1L
         next
       }
@@ -2560,7 +2609,17 @@ summarize_by_cell <- function(assigned_points_sf,
       n_id <- n_id + sum(ok)
       raw <- df[[v]][ok]
       s <- sd(raw)
-      if (is.na(s) || s < .Machine$double.eps) next
+      if (is.na(s)) next
+      # The same reading on the rows with a cell id.  A column with spread
+      # there is z-scored from .spread_scaled(), which divides by powers of
+      # two, since its raw squares can underflow or overflow; the ICC does
+      # not change under a shift and a scale.  Elsewhere the raw values are
+      # z-scored as they stand.
+      if (!(s >= .Machine$double.eps && is.finite(s))) {
+        if (.constant_column(raw)) next
+        raw <- .spread_scaled(raw)$y
+        s <- sd(raw)
+      }
       vals <- c(vals, (raw - mean(raw)) / s)
       grps <- c(grps, paste(v, as.character(df[[id_col]][ok]), sep = "\r"))
     }
@@ -2778,8 +2837,11 @@ summarize_by_cell <- function(assigned_points_sf,
         f <- fn; function(x) f(x)
       })
     }
+    # .cell_sd(), not sd(): the raw squares overflow for values near 1e200
+    # and underflow for a spread near 1e-170, which gave standard errors of
+    # NA or 0 in every cell, with no warning.
     fns[[paste0("..sd_", prefix)]] <- function(x) {
-      if (sum(!is.na(x)) > 1L) sd(x, na.rm = TRUE) else NA_real_
+      if (sum(!is.na(x)) > 1L) .cell_sd(x) else NA_real_
     }
     # The per-column, per-cell quantities behind the SE and (when asked for)
     # the interval: the column's own non-missing count, sd, design effect and
@@ -2807,7 +2869,7 @@ summarize_by_cell <- function(assigned_points_sf,
         if (n_valid <= 1L)
           return(list(n_valid = n_valid, s = NA_real_, deff = NA_real_,
                       df = NA_real_))
-        s <- sd(x, na.rm = TRUE)
+        s <- .cell_sd(x)
         # The df of s^2.  Exactly n_valid - 1 under independence, under a
         # caller-supplied constant deff (a uniform inflation of the SE says
         # nothing about the variance estimate) and under Kish's exchangeable
@@ -3279,6 +3341,30 @@ summarize_by_cell <- function(assigned_points_sf,
   # equal to n, sd and se NA), with no message.  Build it under a reserved
   # name and rename once nothing can shadow it.
   names(out)[names(out) == "..n_rows"] <- "n"
+
+  # --- a standard deviation beyond the largest double ---
+  # .cell_sd() gives Inf only where the spread inside the cell is of order
+  # 1e308; .se_with_deff() then returns NA, and that is said here.
+  sd_over <- integer(0)
+  for (sd_col in grep("^\\.\\.sd_(resp|pred)_", names(out), value = TRUE)) {
+    k_inf <- sum(is.infinite(out[[sd_col]]))
+    v <- sub("^\\.\\.sd_(resp|pred)_", "", sd_col)
+    if (k_inf > 0L && !(v %in% names(sd_over))) sd_over[[v]] <- k_inf
+  }
+  if (length(sd_over)) {
+    several <- length(sd_over) > 1L
+    .warn_classed("spatialkit_sd_overflow", paste0(
+      "summarize_by_cell(): the standard deviation of %s is beyond the largest ",
+      "double (about 1.8e308), so `..sd_*` is Inf in %s and the standard errors%s ",
+      "are NA there. Divide %s by a power of ten to summarise %s."),
+      paste(sprintf("'%s' (%d %s)", names(sd_over), sd_over,
+                    ifelse(sd_over == 1L, "cell", "cells")), collapse = ", "),
+      if (sum(sd_over) == 1L) "that cell" else "those cells",
+      if (is.null(conf_level)) "" else " and intervals",
+      if (several) "those columns" else "the column",
+      if (several) "them" else "it",
+      data = list(columns = names(sd_over), cells = unname(sd_over)))
+  }
 
   # cell_weight is the EFFECTIVE sample size of the primary variable -- the
   # response when there is one, else the first predictor -- so it is built from

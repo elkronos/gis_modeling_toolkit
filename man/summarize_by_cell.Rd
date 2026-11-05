@@ -135,7 +135,12 @@ estimate at or below 0 is another case: the ICC is 0 and the
 column's standard errors are the uncorrected ones. A column that
 does not vary (all its values equal, those of rows with no cell id
 included) has an ICC of \code{NA} and standard errors of 0, with no
-warning: its mean has no error whatever the correlation. The
+warning: its mean has no error whatever the correlation. A column
+whose standard deviation is below \code{.Machine$double.eps} and whose
+values differ only by their rounding (0.1 beside 0.3 / 3) is read
+the same way, as one that does not vary; its standard errors are 0
+in a cell whose values are equal and of the size of that rounding in
+one whose values differ. The
 \code{"deff_applied"} attribute is attached when any ICC is positive, so
 when all are 0 or \code{NA} there is none.}
 \item{A positive number}{Applied as a uniform design effect to every
@@ -487,6 +492,16 @@ number of rows and cells affected (the condition carries \code{n} and
 the steps of one pipeline agree on a cell's mean. A function in \code{agg_funs}
 therefore never sees an infinite value: \code{max} returns the largest finite
 value, and infinities cannot be counted through \code{agg_funs}.
+
+\verb{..sd_*} is the standard deviation of the cell's values in the units of
+the column, at any size. Where the raw squares overflow or lose their bits
+(a standard deviation that is not finite or is below 1e-150), it is taken
+on the values centred on their median and divided by powers of two,
+which keeps their spread. A cell whose
+standard deviation is beyond the largest double (about 1.8e308) has
+\verb{..sd_*} of \code{Inf} and standard errors and interval of \code{NA}, with a warning
+of class \code{"spatialkit_sd_overflow"} (the condition carries \code{columns} and
+\code{cells}, the number of such cells of each column).
 }
 \section{Spatial autocorrelation and standard-error bias}{
 By default (\code{deff = 1}), the \verb{..se_*} columns are computed as
