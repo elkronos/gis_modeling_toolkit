@@ -1505,6 +1505,28 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   if (.mixes_zm(x)) sf::st_zm(x, drop = TRUE, what = "ZM") else x
 }
 
+#' A layer only read for its x and y, in XY when it mixes dimensions or
+#' carries M
+#'
+#' For the layers a builder or a seeder reads and does not return (the
+#' tessellation builders' \code{boundary}, points and cover, the seeders'
+#' \code{boundary}): the cells and seeds made from them are defined in x and
+#' y.  A layer that mixes dimensions is read in XY, as by
+#' \code{.xy_if_mixed()}, and so is one whose geometries carry M (XYM or
+#' XYZM), which GEOS refuses ("GEOS does not support XYM or XYZM
+#' geometries").  A layer XY or XYZ throughout is returned as it came.
+#'
+#' @param x An sf or sfc object.
+#' @return \code{x}, or its copy in XY.
+#' @keywords internal
+#' @noRd
+.xy_if_mixed_or_m <- function(x) {
+  d <- .geom_dims(x)
+  if (length(d) > 1L || any(d %in% c("XYM", "XYZM")))
+    sf::st_zm(x, drop = TRUE, what = "ZM")
+  else x
+}
+
 #' A layer about to be transformed and returned, read in x and y when it
 #' mixes dimensions, with a warning
 #'

@@ -7,7 +7,9 @@
 clip_target_for(points_sf, boundary = NULL, expand = 0, quiet = FALSE)
 }
 \arguments{
-\item{points_sf}{An sf object with POINT/MULTIPOINT geometry.}
+\item{points_sf}{An sf object with POINT/MULTIPOINT geometry. Points that
+mix XY and XYZ (or XYM), or that carry M, are read in x and y, since sf
+reads a layer in the dimension of its first geometry and GEOS refuses M.}
 
 \item{boundary}{Optional polygonal sf object. One with no CRS, given with
 points that have one, is interpreted in the points' own CRS, with a
@@ -17,7 +19,8 @@ reprojected, anything else is stamped with the points' CRS. With lon/lat
 points it is read as lon/lat when its coordinates fit the lon/lat
 envelope, and refused with an error otherwise. A boundary that mixes XY
 and XYZ (or XYM) geometries is read without Z and M, since sf reads a
-layer in the dimension of its first geometry.}
+layer in the dimension of its first geometry. So is one whose
+geometries carry M (XYM or XYZM), which GEOS refuses.}
 
 \item{expand}{Numeric expansion distance or fraction (0–1 = fraction of
 extent). Absolute values are expressed in the units of the CRS the clip

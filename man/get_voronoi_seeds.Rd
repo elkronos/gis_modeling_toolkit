@@ -22,7 +22,8 @@ get_voronoi_seeds(
 \arguments{
 \item{boundary}{Optional polygonal sf object defining the sampling area.
 One that mixes XY and XYZ (or XYM) geometries is read without Z and M,
-since sf reads a layer in the dimension of its first geometry.}
+since sf reads a layer in the dimension of its first geometry. So is one whose
+geometries carry M (XYM or XYZM), which GEOS refuses.}
 
 \item{method}{One of "kmeans", "random", "provided".}
 

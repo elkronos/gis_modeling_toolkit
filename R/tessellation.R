@@ -741,7 +741,9 @@
 #' corners with no data, so a hex or square grid laid over it has cells that
 #' hold no points; pass the study-area polygon when there is one.
 #'
-#' @param points_sf An sf object with POINT/MULTIPOINT geometry.
+#' @param points_sf An sf object with POINT/MULTIPOINT geometry. Points that
+#'   mix XY and XYZ (or XYM), or that carry M, are read in x and y, since sf
+#'   reads a layer in the dimension of its first geometry and GEOS refuses M.
 #' @param boundary Optional polygonal sf object. One with no CRS, given with
 #'   points that have one, is interpreted in the points' own CRS, with a
 #'   warning. With points in a projected CRS it is read as [harmonize_crs()]
@@ -750,7 +752,8 @@
 #'   points it is read as lon/lat when its coordinates fit the lon/lat
 #'   envelope, and refused with an error otherwise. A boundary that mixes XY
 #'   and XYZ (or XYM) geometries is read without Z and M, since sf reads a
-#'   layer in the dimension of its first geometry.
+#'   layer in the dimension of its first geometry. So is one whose
+#'   geometries carry M (XYM or XYZM), which GEOS refuses.
 #' @param expand Numeric expansion distance or fraction (0–1 = fraction of
 #'   extent). Absolute values are expressed in the units of the CRS the clip
 #'   target is built in. Because [sf::st_buffer()] interprets `dist` as
@@ -779,10 +782,15 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   .msg <- function(...) if (!quiet) message(...)
   .assert_sf(points_sf, c("POINT", "MULTIPOINT"), "points_sf")
   .check_boundary_arg(boundary, "clip_target_for")
-  # A boundary that mixes XY and XYZ (or XYM) geometries is read in XY: sf
-  # reads a layer in the dimension of its first geometry, and GEOS stopped on
-  # an XYZ ring among XY ones.
-  if (!is.null(boundary)) boundary <- .xy_if_mixed(boundary)
+  # Points and a boundary that mix XY and XYZ (or XYM) geometries, or whose
+  # geometries carry M, are read in XY (.xy_if_mixed_or_m()): sf reads a
+  # layer in the dimension of its first geometry, so the move of points in
+  # degrees stopped with "OGR error", and GEOS stopped on an XYZ ring among
+  # XY ones and on M.  The target is new geometry, so nothing is said; the
+  # points are flattened before ensure_projected(), which would warn of an
+  # XY copy this function does not return.
+  points_sf <- .xy_if_mixed_or_m(points_sf)
+  if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
   # .expand_distance() below TOLERATES a malformed `expand` by returning 0,
   # which turned `expand = c(0.05, 0.05)` into a silent no-op -- the returned
   # bbox was byte-identical to expand = 0, with no condition raised -- and a
@@ -1043,7 +1051,10 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' @param points_sf An sf object with POINT/MULTIPOINT geometries. Points with
 #'   no CRS whose coordinates look like lon/lat (the heuristic
 #'   [ensure_projected()] applies, with its warning) are taken as EPSG:4326
-#'   and projected, as lon/lat points are.
+#'   and projected, as lon/lat points are. Points that mix XY and XYZ (or
+#'   XYM), or that carry M, are read in x and y, since sf reads a layer in the
+#'   dimension of its first geometry and GEOS refuses M; the attributes the
+#'   seeding functions set on them are kept.
 #' @param boundary Optional polygonal sf object. When exactly one of
 #'   `points_sf` and `boundary` has a CRS, the other is interpreted in it, with
 #'   a warning. CRS-less points, and a CRS-less boundary given with projected
@@ -1055,7 +1066,8 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   coordinates fit the lon/lat envelope, and refused with an error
 #'   otherwise. A boundary that mixes XY and XYZ (or XYM) geometries is read
 #'   without Z and M, since sf reads a layer in the dimension of its first
-#'   geometry.
+#'   geometry. So is one whose
+#'   geometries carry M (XYM or XYZM), which GEOS refuses.
 #' @param cover Optional sf or sfc layer the cells have to hold, read when
 #'   there is no `boundary`: the observations (points), or a polygon. The
 #'   boundary is then derived from it instead of from `points_sf`: the convex
@@ -1072,7 +1084,8 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   and `cover` is only checked against them: the number of its points that
 #'   fall outside every cell is returned as `params$cover_outside`, with a
 #'   warning of class `"spatialkit_unassigned"` when it is not 0 (a polygon
-#'   cover is not checked).
+#'   cover is not checked). A cover, given or attached, that mixes XY and XYZ
+#'   (or XYM) geometries, or that carries M, is read in x and y.
 #' @param expand Numeric; absolute distance, in the working CRS's units, by
 #'   which the boundary (or the hull derived from the points) is grown before
 #'   the diagram is built. With `clip = TRUE` the cells are clipped to the
@@ -1181,12 +1194,20 @@ create_voronoi_polygons <- function(
 ) {
   .assert_sf(points_sf, c("POINT", "MULTIPOINT"), "points_sf")
   .check_boundary_arg(boundary, "create_voronoi_polygons")
-  # A boundary that mixes XY and XYZ (or XYM) geometries is read in XY: sf
-  # reads a layer in the dimension of its first geometry, and GEOS stopped on
-  # an XYZ ring among XY ones.
-  if (!is.null(boundary)) boundary <- .xy_if_mixed(boundary)
   .check_boundary_arg(cover, "create_voronoi_polygons", label = "cover",
                       what = "point or polygon")
+  # The points, the boundary and the cover are read in XY when they mix XY
+  # and XYZ (or XYM) geometries or carry M (.xy_if_mixed_or_m()): sf reads a
+  # layer in the dimension of its first geometry, so the union, the
+  # transform and the read of the coordinates stopped with GEOS's, sf's or
+  # base R's message, GEOS stopped on M, and a mixed cover was set aside as
+  # giving no polygon.  The cells are new geometry and none of the three is
+  # returned, so nothing is said.  sf::st_zm() keeps the points' attributes,
+  # their cover and count record among them.  A layer XY or XYZ throughout
+  # takes its old path.
+  points_sf <- .xy_if_mixed_or_m(points_sf)
+  if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
+  if (!is.null(cover)) cover <- .xy_if_mixed_or_m(cover)
   if (nrow(points_sf) < 1) stop("create_voronoi_polygons(): `points_sf` has no rows.")
   .msg <- function(...) if (!quiet) message(...)
   # The ground the cells have to hold, when there is no boundary: the `cover`
@@ -1199,7 +1220,7 @@ create_voronoi_polygons <- function(
     cover_geom <- sf::st_geometry(cover)
     cover_from <- "cover"
   } else if (inherits(attr(points_sf, "cover", exact = TRUE), c("sf", "sfc"))) {
-    cover_geom <- sf::st_geometry(attr(points_sf, "cover", exact = TRUE))
+    cover_geom <- .xy_if_mixed_or_m(sf::st_geometry(attr(points_sf, "cover", exact = TRUE)))
     cover_from <- "seeds' cover"
   }
   seed_like <- .looks_like_seeds(points_sf)
@@ -1522,7 +1543,8 @@ create_voronoi_polygons <- function(
 #'
 #' @param boundary Polygonal sf or sfc object. One that mixes XY and XYZ (or
 #'   XYM) geometries is read without Z and M, since sf reads a layer in the
-#'   dimension of its first geometry.
+#'   dimension of its first geometry. So is one whose
+#'   geometries carry M (XYM or XYZM), which GEOS refuses.
 #' @param target_cells Optional approximate desired number of cells.  The cell
 #'   \emph{size} is derived from it as \code{sqrt(area / target_cells)}, where
 #'   \code{area} is that of the boundary's bounding box, so square grids get
@@ -1610,8 +1632,9 @@ create_grid_polygons <- function(
 
   # A boundary that mixes XY and XYZ (or XYM) geometries is read in XY: sf
   # reads a layer in the dimension of its first geometry, and GEOS stopped on
-  # an XYZ ring among XY ones.
-  boundary <- .xy_if_mixed(.as_sf(boundary))
+  # an XYZ ring among XY ones.  So is a boundary whose polygons carry M, on
+  # which GEOS stopped (.xy_if_mixed_or_m()).
+  boundary <- .xy_if_mixed_or_m(.as_sf(boundary))
   # A layer as `crs` means its CRS; passed on as it was, it stopped with "the
   # condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
@@ -1880,7 +1903,9 @@ create_grid_polygons <- function(
 #' \code{cell_id} among the cells it touches.  See
 #' \code{\link{create_voronoi_polygons}()}.
 #'
-#' @param points_sf An sf object with POINT/MULTIPOINT geometry.
+#' @param points_sf An sf object with POINT/MULTIPOINT geometry. Points that
+#'   mix XY and XYZ (or XYM), or that carry M, are read in x and y, since sf
+#'   reads a layer in the dimension of its first geometry and GEOS refuses M.
 #' @param boundary Polygonal sf/sfc study area. **Required** for
 #'   `method = "hex"` and `method = "square"`, which have no extent of their
 #'   own to lay a grid over and error without it; supply the study-area polygon,
@@ -1904,7 +1929,8 @@ create_grid_polygons <- function(
 #'   envelope is then refused with an error), otherwise left in the same
 #'   unnamed planar space. A boundary that mixes XY and XYZ (or XYM)
 #'   geometries is read without Z and M, since sf reads a layer in the
-#'   dimension of its first geometry.
+#'   dimension of its first geometry. So is one whose
+#'   geometries carry M (XYM or XYZM), which GEOS refuses.
 #' @param method One of "voronoi", "triangles", "hex", "square".
 #' @param approx_n_cells Approximate number of cells.  Read by
 #'   \code{method = "hex"} and \code{"square"} only: \code{"voronoi"} grows
@@ -1977,8 +2003,9 @@ create_grid_polygons <- function(
 #'   transformed. With a `boundary` (and for the other methods) the cover
 #'   sizes nothing: when it is a point layer, the number of its points that
 #'   fall outside every cell is returned as `params$cover_outside`, with a
-#'   warning of class `"spatialkit_unassigned"` when it is not 0. See
-#'   [create_voronoi_polygons()].
+#'   warning of class `"spatialkit_unassigned"` when it is not 0. A cover,
+#'   given or attached, that mixes XY and XYZ (or XYM) geometries, or that
+#'   carries M, is read in x and y. See [create_voronoi_polygons()].
 #' @param expand Buffer distance, in the working CRS's units, by which the
 #'   Voronoi boundary is grown before the diagram is built. Applied by
 #'   `method = "voronoi"` only; the `"hex"`, `"square"` and `"triangles"`
@@ -2123,12 +2150,19 @@ build_tessellation <- function(
              stop(paste0(conditionMessage(e), hint), call. = FALSE)
            })
   .check_boundary_arg(boundary, "build_tessellation")
-  # A boundary that mixes XY and XYZ (or XYM) geometries is read in XY: sf
-  # reads a layer in the dimension of its first geometry, and GEOS stopped on
-  # an XYZ ring among XY ones.
-  if (!is.null(boundary)) boundary <- .xy_if_mixed(boundary)
   .check_boundary_arg(cover, "build_tessellation", label = "cover",
                       what = "point or polygon")
+  # The points, the boundary and the cover are read in XY when they mix XY
+  # and XYZ (or XYM) geometries or carry M (.xy_if_mixed_or_m()), before
+  # any of them is moved, read or handed on: sf reads a layer in the
+  # dimension of its first geometry, so the transform, the index and the
+  # read of the coordinates stopped with sf's, GEOS's or base R's message,
+  # and GEOS stopped on M.  The cells are new geometry and none of the three
+  # is returned, so nothing is said.  A layer XY or XYZ throughout takes its
+  # old path.
+  points_sf <- .xy_if_mixed_or_m(points_sf)
+  if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
+  if (!is.null(cover)) cover <- .xy_if_mixed_or_m(cover)
   # A layer as `crs` means its CRS (as ensure_projected(target_crs =) reads
   # it); passed on as it was, it stopped with "the condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
@@ -2139,7 +2173,8 @@ build_tessellation <- function(
   points_in  <- points_sf
   cover_attr <- attr(points_sf, "cover", exact = TRUE)
   cover_geom <- if (!is.null(cover)) sf::st_geometry(cover)
-                else if (inherits(cover_attr, c("sf", "sfc"))) sf::st_geometry(cover_attr)
+                else if (inherits(cover_attr, c("sf", "sfc")))
+                  .xy_if_mixed_or_m(sf::st_geometry(cover_attr))
                 else NULL
 
   # The level-selection step's own answer is accepted here, so the count

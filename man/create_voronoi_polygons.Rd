@@ -19,7 +19,10 @@ create_voronoi_polygons(
 \item{points_sf}{An sf object with POINT/MULTIPOINT geometries. Points with
 no CRS whose coordinates look like lon/lat (the heuristic
 \code{\link[=ensure_projected]{ensure_projected()}} applies, with its warning) are taken as EPSG:4326
-and projected, as lon/lat points are.}
+and projected, as lon/lat points are. Points that mix XY and XYZ (or
+XYM), or that carry M, are read in x and y, since sf reads a layer in the
+dimension of its first geometry and GEOS refuses M; the attributes the
+seeding functions set on them are kept.}
 
 \item{boundary}{Optional polygonal sf object. When exactly one of
 \code{points_sf} and \code{boundary} has a CRS, the other is interpreted in it, with
@@ -32,7 +35,8 @@ with CRS-less points taken as lon/lat) is read as lon/lat when its
 coordinates fit the lon/lat envelope, and refused with an error
 otherwise. A boundary that mixes XY and XYZ (or XYM) geometries is read
 without Z and M, since sf reads a layer in the dimension of its first
-geometry.}
+geometry. So is one whose
+geometries carry M (XYM or XYZM), which GEOS refuses.}
 
 \item{expand}{Numeric; absolute distance, in the working CRS's units, by
 which the boundary (or the hull derived from the points) is grown before
@@ -91,7 +95,8 @@ set aside with a warning. With a \code{boundary}, the boundary sets the cells
 and \code{cover} is only checked against them: the number of its points that
 fall outside every cell is returned as \code{params$cover_outside}, with a
 warning of class \code{"spatialkit_unassigned"} when it is not 0 (a polygon
-cover is not checked).}
+cover is not checked). A cover, given or attached, that mixes XY and XYZ
+(or XYM) geometries, or that carries M, is read in x and y.}
 }
 \value{
 A list with \code{cells}, \code{index}, \code{boundary},

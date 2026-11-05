@@ -233,11 +233,14 @@ test_that("layers in one dimension take the path they took", {
   expect_identical(sf::st_geometry(s), sf::st_geometry(voronoi_seeds_random(F$bnd, k = 10, set_seed = 1)))
   # The cover of a boundary XYZ throughout keeps its Z: nothing flattens it.
   expect_identical(attr(s, "cover"), sf::st_geometry(bz))
-  # ensure_stable_poly_id() on cells XYZ throughout: no warning about Z, the
-  # XY cells' IDs, and without the repair the caller's own rows.
+  # ensure_stable_poly_id() on cells XYZ throughout: the repair is made in
+  # XY and says so, with the XY cells' IDs; without the repair the caller's
+  # own rows.
   cz <- .zi_all(F$cells)
   got <- .zi_catch(ensure_stable_poly_id(cz))
-  expect_false("spatialkit_zm_dropped" %in% got$classes)
+  expect_true("spatialkit_zm_dropped" %in% got$classes)
+  expect_match(got$texts, "16 of the 16 geometries of `polygons_sf` carry Z or M", fixed = TRUE,
+               all = FALSE)
   expect_identical(got$value$k, ensure_stable_poly_id(F$cells)$k)
   got <- suppressMessages(ensure_stable_poly_id(cz, make_valid = FALSE))
   expect_identical(.zi_dims(got), rep("XYZ", 16L))

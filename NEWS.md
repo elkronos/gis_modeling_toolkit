@@ -2404,7 +2404,9 @@ old behaviour where there is a way.
   with their Z, keyed in XY; with `make_valid = TRUE` (the default) it
   returns its repaired copy, which for such polygons is made in XY, with a
   warning of class `spatialkit_zm_dropped`.  A layer in one dimension, XY
-  or XYZ throughout, is read as before.
+  or XYZ throughout, is read as before, save that
+  `ensure_stable_poly_id(make_valid = TRUE)` now repairs polygons that all
+  carry Z or M in XY with a warning (see below).
 
 * **`get_voronoi_seeds(method = "provided")` stopped with sf's "OGR
   error" on `seeds` in another CRS than `boundary` whose first point had a
@@ -2414,6 +2416,72 @@ old behaviour where there is a way.
   CRS in XY, with a warning of class `spatialkit_zm_dropped` that carries
   the rows with Z or M as `rows`.  Seeds in the boundary's CRS, or given
   without a boundary, come back as they were given, Z included.
+
+* **`create_voronoi_polygons()`, `build_tessellation()` and
+  `clip_target_for()` stopped with a bare message from base R, sf or GEOS
+  on `points_sf` that mixed XY and XYZ (or XYM) points, and set a mixed
+  `cover` aside under a false warning.**  sf reads a layer in the dimension
+  of its first geometry.  With an XYZ point first among XY points,
+  `create_voronoi_polygons()` stopped with GEOS's "ParseException:
+  Unexpected EOF parsing WKB" (or "GEOS does not support XYM"), and
+  `build_tessellation()` with sf's "OGR error" for every method; with the
+  XYZ point later, `create_voronoi_polygons()` and `method = "triangles"`
+  stopped with base R's "length of 'dimnames' [2] not equal to array
+  extent".  Points in degrees ran, but raised `ensure_projected()`'s
+  `spatialkit_zm_dropped` warning about an XY copy none of the three
+  functions returns.  A polygon `cover` that mixed dimensions, given as the
+  argument or carried by the seeds, raised `spatialkit_no_cover` ("gives no
+  polygon in the working CRS", or "could not be put in the working CRS")
+  and the cells were built on the points' own hull; a point `cover` with an
+  XYZ point first, checked against cells built in a `boundary`, stopped
+  with "OGR error".  The points and the cover are now read in x and y,
+  before they are moved or read, with no warning, as the cells and the
+  clip target are new geometry, and give what the same rows in XY give.
+  The seeds keep their attributes, their cover and count record among
+  them.  A layer XY or XYZ throughout is read as before.
+
+* **The tessellation builders, the grid builders, the seeders and
+  `clip_target_for()` stopped with GEOS's "GEOS does not support XYM or
+  XYZM geometries" on a projected `boundary` whose polygons all carry M,
+  where the same boundary with one XY polygon among them ran.**  In
+  degrees the grids, the builders and `clip_target_for()` stopped the same
+  way, and the seeders ran but attached the cover with M.
+  `get_voronoi_seeds(method = "kmeans")` given `sample_points` ran in
+  either CRS, and a builder given its seeds set their cover aside under a
+  false `spatialkit_no_cover` warning or stopped.  The cells and seeds
+  are defined in x and y and M is read nowhere.  Such a boundary is now
+  read in x and y by `create_grid_polygons()`,
+  `create_grid_polygons_cached()`, `create_voronoi_polygons()`,
+  `build_tessellation()`, `clip_target_for()`, `get_voronoi_seeds()` and
+  `voronoi_seeds_random()`, with no warning, and gives what the same
+  boundary in XY gives; `create_grid_polygons_cached()` keeps one cache
+  entry for the two, and the seeders' cover is the boundary in XY.  So are
+  `points_sf` and `cover` of `create_voronoi_polygons()` and
+  `build_tessellation()` (and `points_sf` of `clip_target_for()`) that
+  carry M: points XYM throughout stopped the Voronoi builder and the grids
+  with the same message, and a cover XYM throughout was set aside with the
+  false warning above.  A layer XY or XYZ throughout is read as before;
+  the cover the seeders attach to a boundary XYZ throughout keeps its Z.
+
+* **`ensure_stable_poly_id(make_valid = TRUE)`, the default, returned
+  polygons that all carry Z in XY without a word, and stopped with GEOS's
+  "GEOS does not support XYM or XYZM geometries" on projected polygons
+  that all carry M (in degrees they came back in XY without a word).**  The rows returned are the repaired polygons, and
+  `sf::st_make_valid()` on GEOS 3.13 drops Z from every polygon it repairs
+  and refuses M.  Only a layer that mixed XY and XYZ (or XYM) polygons
+  raised a warning, which let a reader take a layer in one dimension to
+  keep its Z.  Z and M are now dropped before the repair whenever any
+  polygon carries them, so the rows returned are XY on every GEOS version,
+  and a warning of class `spatialkit_zm_dropped` names `polygons_sf`, says
+  how many of its geometries carry Z or M, and carries their rows as
+  `rows`.  The same holds for an XYZ layer with an empty XY polygon after
+  the first.  An empty polygon in Z or M has no coordinates to drop, so it
+  is not counted, and XY polygons with such an empty one among them raise
+  no warning.  Mixed layers keep their warning.  With `make_valid = FALSE`
+  the rows come back with their Z and M, with no warning, as before.  The
+  cells `create_voronoi_polygons()`, `build_tessellation()` and
+  `create_grid_polygons_cached()` key are new geometry in XY and raise no
+  such warning.
 
 * **`cell_values_at()` without `seeds` gave every location the value `NA`,
   marked filled, when `values` had no cell ID.**  A `values` whose ID

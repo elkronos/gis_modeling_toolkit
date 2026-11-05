@@ -25,10 +25,13 @@ and M, since sf reads a layer in the dimension of its first geometry
 \item{make_valid}{Logical; apply st_make_valid() first. Default TRUE.
 The copy the sort key is measured on is repaired as well, after it has
 been transformed (see Details); with \code{FALSE} neither is. The rows
-returned are the repaired polygons; polygons that mix XY and XYZ (or XYM)
-geometries are repaired in XY and returned in XY, with a warning of class
+returned are the repaired polygons, made in x and y whenever
+\code{polygons_sf} carries Z or M: polygons that mix XY and XYZ (or XYM)
+geometries, and polygons that all carry Z or M, are repaired in XY and
+returned in XY, with a warning of class
 \code{"spatialkit_zm_dropped"}. With \code{FALSE} the rows come back
-with the geometry they arrived with, Z and M included.}
+with the geometry they arrived with, Z and M included. An empty polygon
+in Z or M has no coordinates to drop and raises no warning.}
 
 \item{transform_for_sort}{CRS used only for computing sort-key coordinates.
 Default 4326. This is the whole mechanism by which the IDs are stable

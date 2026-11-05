@@ -19,7 +19,9 @@ build_tessellation(
 )
 }
 \arguments{
-\item{points_sf}{An sf object with POINT/MULTIPOINT geometry.}
+\item{points_sf}{An sf object with POINT/MULTIPOINT geometry. Points that
+mix XY and XYZ (or XYM), or that carry M, are read in x and y, since sf
+reads a layer in the dimension of its first geometry and GEOS refuses M.}
 
 \item{boundary}{Polygonal sf/sfc study area. \strong{Required} for
 \code{method = "hex"} and \code{method = "square"}, which have no extent of their
@@ -44,7 +46,8 @@ look like degrees (a boundary whose coordinates do not fit the lon/lat
 envelope is then refused with an error), otherwise left in the same
 unnamed planar space. A boundary that mixes XY and XYZ (or XYM)
 geometries is read without Z and M, since sf reads a layer in the
-dimension of its first geometry.}
+dimension of its first geometry. So is one whose
+geometries carry M (XYM or XYZM), which GEOS refuses.}
 
 \item{method}{One of "voronoi", "triangles", "hex", "square".}
 
@@ -172,8 +175,9 @@ CRS is read in the coordinates of \code{points_sf}; one in another CRS is
 transformed. With a \code{boundary} (and for the other methods) the cover
 sizes nothing: when it is a point layer, the number of its points that
 fall outside every cell is returned as \code{params$cover_outside}, with a
-warning of class \code{"spatialkit_unassigned"} when it is not 0. See
-\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}.}
+warning of class \code{"spatialkit_unassigned"} when it is not 0. A cover,
+given or attached, that mixes XY and XYZ (or XYM) geometries, or that
+carries M, is read in x and y. See \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}.}
 }
 \value{
 A list with components:

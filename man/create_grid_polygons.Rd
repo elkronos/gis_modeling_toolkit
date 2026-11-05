@@ -19,7 +19,8 @@ create_grid_polygons(
 \arguments{
 \item{boundary}{Polygonal sf or sfc object. One that mixes XY and XYZ (or
 XYM) geometries is read without Z and M, since sf reads a layer in the
-dimension of its first geometry.}
+dimension of its first geometry. So is one whose
+geometries carry M (XYM or XYZM), which GEOS refuses.}
 
 \item{target_cells}{Optional approximate desired number of cells.  The cell
 \emph{size} is derived from it as \code{sqrt(area / target_cells)}, where

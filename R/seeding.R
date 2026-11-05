@@ -38,7 +38,8 @@
 #'
 #' @param boundary Optional polygonal sf object defining the sampling area.
 #'   One that mixes XY and XYZ (or XYM) geometries is read without Z and M,
-#'   since sf reads a layer in the dimension of its first geometry.
+#'   since sf reads a layer in the dimension of its first geometry. So is one whose
+#'   geometries carry M (XYM or XYZM), which GEOS refuses.
 #' @param method One of "kmeans", "random", "provided".
 #' @param n Integer; number of seeds to return. Required for
 #'   `method = "kmeans"` and `method = "random"`. **Ignored** for
@@ -328,9 +329,11 @@ get_voronoi_seeds <- function(boundary = NULL,
   # (.xy_if_mixed()), before any union, transform or read of its
   # coordinates: sf reads a layer in the dimension of its first geometry, so
   # the cloud was clustered on garbled coordinates or stopped, and GEOS or s2
-  # stopped on the boundary or sampled it on other rings.  The seeds are new
-  # points and the cover is this function's copy, so nothing is said.
-  if (!is.null(boundary)) boundary <- .xy_if_mixed(boundary)
+  # stopped on the boundary or sampled it on other rings.  So is a boundary
+  # whose polygons carry M (.xy_if_mixed_or_m()), on which GEOS stopped.  The
+  # seeds are new points and the cover is this function's copy, so nothing
+  # is said.
+  if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
   if (!is.null(sample_points)) sample_points <- .xy_if_mixed(sample_points)
 
   # A select_resolution() result or a resolution_profile() as `n` carries the
@@ -1021,7 +1024,8 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
 #'
 #' @param boundary An sf or sfc polygonal object. One that mixes XY and XYZ
 #'   (or XYM) geometries is read without Z and M, since sf reads a layer in
-#'   the dimension of its first geometry.
+#'   the dimension of its first geometry. So is one whose
+#'   geometries carry M (XYM or XYZM), which GEOS refuses.
 #' @param k Integer; number of random seeds.
 #' @param set_seed Optional integer RNG seed. Default `NULL`: the seeds are
 #'   drawn from the session's random-number stream, so consecutive calls give
@@ -1067,10 +1071,10 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   # `@param boundary` documents sf *or* sfc, and .assert_sf() only accepts sf.
   if (inherits(boundary, "sfc")) boundary <- sf::st_as_sf(boundary)
   .assert_sf(boundary, c("POLYGON", "MULTIPOLYGON"), "boundary")
-  # A boundary that mixes XY and XYZ (or XYM) polygons is read in XY
-  # (.xy_if_mixed()), as in get_voronoi_seeds(): GEOS stopped on it, and s2
-  # sampled other rings in silence.
-  boundary <- .xy_if_mixed(boundary)
+  # A boundary that mixes XY and XYZ (or XYM) polygons, or whose polygons
+  # carry M, is read in XY (.xy_if_mixed_or_m()), as in get_voronoi_seeds():
+  # GEOS stopped on it, and s2 sampled other rings of a mixed one in silence.
+  boundary <- .xy_if_mixed_or_m(boundary)
 
   cleanup <- .with_seed(set_seed)
   on.exit(cleanup(), add = TRUE)

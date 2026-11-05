@@ -27,10 +27,13 @@
 #' @param make_valid Logical; apply st_make_valid() first. Default TRUE.
 #'   The copy the sort key is measured on is repaired as well, after it has
 #'   been transformed (see Details); with \code{FALSE} neither is. The rows
-#'   returned are the repaired polygons; polygons that mix XY and XYZ (or XYM)
-#'   geometries are repaired in XY and returned in XY, with a warning of class
+#'   returned are the repaired polygons, made in x and y whenever
+#'   \code{polygons_sf} carries Z or M: polygons that mix XY and XYZ (or XYM)
+#'   geometries, and polygons that all carry Z or M, are repaired in XY and
+#'   returned in XY, with a warning of class
 #'   \code{"spatialkit_zm_dropped"}. With \code{FALSE} the rows come back
-#'   with the geometry they arrived with, Z and M included.
+#'   with the geometry they arrived with, Z and M included. An empty polygon
+#'   in Z or M has no coordinates to drop and raises no warning.
 #' @param transform_for_sort CRS used only for computing sort-key coordinates.
 #'   Default 4326. This is the whole mechanism by which the IDs are stable
 #'   (sorting in one common CRS is what makes the same layer get the same IDs
@@ -129,14 +132,37 @@ ensure_stable_poly_id <- function(polygons_sf,
   # it can only be made in XY, so it comes back in XY with a warning of class
   # "spatialkit_zm_dropped" (.xy_if_mixed_warn()).  Without the repair the
   # caller's rows come back with their Z, keyed from a copy in XY
-  # (.xy_if_mixed()).  A layer in one dimension takes its old path.
-  # The warning is raised before the repair, whose suppressWarnings() would
-  # otherwise take it as a lazily evaluated argument.
+  # (.xy_if_mixed()).
+  # Polygons in one dimension that carry Z or M are repaired in XY too, with
+  # a warning of the same class: GEOS 3.13 drops Z from every polygon it
+  # repairs and refuses M, so the repaired rows came back in XY without a
+  # word, or the call stopped on M.  Dropping Z and M first makes the rows
+  # returned XY on every GEOS.  A layer XY throughout takes its old path.
+  # The warnings are raised before the repair, whose suppressWarnings() would
+  # otherwise take them as a lazily evaluated argument.
   if (isTRUE(make_valid)) {
     polygons_sf <- .xy_if_mixed_warn(
       polygons_sf, "ensure_stable_poly_id", "polygons_sf",
       why = paste0("which sf::st_make_valid() reads wrongly, so Z and M are ",
                    "dropped and the repaired polygons are returned in XY"))
+    # An empty polygon in Z or M has no coordinates, so nothing is dropped
+    # from it: it is flattened with the rest but not counted, as
+    # .xy_if_mixed_warn() leaves such empties alone.
+    g <- sf::st_geometry(polygons_sf)
+    dims <- vapply(g, function(s) class(s)[1L], character(1), USE.NAMES = FALSE)
+    if (any(dims != "XY")) {
+      zm <- which(dims != "XY" & !sf::st_is_empty(g))
+      if (length(zm))
+        .warn_classed("spatialkit_zm_dropped",
+                      paste0("ensure_stable_poly_id(): %d of the %d geometries of ",
+                             "`polygons_sf` carry Z or M coordinates, and the repair ",
+                             "with sf::st_make_valid() is made in x and y, so the ",
+                             "repaired polygons are returned in XY. Pass make_valid = ",
+                             "FALSE to have the rows returned with their Z and M, or ",
+                             "drop them with sf::st_zm() first to silence this."),
+                      length(zm), length(dims), data = list(rows = zm))
+      polygons_sf <- sf::st_zm(polygons_sf, drop = TRUE, what = "ZM")
+    }
     polygons_sf <- .safe_make_valid(polygons_sf)
   }
   key_sf <- .xy_if_mixed(polygons_sf)
@@ -185,7 +211,8 @@ ensure_stable_poly_id <- function(polygons_sf,
   # clipped hex tessellation of North Carolina, 2 of 18 cells that are valid
   # projected are invalid once transformed, and st_centroid() on one of them
   # aborted this function rather than returning IDs.  Only the sort copy is
-  # repaired; the geometry that comes back is the caller's own.
+  # repaired here; the rows that come back are the repair made above, or with
+  # make_valid = FALSE the caller's own.
   if (isTRUE(make_valid))
     sort_sf <- .safe_make_valid(sort_sf)
 
@@ -571,9 +598,9 @@ ensure_stable_poly_id <- function(polygons_sf,
 #' so repeated calls with the same inputs return instantly.
 #'
 #' @param boundary An sf or sfc polygonal object. One that mixes XY and XYZ
-#'   (or XYM) geometries is read without Z and M, as in
-#'   [create_grid_polygons()], and shares its cache entry with the same
-#'   boundary in XY.
+#'   (or XYM) geometries, or whose geometries carry M (XYM or XYZM), is read
+#'   without Z and M, as in [create_grid_polygons()], and shares its cache
+#'   entry with the same boundary in XY.
 #' @param target_cells Approximate desired number of cells. Default `NULL`,
 #'   as in [create_grid_polygons()], so the grid can be sized by `cellsize`
 #'   or `n` passed through `...` instead.
@@ -629,12 +656,13 @@ create_grid_polygons_cached <- function(boundary,
   if (!inherits(bnd, "sf"))
     stop(paste0("create_grid_polygons_cached(): 'boundary' must be sf/sfc POLYGON/MULTIPOLYGON",
                 .tess_hint(bnd, "$boundary"), "."))
-  # A boundary that mixes XY and XYZ (or XYM) polygons is read in XY
-  # (.xy_if_mixed()) before the projection and the cache key, as
-  # create_grid_polygons() reads it: the union the key hashes stopped on it
-  # with GEOS's message.  The grid is new geometry, so nothing is said, and
-  # a mixed boundary shares its key with the same boundary in XY.
-  bnd <- .xy_if_mixed(bnd)
+  # A boundary that mixes XY and XYZ (or XYM) polygons, or whose polygons
+  # carry M, is read in XY (.xy_if_mixed_or_m()) before the projection and
+  # the cache key, as create_grid_polygons() reads it: the union the key
+  # hashes stopped on it with GEOS's message.  The grid is new geometry, so
+  # nothing is said, and such a boundary shares its key with the same
+  # boundary in XY.
+  bnd <- .xy_if_mixed_or_m(bnd)
   # The same projection create_grid_polygons() makes, so a cached grid is laid
   # in the CRS an uncached one would be (see .project_for_grid()).
   bnd <- .project_for_grid(bnd, "create_grid_polygons_cached")
