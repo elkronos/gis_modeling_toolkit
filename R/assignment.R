@@ -1699,15 +1699,25 @@ assign_features_to_polygons <- function(
 #' locations they do not depend on the unit or the origin of the coordinates
 #' either. The values agree to rounding under another order of the rows,
 #' since a cell's sums are taken in the order of its rows, and under another
-#' unit or origin where three or more cells' centroids coincide, since the
+#' unit or origin where three to eight cells' centroids coincide, since the
 #' rounding then sets the order in which a cell's neighbours on that point
-#' are summed. Where so many cells' centroids coincide that each of them has
-#' more cells on its point than it has neighbours, which of them it takes can
-#' change with the unit or the origin, and with them every pooled value,
-#' since `tau2` is fitted over the layer. Distances are measured in the CRS
-#' named under `estimate`, so the same layer in another projection can still
-#' give a cell other neighbours, and so can a lattice whose spacing is below
-#' about a ten-millionth of its coordinates.
+#' are summed. A cell whose centroid shares its point with as many other
+#' cells as it has neighbours, or more, takes its neighbours from them, the
+#' first by ID, without a search. Centroids count as one point there when
+#' they are equal, or when they lie within a ten-millionth of the largest
+#' coordinate of one another, in x and in y. Where other centroids that close
+#' to them chain on further than that, the chain is taken again at half that
+#' reach, and so on, until its parts span no more than the reach they were
+#' taken at. So those cells keep their neighbours and their values in another
+#' unit, and with the origin moved by little against the coordinates. On such
+#' a point, cells whose centroids lie that close without coinciding take each
+#' other by ID as well, not by distance. The reach follows the largest
+#' coordinate, so with the origin moved far, to the corner of the data say,
+#' such centroids can lie beyond it, and their cells then take the nearest.
+#' Distances are measured in the CRS named under `estimate`, so the same
+#' layer in another projection can still give a cell other neighbours, and
+#' so can a lattice whose spacing is below about a ten-millionth of its
+#' coordinates.
 #'
 #' The figures on this page that describe pooled values and the two
 #' intervals come from one simulation, `dev/sim-pooled-values.R` in the

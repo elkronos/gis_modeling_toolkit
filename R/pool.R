@@ -47,6 +47,9 @@
 #                           Of centroids still tied, the region of the lower
 #                           number is taken, so regions on one point stay
 #                           told apart by number when rounding parts them.
+#                           Centroids within the reach of a tie of one
+#                           another count as one point, so a point with more
+#                           regions than a region has neighbours stays one.
 # =============================================================================
 
 # Regions in a target.
@@ -61,7 +64,9 @@
 # centroid is off moves its squared distances by about 5e-16 times the
 # coordinates over the spacing.  A centroid summed from many rows can be off
 # by several.  So a tie holds while the spacing is above about a
-# ten-millionth of the coordinates, which leaves room for that.
+# ten-millionth of the coordinates, which leaves room for that.  The same
+# fraction of the largest coordinate is the reach within which the pooling
+# counts centroids as one point (.region_neighbours()).
 .TIE_TOL <- 1e-7
 
 # Rows per region: the size a count is set by when none is given, and the
@@ -598,17 +603,26 @@
 #' neighbour.
 #'
 #' A centroid that shares its point with \code{k} others or more is not
-#' searched for at all: its neighbours are the first \code{k} of them in that
-#' order, all at distance 0.  That is what a search returns for it, and it
-#' keeps a layer whose regions lie on one point by the thousand (rows that
-#' carry the coordinates of a coarser unit, or a placeholder) from costing
-#' the square of their number: a kd-tree asked about such a centroid has to
-#' list every other one on its point before it can tell which come first.
-#' The point is found by exact equality.  Where another unit or origin parts
-#' such centroids by rounding they are searched for, among themselves by
-#' their tiny distances: with \code{k + 1} or fewer on the point each still
-#' takes all the others, perhaps in another order, and with more, which
-#' \code{k} it takes can change.
+#' searched for at all: its neighbours are the first \code{k} of them by
+#' region number.  It keeps a layer whose regions lie on one point by the
+#' thousand (rows that carry the coordinates of a coarser unit, or a
+#' placeholder) from costing the square of their number: a kd-tree asked
+#' about such a centroid has to list every other one on its point before it
+#' can tell which come first.  A point is found with the reach of a tie,
+#' \code{.TIE_TOL} times the largest absolute coordinate of the centroids
+#' (\code{.shared_points()}): centroids that chains of pairs within it in x
+#' and in y link are on one point while they lie within it of one another,
+#' and so are equal centroids; a chain that spans further is linked again at
+#' half the reach, and so on.  Another unit, or an origin moved by little
+#' against the coordinates, parts the centroids of a point by rounding, far
+#' less than the reach, so they stay on it and each keeps the same
+#' \code{k}.  The reach follows the largest coordinate, so an origin moved
+#' far, to the corner of the centroids say, can part centroids that lie
+#' within it without coinciding.  Where more than \code{k} are on a point,
+#' centroids on it that do not coincide take each other by number too, not
+#' by distance.  With \code{k} or fewer on a point they are searched for;
+#' where the point's centroids coincide each takes all the others, and only
+#' the order of its neighbours can follow the rounding.
 #'
 #' For the rest, with \pkg{FNN} the kd-tree returns one neighbour more than
 #' is wanted, where there are that many other regions (ten regions or more
@@ -639,17 +653,22 @@
   o <- order(cen[, 1L], cen[, 2L])
   u <- unname(cen[o, , drop = FALSE])
   x <- u[, 1L]; y <- u[, 2L]
-  # Centroids on one point stand together in this order, lowest number first.
-  first <- c(TRUE, x[-1L] != x[-K] | y[-1L] != y[-K])
-  run   <- cumsum(first)
-  from  <- which(first)[run]                # where each centroid's point starts
-  many  <- tabulate(run)[run] > k           # k others or more on its own point
+  # Centroids within the reach of a tie of one another are on one point.
+  h <- .TIE_TOL * max(abs(u))
+  if (!is.finite(h)) h <- 0
+  pt    <- .shared_points(x, y, h)
+  many  <- tabulate(pt)[pt] > k             # k others or more on its own point
   idx   <- matrix(0L, K, k)
   if (any(many)) {
-    # The first k + 1 of the point, less the centroid itself when it is one.
-    at <- which(many)
-    j  <- matrix(rep(seq_len(k) - 1L, each = length(at)), length(at), k)
-    idx[at, ] <- from[at] + j + (j >= at - from[at])
+    # The point's centroids by number; each takes the first k + 1 of them,
+    # less itself when it is one.
+    at   <- which(many)
+    m    <- at[order(pt[at], o[at])]
+    from <- match(pt[m], pt[m])             # where each point starts in m
+    pos  <- integer(K); pos[m] <- seq_along(m)
+    f    <- from[pos[at]]
+    j    <- matrix(rep(seq_len(k) - 1L, each = length(at)), length(at), k)
+    idx[at, ] <- m[f + j + (j >= pos[at] - f)]
   }
   rest <- which(!many)
   if (!isTRUE(use_fnn)) {
@@ -672,6 +691,147 @@
   out <- matrix(0L, K, k)
   out[o, ] <- o[idx]
   out
+}
+
+
+#' Centroids on one point, to within a reach
+#'
+#' Centroids that chains of pairs within \code{h} of each other in x and in
+#' y link are one point, as long as they all lie within \code{h} of one
+#' another in x and in y.  A chain that spans further is not a point: its
+#' centroids are linked again at \code{h / 2}, the chains of that wider than
+#' \code{h / 2} again at \code{h / 4}, and so on, until no chain is wider
+#' than the reach it was linked at.  So rounding that moves the centroids of
+#' a point by far less than \code{h} keeps them on it where other centroids
+#' that close chain on beyond \code{h}, and a point never spans more than
+#' \code{h}.  Each halving parts at least one pair of the chain's centroids
+#' once the reach is below their distance, so it ends; centroids it leaves
+#' apart to the last are on the point of the centroids equal to them.  With
+#' \code{h = 0} a point is the centroids that are equal.
+#'
+#' @param x,y Coordinates of the centroids.
+#' @param h The reach, 0 or more.
+#' @return An integer vector: the point of each centroid, numbered from 1.
+#' @keywords internal
+#' @noRd
+.shared_points <- function(x, y, h) {
+  n <- length(x)
+  if (n == 0L) return(integer(0))
+  o  <- order(x, y)
+  xs <- x[o]; ys <- y[o]
+  first <- c(TRUE, xs[-1L] != xs[-n] | ys[-1L] != ys[-n])
+  d  <- cumsum(first)                       # distinct centroid of each, in order
+  nd <- d[n]
+  xd <- xs[first]; yd <- ys[first]
+  pt <- seq_len(nd)                         # equal centroids, until a reach joins more
+  at <- if (isTRUE(h > 0) && nd >= 2L) seq_len(nd) else integer(0)
+  ch <- rep(1L, length(at))                 # the chain each was on at the last reach
+  top <- nd
+  while (length(at) > 1L && h > 0) {
+    ch <- .reach_chains(xd[at], yd[at], ch, h)
+    wide <- .chain_span(xd[at], ch) > h | .chain_span(yd[at], ch) > h
+    pt[at[!wide]] <- top + ch[!wide]
+    top <- top + length(at)
+    at <- at[wide]; ch <- ch[wide]
+    h  <- h / 2
+  }
+  out <- integer(n); out[o] <- pt[d]
+  match(out, unique(out))
+}
+
+
+#' How far each centroid's chain spans along one coordinate
+#'
+#' @param v One coordinate of the centroids.
+#' @param g The chain of each, as positive integers.
+#' @return For each centroid, the greatest less the least \code{v} of its
+#'   chain.
+#' @keywords internal
+#' @noRd
+.chain_span <- function(v, g) {
+  lo <- hi <- numeric(max(g))
+  ov <- order(g, v)
+  lo[rev(g[ov])] <- rev(v[ov]); hi[g[ov]] <- v[ov]
+  hi[g] - lo[g]
+}
+
+
+#' Chains of distinct centroids within a reach of each other
+#'
+#' Centroids within \code{h} of each other in x and in y are linked, and a
+#' chain is the centroids that links join, directly or through others.  Only
+#' centroids of one group (\code{g}, the chain each was on at a wider reach)
+#' are linked.  Each group is put in squares of side \code{h} counted from
+#' its own least x and y, so the squares' numbers stay small however small
+#' \code{h} gets: a group from a wider reach is a chain at twice \code{h},
+#' and spans at most twice \code{h} times its centroids.  Two in one square are
+#' within \code{h} of each other, and two within \code{h} lie in one square
+#' or in two that touch.  Squares side by side are linked when the nearest of
+#' their centroids along that side are within \code{h}; squares corner to
+#' corner are linked when a pair of their centroids is.
+#'
+#' @param x,y Coordinates of distinct centroids.
+#' @param g The group of each.
+#' @param h The reach, above 0.
+#' @return An integer vector: the chain of each centroid, as the place in
+#'   \code{x} of one centroid of it.
+#' @keywords internal
+#' @noRd
+.reach_chains <- function(x, y, g, h) {
+  nd <- length(x)
+  g  <- match(g, unique(g))
+  lo_x <- numeric(max(g)); lo_y <- numeric(max(g))
+  ox <- order(g, x); oy <- order(g, y)
+  lo_x[rev(g[ox])] <- rev(x[ox]); lo_y[rev(g[oy])] <- rev(y[oy])
+  gx <- floor((x - lo_x[g]) / h) + 1; gy <- floor((y - lo_y[g]) / h) + 1
+  nx <- max(gx) + 2; ny <- max(gy) + 2
+  key <- if ((max(g) + 1) * nx * ny < 2^52)
+    function(i, j) (g * nx + i) * ny + j
+  else function(i, j) paste(g, i, j)
+  gk   <- key(gx, gy)
+  cell <- match(gk, gk)                     # the first centroid of each square
+  # The least and the greatest x and y of each square.
+  lo_x <- hi_x <- lo_y <- hi_y <- numeric(nd)
+  ox <- order(cell, x); oy <- order(cell, y)
+  lo_x[rev(cell[ox])] <- rev(x[ox]); hi_x[cell[ox]] <- x[ox]
+  lo_y[rev(cell[oy])] <- rev(y[oy]); hi_y[cell[oy]] <- y[oy]
+  sq  <- which(cell == seq_len(nd))
+  mem <- split(seq_len(nd), cell)
+  e1 <- e2 <- integer(0)
+  for (dir in list(c(1, 0), c(0, 1), c(1, 1), c(1, -1))) {
+    nb <- cell[match(key(gx + dir[1L], gy + dir[2L])[sq], gk)]
+    a  <- sq[!is.na(nb)]; b <- nb[!is.na(nb)]
+    if (!length(a)) next
+    linked <- if (dir[2L] == 0) lo_x[b] - hi_x[a] <= h
+    else if (dir[1L] == 0) lo_y[b] - hi_y[a] <= h
+    else {
+      ma <- mem[as.character(a)]; mb <- mem[as.character(b)]
+      la <- lengths(ma); lb <- lengths(mb)
+      pa <- unlist(mapply(function(u, v) rep(u, length(v)), ma, mb, SIMPLIFY = FALSE),
+                   use.names = FALSE)
+      pb <- unlist(mapply(function(u, v) rep(v, each = length(u)), ma, mb, SIMPLIFY = FALSE),
+                   use.names = FALSE)
+      ok <- abs(x[pb] - x[pa]) <= h & abs(y[pb] - y[pa]) <= h
+      seq_along(a) %in% rep(seq_along(a), la * lb)[ok]
+    }
+    e1 <- c(e1, a[linked]); e2 <- c(e2, b[linked])
+  }
+  # Join the linked squares: each points to the lowest square of its chain.
+  lab <- cell
+  repeat {
+    r1 <- lab[e1]; r2 <- lab[e2]
+    hi <- pmax(r1, r2); lo <- pmin(r1, r2)
+    if (!any(hi != lo)) break
+    k  <- order(hi, lo)
+    f  <- !duplicated(hi[k])
+    lab[hi[k][f]] <- pmin(lab[hi[k][f]], lo[k][f])
+    repeat {
+      l2 <- lab[lab]
+      if (identical(l2, lab)) break
+      lab <- l2
+    }
+  }
+  lab
 }
 
 

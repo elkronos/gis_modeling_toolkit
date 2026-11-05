@@ -260,10 +260,35 @@ test_that("the kd-tree's search and the exact search pick by one rule, and the p
 # ---- Regions whose centroids coincide, and the parts of the rule ------------------
 
 # Each region's neighbours by the rule, one at a time, the last tie to the
-# lower region number.
-fnt_neighbours <- function(cen, k = 8L) {
+# lower region number.  Centroids within `reach` of one another in x and in
+# y, directly or through others, are one point while they span no more than
+# `reach`; a wider chain is linked again at half the reach, and so on (equal
+# centroids are one point in any case).  A region with `k` others or more on
+# its point takes the first `k` of them by number.
+fnt_neighbours <- function(cen, k = 8L, reach = 0) {
   K <- nrow(cen); k <- min(as.integer(k), K - 1L)
+  pt <- match(paste(cen[, 1], cen[, 2]), paste(cen[, 1], cen[, 2]))
+  at <- seq_len(K); top <- K; h <- reach
+  while (length(at) > 1L && h > 0) {
+    xa <- cen[at, 1]; ya <- cen[at, 2]; n <- length(at)
+    near <- abs(outer(xa, xa, "-")) <= h & abs(outer(ya, ya, "-")) <= h
+    ch <- seq_len(n)
+    repeat {
+      c2 <- vapply(seq_len(n), function(j) min(ch[near[j, ]]), integer(1))
+      if (identical(c2, ch)) break
+      ch <- c2
+    }
+    wide <- logical(n)
+    for (g in unique(ch)) {
+      i <- which(ch == g)
+      wide[i] <- diff(range(xa[i])) > h || diff(range(ya[i])) > h
+    }
+    pt[at[!wide]] <- top + ch[!wide]
+    top <- top + n; at <- at[wide]; h <- h / 2
+  }
   picks <- vapply(seq_len(K), function(j) {
+    same <- setdiff(which(pt == pt[j]), j)
+    if (length(same) >= k) return(same[seq_len(k)])
     d2 <- (cen[, 1] - cen[j, 1])^2 + (cen[, 2] - cen[j, 2])^2
     left <- seq_len(K)[-j]; out <- integer(k)
     for (i in seq_len(k)) {
@@ -311,10 +336,17 @@ test_that("regions whose centroids coincide to rounding get the rule's neighbour
   }
   base[c(26, 50), 2] <- ulp(base[c(26, 50), 2], c(-1, 3))
   expect_false(anyDuplicated(base) > 0L)
-  for (f in fnt_paths())
+  # They lie within the reach of a tie of one another, so each pair and the
+  # triple is one point: at one neighbour the triple holds more than that,
+  # and region 25 takes 26, the lowest number of the others on its point.
+  reach <- .TIE_TOL * max(abs(base))
+  for (f in fnt_paths()) {
     for (k in c(8L, 1L))
-      expect_identical(.region_neighbours(base, k, f), fnt_neighbours(base, k),
+      expect_identical(.region_neighbours(base, k, f), fnt_neighbours(base, k, reach),
                        info = sprintf("%s, %d neighbours", fnt_tag(f), k))
+    expect_identical(.region_neighbours(base, 1L, f)[c(25L, 26L, 50L), 1L], c(26L, 25L, 25L),
+                     info = fnt_tag(f))
+  }
 })
 
 test_that("two cells whose centroids coincide keep their neighbours and values in another unit or origin", {

@@ -2327,10 +2327,35 @@ old behaviour where there is a way.
   sorts first), so the same cells in another unit or with another origin get
   the same neighbours and the same values, cells whose centroids coincide
   among them.  That holds while the spacing of the lattice is above about a
-  ten-millionth of its coordinates.  Where three or more cells' centroids
-  coincide the values agree to rounding, and where ten or more do, which 8
-  of them each takes can still change.  Layers without such ties are
+  ten-millionth of its coordinates.  Where three to eight cells' centroids
+  coincide the values agree to rounding.  Layers without such ties are
   unchanged.  Another projection still gives other distances.
+
+* **Where more cells' centroids shared a point than a cell has neighbours,
+  which of them each took depended on the unit and the origin of the
+  coordinates.**  A cell whose centroid shares its point with 8 other cells
+  or more takes the first 8 of them by ID, without a search.  The point was
+  found by exact equality.  In another unit, or with the origin moved,
+  rounding parts such centroids by a few units in the last place, and the
+  cells were then searched for among themselves by those distances.  Twelve
+  cells of 1 to 12 rows on one point beside a 10 by 10 lattice of one-row
+  cells at 250 m gave 3 cells other neighbours in feet and 12 with the
+  origin moved by 0.1 m.  Since `tau2` is fitted over the layer, every
+  pooled value of `summarize_by_cell()` could move, by up to 0.21 on that
+  layer, and so could the leave-one-out error of `resolution_profile()` on
+  the same cells.  Centroids that lie within a ten-millionth of the largest
+  coordinate of one another, in x and in y, now count as one point; that is
+  the reach of the tie rule above.  Where other centroids that close chain on
+  further than that, the chain is taken again at half the reach, and so on,
+  until its parts span no more than the reach they were taken at.  Such
+  cells take the same neighbours, and get the same values, in another unit
+  and with the origin moved by little against the coordinates.  Cells whose
+  centroids lie that close without coinciding take each other by ID too, not
+  by distance.  The reach follows the largest coordinate, so with the origin
+  moved far, to the corner of the data say, such centroids can lie beyond it
+  and their cells then take the nearest.  A layer
+  whose centroids are either equal or further apart than that reach in x or
+  in y gets the same neighbours and values as before.
 
 * **On gridded locations the density partition depended on the unit and the
   origin of the coordinates.**  The regions `resolution_profile()`,
