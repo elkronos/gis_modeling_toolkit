@@ -1420,6 +1420,48 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 # Geometry Helpers
 # -----------------------------------------------------------------------------
 
+#' The coordinate dimensions of a layer's geometries
+#'
+#' Read from each geometry: sf takes the dimension of a layer from its first
+#' geometry, so its own test cannot tell a layer that mixes XY and XYZ
+#' geometries from one that does not.  An empty geometry has a dimension
+#' too.  \code{.drop_zm()} counts the values of a point layer instead, which
+#' cannot tell a mixed layer from a uniform one either.
+#'
+#' @param x An sf or sfc object.
+#' @return The distinct dimensions, among \code{"XY"}, \code{"XYZ"},
+#'   \code{"XYM"} and \code{"XYZM"}, in the order they first occur.
+#' @keywords internal
+#' @noRd
+.geom_dims <- function(x) {
+  g <- if (inherits(x, "sfc")) x else sf::st_geometry(x)
+  unique(vapply(g, function(s) class(s)[1L], character(1), USE.NAMES = FALSE))
+}
+
+#' Whether a layer mixes geometries of different dimensions
+#' @param x An sf or sfc object.
+#' @return \code{TRUE} when its geometries do not all have one dimension.
+#' @keywords internal
+#' @noRd
+.mixes_zm <- function(x) length(.geom_dims(x)) > 1L
+
+#' A layer read in x and y when it mixes dimensions
+#'
+#' sf reads a layer that mixes XY and XYZ (or XYM) geometries in the
+#' dimension of its first: \code{sf::st_coordinates()} of such a point layer
+#' lays the values out of step or stops on its \code{dimnames}, and
+#' \code{sf::st_transform()} of one with an XYZ point first stops with "OGR
+#' error".  Z and M are then dropped from every geometry.  A layer in one
+#' dimension is returned as it came.
+#'
+#' @param x An sf or sfc object.
+#' @return \code{x}, or its copy in XY when it mixes dimensions.
+#' @keywords internal
+#' @noRd
+.xy_if_mixed <- function(x) {
+  if (.mixes_zm(x)) sf::st_zm(x, drop = TRUE, what = "ZM") else x
+}
+
 #' Fast center points of per-feature bounding boxes
 #'
 #' @param x An sf object.

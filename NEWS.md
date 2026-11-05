@@ -2231,6 +2231,29 @@ old behaviour where there is a way.
   location (an empty point, or a coordinate that is not finite or lies
   beyond 1e150)".
 
+* **A layer of `newdata`, `seeds` or `points` that mixes XY and XYZ points
+  stopped `cell_values_at()` and `summarize_by_cell(estimate = "pooled")`
+  with a bare message from base R or sf, or was read at the wrong
+  coordinates.**  sf reads a layer in the dimension of its first point,
+  and `rbind()` of an XY and an XYZ layer builds such a layer without a
+  word.  With an XYZ point first, `sf::st_coordinates()` laid the values
+  out of step, so that every later row was read at another row's place,
+  with only base R's "data length is not a sub-multiple" warning: locations
+  took another cell and distance, seeds another cell, and the pooled
+  columns of every cell moved; in another CRS than the working one the call
+  stopped with sf's "OGR error".  With an XY point first the call stopped
+  with base R's "length of 'dimnames' [2] not equal to array extent".
+  The same held for a layer XYZ throughout whose features are not all
+  points: the point taken on the surface of a POLYGON Z, and the empty
+  point of an empty LINESTRING Z, are XY beside the POINT Z rows kept.
+  These layers are now read in x and y: when a layer's points, or the
+  points taken from its other features, do not all have the same
+  dimensions, Z and M are dropped from the copy read, and the call gives
+  what the same rows in XY give.  An XYM point is read as an XYZ point is.
+  A layer of points in one dimension, XY or XYZ throughout, is read as
+  before.  Neither function returns these layers' geometry, so the
+  caller's points keep their Z.
+
 * **`cell_values_at()` without `seeds` gave every location the value `NA`,
   marked filled, when `values` had no cell ID.**  A `values` whose ID
   column is all `NA` placed no location in a cell, so every location was

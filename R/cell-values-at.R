@@ -48,13 +48,17 @@
 #' @return An sf layer with the geometry column and no other, row for row
 #'   with \code{layer}.  A feature that is not a point is reduced to one by
 #'   \code{coerce_to_points(, "auto")}, whose conditions are passed on; an
-#'   empty geometry stays an empty point.
+#'   empty geometry stays an empty point.  A layer whose geometries do not
+#'   all have one dimension is read in XY (\code{.xy_if_mixed()}), and so is
+#'   the point layer reduced from it when its points do not: the point on the
+#'   surface of a POLYGON Z, and the empty point of an empty LINESTRING Z, are
+#'   XY beside the POINT Z rows that are kept.
 #' @keywords internal
 #' @noRd
 .values_at_points <- function(layer) {
-  g <- sf::st_sf(geometry = sf::st_geometry(layer))
+  g <- .xy_if_mixed(sf::st_sf(geometry = sf::st_geometry(layer)))
   if (nrow(g) > 0L && !all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
-    g <- coerce_to_points(g, "auto")
+    g <- .xy_if_mixed(coerce_to_points(g, "auto"))
   g
 }
 
@@ -448,6 +452,10 @@
 #'    else the one in `attr(values, "pooled")`, else the CRS of `points`
 #'    when it is projected and the one [ensure_projected()] picks for it
 #'    when it is not. `points`, `newdata` and `seeds` are transformed to it.
+#'    `newdata`, `seeds` and `points` are read in x and y: a layer whose
+#'    points, or the points taken from its other features, do not all have
+#'    the same dimensions (some with a Z or M coordinate) is read without its
+#'    Z and M, since sf reads a layer in the dimension of its first point.
 #'    When neither `points` nor `newdata` has a CRS the coordinates are used
 #'    as they are, unless those of `points` look like longitude and latitude:
 #'    both are then read as EPSG:4326, as [summarize_by_cell()] reads
@@ -851,6 +859,9 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
                           "column '%s' that gives each seed's cell; for cells from ",
                           "build_tessellation(seeds), set seeds$%s <- tess$index."),
                    id_col, id_col), call. = FALSE)
+    # Seeds that mix XY and XYZ (or XYM) points are read in XY: sf reads a
+    # layer in the dimension of its first point.
+    seeds <- .xy_if_mixed(seeds)
     seed_ids <- .id_as_character(seeds[[id_col]])
     # Seeds at different locations with one ID are refused, and counted: every
     # seed whose ID another seed elsewhere carries.  Seeds on one location

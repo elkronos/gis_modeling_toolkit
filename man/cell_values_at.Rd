@@ -130,6 +130,10 @@ The function works in six steps.
 else the one in \code{attr(values, "pooled")}, else the CRS of \code{points}
 when it is projected and the one \code{\link[=ensure_projected]{ensure_projected()}} picks for it
 when it is not. \code{points}, \code{newdata} and \code{seeds} are transformed to it.
+\code{newdata}, \code{seeds} and \code{points} are read in x and y: a layer whose
+points, or the points taken from its other features, do not all have
+the same dimensions (some with a Z or M coordinate) is read without its
+Z and M, since sf reads a layer in the dimension of its first point.
 When neither \code{points} nor \code{newdata} has a CRS the coordinates are used
 as they are, unless those of \code{points} look like longitude and latitude:
 both are then read as EPSG:4326, as \code{\link[=summarize_by_cell]{summarize_by_cell()}} reads

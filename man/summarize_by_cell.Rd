@@ -237,7 +237,9 @@ distances are measured in; a layer projected beforehand is used in its
 own CRS. When the input carries the record of its cells' count (see
 "Value") and that record names a projected CRS, the one the profile
 worked in, the distances are measured in it, whatever CRS the layer is
-in. The value is matched as \code{\link[=match.arg]{match.arg()}} matches a choice, so an
+in. The distances are taken in x and y: a layer whose features, or the
+points taken from them, do not all have the same dimensions (some with a
+Z or M coordinate) is read without its Z and M. The value is matched as \code{\link[=match.arg]{match.arg()}} matches a choice, so an
 abbreviation (\code{"m"}) is accepted and \code{NULL} is the default. See "Pooled
 values" for what the pooled value estimates and what its numbers rest
 on, "Value" for the columns and the attributes, and "Conditions" for

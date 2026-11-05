@@ -2131,7 +2131,9 @@ assign_features_to_polygons <- function(
 #'   own CRS. When the input carries the record of its cells' count (see
 #'   "Value") and that record names a projected CRS, the one the profile
 #'   worked in, the distances are measured in it, whatever CRS the layer is
-#'   in. The value is matched as [match.arg()] matches a choice, so an
+#'   in. The distances are taken in x and y: a layer whose features, or the
+#'   points taken from them, do not all have the same dimensions (some with a
+#'   Z or M coordinate) is read without its Z and M. The value is matched as [match.arg()] matches a choice, so an
 #'   abbreviation (`"m"`) is accepted and `NULL` is the default. See "Pooled
 #'   values" for what the pooled value estimates and what its numbers rest
 #'   on, "Value" for the columns and the attributes, and "Conditions" for
@@ -3809,6 +3811,11 @@ summarize_by_cell <- function(assigned_points_sf,
 #' read as it is read with those rows empty.  The warning sf raises when it takes a
 #' point on the surface of a lon/lat polygon is not passed on: the point is
 #' one of the polygon's, and it is projected before any distance is taken.
+#' A layer that mixes XY and XYZ (or XYM) geometries is read in XY
+#' (\code{.xy_if_mixed()}), since sf reads a layer in the dimension of its
+#' first geometry, and so are the points reduced from a layer whose points do
+#' not all have one dimension; no geometry is returned, so the caller's keep
+#' their Z.
 #'
 #' @param layer The assigned layer.
 #' @param crs \code{NULL}, or the projected CRS to measure in: the one the
@@ -3823,13 +3830,18 @@ summarize_by_cell <- function(assigned_points_sf,
   if (!inherits(layer, "sf")) return(NULL)
   if (nrow(layer) == 0L)
     return(list(xy = matrix(numeric(0), 0L, 2L), crs = sf::st_crs(layer)))
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in XY: sf reads
+  # a layer in the dimension of its first geometry.  The points reduced from
+  # a layer in one dimension can mix them (the point on the surface of a
+  # POLYGON Z is XY beside the POINT Z rows kept), so they are tested again.
+  layer <- .xy_if_mixed(layer)
   if (!all(sf::st_geometry_type(layer, by_geometry = TRUE) == "POINT"))
-    layer <- withCallingHandlers(
+    layer <- .xy_if_mixed(withCallingHandlers(
       coerce_to_points(layer, "auto"),
       warning = function(w)
         if (grepl("st_point_on_surface may not give correct results",
                   conditionMessage(w), fixed = TRUE))
-          invokeRestart("muffleWarning"))
+          invokeRestart("muffleWarning")))
   given <- unname(sf::st_coordinates(layer)[, 1:2, drop = FALSE])
   far_given <- abs(given[, 1L]) > .POOL_XY_MAX | abs(given[, 2L]) > .POOL_XY_MAX
   # Those rows are emptied before the projection: the bounding box it is
