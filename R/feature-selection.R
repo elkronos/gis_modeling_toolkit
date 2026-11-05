@@ -506,8 +506,10 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   split <- NULL
   holdout_sf <- NULL
   if (identical(select_on, "split")) {
+    # A layer that mixes XY and XYZ (or XYM) geometries is pointized in x
+    # and y, as prep_model_data() pointizes it.
     if (!all(sf::st_geometry_type(train_sf, by_geometry = TRUE) == "POINT"))
-      train_sf <- coerce_to_points(train_sf, "auto")
+      train_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed(train_sf), "auto"))
     split <- .spatial_half_split(train_sf, seed = seed,
                                  caller = "select_features_forward")
     holdout_sf <- train_sf[split$estimation, , drop = FALSE]

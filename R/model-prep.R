@@ -191,8 +191,11 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   # (fit_bayesian_spatial_model()'s cbind, GWmodel's Spatial coercion).
   # coerce_to_points() maps MULTIPOINT to its centroid, so single-vertex
   # MULTIPOINTs (common in shapefiles) are unchanged in practice.
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y
+  # (.xy_if_mixed()), before the coerce and again after it: the point on the
+  # surface of a POLYGON Z is XY beside the POINT Z rows kept.
   if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")) {
-    data_sf <- coerce_to_points(data_sf, pointize)
+    data_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed(data_sf), pointize))
   }
 
   # Drop any Z or M coordinate.  Every backend works in 2-D map distance, but

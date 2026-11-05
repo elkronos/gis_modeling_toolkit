@@ -1523,10 +1523,15 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' @param x An sf or sfc object.
 #' @param caller The function whose result it is, for the message.
 #' @param arg The argument that holds the layer, for the message.
+#' @param why The end of the message: what reads the layer wrongly and what
+#'   comes back.
 #' @return \code{x}, or its copy in XY when it mixes dimensions.
 #' @keywords internal
 #' @noRd
-.xy_if_mixed_warn <- function(x, caller, arg) {
+.xy_if_mixed_warn <- function(x, caller, arg,
+                              why = paste0("which sf::st_transform() reads ",
+                                           "wrongly, so Z and M are dropped and ",
+                                           "the layer is returned in XY")) {
   g <- if (inherits(x, "sfc")) x else sf::st_geometry(x)
   d <- vapply(g, function(s) class(s)[1L], character(1), USE.NAMES = FALSE)
   if (length(unique(d)) < 2L) return(x)
@@ -1538,11 +1543,9 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   zm <- which(d != "XY")
   .warn_classed("spatialkit_zm_dropped",
                 paste0("%s(): `%s` mixes geometries with and without Z or M ",
-                       "coordinates (%d of its %d geometries carry them), which ",
-                       "sf::st_transform() reads wrongly, so Z and M are dropped ",
-                       "and the layer is returned in XY. Drop them with ",
-                       "sf::st_zm() first to silence this."),
-                caller, arg, length(zm), length(d), data = list(rows = zm))
+                       "coordinates (%d of its %d geometries carry them), %s. ",
+                       "Drop them with sf::st_zm() first to silence this."),
+                caller, arg, length(zm), length(d), why, data = list(rows = zm))
   sf::st_zm(x, drop = TRUE, what = "ZM")
 }
 
@@ -1645,6 +1648,23 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' the temporary projection's choice of CRS, segfaulted on an empty line
 #' part too.
 #'
+#' In mode `"auto"` a MULTILINESTRING gets the midpoint of its longest part.
+#' When several parts share the greatest length (to one part in ten
+#' million, measured in the projection used), their midpoints are taken
+#' and the one lowest in x, then in y, is kept, so the point does not depend
+#' on the order in which the feature lists its parts.
+#'
+#' A layer whose geometries do not all have the same dimensions (XY beside
+#' XYZ or XYM, as `rbind()` of an XY and an XYZ layer gives) is read in x
+#' and y: sf hands GEOS and s2 every geometry in the dimension of the first,
+#' and the points of such a layer are returned in one dimension.
+#' Z and M are dropped, the points come back in XY, and a warning of class
+#' `spatialkit_zm_dropped` says so, with the rows that carried Z or M as its
+#' `rows`.  Mode `"bbox_center"` reads the box of each geometry and gives XY
+#' points for any layer, with no warning.  A layer in one dimension, XY or
+#' XYZ throughout, is read as it is, and so is a layer whose only
+#' geometries of another dimension than the first are empty and not points.
+#'
 #' @param x An sf object.
 #' @param mode One of "auto", "centroid", "point_on_surface", "surface",
 #'   "line_midpoint", "bbox_center".
@@ -1680,13 +1700,32 @@ coerce_to_points <- function(
   if (identical(mode, "surface")) mode <- "point_on_surface"
   if (nrow(x) == 0L) return(x)
 
-  g   <- sf::st_geometry(x)
   crs <- sf::st_crs(x)
 
   # -- bbox_center ---
+  # Read geometry by geometry, so a layer that mixes dimensions gives the
+  # boxes of its rows; the points are XY whatever the input.
   if (mode == "bbox_center") {
     return(sf::st_set_geometry(x, .bbox_center_sfc(x)))
   }
+
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y:
+  # sf hands GEOS and s2 every geometry in the dimension of the first, so an
+  # XYZ ring among XY rows (or the reverse) stopped GEOS or was read as a
+  # ring of other points, and st_transform() of the lines stopped with "OGR
+  # error".  The points come back in XY, with the warning of class
+  # spatialkit_zm_dropped.  A layer whose geometry types each keep one
+  # dimension (XY polygons beside a POINT Z) is read in x and y too: the
+  # types are read apart below, but the points would come back mixed.  The
+  # warning therefore says what is done, not that the layer was misread.  A
+  # layer in one dimension takes the path below as it did, and so does one
+  # whose only geometries of another dimension than the first are empty and
+  # not points (see .xy_if_mixed_warn()).
+  x <- .xy_if_mixed_warn(x, "coerce_to_points", "x",
+                         why = paste0("so it is read in x and y: Z and M are ",
+                                      "dropped and the points are returned ",
+                                      "in XY"))
+  g <- sf::st_geometry(x)
 
   # -- direct ops ---
   # Not spherical-safe, whatever this heading used to say.  On lon/lat input
@@ -1836,9 +1875,21 @@ coerce_to_points <- function(
           parts <- sf::st_sfc(lapply(mats, sf::st_linestring), crs = proj_crs)
           lens <- as.numeric(sf::st_length(parts))
           k    <- if (length(lens)) which.max(lens) else 1L
+          # Parts of equal greatest length are all sampled, and the midpoint
+          # lowest in x, then in y, is kept: which.max() alone took the first
+          # in the feature's part order, so the same geometry with its parts
+          # listed the other way round got another point.  Lengths within
+          # .TIE_TOL of the greatest are equal: congruent parts differ in
+          # their last bits after a shift of the origin.
+          k    <- if (length(k)) which(lens >= lens[k] * (1 - .TIE_TOL)) else k
           mp   <- sf::st_line_sample(parts[k], sample = 0.5)
           mp   <- sf::st_cast(mp, "POINT")
           mp   <- .back_to_input_crs(mp, g_mls_proj, crs)
+          if (length(mp) > 1L) {
+            # x, then y, then Z or M where the parts carry them.
+            xy <- unname(as.data.frame(sf::st_coordinates(mp)))
+            mp <- mp[do.call(order, xy)[1L]]
+          }
           out[[idx_mls[j]]] <- mp[[1]]
         }
       }

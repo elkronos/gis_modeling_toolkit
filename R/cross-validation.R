@@ -3259,8 +3259,10 @@ estimate_sac_range <- function(points_sf, response_var,
   # returns one row per VERTEX, so any multi-vertex feature makes xy[i, ] a
   # different feature than row i, and every fold below misaligns silently.
   # coerce_to_points() takes centroids, matching prep_model_data().
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y,
+  # before the coerce and after it, as prep_model_data() reads it.
   if (!all(sf::st_geometry_type(points_sf, by_geometry = TRUE) == "POINT"))
-    points_sf <- coerce_to_points(points_sf, "auto")
+    points_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed(points_sf), "auto"))
 
   # gstat::variogram() uses EVERY coordinate dimension, so an XYZ layer has
   # its elevation folded into each lag and the "range" is a length in 3-D,
@@ -5361,11 +5363,15 @@ make_folds <- function(points_sf, k,
            else "a value of length 0", ".", call. = FALSE)
     max_test <- as.integer(max_test)
   }
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y
+  # from here on, the probe included; the points reduced from it are tested
+  # again, as prep_model_data() tests them.
+  points_sf <- .xy_if_mixed(points_sf)
   # The provenance probe is taken on the geometry AS SUPPLIED -- before
   # pointization -- because that is what the cv_*() wrappers will probe too.
   row_probe <- .fold_row_probe(points_sf)
   if (!all(sf::st_geometry_type(points_sf, by_geometry = TRUE) == "POINT"))
-    points_sf <- coerce_to_points(points_sf, "auto")
+    points_sf <- .xy_if_mixed(coerce_to_points(points_sf, "auto"))
 
   # Drop rows with no usable coordinates, AFTER ..row_id is stamped so the
   # survivors keep their original row identities and the dropped rows simply

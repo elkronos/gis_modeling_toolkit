@@ -1862,7 +1862,11 @@ compare_models_cv <- function(
   .warn_fold_args_ignored(folds, block_size, auto_range, "compare_models_cv")
   if (is.null(folds)) {
     pointized <- !all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")
-    fold_src  <- if (pointized) coerce_to_points(data_sf, pointize) else data_sf
+    # A layer that mixes XY and XYZ (or XYM) geometries is pointized in x
+    # and y, as prep_model_data() pointizes it.
+    fold_src  <- if (pointized)
+      .xy_if_mixed(coerce_to_points(.xy_if_mixed(data_sf), pointize))
+    else data_sf
     folds <- tryCatch(
       make_folds(fold_src, k = k, method = "block_kfold",
                  seed = if (is.null(seed)) 123L else seed,

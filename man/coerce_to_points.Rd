@@ -46,6 +46,23 @@ non-empty feature is ignored, so the feature gets the point its other
 parts give; GEOS's interior point, used by \code{"point_on_surface"} and by
 the temporary projection's choice of CRS, segfaulted on an empty line
 part too.
+
+In mode \code{"auto"} a MULTILINESTRING gets the midpoint of its longest part.
+When several parts share the greatest length (to one part in ten
+million, measured in the projection used), their midpoints are taken
+and the one lowest in x, then in y, is kept, so the point does not depend
+on the order in which the feature lists its parts.
+
+A layer whose geometries do not all have the same dimensions (XY beside
+XYZ or XYM, as \code{rbind()} of an XY and an XYZ layer gives) is read in x
+and y: sf hands GEOS and s2 every geometry in the dimension of the first,
+and the points of such a layer are returned in one dimension.
+Z and M are dropped, the points come back in XY, and a warning of class
+\code{spatialkit_zm_dropped} says so, with the rows that carried Z or M as its
+\code{rows}.  Mode \code{"bbox_center"} reads the box of each geometry and gives XY
+points for any layer, with no warning.  A layer in one dimension, XY or
+XYZ throughout, is read as it is, and so is a layer whose only
+geometries of another dimension than the first are empty and not points.
 }
 \examples{
 library(sf)

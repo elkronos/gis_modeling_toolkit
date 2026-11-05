@@ -2301,6 +2301,54 @@ old behaviour where there is a way.
   so the test found no precision and the layer was not moved from lon/lat.
   The test now leaves empty geometries out.
 
+* **`coerce_to_points()` stopped with a bare message from GEOS or sf, or
+  returned points at the wrong place, on a polygon or line layer that
+  mixed XY and XYZ (or XYM) geometries, and so did every function that
+  reduces the caller's layer to points first.**  sf hands GEOS and s2 every
+  geometry of a layer in the dimension of its first, and `rbind()` of an
+  XY and an XYZ layer gives such a layer without a word.  On projected
+  polygons the modes `"auto"`, `"centroid"` and `"point_on_surface"`
+  stopped with GEOS's "ParseException: Unexpected EOF parsing WKB" or
+  "Points of LinearRing do not form a closed linestring"; on lines
+  `"auto"` and `"line_midpoint"` stopped with sf's "OGR error" when the
+  first line was XYZ, and gave a later XYZ line another midpoint in
+  silence; on squares in degrees `"centroid"` put an XYZ square's point
+  8,666 km from the square.  `prep_model_data()`, and through it the fits,
+  the cross-validations and `predict()` on `newdata` in the fit's CRS,
+  `make_folds()`,
+  `estimate_sac_range()`, `compare_models_cv()` and
+  `select_features_forward(select_on = "split")` stopped the same way.
+  `make_folds()`, `compare_models_cv()` and
+  `select_features_forward(select_on = "split")` also stopped with "OGR
+  error" on a layer XYZ throughout that mixes POINT Z rows with POLYGON Z
+  or LINESTRING Z rows, as the points taken from the polygons and lines
+  are XY, and `make_folds()` stopped the same way on a point layer with an
+  XYZ point first among XY points.
+  `coerce_to_points()` now reads such a layer in x and y and returns XY
+  points, with a warning of class `spatialkit_zm_dropped` that carries the
+  rows with Z or M as `rows`.  This includes a layer whose geometry types
+  each have one dimension, such as XY polygons beside a POINT Z row: it
+  was read right, and its points came back with Z on that row only.
+  `prep_model_data()`, `make_folds()`, `estimate_sac_range()`,
+  `compare_models_cv()` and `select_features_forward(select_on = "split")`
+  read the layer in x and y with no warning, and give what the same rows
+  in XY give.  A layer in one dimension, XY or XYZ throughout, is
+  read as before, and so is a layer whose only geometries of another
+  dimension than the first are empty and not points.  The mode
+  `"bbox_center"` read each geometry's box and gave the right points; it
+  still does, with no warning.
+
+* **`coerce_to_points(mode = "auto")` gave a MULTILINESTRING whose longest
+  parts are of equal length the midpoint of the first of them in the
+  feature's part order**, so the same geometry with its parts listed the
+  other way round got a point 1 km away in a two-part example; congruent
+  parts were also told apart by the last bits of their lengths, so the
+  point moved with a shift of the origin.  Among parts of equal greatest
+  length, to one part in ten million, the midpoint lowest in x, then in y,
+  is now taken; a feature with one longest part gets its midpoint as
+  before.
+  `?coerce_to_points` states the rule.
+
 * **`cell_values_at()` without `seeds` gave every location the value `NA`,
   marked filled, when `values` had no cell ID.**  A `values` whose ID
   column is all `NA` placed no location in a cell, so every location was
