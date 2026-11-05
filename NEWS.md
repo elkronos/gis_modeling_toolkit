@@ -2162,9 +2162,34 @@ old behaviour where there is a way.
   to set it from the tessellation, or `values`.  The cells that seeds
   outside the polygons take count as their IDs, so points placed by hand
   outside the boundary, all `NA` in `index`, are still the seeds of their
-  cells when `values` carries the polygons.  One seed with the ID of a cell
-  of `values` is enough for the call to run, and a seed whose ID `values`
-  has no row for still stands for a cell without a value.
+  cells when `values` carries the polygons.  One seed with a location and
+  the ID of a cell of `values` is enough for the call to run, and a seed
+  whose ID `values` has no row for still stands for a cell without a value.
+
+* **`cell_values_at(seeds = )` filled every location, with no error, when
+  the seeds with the ID of a cell of `values` had no location.**  The check
+  that some seed has the ID of a cell of `values` counted seeds with an
+  empty point, or a coordinate that is not finite or lies beyond 1e150,
+  though such a seed is the nearest seed of no location, and it read the
+  coordinates only as given, so seeds that leave the globe once placed in
+  the working CRS (metres given EPSG:4326, a latitude beyond 90) counted
+  too.  Seeds that kept their IDs and lost their points left every location
+  without a cell, and so did one such seed with a cell's ID beside seeds
+  with `NA` IDs; beside seeds with other IDs it gave every location a cell
+  that `values` has no row for.  Each location then took the value of the
+  cell of its nearest scored row: the seeds of a tessellation of 107 cells,
+  every point emptied, filled all 120 locations asked for.  Only a seed with
+  a location, as given and in the working CRS, now counts, and when every
+  seed with the ID of a cell has none the call stops with an error that
+  says so; when they had a location as given, it names the working CRS and
+  the CRS of `seeds`.  A seed with a coordinate beyond 1e150 is no longer
+  searched where a move between CRSs puts it (a northing of 1e200 in
+  EPSG:32618 comes back finite in EPSG:32617).  One seed with a location
+  and the ID of a cell is still enough for the call to run.  A cell whose
+  ID only seeds without a location carry is now one no seed names, which
+  step 3 offers to a seed with an `NA` ID outside the polygons: points
+  placed by hand outside the boundary take their cells beside such a seed,
+  where the locations in the cell it named were filled.
 
 * **`cell_values_at()` refused `seeds` without a CRS beside `points` with
   one, with an error that did not say which CRS to set.**  For rows without

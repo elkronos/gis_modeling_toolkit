@@ -285,8 +285,9 @@
 #' @param frame The CRS the polygons of \code{values} are read in when they
 #'   have none: the one the rows were assigned in.
 #' @return \code{NULL} when \code{values} carries no polygons, no seed with
-#'   an \code{NA} ID and a location lies outside them, or every polygon has
-#'   a seed; otherwise a list: \code{lost}, the rows of those seeds;
+#'   an \code{NA} ID and a location lies outside them, or every polygon is
+#'   named by a seed with a location (one without names no location, so
+#'   the cell whose ID it carries is still free); otherwise a list: \code{lost}, the rows of those seeds;
 #'   \code{xy}, a point inside each polygon no seed names, in the working
 #'   CRS; \code{id}, the IDs of those polygons as text.
 #' @keywords internal
@@ -300,7 +301,8 @@
     sf::st_geometry_type(g, by_geometry = TRUE) %in% c("POLYGON", "MULTIPOLYGON")
   # A grouped summary has a row per group: one polygon per cell.
   keep <- keep & !duplicated(ifelse(keep, vid, NA_character_), incomparables = NA)
-  free <- keep & !(vid %in% seed_ids)
+  named <- seed_ids[is.finite(seed_xy[, 1L]) & is.finite(seed_xy[, 2L])]
+  free <- keep & !(vid %in% named)
   if (!any(free)) return(NULL)
   g <- g[keep]; vid <- vid[keep]; free <- free[keep]
   # The polygons in the working CRS.  Without a CRS they are read where the
@@ -332,14 +334,44 @@
 #' @param polygons Whether \code{values} carries cell polygons, so that a
 #'   seed with an \code{NA} ID outside all of them was offered the cell it
 #'   generates (\code{.values_at_free_cells()}) before the check.
-#' @return The message.  Seeds whose IDs are all \code{NA} are told what
-#'   gives a point placed by hand its cell; other seeds how to set the
+#' @param nowhere Whether some seed without a location has the ID of a cell
+#'   of \code{values}.
+#' @param crs With \code{nowhere}, the working CRS when the seeds with the
+#'   IDs of cells have a location as given and none once placed in it;
+#'   \code{NULL} when they have none as given.
+#' @param seeds_crs With \code{crs}, the CRS of \code{seeds} as passed.
+#' @return The message.  Seeds whose IDs of cells are all on seeds without
+#'   a location are told so, with the CRS they were placed in and their own
+#'   when they had one as given; seeds whose IDs are all \code{NA} are told
+#'   what gives a point placed by hand its cell; other seeds how to set the
 #'   column.
 #' @keywords internal
 #' @noRd
-.values_at_no_seed_cell <- function(seed_ids, id_col, polygons) {
+.values_at_no_seed_cell <- function(seed_ids, id_col, polygons, nowhere = FALSE,
+                                   crs = NULL, seeds_crs = NULL) {
   set <- sprintf(paste0("Set the column from the tessellation the cells of `values` came ",
                         "from (seeds$%s <- tess$index)."), id_col)
+  if (nowhere && !is.null(crs)) {
+    at  <- .fold_crs_label(crs)
+    own <- .fold_crs_label(seeds_crs)
+    return(sprintf(paste0("cell_values_at(): every seed in `seeds` with the ID of a cell of ",
+                          "`values` has no location once placed in %s, the CRS the summary ",
+                          "measured in (a coordinate there is not finite or lies beyond ",
+                          "1e150), so no location could take its own cell's value. %s Set ",
+                          "the CRS the seeds' coordinates are in with sf::st_set_crs(), or ",
+                          "pass the seeds the cells were built on and set the column from ",
+                          "that tessellation (seeds$%s <- tess$index)."),
+                   if (is.na(at)) "the working CRS" else at,
+                   if (is.na(own)) "`seeds` has no CRS." else sprintf("`seeds` is in %s.", own),
+                   id_col))
+  }
+  if (nowhere)
+    return(sprintf(paste0("cell_values_at(): every seed in `seeds` with the ID of a cell of ",
+                          "`values` has no location (an empty point, or a coordinate that ",
+                          "is not finite or lies beyond 1e150), so no location could take ",
+                          "its own cell's value. Pass the seeds the cells were built on, ",
+                          "with their points, and set the column from that tessellation ",
+                          "(seeds$%s <- tess$index)."), id_col))
   if (!length(seed_ids) || !all(is.na(seed_ids)))
     return(sprintf(paste0("cell_values_at(): no seed in `seeds$%s` has the ID of a cell of ",
                           "`values`, so no location could take its own cell's value. %s"),
@@ -589,13 +621,16 @@
 #'   are seeds (see [create_voronoi_polygons()]). Two seeds at different
 #'   locations with one ID are an error; seeds that share a location share
 #'   its cell, as `index` gives them. `NA` marks a seed without a cell.
-#'   When no seed has the ID of a cell of `values` (an ID column from
-#'   another tessellation, or IDs that are all `NA`), counting the cells
-#'   step 3 gives seeds outside the polygons, the call stops, since no
-#'   location could take its own cell's value; one seed with such an ID is
-#'   enough, and a seed whose ID `values` has no row for stands for a cell
-#'   without a value. Without a CRS beside `points` with one, the seeds are
-#'   read as step 1 says.
+#'   When no seed with a location has the ID of a cell of `values` (an ID
+#'   column from another tessellation, IDs that are all `NA`, or the IDs of
+#'   cells on seeds with an empty point or a coordinate that is not finite
+#'   or lies beyond 1e150, as given or once placed in the working CRS, such
+#'   as metres given EPSG:4326), counting the cells step 3 gives seeds outside
+#'   the polygons, the call stops, since no location could take its own
+#'   cell's value; one seed with such an ID and a location is enough, and a
+#'   seed whose ID `values` has no row for stands for a cell without a
+#'   value. Without a CRS beside `points` with one, the seeds are read as
+#'   step 1 says.
 #'
 #' @return A data frame with one row per row of `newdata`, in its order:
 #'   \describe{
@@ -811,8 +846,13 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
     # the index of another tessellation, IDs all NA) would leave every
     # location without its cell's value: each would be filled from its
     # nearest scored row.  NA is dropped on both sides, since NA %in% NA is
-    # TRUE.  One seed with a cell's ID is enough: a seed whose ID `values` has
-    # no row for stands for a cell without a value (step 5).
+    # TRUE.  One seed with a location and a cell's ID is enough: a seed whose
+    # ID `values` has no row for stands for a cell without a value (step 5).
+    # Only a seed with a location counts.  One without (an empty point, a
+    # coordinate that is not finite or lies beyond .POOL_XY_MAX, as
+    # .values_at_xy() reads it) is the nearest seed of no location, and is
+    # given no cell in step 3.  The coordinates are read as given, before any
+    # CRS work, and again once the seeds are placed in the working CRS.
     of_values <- .id_as_character(values[[id_col]])
     of_values <- of_values[!is.na(of_values)]
     if (!length(of_values))
@@ -825,11 +865,18 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
     # boundary can all be such seeds.  Beside polygons the check then
     # waits for that step and reads the IDs it gives; other seeds are refused
     # here, before any CRS work or search.
-    ids_named <- any(seed_ids[!is.na(seed_ids)] %in% of_values)
-    ids_later <- !ids_named && anyNA(seed_ids) && inherits(values, "sf") &&
+    located <- local({
+      at <- .values_at_xy(seeds)
+      is.finite(at[, 1L]) & is.finite(at[, 2L])
+    })
+    of_cells <- function(ids, among) any(ids[among & !is.na(ids)] %in% of_values)
+    has_polygons <- inherits(values, "sf") &&
       any(sf::st_geometry_type(values, by_geometry = TRUE) %in% c("POLYGON", "MULTIPOLYGON"))
+    ids_named <- of_cells(seed_ids, located)
+    ids_later <- !ids_named && anyNA(seed_ids[located]) && has_polygons
     if (!ids_named && !ids_later)
-      stop(.values_at_no_seed_cell(seed_ids, id_col, polygons = FALSE), call. = FALSE)
+      stop(.values_at_no_seed_cell(seed_ids, id_col, polygons = has_polygons,
+                                   nowhere = of_cells(seed_ids, !located)), call. = FALSE)
   }
 
   points_crs <- sf::st_crs(points)
@@ -899,7 +946,17 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
   if (by_seeds) {
     seed_xy <- .values_at_xy(.values_at_place(.values_at_points(seeds), "seeds", "seeds",
                                               crs, points_crs, as_lonlat))
+    # A seed without a location as given has none here either, though a move
+    # between CRSs can bring a coordinate beyond 1e150 back finite.
+    seed_xy[!located, ] <- NA_real_
     seed_at <- which(is.finite(seed_xy[, 1L]) & is.finite(seed_xy[, 2L]))
+    seed_on <- seq_len(nrow(seed_xy)) %in% seed_at
+    # The check of the seeds' IDs, on the seeds that have a location in the
+    # working CRS: coordinates finite as given can leave the globe there
+    # (metres stamped EPSG:4326, a latitude beyond 90).
+    if (ids_named && !of_cells(seed_ids, seed_on))
+      stop(.values_at_no_seed_cell(seed_ids, id_col, polygons = has_polygons, nowhere = TRUE,
+                                   crs = crs, seeds_crs = sf::st_crs(seeds)), call. = FALSE)
     # Seeds with an NA ID outside every cell of `values`, whose cells may be
     # there with no seed naming them (see .values_at_free_cells()).  Looked
     # for also without a location to place when the check of the seeds' IDs
@@ -959,8 +1016,9 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
                          "other seed names."), length(given))
     }
     # The check of the seeds' IDs that waited for the step above.
-    if (ids_later && !any(seed_ids[!is.na(seed_ids)] %in% of_values))
-      stop(.values_at_no_seed_cell(seed_ids, id_col, polygons = TRUE), call. = FALSE)
+    if (ids_later && !of_cells(seed_ids, seed_on))
+      stop(.values_at_no_seed_cell(seed_ids, id_col, polygons = TRUE,
+                                   nowhere = of_cells(seed_ids, !located)), call. = FALSE)
     if (length(live) && length(seed_at)) {
       # Seeds that are the centres the profile scored, in any order, are
       # searched at the centres as the record holds them and in its order, so

@@ -50,13 +50,16 @@ nearest it have none. Passed through \code{get_voronoi_seeds(method = "provided"
 are seeds (see \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}). Two seeds at different
 locations with one ID are an error; seeds that share a location share
 its cell, as \code{index} gives them. \code{NA} marks a seed without a cell.
-When no seed has the ID of a cell of \code{values} (an ID column from
-another tessellation, or IDs that are all \code{NA}), counting the cells
-step 3 gives seeds outside the polygons, the call stops, since no
-location could take its own cell's value; one seed with such an ID is
-enough, and a seed whose ID \code{values} has no row for stands for a cell
-without a value. Without a CRS beside \code{points} with one, the seeds are
-read as step 1 says.}
+When no seed with a location has the ID of a cell of \code{values} (an ID
+column from another tessellation, IDs that are all \code{NA}, or the IDs of
+cells on seeds with an empty point or a coordinate that is not finite
+or lies beyond 1e150, as given or once placed in the working CRS, such
+as metres given EPSG:4326), counting the cells step 3 gives seeds outside
+the polygons, the call stops, since no location could take its own
+cell's value; one seed with such an ID and a location is enough, and a
+seed whose ID \code{values} has no row for stands for a cell without a
+value. Without a CRS beside \code{points} with one, the seeds are read as
+step 1 says.}
 }
 \value{
 A data frame with one row per row of \code{newdata}, in its order:
