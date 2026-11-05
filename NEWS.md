@@ -1818,6 +1818,30 @@ old behaviour where there is a way.
   before, and the points added along an edge no longer depend on the
   direction in which its ring is listed.
 
+* **`summarize_by_cell(area = TRUE)` refused projected cells when s2
+  refused one of them in degrees.**  The area check compares the cells'
+  planar areas with their geodesic areas, which s2 measures on the cells'
+  copy in EPSG:4326, and it took the geodesic areas in one call.
+  Two corners a fraction of a nanometre apart in the cells' CRS can fall on
+  one point in degrees, where s2 refuses the ring ("duplicate vertex"), and
+  then the call failed for every cell.  A vertex listed twice, which GEOS
+  accepts, does the same.  The k-means cells of a 30 by 20 lattice at 30 m,
+  built and kept in EPSG:32615 from rows in degrees, are all valid in
+  EPSG:32615 and s2 refuses 4 of the 133; the request was refused because
+  "the area distortion of `cells_sf`'s CRS could not be measured".
+  `ensure_projected(purpose = "area")` on projected input skipped its check
+  in silence the same way: 20 cells of 1 degree from 30N to 69N in Web
+  Mercator, which distort areas by 214 percent, logged nothing when one
+  cell had such a pair of corners.  When the one call fails, the geodesic
+  areas are now taken one cell at a time, and a cell s2 refuses is measured
+  again without the vertices that repeat the one before them in degrees,
+  which leaves its points and its area as they were.  The lattice's cells
+  get a density, with `attr(, "area_error")` the spread over all 133
+  cells, and the warning is logged for the Web Mercator cells.  A cell s2
+  refuses even then, such as one whose edges cross, still leaves the spread
+  unmeasured, and the request is refused as before.  A layer whose cells s2
+  all accepts gets the same figure as before.
+
 * **`resolution_profile()` reported a layer too small for a ladder as
   supported.**  With fewer than two cells at `min_cell_n` it raised the
   ceiling to 2 with `supported = TRUE`.  It still scores two cells, with

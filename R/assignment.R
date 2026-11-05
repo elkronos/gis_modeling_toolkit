@@ -1851,7 +1851,12 @@ assign_features_to_polygons <- function(
 #'   from one cell to the next.  Inside a UTM zone the spread is under 0.3
 #'   percent and the request goes through; the conterminous United States
 #'   forced into one zone (14 percent), or a few degrees of latitude in Web
-#'   Mercator (4 percent at 48N), does not.  [ensure_projected()] with
+#'   Mercator (4 percent at 48N), does not.  A projected cell with two
+#'   vertices that fall on one point once in degrees, where s2 refuses it, is
+#'   measured there without the repeat, which moves no area; when s2 refuses
+#'   a cell it measures for another reason (edges that cross, a spike), the
+#'   spread cannot be measured and the request is refused.
+#'   [ensure_projected()] with
 #'   `purpose = "area"` chooses an equal-area CRS for lon/lat input; build the
 #'   cells in it.  Lon/lat cells are measured geodesically instead: their
 #'   `cell_area` is `sf::st_area()`'s area in square metres (on the sphere

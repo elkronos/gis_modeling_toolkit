@@ -746,8 +746,11 @@
 #'   even when \code{x} has polygons.  A single study-area polygon is one
 #'   probe, and one ratio has no spread to measure.
 #' @return Numeric worst-case \code{|ratio / median(ratio) - 1|}, or
-#'   \code{NA} when it cannot be computed (no CRS, no area, geodesic areas
-#'   unavailable).
+#'   \code{NA} when it cannot be computed (no CRS, fewer than two probes
+#'   with an area, a probe whose geodesic area is unavailable).  A probe
+#'   with two vertices that fall on one point in degrees is measured there
+#'   without the repeat; a probe s2 refuses even then makes the figure
+#'   \code{NA}.
 #' @keywords internal
 #' @noRd
 .crs_area_error <- function(x, crs = NULL, n = 6L, max_n = 200L, grid = FALSE) {
@@ -809,12 +812,64 @@
     # asks lwgeom for them, which is not a dependency, the error became NA
     # here, and summarize_by_cell(area = TRUE) then refused every grid while
     # ensure_projected(purpose = "area") skipped its distortion check.
-    geod   <- .with_s2(as.numeric(sf::st_area(sf::st_transform(probe, 4326))))
+    # When the one call fails, each probe is measured on its own, and a probe
+    # s2 refuses is measured again without the vertices that repeat the one
+    # before them in degrees.  Two corners a fraction of a nanometre apart in
+    # the layer's CRS can fall on one point in degrees, and s2 refuses the
+    # ring ("duplicate vertex"); an exact repeated vertex, which GEOS
+    # accepts, does the same.  4 of 133 k-means cells kept in EPSG:32615 for
+    # rows in degrees did, the one call made the figure NA, and
+    # summarize_by_cell(area = TRUE) refused cells that are valid in their
+    # own CRS.  Dropping a repeat leaves the ring's points in degrees as
+    # they were, so no area moves.  st_make_valid() is not used: it snaps
+    # the vertices to 1e-7 degrees, which moves an area by up to about the
+    # perimeter times a centimetre, and on cells a few metres across moves
+    # the ratio by more than the tolerance.
+    p_ll <- sf::st_transform(probe, 4326)
+    geod <- .with_s2(tryCatch(as.numeric(sf::st_area(p_ll)), error = function(e)
+      vapply(seq_along(p_ll), function(i)
+        tryCatch(as.numeric(sf::st_area(p_ll[i])), error = function(e)
+          tryCatch(as.numeric(sf::st_area(.drop_repeated_vertices(p_ll[i]))),
+                   error = function(e) NA_real_)),
+        numeric(1))))
+    # A probe s2 refuses even then (crossing edges, a spike) leaves the
+    # figure unmeasured.  Leaving it out let the probes that carry the
+    # distortion drop out of the spread: 20 Web Mercator cells from 30N to
+    # 67N, 18 of them with a repeated vertex, measured 7e-15 over the two
+    # left, where all twenty give 1.87.
+    if (anyNA(geod)) return(NA_real_)
     ratio  <- planar / geod
     ok <- is.finite(ratio) & is.finite(geod) & geod > 0
     if (sum(ok) < 2L) return(NA_real_)
     max(abs(ratio[ok] / stats::median(ratio[ok]) - 1))
   }, error = function(e) NA_real_)
+}
+
+#' A polygon without the vertices that repeat the one before them
+#'
+#' Each ring keeps its first vertex and every vertex whose x or y differs from
+#' the one before it, so the ring's points and the area it encloses are as
+#' they were, and the ring stays closed.  Other coordinates (z, m) are kept
+#' and not compared.  Used by \code{.crs_area_error()} on a probe s2 refuses
+#' in degrees.
+#'
+#' @param g An sfc of one POLYGON or MULTIPOLYGON.
+#' @return The same sfc with each ring's repeats dropped.
+#' @keywords internal
+#' @noRd
+.drop_repeated_vertices <- function(g) {
+  ring <- function(r) {
+    if (nrow(r) < 2L) return(r)
+    moved <- r[-1L, 1L] != r[-nrow(r), 1L] | r[-1L, 2L] != r[-nrow(r), 2L]
+    r[c(TRUE, moved), , drop = FALSE]
+  }
+  geom <- g[[1L]]
+  cls  <- class(geom)
+  out  <- if (inherits(geom, "MULTIPOLYGON"))
+    lapply(unclass(geom), function(p) lapply(p, ring))
+  else lapply(unclass(geom), ring)
+  class(out) <- cls
+  sf::st_sfc(out, crs = sf::st_crs(g))
 }
 
 #' The area-distortion tolerance below which a CRS is taken as equal-area
