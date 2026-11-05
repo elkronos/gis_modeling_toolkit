@@ -1167,18 +1167,21 @@
 #'     that share a location), \code{total} (the rows \code{loo} read) and
 #'     \code{column}.}
 #'   \item{\code{spatialkit_no_scored_rows}}{\code{resolution_profile()}
-#'     with an \code{estimate} under \code{select_on = "split"}: no row of
-#'     the selection half has a response.  The check that \code{estimate}
-#'     has rows to read is made on the layer, and the rows with a response
-#'     are all in the estimation half, so \code{loo} and the estimate's other
-#'     columns read no row and are \code{NA} at every level, as are
-#'     \code{rss}, \code{cp}, \code{moran_i} and \code{moran_z}.  Raised
-#'     once, after the levels are scored.  The condition carries
+#'     under \code{select_on = "split"}: no row of the selection half has a
+#'     response, and the rows of the layer with one are all in the
+#'     estimation half.  \code{rss}, \code{cp}, \code{moran_i} and
+#'     \code{moran_z}, which read the selection half, are \code{NA} at
+#'     every level.  With an \code{estimate}, whose check that it has rows
+#'     to read is made on the layer, \code{loo} and the estimate's other
+#'     columns read no row and are \code{NA} at every level too.  With
+#'     \code{predictor_vars} a row counts when it has a response and every
+#'     predictor.  Not raised when no row of the layer has a response.
+#'     Raised once, after the levels are scored.  The condition carries
 #'     \code{reason}
 #'     (\code{"no response in the selection half"}), \code{n} (0, the rows
-#'     \code{loo} read), \code{selection} (the rows of the selection half),
-#'     \code{n_response} (the rows of the layer with a response) and
-#'     \code{column}.}
+#'     of the selection half scored), \code{selection} (the rows of the
+#'     selection half), \code{n_response} (the rows of the layer with a
+#'     response) and \code{column}.}
 #'   \item{\code{spatialkit_pool_unavailable}}{\code{resolution_profile()}
 #'     with an \code{estimate}: the values of the response lie beyond what
 #'     the arithmetic of the estimate holds, values so large, or so close to
@@ -1538,7 +1541,10 @@
 #'   \code{sac} (the range object used) and, with \code{select_on =
 #'   "split"}, \code{split} (a \code{spatialkit_split}: \code{selection}
 #'   and \code{estimation}, integer row positions in \code{data_sf}, with
-#'   the \code{method} and \code{seed} that made them), \code{cp_noise} (a
+#'   the \code{method} and \code{seed} that made them, and with a
+#'   response \code{n_response}, the rows of the selection half with a
+#'   finite response and every predictor, counted on the layer before any
+#'   subsample), \code{cp_noise} (a
 #'   list with \code{source}, \code{"variogram nugget"},
 #'   \code{"finest-level residual mean square"} or \code{"short-lag
 #'   semivariance"}, \code{value}, the \eqn{\tau^2} used, and \code{level},
@@ -2035,6 +2041,16 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     scored <- resp_ok[ord]
     if (!is.null(in_sel)) scored <- scored & in_sel[ord]
     lay <- list(xy = unname(xy[ord[scored], , drop = FALSE]), y = resp[ord[scored]])
+  }
+  # Under select_on = "split", the rows of the selection half with a finite
+  # response (and every predictor), counted on the layer before the
+  # subsample: with an estimate, the rows it reads.  Kept on the split
+  # (`n_response`), where summary() and select_resolution() read that the
+  # half has none, with or without an estimate.
+  n_sel_resp <- NA_integer_
+  if (has_resp && !is.null(in_sel)) {
+    n_sel_resp <- as.integer(sum(resp_ok & in_sel))
+    split$n_response <- n_sel_resp
   }
   # A size is a number of rows of the layer, so the centres of a ladder of
   # sizes are fitted to every row: no subsample is drawn, and `sample_n` is
@@ -2881,21 +2897,28 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # half that have a response, and the check that `estimate` has rows to read
   # is made on the layer.  A layer whose rows with a response all lie in the
   # estimation half passed it, and the profile returned a `loo` read off no
-  # row with nothing said.  The columns stay NA, and this says why.  Raised
-  # after the sweep, so a call a guard stops says nothing of columns it never
-  # returns.
-  if (!is.null(est) && !is.null(split) && !length(lay$y)) {
+  # row with nothing said.  The columns stay NA, and this says why.  Without
+  # an estimate `rss`, `cp` and the Moran columns are NA for the same reason,
+  # and this says so too.  Not raised when no row of the layer has a
+  # response: then the split is not the reason.  Raised after the sweep, so a
+  # call a guard stops says nothing of columns it never returns.
+  if (!is.null(split) && has_resp && n_resp > 0L && identical(n_sel_resp, 0L)) {
     n_sel <- length(split$selection)
     .warn_classed("spatialkit_no_scored_rows",
                   paste0("resolution_profile(): no row of the selection half has a finite ",
-                         "value of '%s', so `loo`, `loo_se`, `scored_per_cell`, `share_alone` ",
-                         "and `own_weight` are NA at every level, and so are `rss`, `cp`, ",
-                         "`moran_i` and `moran_z`, which also read the selection half. Under ",
-                         "select_on = \"split\" the response is read on the selection half ",
-                         "alone (%d row%s); the %d row%s with a finite value %s in the ",
-                         "estimation half."),
-                  response_var, n_sel, if (n_sel == 1L) "" else "s",
+                         "value of '%s'%s, so %s. Under select_on = \"split\" the response is ",
+                         "read on the selection half alone (%d row%s); the %d row%s with %s %s ",
+                         "in the estimation half."),
+                  response_var, if (has_pred) " and of every predictor" else "",
+                  if (!is.null(est))
+                    paste0("`loo`, `loo_se`, `scored_per_cell`, `share_alone` and `own_weight` ",
+                           "are NA at every level, and so are `rss`, `cp`, `moran_i` and ",
+                           "`moran_z`, which also read the selection half")
+                  else paste0("`rss`, `cp`, `moran_i` and `moran_z`, which read the selection ",
+                              "half, are NA at every level"),
+                  n_sel, if (n_sel == 1L) "" else "s",
                   as.integer(n_support), if (n_support == 1L) "" else "s",
+                  if (has_pred) "them" else "a finite value",
                   if (n_support == 1L) "is" else "are all",
                   data = list(reason = "no response in the selection half", n = 0L,
                               selection = n_sel, n_response = as.integer(n_support),
@@ -3216,6 +3239,20 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # what select_resolution() refits the chosen level to.
   if (!is.null(refit_rows)) attr(out, "refit_rows") <- refit_rows
   out
+}
+
+
+# Whether no row of a split profile's selection half has a response (and
+# every predictor) while the layer has rows with one: the case of
+# spatialkit_no_scored_rows.  Read off the split's count (`n_response`), and
+# off the estimate's record for a profile kept from before the split carried
+# that count.
+.split_no_response <- function(x) {
+  sp  <- attr(x, "split", exact = TRUE)
+  est <- attr(x, "estimate", exact = TRUE)
+  b   <- attr(x, "bounds", exact = TRUE)
+  (is.list(sp) && isTRUE(sp$n_response == 0L) && is.list(b) && isTRUE(b$n_response > 0L)) ||
+    (is.list(est) && isTRUE(est$n == 0L) && identical(est$rows, "selection half"))
 }
 
 
@@ -3719,8 +3756,11 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #' count, and \code{plot()} draws each as one point, with no selected level
 #' and no band.  When none is finite, as on a constant response, where
 #' \code{loo} is \code{NA} too, or when no row of the selection half has a
-#' response (\code{select_on = "split"} with an \code{estimate}),
-#' \code{summary()} stops with an error that says so.
+#' response (\code{select_on = "split"}), \code{summary()} stops with an
+#' error that says so.  In that last case \code{"cp"} and \code{"moran_z"},
+#' and \code{"loo"} with an \code{estimate}, are errors that give the same
+#' reason, except \code{"cp"} on a size ladder that fitted no variogram,
+#' which gives the size ladder's reason, as above.
 #'
 #' @param profile A \code{resolution_profile}.
 #' @param criterion Which rule sets the count: \code{"cp"} (minimised),
@@ -4068,6 +4108,17 @@ select_resolution <- function(profile,
                         "criterion = \"size\" reads this profile."),
                  criterion, .got_text(ladder_sizes), criterion,
                  if (criterion == "cp") "noise variance" else "range"),
+         call. = FALSE)
+  # Under the split, a selection half with no response leaves `cp` and
+  # `moran_z` NA too, with or without an estimate: "it needs a response" sent
+  # the caller to look for a response that the layer has.
+  if (!any(ok) && criterion %in% c("cp", "moran_z") && .split_no_response(profile))
+    stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because no row of the ",
+                        "selection half has a response%s: under select_on = \"split\" the ",
+                        "profile reads the response on that half alone."),
+                 criterion,
+                 if (isTRUE(attr(profile, "bounds", exact = TRUE)$predictors))
+                   " and every predictor" else ""),
          call. = FALSE)
   if (!any(ok))
     stop(sprintf(paste0("select_resolution(): `%s` is NA at every level%s."),
@@ -5224,8 +5275,9 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
     # So is a selection half with no response under select_on = "split": the
     # layer has rows with one, all in the estimation half, and "cp needs a
     # response" sent the caller to look for a response that is there.
-    split_none <- is.list(est_c) && isTRUE(est_c$n == 0L) &&
-      identical(est_c$rows, "selection half")
+    # Read off the split's count, so with or without an estimate.
+    split_none <- .split_no_response(object)
+    split_pred <- isTRUE(attr(object, "bounds", exact = TRUE)$predictors)
     # And values beyond what the estimate's arithmetic holds: `loo` is NA for
     # that, and not because the test for `cp` finds the response constant.
     beyond <- .estimate_beyond_range(est_c)
@@ -5234,12 +5286,13 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
     beyond_all <- beyond && identical(.cp_constant_case(one_c, est_c), "beyond")
     stop("summary.resolution_profile(): no count criterion is finite at any level. ",
          if (split_none)
-           sprintf(paste0("No row of the selection half has a response, and under ",
+           sprintf(paste0("No row of the selection half has a response%s, and under ",
                           "select_on = \"split\" the response is read on that half alone, ",
                           "so no criterion that reads it is finite: %s are NA at every ",
                           "level, and reliability needs a usable variogram of that half; ",
                           "elbow, read off the points alone, is NA when the WSS curve has ",
                           "no elbow."),
+                   if (split_pred) " and every predictor" else "",
                    if ("loo" %in% names(object)) "cp, loo and moran_z" else "cp and moran_z")
          else if (beyond_all)
            sprintf(paste0("The values of the response lie beyond what the arithmetic of the ",

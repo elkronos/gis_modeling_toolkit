@@ -2729,6 +2729,21 @@ old behaviour where there is a way.
   holds two rows with a response, and `summary()` of the profile, whose
   error said that "cp needs a response", gives it too.  No number changes.
 
+* **`resolution_profile(select_on = "split")` without an estimate returned
+  `rss`, `cp`, `moran_i` and `moran_z` `NA` at every level, with nothing
+  said, when no row of the selection half had a response.**  The warning of
+  class `spatialkit_no_scored_rows`, which gave the reason only with an
+  estimate, is now raised without one too, and with `predictor_vars` it
+  counts the rows with a response and every predictor.  It is not raised
+  when no row of the layer has a response.  The split the profile carries
+  records the rows of the selection half with a response (`n_response`).
+  `summary()` of the profile, which said that "cp needs a response", and
+  `select_resolution(criterion = "cp")` and `"moran_z"`, and `"auto"` where
+  it reads `cp`, which said what each criterion needs, now give the reason,
+  with or without an estimate.  On a size ladder that fitted no variogram,
+  `"cp"`, and `"auto"` where it reads `cp`, give the size ladder's reason,
+  as before.  No number changes.
+
 * **The warnings of `make_folds(method = "block_kfold")` on blocks smaller
   than the autocorrelation range said "Spatial CV may leak correlated
   information across folds".**  That read blocks below the range as a

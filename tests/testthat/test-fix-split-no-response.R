@@ -167,21 +167,36 @@ test_that("with a variogram given, reliability is computed and the warning does 
     expect_true(all(is.na(p[[col]])), info = col)
 })
 
-test_that("the estimate adds the warning and changes nothing else", {
+test_that("the estimate adds its columns to the warning and changes nothing else", {
   skip_if_not_installed("FNN")
   L <- fsn_no_selection()
   call <- function(est) resolution_profile(L$pts, "z", estimate = est, obs_per_cell = NULL,
                                            n_levels = 5, partition = "kmeans", nstart = 2,
                                            select_on = "split")
   base <- fsn_catch(call(NULL))
-  expect_length(fsn_of(base, "spatialkit_no_scored_rows"), 0L)
+  # Without an estimate the warning is raised too, and names the columns
+  # that read the selection half (BUG-34).
+  expect_length(fsn_of(base, "spatialkit_no_scored_rows"), 1L)
+  base_w <- fsn_first(base, "spatialkit_no_scored_rows")
   for (est in c("pooled", "mean")) {
     r <- fsn_catch(call(est))
     for (col in names(base$value))
       expect_identical(r$value[[col]], base$value[[col]], info = paste(est, col))
-    added <- r$classes == "spatialkit_no_scored_rows"
-    expect_identical(sum(added), 1L)
-    expect_identical(r$classes[!added], base$classes, info = est)
+    expect_identical(sum(r$classes == "spatialkit_no_scored_rows"), 1L)
+    expect_identical(r$classes, base$classes, info = est)
+    # The two warnings differ in the estimate's columns alone.
+    w <- fsn_first(r, "spatialkit_no_scored_rows")
+    expect_identical(fsn_msg(w), fsn_text(length(L$split$selection), length(L$split$estimation)))
+    expect_identical(
+      sub(paste0("`loo`, `loo_se`, `scored_per_cell`, `share_alone` and `own_weight` are NA ",
+                 "at every level, and so are `rss`, `cp`, `moran_i` and `moran_z`, which also ",
+                 "read the selection half"),
+          paste0("`rss`, `cp`, `moran_i` and `moran_z`, which read the selection half, are NA ",
+                 "at every level"),
+          fsn_msg(w), fixed = TRUE),
+      fsn_msg(base_w), info = est)
+    for (f in c("reason", "n", "selection", "n_response", "column"))
+      expect_identical(w[[f]], base_w[[f]], info = paste(est, f))
   }
 })
 
@@ -209,7 +224,7 @@ test_that("downstream, the size still sets the count and loo refuses with the re
   expect_identical(err(select_resolution(mean_p, criterion = "loo")), msg)
 })
 
-test_that("the other criteria keep their own refusals, and summary() gives the reason", {
+test_that("the other criteria refuse with their own reason or the split's, and summary() gives the reason", {
   skip_if_not_installed("FNN")
   L <- fsn_no_selection()
   err <- function(expr) tryCatch({ expr; NA_character_ }, error = conditionMessage)
@@ -220,9 +235,10 @@ test_that("the other criteria keep their own refusals, and summary() gives the r
                                                 select_on = "split"))
   mean_p <- suppressWarnings(resolution_profile(L$pts, "z", estimate = "mean",
                                                 select_on = "split"))
-  # The refusal that names the selection half is for `loo` alone: the other
-  # criteria stop with their own reason, on the default profile and on a
-  # ladder of counts.
+  # On the default profile, a ladder of one size with no variogram, cp and
+  # reliability stop with the size ladder's reason.  On a ladder of counts
+  # cp and moran_z name the selection half (BUG-34), and reliability, which
+  # needs a variogram, keeps its own reason.  None names `loo`.
   size_text <- function(cr, what)
     sprintf(paste0("select_resolution(): `%s` is NA at every level: this profile is on a ",
                    "size ladder (obs_per_cell = 4.5), which fits no variogram unless `sac` ",
@@ -239,7 +255,7 @@ test_that("the other criteria keep their own refusals, and summary() gives the r
     expect_true(startsWith(e, sprintf("select_resolution(): `%s` is NA at every level", cr)),
                 info = cr)
     expect_false(grepl("`loo` is NA", e, fixed = TRUE), info = cr)
-    expect_false(grepl("selection half", e, fixed = TRUE), info = cr)
+    expect_identical(grepl("selection half", e, fixed = TRUE), cr != "reliability", info = cr)
   }
   # summary() names the selection half, not a missing response.
   split_text <- paste0("summary.resolution_profile(): no count criterion is finite at any ",
@@ -267,7 +283,7 @@ test_that("the other criteria keep their own refusals, and summary() gives the r
   expect_false(grepl("No row of the selection half", e, fixed = TRUE))
 })
 
-test_that("the warning is not raised where the selection half has a response, or without the split", {
+test_that("the warning is raised where the selection half has no response, with or without an estimate, and not elsewhere", {
   skip_if_not_installed("FNN")
   pts <- fsn_layer()
   sp  <- fsn_split(pts)
@@ -306,10 +322,12 @@ test_that("the warning is not raised where the selection half has a response, or
   r <- fsn_catch(resolution_profile(none, "z"))
   expect_null(attr(r$value, "estimate"))
   expect_length(fsn_of(r, "spatialkit_no_scored_rows"), 0L)
-  # The split with no estimate: nothing reads `loo`.
+  # The split with no estimate: nothing reads `loo`, but `rss`, `cp` and the
+  # Moran columns read the selection half, and the warning says so (BUG-34).
   L <- fsn_no_selection()
   r <- fsn_catch(resolution_profile(L$pts, "z", estimate = NULL, select_on = "split"))
-  expect_length(fsn_of(r, "spatialkit_no_scored_rows"), 0L)
+  expect_length(fsn_of(r, "spatialkit_no_scored_rows"), 1L)
+  expect_false(grepl("`loo`", fsn_msg(fsn_first(r, "spatialkit_no_scored_rows")), fixed = TRUE))
 })
 
 test_that("a call a guard stops says nothing of the columns", {
@@ -337,21 +355,22 @@ test_that("the help and NEWS say when the columns are NA and why", {
                   "class spatialkit_no_scored_rows."))
   says(rp, paste0("All five are NA at every level when no row of the selection half has a ",
                   "response (select_on = \"split\"; spatialkit_no_scored_rows)."))
-  says(rp, paste0("spatialkit_no_scored_rowsresolution_profile() with an estimate under ",
-                  "select_on = \"split\": no row of the selection half has a response."))
-  says(rp, paste0("so loo and the estimate's other columns read no row and are NA at every ",
-                  "level, as are rss, cp, moran_i and moran_z."))
+  says(rp, paste0("spatialkit_no_scored_rowsresolution_profile() under select_on = ",
+                  "\"split\": no row of the selection half has a response"))
+  says(rp, paste0("loo and the estimate's other columns read no row and are NA at every ",
+                  "level too."))
   says(rp, paste0("The condition carries reason (\"no response in the selection half\"), n ",
-                  "(0, the rows loo read), selection (the rows of the selection half), ",
-                  "n_response (the rows of the layer with a response) and column."))
+                  "(0, the rows of the selection half scored), selection (the rows of the ",
+                  "selection half), n_response (the rows of the layer with a response) and ",
+                  "column."))
   # ?select_resolution says when summary() stops, and that it says why.
   file <- file.path(root, "man", "select_resolution.Rd")
   db <- if (file.exists(file)) tools::parse_Rd(file)
         else tools::Rd_db("spatialkit")[["select_resolution.Rd"]]
   sr <- gsub("[[:space:]]+", " ", flat(db))
   says(sr, paste0("When none is finite, as on a constant response, where loo is NA too, or ",
-                  "when no row of the selection half has a response (select_on = \"split\" ",
-                  "with an estimate), summary() stops with an error that says so."))
+                  "when no row of the selection half has a response (select_on = \"split\"), ",
+                  "summary() stops with an error that says so."))
 
   news_file <- file.path(root, "NEWS.md")
   if (!file.exists(news_file)) news_file <- system.file("NEWS.md", package = "spatialkit")

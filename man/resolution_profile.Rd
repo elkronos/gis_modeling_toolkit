@@ -318,7 +318,10 @@ say); \code{NULL} when none was usable), \code{variable} (\code{"response"},
 \code{sac} (the range object used) and, with \code{select_on =
   "split"}, \code{split} (a \code{spatialkit_split}: \code{selection}
 and \code{estimation}, integer row positions in \code{data_sf}, with
-the \code{method} and \code{seed} that made them), \code{cp_noise} (a
+the \code{method} and \code{seed} that made them, and with a
+response \code{n_response}, the rows of the selection half with a
+finite response and every predictor, counted on the layer before any
+subsample), \code{cp_noise} (a
 list with \code{source}, \code{"variogram nugget"},
 \code{"finest-level residual mean square"} or \code{"short-lag
   semivariance"}, \code{value}, the \eqn{\tau^2} used, and \code{level},
@@ -1095,18 +1098,21 @@ Raised once, after the levels are scored, and not when \code{loo} is
 that share a location), \code{total} (the rows \code{loo} read) and
 \code{column}.}
 \item{\code{spatialkit_no_scored_rows}}{\code{resolution_profile()}
-with an \code{estimate} under \code{select_on = "split"}: no row of
-the selection half has a response.  The check that \code{estimate}
-has rows to read is made on the layer, and the rows with a response
-are all in the estimation half, so \code{loo} and the estimate's other
-columns read no row and are \code{NA} at every level, as are
-\code{rss}, \code{cp}, \code{moran_i} and \code{moran_z}.  Raised
-once, after the levels are scored.  The condition carries
+under \code{select_on = "split"}: no row of the selection half has a
+response, and the rows of the layer with one are all in the
+estimation half.  \code{rss}, \code{cp}, \code{moran_i} and
+\code{moran_z}, which read the selection half, are \code{NA} at
+every level.  With an \code{estimate}, whose check that it has rows
+to read is made on the layer, \code{loo} and the estimate's other
+columns read no row and are \code{NA} at every level too.  With
+\code{predictor_vars} a row counts when it has a response and every
+predictor.  Not raised when no row of the layer has a response.
+Raised once, after the levels are scored.  The condition carries
 \code{reason}
 (\code{"no response in the selection half"}), \code{n} (0, the rows
-\code{loo} read), \code{selection} (the rows of the selection half),
-\code{n_response} (the rows of the layer with a response) and
-\code{column}.}
+of the selection half scored), \code{selection} (the rows of the
+selection half), \code{n_response} (the rows of the layer with a
+response) and \code{column}.}
 \item{\code{spatialkit_pool_unavailable}}{\code{resolution_profile()}
 with an \code{estimate}: the values of the response lie beyond what
 the arithmetic of the estimate holds, values so large, or so close to

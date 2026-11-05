@@ -380,8 +380,11 @@ criterion that is finite at the level and says that the size set the
 count, and \code{plot()} draws each as one point, with no selected level
 and no band.  When none is finite, as on a constant response, where
 \code{loo} is \code{NA} too, or when no row of the selection half has a
-response (\code{select_on = "split"} with an \code{estimate}),
-\code{summary()} stops with an error that says so.
+response (\code{select_on = "split"}), \code{summary()} stops with an
+error that says so.  In that last case \code{"cp"} and \code{"moran_z"},
+and \code{"loo"} with an \code{estimate}, are errors that give the same
+reason, except \code{"cp"} on a size ladder that fitted no variogram,
+which gives the size ladder's reason, as above.
 }
 
 \examples{
