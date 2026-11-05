@@ -63,14 +63,29 @@ whose overlap is undefined, are repaired with \code{sf::st_make_valid()}
 for the join, with a warning, and returned as they arrived. If the
 overlap still cannot be computed the function stops: falling back to
 \code{predicate} and \code{tie_break} would change the rule for every
-feature in the layer, so pass \code{largest = FALSE} to ask for that.}
+feature in the layer, so pass \code{largest = FALSE} to ask for that.
+In longitude and latitude with s2 on (sf's default), where s2 refuses
+a polygon of either layer as it arrived, the join by \code{predicate}
+meets that refusal too, and the error names the polygons and the
+transform instead (see Details).
+In longitude and latitude the validity check, the repair and the
+overlaps run on s2 whatever \code{sf::sf_use_s2()} says; with s2 off
+the join by \code{predicate} runs with GEOS, and the error that names
+the polygons also offers \code{largest = FALSE}.}
 
 \item{tie_break}{Strategy for resolving features that match multiple
 polygons (with \code{largest}, that overlap several polygons equally):
 \code{"smallest_area"} (default) keeps the polygon with the
 smallest area and, among polygons of equal area (a point on the shared
 edge of two grid cells), the one whose bounding-box centre is lowest,
-then leftmost, so the choice does not depend on the order of the rows;
+then leftmost, so the choice does not depend on the order of the rows.
+Areas in longitude and latitude are measured on the sphere with s2,
+whatever \code{sf::sf_use_s2()} says. A polygon among those compared
+whose geometry is invalid (a ring whose edges cross, whose lobes GEOS
+measures as cancelling) is measured on a copy repaired with
+\code{sf::st_make_valid()}, with a warning, and returned as it arrived;
+in degrees, one s2 refuses even repaired (a bowtie) stops the call with
+the error of class \code{"spatialkit_cells_degenerate"} (see Details).
 \code{"first"} keeps the first match (original order-dependent
 behavior). On cells built from the centres a profile scored, a point on
 the edge between two of them is placed by the profile's rule whichever
@@ -224,6 +239,25 @@ projected CRS, where the join runs. The largest-overlap join repairs such
 polygons first (see \code{largest}), and stops with that error when s2 still
 refuses a polygon it repaired, such as one whose hole crosses its outer
 ring.
+A polygon of \code{features_sf} that s2 refuses stops the join by \code{predicate}
+with an error of class \code{"spatialkit_features_degenerate"}, with the same
+fields, that gives its rows, quotes s2's reason and says to transform
+\code{features_sf} to a projected CRS, where the join runs; so does one s2
+refuses even after the repair of the largest-overlap join. When that
+repair makes s2 accept the polygons of both layers and s2 then refuses a
+piece of an overlap of the two layers (a figure eight, one vertex listed
+twice, is repaired into two parts that touch at a point, and the piece can
+hold that point twice), the join stops with the error for the layer whose
+polygons s2 refused as they arrived; with s2 on (sf's default), the join
+by \code{predicate} meets those polygons too. When s2 refused no polygon of
+either layer as it arrived, the error says to pass \code{largest = FALSE} or to
+project both layers. In longitude and latitude the largest-overlap join
+runs on s2, and the areas \code{tie_break} compares are measured on the sphere
+with s2, whatever \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} says, as the package's other areas in
+degrees are; the join by \code{predicate} runs with the engine the session
+names. With s2 off that engine is GEOS, which reads these polygons in
+degrees, so the largest-overlap join's error for a polygon s2 refuses also
+offers \code{largest = FALSE}.
 
 sf reads a layer in the dimension of its first geometry, so s2, GEOS and
 \code{\link[sf:st_transform]{sf::st_transform()}} read a layer that mixes XY and XYZ (or XYM)

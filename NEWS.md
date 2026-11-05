@@ -2814,6 +2814,41 @@ old behaviour where there is a way.
   moved with `sf::st_transform()`, which keeps their M.  A layer XY or XYZ
   throughout is read as before.
 
+* **The smallest-area tie-break of `assign_features_to_polygons()` gave a
+  feature to a polygon whose ring crosses itself as the smallest.**  GEOS
+  measures such a ring as the signed sum of its lobes, which cancel: a
+  bowtie whose two lobes cover 180,000 square metres measured 0, so a point
+  inside a valid 100 m square and inside the bowtie went to the bowtie,
+  without a warning, where the same bowtie repaired by the caller, or a
+  valid polygon in its place, lost the tie.  The largest-overlap join
+  already repaired such polygons for its overlaps.  The tie-break now
+  checks the polygons it compares and measures the invalid ones on copies
+  repaired with `sf::st_make_valid()`, with a warning in the words of the
+  largest-overlap join's; the polygons and features are returned as they
+  arrived.  Layers without ties, or whose tied polygons are valid, are
+  assigned as before.
+
+* **`assign_features_to_polygons()` on layers in longitude and latitude
+  stopped with sf's "package lwgeom required, please install it first"
+  when `sf::sf_use_s2()` was `FALSE`.**  sf hands areas in degrees to
+  lwgeom when s2 is off, and the package does not depend on lwgeom: the
+  smallest-area tie-break stopped on a point in two polygons, and the
+  largest-overlap join of polygon features stopped with "the largest-overlap
+  join failed (package lwgeom required ...). Pass largest = FALSE ...",
+  whose advice stopped the same way.  In degrees the largest-overlap join
+  (its validity check, repair and overlaps) and the areas the tie-break
+  compares now run on s2 whatever the session says, as the package's other
+  areas in degrees do, and give what they give with s2 on; the join by
+  `predicate` keeps the session's engine.  The largest-overlap join no
+  longer advises `largest = FALSE` for an error that the join by
+  `predicate` meets too, such as a missing lwgeom.  With s2 off, a polygon
+  in a tie that s2 refuses even repaired (a bowtie in degrees) stops the
+  call with the `spatialkit_cells_degenerate` error, which names it and the
+  transform.  With s2 off, the error of the largest-overlap join for a
+  polygon s2 refuses offers `largest = FALSE`, whose join by `predicate`
+  runs with GEOS, and these errors name s2 as the engine the package uses
+  there, not as the one sf uses in the session.
+
 * **`cell_values_at()` without `seeds` gave every location the value `NA`,
   marked filled, when `values` had no cell ID.**  A `values` whose ID
   column is all `NA` placed no location in a cell, so every location was
@@ -2907,11 +2942,28 @@ old behaviour where there is a way.
   polygon of the layer gets this error, among them a hole that crosses its
   outer ring and two holes that share an edge, which also stopped with s2's
   bare message.  The largest-overlap join of polygon features still repairs
-  the polygons s2 refuses, with its warning, and runs; on a polygon s2
-  refuses even after the repair (a hole that crosses its outer ring) it
-  stops with the same error, where it advised `largest = FALSE`, which meets
-  the same refusal.  `cell_values_at()` without `seeds`, which places its
-  locations with this join, gives the error in its own words: it names
+  the polygons s2 refuses, with its warning, and runs on most of them; on
+  a polygon s2 refuses even after the repair (a hole that crosses its outer
+  ring) it stops with the same error, where it advised `largest = FALSE`,
+  which meets the same refusal.  When the repair makes s2 accept a polygon
+  and s2 then refuses a piece of its overlap with the other layer (a figure eight,
+  repaired into two triangles that touch at a point), the join gave the
+  same advice, and with s2 on the join by `predicate` then stopped on the
+  polygon as it arrived; it now stops with the error that names that
+  polygon and the transform.  Where s2 refuses a polygon of either layer
+  even after the repair, the error names that polygon, and not a polygon
+  of the other layer that the repair made s2 accept.  A polygon of `features_sf` that s2 refuses stopped the join by
+  `predicate` with s2's bare message, such as "Loop 0 is not valid: Edge 0
+  crosses edge 2" for a bowtie; it now stops with an error of class
+  `spatialkit_features_degenerate`, with the fields of the cells' class,
+  that gives its rows, quotes s2 and says to transform `features_sf` to a
+  projected CRS, and, where `sf::st_make_valid()` makes s2 accept the rows,
+  that repairing them works too.  Where s2 refuses polygons of both layers,
+  the error for `polygons_sf` quotes each row's own reason, where it quoted
+  s2's message for a feature as a cell's, and says that s2 also refuses rows
+  of `features_sf` (`features_rows` on the condition).
+  `cell_values_at()` without `seeds`, which places its locations with this
+  join, gives the error in its own words: it names
   `values` and the rows of `values`.  Polygons s2 accepts are joined as
   before, and an error of another kind keeps its own message.
 

@@ -34,6 +34,25 @@
 #' polygons first (see `largest`), and stops with that error when s2 still
 #' refuses a polygon it repaired, such as one whose hole crosses its outer
 #' ring.
+#' A polygon of `features_sf` that s2 refuses stops the join by `predicate`
+#' with an error of class `"spatialkit_features_degenerate"`, with the same
+#' fields, that gives its rows, quotes s2's reason and says to transform
+#' `features_sf` to a projected CRS, where the join runs; so does one s2
+#' refuses even after the repair of the largest-overlap join. When that
+#' repair makes s2 accept the polygons of both layers and s2 then refuses a
+#' piece of an overlap of the two layers (a figure eight, one vertex listed
+#' twice, is repaired into two parts that touch at a point, and the piece can
+#' hold that point twice), the join stops with the error for the layer whose
+#' polygons s2 refused as they arrived; with s2 on (sf's default), the join
+#' by `predicate` meets those polygons too. When s2 refused no polygon of
+#' either layer as it arrived, the error says to pass `largest = FALSE` or to
+#' project both layers. In longitude and latitude the largest-overlap join
+#' runs on s2, and the areas `tie_break` compares are measured on the sphere
+#' with s2, whatever [sf::sf_use_s2()] says, as the package's other areas in
+#' degrees are; the join by `predicate` runs with the engine the session
+#' names. With s2 off that engine is GEOS, which reads these polygons in
+#' degrees, so the largest-overlap join's error for a polygon s2 refuses also
+#' offers `largest = FALSE`.
 #'
 #' sf reads a layer in the dimension of its first geometry, so s2, GEOS and
 #' [sf::st_transform()] read a layer that mixes XY and XYZ (or XYM)
@@ -93,12 +112,27 @@
 #'   overlap still cannot be computed the function stops: falling back to
 #'   \code{predicate} and \code{tie_break} would change the rule for every
 #'   feature in the layer, so pass \code{largest = FALSE} to ask for that.
+#'   In longitude and latitude with s2 on (sf's default), where s2 refuses
+#'   a polygon of either layer as it arrived, the join by \code{predicate}
+#'   meets that refusal too, and the error names the polygons and the
+#'   transform instead (see Details).
+#'   In longitude and latitude the validity check, the repair and the
+#'   overlaps run on s2 whatever \code{sf::sf_use_s2()} says; with s2 off
+#'   the join by \code{predicate} runs with GEOS, and the error that names
+#'   the polygons also offers \code{largest = FALSE}.
 #' @param tie_break Strategy for resolving features that match multiple
 #'   polygons (with \code{largest}, that overlap several polygons equally):
 #'   \code{"smallest_area"} (default) keeps the polygon with the
 #'   smallest area and, among polygons of equal area (a point on the shared
 #'   edge of two grid cells), the one whose bounding-box centre is lowest,
-#'   then leftmost, so the choice does not depend on the order of the rows;
+#'   then leftmost, so the choice does not depend on the order of the rows.
+#'   Areas in longitude and latitude are measured on the sphere with s2,
+#'   whatever \code{sf::sf_use_s2()} says. A polygon among those compared
+#'   whose geometry is invalid (a ring whose edges cross, whose lobes GEOS
+#'   measures as cancelling) is measured on a copy repaired with
+#'   \code{sf::st_make_valid()}, with a warning, and returned as it arrived;
+#'   in degrees, one s2 refuses even repaired (a bowtie) stops the call with
+#'   the error of class \code{"spatialkit_cells_degenerate"} (see Details).
 #'   \code{"first"} keeps the first match (original order-dependent
 #'   behavior). On cells built from the centres a profile scored, a point on
 #'   the edge between two of them is placed by the profile's rule whichever
@@ -412,7 +446,27 @@ assign_features_to_polygons <- function(
   use_largest <- isTRUE(largest) &&
     all(f_gtypes %in% c("POLYGON", "MULTIPOLYGON"))
 
-  if (use_largest) {
+  # In longitude and latitude the overlaps and the areas the join compares
+  # are measured on the sphere with s2, whatever sf::sf_use_s2() says, as the
+  # package's other areas in degrees are (.with_s2()).  With s2 off sf hands
+  # st_area() to lwgeom, which the package does not depend on: the
+  # tie-break and the largest-overlap join stopped with "package lwgeom
+  # required, please install it first", and the latter advised `largest =
+  # FALSE`, which stopped the same way.  The join by `predicate` keeps the
+  # session's engine.
+  on_sphere <- isTRUE(sf::st_is_longlat(sf::st_crs(p_sel)))
+  s2_if_sphere <- function(expr) if (on_sphere) .with_s2(expr) else expr
+  # The session's engine, read before any step is put on s2: with s2 off the
+  # join by `predicate` runs with GEOS, which reads in degrees polygons s2
+  # refuses, so the largest-overlap join's error still offers it.
+  s2_session <- isTRUE(sf::sf_use_s2())
+
+  # The layers as they arrived at the join, before the largest-overlap
+  # join's repair: s2's refusal of a piece of an overlap is traced to the
+  # polygons it refused as they arrived (.stop_join_degenerate()).
+  f_in <- f
+  p_in <- p_sel
+  if (use_largest) s2_if_sphere({
     # sf measures the overlap with st_intersection(), which GEOS cannot do on
     # an invalid ring: one bow-tie parcel threw a TopologyException, and a
     # catch-all retry without `largest` used to swallow it and reassign EVERY
@@ -442,7 +496,7 @@ assign_features_to_polygons <- function(
         p_sel <- sf::st_set_geometry(p_sel, g)
       }
     }
-  }
+  })
 
   join_args <- list(x = f, y = p_sel, join = predicate, left = TRUE)
   largest_ties <- integer(0)
@@ -459,7 +513,9 @@ assign_features_to_polygons <- function(
     # st_agr() on the inputs does not help).  Keeping one cell per feature is
     # exactly that assumption, so the warning says nothing about the data;
     # it alone is muffled.
-    joined <- tryCatch(
+    # In degrees the join runs on s2 whatever the session says (above), and
+    # so does its handler, which asks s2 which polygons it refuses.
+    joined <- s2_if_sphere(tryCatch(
       withCallingHandlers(
         do.call(sf::st_join, c(join_args, largest = TRUE)),
         warning = function(w) {
@@ -472,26 +528,37 @@ assign_features_to_polygons <- function(
         # of them then.  It still refuses some (a hole that crosses its
         # outer ring stays two rings whose edges cross), and `largest =
         # FALSE` would meet the same refusal, so the error names the cause
-        # and the transform that helps instead of advising it.
-        .stop_cells_degenerate(e, p_sel, "assign_features_to_polygons",
-                               "`polygons_sf`", "the join", .JOIN_AGAIN, is.na(crs_p))
-        stop(sprintf(paste0(
-          "assign_features_to_polygons(): the largest-overlap join failed (%s). ",
-          "Pass largest = FALSE to assign every feature by `predicate` and ",
-          "`tie_break` instead%s."),
-          conditionMessage(e),
-          if (isTRUE(sf::st_is_longlat(f)))
-            ", or project both layers first (see ensure_projected())" else ""),
-          call. = FALSE)
-      })
+        # and the transform that helps instead of advising it.  So it does
+        # where the repair made s2 accept a polygon and s2 then refused a
+        # piece of its overlap with the other layer (a figure eight,
+        # repaired into two parts that touch at a point): the join by
+        # `predicate` meets that polygon as it arrived, where the session
+        # has s2 on; with s2 off it runs with GEOS, and the error offers it.
+        .stop_join_degenerate(e, f_in, p_in, f, p_sel, is.na(orig_crs), is.na(crs_p),
+                              predicate_on_s2 = s2_session)
+        # `largest = FALSE` is advised only where that join does not meet
+        # the same error: an engine sf lacks (lwgeom) stops it too.
+        in_degrees <- isTRUE(sf::st_is_longlat(f))
+        advice <- if (!grepl("lwgeom", conditionMessage(e), fixed = TRUE))
+          paste0(" Pass largest = FALSE to assign every feature by `predicate` and ",
+                 "`tie_break` instead",
+                 if (in_degrees) ", or project both layers first (see ensure_projected())",
+                 ".")
+        else if (in_degrees) " Project both layers first (see ensure_projected())."
+        else ""
+        stop(sprintf("assign_features_to_polygons(): the largest-overlap join failed (%s).%s",
+                     conditionMessage(e), advice),
+             call. = FALSE)
+      }))
     # sf keeps the largest intersection piece without asking whether it has
     # any area, so under GEOS a feature that only shares an edge or a corner
     # with the cells was assigned to one of them with zero overlap, while
     # under s2 (lon/lat, s2 on) the same feature had no piece and came back
     # unassigned: sf's 100 nc counties against 50 of them as cells gave 70
     # rows projected and 50 in lon/lat.  A feature with no overlap has no largest
-    # overlap, so it is unassigned whatever the CRS.  s2 already does this.
-    if (!(isTRUE(sf::st_is_longlat(f)) && isTRUE(sf::sf_use_s2()))) {
+    # overlap, so it is unassigned whatever the CRS.  s2 already does this,
+    # and joins every layer in degrees here.
+    if (!on_sphere) {
       hit <- which(!is.na(joined[[join_id]]))
       if (length(hit)) {
         # "2********": the interiors meet in an area.
@@ -515,7 +582,7 @@ assign_features_to_polygons <- function(
     # overlapping two or more cells are measured again, and an exact tie
     # (areas equal to 9 significant digits, as for the cell areas below) is
     # decided by `tie_break` among the equally largest cells.
-    lt <- .largest_overlap_ties(f, p_sel, joined, join_id, tie_break)
+    lt <- s2_if_sphere(.largest_overlap_ties(f, p_sel, joined, join_id, tie_break))
     if (length(lt$rows)) {
       joined[[join_id]][lt$rows] <- lt$ids
       largest_ties <- joined[["..pre_join_row_id"]][lt$rows]
@@ -532,13 +599,12 @@ assign_features_to_polygons <- function(
     # names neither the polygon nor a way on: the k-means cells of a 30 by 20
     # lattice at 30 m returned in EPSG:4326 stopped it once they had lost
     # their record or their CRS.  Such a refusal, and every other refusal
-    # of a polygon of the layer by s2, now stops with the cause and the
+    # of a polygon of either layer by s2, now stops with the cause and the
     # remedy; every other error passes as it was raised.
     joined <- withCallingHandlers(
       do.call(sf::st_join, join_args),
       error = function(e)
-        .stop_cells_degenerate(e, p_sel, "assign_features_to_polygons",
-                               "`polygons_sf`", "the join", .JOIN_AGAIN, is.na(crs_p)))
+        .stop_join_degenerate(e, f, p_sel, f, p_sel, is.na(orig_crs), is.na(crs_p)))
   }
   # The join ran on copies (moved into the polygons' CRS, repaired); hand
   # back the geometry the caller passed, in the CRS it arrived in, rather
@@ -576,10 +642,17 @@ assign_features_to_polygons <- function(
     # For each duplicated feature, keep the polygon with the smallest area
     # (the most specific / tightest-fitting polygon).  Areas are compared to
     # 9 significant digits, so equal cells whose computed areas differ in the
-    # last bits count as equal.
-    poly_areas <- suppressWarnings(as.numeric(sf::st_area(p)))
+    # last bits count as equal.  Only the polygons the tied features fall in
+    # are measured, those whose areas the rule compares.
+    tie_ids <- unique(as.character(
+      joined[[polygon_id_col]][joined[["..pre_join_row_id"]] %in% tie_rows]))
+    tie_ids <- tie_ids[!is.na(tie_ids)]
+    tie_at  <- match(tie_ids, as.character(p[[id_col]]))
+    p_tie   <- sf::st_geometry(p)[tie_at]
+    poly_areas <- s2_if_sphere(.tie_break_areas(p_tie, tie_at, nrow(p), is.na(crs_p),
+                                                s2_session))
     poly_areas[!is.finite(poly_areas)] <- Inf
-    names(poly_areas) <- as.character(p[[id_col]])
+    names(poly_areas) <- tie_ids
 
     joined$`..poly_area` <- signif(poly_areas[as.character(joined[[polygon_id_col]])], 9L)
     joined$`..poly_area`[is.na(joined$`..poly_area`)] <- Inf
@@ -591,10 +664,6 @@ assign_features_to_polygons <- function(
     # whose bounding-box centre is lowest, then leftmost, wins instead.  On
     # a create_grid_polygons() grid, which is numbered from the lower left a
     # row at a time, that is the cell the row order picked.
-    tie_ids <- unique(as.character(
-      joined[[polygon_id_col]][joined[["..pre_join_row_id"]] %in% tie_rows]))
-    tie_ids <- tie_ids[!is.na(tie_ids)]
-    p_tie   <- sf::st_geometry(p)[match(tie_ids, as.character(p[[id_col]]))]
     ctr     <- vapply(p_tie, function(g) {
       bb <- sf::st_bbox(g)
       c((bb[["xmin"]] + bb[["xmax"]]) / 2, (bb[["ymin"]] + bb[["ymax"]]) / 2)
@@ -752,27 +821,124 @@ assign_features_to_polygons <- function(
 #' @noRd
 .stop_cells_degenerate <- function(e, polygons, caller, layer, task, again,
                                    no_crs = FALSE) {
-  said <- conditionMessage(e)
-  if (!grepl("[Ll]oop [0-9]+|loop orientations", said)) return(invisible(NULL))
+  if (!.is_s2_ring_error(e)) return(invisible(NULL))
   g <- sf::st_geometry(polygons)
   if (!isTRUE(sf::st_is_longlat(g)) || !isTRUE(sf::sf_use_s2())) return(invisible(NULL))
+  bad <- .s2_refused_rows(g)
+  if (is.null(bad) || !length(bad$rows)) return(invisible(NULL))
+  .raise_cells_degenerate(e, bad$rows, bad$reasons, length(g), caller, layer, task,
+                          again, no_crs)
+}
+
+# s2's refusals of a polygon all name a ring ("Loop N ...", "... crosses
+# loop N ...", "Inconsistent loop orientations detected").
+.is_s2_ring_error <- function(e)
+  grepl("[Ll]oop [0-9]+|loop orientations", conditionMessage(e))
+
+# The rows of `x` (sf or sfc) that sf's validity check refuses, with its
+# reason for each, as a list of `rows` and `reasons`; NULL when the check
+# cannot say.  With `polygonal`, only polygons count: a ring error is not a
+# point's or a line's.  Run it under the engine whose refusal is asked about.
+.s2_refused_rows <- function(x, polygonal = FALSE) {
+  g <- sf::st_geometry(x)
   check <- function(...) tryCatch(suppressWarnings(sf::st_is_valid(g, ...)),
                                   error = function(err) NULL)
   ok  <- check()
   why <- check(reason = TRUE)
-  if (length(ok) != length(g) || length(why) != length(g)) return(invisible(NULL))
-  bad <- which(ok %in% FALSE)
-  if (!length(bad)) return(invisible(NULL))
-  .raise_cells_degenerate(e, bad, unname(why[bad]), length(g), caller, layer, task,
-                          again, no_crs)
+  if (length(ok) != length(g) || length(why) != length(g)) return(NULL)
+  bad <- ok %in% FALSE
+  if (polygonal) bad <- bad & (sf::st_dimension(g) %in% 2L)
+  list(rows = which(bad), reasons = unname(why[bad]))
 }
 
-#' The error of class "spatialkit_cells_degenerate"
+#' Stop with the cause when s2 refuses a polygon of either layer of the join
 #'
-#' Builds and raises the error \code{.stop_cells_degenerate()} found the
-#' cause of.  A function that hands its polygons to another that raised this
-#' error calls it again with the fields of that condition and its own words,
-#' so the message names the argument the caller passed.
+#' The handler of both joins of \code{assign_features_to_polygons()}.  s2
+#' can refuse a polygon of \code{polygons_sf} or of \code{features_sf}, and
+#' on the largest-overlap join, which repairs the polygons it refuses first,
+#' a piece of an overlap of two polygons it accepts: a figure eight, one
+#' vertex listed twice, is repaired into two parts that touch at a point, and
+#' a piece of its overlap with the other layer can hold that point twice.
+#' The layers the join used are examined first, the polygons before the
+#' features, then the layers as they arrived, in the same order; the first
+#' layer s2 refuses a polygon of is named.  So a polygon s2 refuses even
+#' repaired is named before one the repair made s2 accept.  When s2 refuses
+#' no polygon of either layer as it arrived, the join by \code{predicate}
+#' runs, and the caller's message, which advises it, stands.
+#'
+#' @param e The error caught.
+#' @param f_in,p_in The features and polygons as they arrived at the join.
+#' @param f_used,p_used The features and polygons the join used (repaired on
+#'   the largest-overlap join; the same as \code{f_in} and \code{p_in} on the
+#'   join by \code{predicate}).
+#' @param no_crs_f,no_crs_p Whether the features or the polygons came without
+#'   a CRS and were read as longitude and latitude.
+#' @param predicate_on_s2 Whether the join by \code{predicate} runs on s2:
+#'   the session's \code{sf::sf_use_s2()}, read before the largest-overlap
+#'   join was put on s2.  When it is \code{FALSE}, that join runs with GEOS,
+#'   so the error names the largest-overlap join and offers
+#'   \code{largest = FALSE}.
+#' @return \code{NULL}, invisibly, when \code{e} is not s2's refusal of a
+#'   ring or s2 refuses no polygon of either layer; otherwise it stops with
+#'   the error \code{.raise_cells_degenerate()} builds, of class
+#'   \code{"spatialkit_cells_degenerate"} for the polygons and
+#'   \code{"spatialkit_features_degenerate"} for the features.
+#' @keywords internal
+#' @noRd
+.stop_join_degenerate <- function(e, f_in, p_in, f_used, p_used, no_crs_f = FALSE,
+                                  no_crs_p = FALSE, predicate_on_s2 = TRUE) {
+  if (!.is_s2_ring_error(e)) return(invisible(NULL))
+  if (!isTRUE(sf::st_is_longlat(sf::st_geometry(p_used))) || !isTRUE(sf::sf_use_s2()))
+    return(invisible(NULL))
+  same <- identical(f_in, f_used) && identical(p_in, p_used)
+  pa <- .s2_refused_rows(p_used)
+  pb <- if (same) pa else .s2_refused_rows(p_in)
+  fa <- .s2_refused_rows(f_used, polygonal = TRUE)
+  fb <- if (same) fa else .s2_refused_rows(f_in, polygonal = TRUE)
+  if (is.null(pa) || is.null(pb) || is.null(fa) || is.null(fb)) return(invisible(NULL))
+  n_p <- nrow(p_used); n_f <- nrow(f_used)
+  task <- if (predicate_on_s2) "the join" else "the largest-overlap join"
+  forced <- !isTRUE(predicate_on_s2)
+  cells <- function(bad, repaired)
+    .raise_cells_degenerate(e, bad$rows, bad$reasons, n_p, "assign_features_to_polygons",
+                            "`polygons_sf`", task, .JOIN_AGAIN, no_crs_p,
+                            repaired = repaired,
+                            also = list(rows = fb$rows, reasons = fb$reasons, n = n_f),
+                            s2_forced = forced, advise_predicate = forced)
+  features <- function(bad, repaired) {
+    # The join by `predicate` repairs nothing: the caller's repair helps
+    # where it makes s2 accept every row named, which depends on the ring
+    # (s2 accepts a repeated vertex and a figure eight repaired, not a
+    # bowtie or a hole that crosses its outer ring).
+    fixable <- !repaired && same && isTRUE(tryCatch(
+      all(sf::st_is_valid(.safe_make_valid(sf::st_geometry(f_in)[bad$rows])) %in% TRUE),
+      error = function(err) FALSE))
+    .raise_cells_degenerate(e, bad$rows, bad$reasons, n_f, "assign_features_to_polygons",
+                            "`features_sf`", task, .JOIN_AGAIN, no_crs_f,
+                            of = sprintf("the %d features of `features_sf`", n_f),
+                            kind = "features", repaired = repaired, fixable = fixable,
+                            s2_forced = forced, advise_predicate = forced)
+  }
+  # A polygon s2 refuses as the join had it is what the join failed on; the
+  # layers as they arrived are asked about only when s2 accepts both
+  # repaired.  Asked the other way round, a figure-eight cell beside a
+  # feature s2 refuses even repaired (a bowtie) was named as the cause, with
+  # the feature's reason quoted as that of a piece of an overlap.
+  if (length(pa$rows)) cells(pa, FALSE)
+  if (length(fa$rows)) features(fa, FALSE)
+  if (length(pb$rows)) cells(pb, TRUE)
+  if (length(fb$rows)) features(fb, TRUE)
+  invisible(NULL)
+}
+
+#' The errors of class "spatialkit_cells_degenerate" and
+#' "spatialkit_features_degenerate"
+#'
+#' Builds and raises the error \code{.stop_cells_degenerate()} or
+#' \code{.stop_join_degenerate()} found the cause of.  A function that hands
+#' its polygons to another that raised this error calls it again with the
+#' fields of that condition and its own words, so the message names the
+#' argument the caller passed.
 #'
 #' @param parent s2's error, quoted in the message.
 #' @param rows The rows of \code{layer} s2 refuses.
@@ -782,23 +948,67 @@ assign_features_to_polygons <- function(
 #' @param caller,layer,task,again,no_crs As for \code{.stop_cells_degenerate()}.
 #' @param of The polygons counted, as in "refuses 2 of \code{of}"; \code{NULL}
 #'   for "the \code{n} polygons of \code{layer}".
+#' @param kind \code{"cells"} for the polygons a call places or measures
+#'   things in (the cells' class, with the sentence on corners that differ by
+#'   rounding where s2 reads two corners as one point), or \code{"features"}
+#'   for the features a join places (the features' class, without it).
+#' @param repaired Whether the largest-overlap join repaired these rows into
+#'   polygons s2 accepts, and s2 then refused a piece of an overlap.
+#' @param also The rows of \code{features_sf} s2 refuses too, as a list of
+#'   \code{rows}, \code{reasons} and \code{n}, or \code{NULL}.
+#' @param fixable Whether \code{sf::st_make_valid()} makes s2 accept every
+#'   row named (features only), so the message offers it.
+#' @param s2_forced Whether the call ran on s2 although the session has
+#'   \code{sf::sf_use_s2(FALSE)}: the message then does not call s2 the
+#'   engine sf uses in degrees.
+#' @param advise_predicate Whether the join by \code{predicate} runs on these
+#'   layers (with GEOS, s2 off): the message then offers
+#'   \code{largest = FALSE} and does not say that join meets the refusal.
 #' @return Does not return.  The condition carries \code{rows}, \code{n},
-#'   \code{reasons} and \code{parent}.
+#'   \code{reasons}, \code{parent}, \code{repaired} and \code{s2_forced},
+#'   and \code{features_rows} when \code{also} is given.
 #' @keywords internal
 #' @noRd
 .raise_cells_degenerate <- function(parent, rows, reasons, n, caller, layer, task, again,
-                                    no_crs = FALSE, of = NULL) {
-  said <- conditionMessage(parent)
+                                    no_crs = FALSE, of = NULL,
+                                    kind = c("cells", "features"), repaired = FALSE,
+                                    also = NULL, fixable = FALSE, s2_forced = FALSE,
+                                    advise_predicate = FALSE) {
+  kind <- match.arg(kind)
+  said <- trimws(strsplit(conditionMessage(parent), "\n", fixed = TRUE)[[1L]][1L])
   rows_text <- function(r) {
     k <- length(r)
     if (k == 1L) sprintf("row %d", r)
     else if (k <= 6L) sprintf("rows %s and %d", paste(r[-k], collapse = ", "), r[k])
     else sprintf("rows %s and %d more", paste(r[1:6], collapse = ", "), k - 6L)
   }
+  # Each row with its own reason, for the rows rows_text() names.
+  rows_why <- function(r, why) {
+    k <- length(r); shown <- seq_len(min(k, 6L))
+    paste0(paste(sprintf("row %d: \"%s\"", r[shown], why[shown]), collapse = "; "),
+           if (k > 6L) sprintf("; and %d more", k - 6L) else "")
+  }
   k <- length(rows)
+  # s2's message for the call is quoted as the rows' own when it is one of
+  # their reasons.  It can be another layer's (a feature s2 met first) or a
+  # piece of an overlap the call made; each row's own reason is quoted then.
+  own <- !isTRUE(repaired) && any(vapply(sub("^Loop [0-9]+: ", "", reasons), function(r)
+    nzchar(r) && grepl(r, said, fixed = TRUE), logical(1)))
+  named <- if (own) sprintf("%s; \"%s\"", rows_text(rows), said) else rows_why(rows, reasons)
+  them <- if (k == 1L) c("it", "it", "it") else c("them", "them", "they")
+  told <- if (isTRUE(repaired))
+    paste0(sprintf(paste0("The largest-overlap join repaired %s with sf::st_make_valid(), ",
+                          "which s2 accepts, and s2 then refused a piece of an overlap of the ",
+                          "two layers (\"%s\")"), them[1L], said),
+           if (isTRUE(advise_predicate)) ". "
+           else sprintf("; the join by `predicate`, which repairs nothing, meets %s as %s arrived. ",
+                        them[2L], them[3L]))
+  else ""
+  other_said <- if (!isTRUE(repaired) && !own) sprintf("s2's error reads \"%s\". ", said)
+                else ""
   # s2 gives "duplicate vertex" for two corners it reads as one point; the
   # cause and its usual source are named for those polygons only.
-  dup <- grepl("duplicate vertex", reasons, fixed = TRUE)
+  dup <- kind == "cells" & grepl("duplicate vertex", reasons, fixed = TRUE)
   other <- which(!dup)
   cause <- if (!any(dup)) "" else paste0(
     if (!length(other)) {
@@ -813,7 +1023,22 @@ assign_features_to_polygons <- function(
     "hold such corners: where four seeds stand the same distance from one point, two ",
     "cells meet there at two corners that differ only by rounding, which the ",
     "transform to degrees puts at one point. ")
-  remedy <- if (isTRUE(no_crs))
+  also_text <- if (length(also$rows))
+    sprintf("s2 also refuses %d of the %d features of `features_sf` (%s). ",
+            length(also$rows), also$n, rows_why(also$rows, also$reasons))
+  else ""
+  remedy <- if (kind == "features") paste0(
+    if (isTRUE(no_crs))
+      sprintf(paste0("%s has no CRS and was read as longitude and latitude: give it its ",
+                     "CRS with sf::st_set_crs(), transform it to a projected CRS with ",
+                     "sf::st_transform(), and %s."), layer, again)
+    else
+      sprintf(paste0("Transform %s to a projected CRS, such as the one ensure_projected() ",
+                     "picks for it (sf::st_transform()), and %s."), layer, again),
+    if (isTRUE(fixable) && !isTRUE(no_crs))
+      sprintf(" Or repair %s with sf::st_make_valid(), which s2 accepts, and assign again.",
+              them[1L]))
+  else if (isTRUE(no_crs))
     sprintf(paste0("%s has no CRS and was read as longitude and latitude: give it its ",
                    "CRS with sf::st_set_crs(), transform it to a projected CRS, such as ",
                    "the one its cells were built in, with sf::st_transform(), and %s."),
@@ -822,14 +1047,66 @@ assign_features_to_polygons <- function(
     sprintf(paste0("Transform %s to a projected CRS, such as the one its cells were ",
                    "built in (sf::st_transform()) or the one ensure_projected() picks ",
                    "for it, and %s."), layer, again)
+  # With s2 off the join by `predicate` runs with GEOS, which reads these
+  # polygons in degrees.
+  if (isTRUE(advise_predicate))
+    remedy <- paste0(remedy, " Or pass largest = FALSE to assign every feature by ",
+                     "`predicate` and `tie_break` instead; with sf::sf_use_s2(FALSE), as in ",
+                     "this session, that join runs with GEOS.")
+  engine <- if (isTRUE(s2_forced))
+    "s2, which the package uses here in longitude and latitude whatever sf::sf_use_s2() says,"
+  else "s2, the engine sf uses for geometry in longitude and latitude,"
   if (is.null(of)) of <- sprintf("the %d polygons of %s", n, layer)
   msg <- sprintf(paste0(
-    "%s(): s2, the engine sf uses for geometry in longitude and latitude, refuses %d ",
-    "of %s (%s; \"%s\"), so %s cannot run in degrees. %s%s"),
-    caller, k, of, rows_text(rows),
-    trimws(strsplit(said, "\n", fixed = TRUE)[[1L]][1L]), task, cause, remedy)
-  stop(errorCondition(msg, class = "spatialkit_cells_degenerate", call = NULL,
-                      rows = rows, n = n, reasons = reasons, parent = parent))
+    "%s(): %s refuses %d ",
+    "of %s (%s), so %s cannot run in degrees. %s%s%s%s%s"),
+    caller, engine, k, of, named, task, told, cause, other_said, also_text, remedy)
+  fields <- list(rows = rows, n = n, reasons = reasons, parent = parent,
+                 repaired = isTRUE(repaired), s2_forced = isTRUE(s2_forced))
+  if (!is.null(also)) fields$features_rows <- also$rows
+  stop(do.call(errorCondition, c(list(msg, class = paste0("spatialkit_", kind, "_degenerate"),
+                                      call = NULL), fields)))
+}
+
+
+# The areas the smallest-area tie-break compares: `g`, the polygons the tied
+# features fall in, rows `rows` of the `n` polygons of `polygons_sf`.  GEOS
+# gives a ring whose edges cross the signed area of its lobes, which cancel
+# (a bowtie of two 90,000 m^2 lobes measured 0 m^2), so a point in a valid
+# cell and in a bowtie went to the bowtie as the smaller, without a word.
+# Polygons the validity check refuses are measured on repaired copies, with
+# the largest-overlap join's warning, and returned as they arrived.  Called
+# under the engine of the join (s2 in degrees); a polygon s2 refuses even
+# repaired (a bowtie in degrees) has no area there, and stops the call with
+# the error that names it and the transform.  `s2_session` is the session's
+# sf::sf_use_s2(), which the error reads to name the engine.
+.tie_break_areas <- function(g, rows, n, no_crs = FALSE, s2_session = TRUE) {
+  if (!length(g)) return(numeric(0))
+  ok  <- tryCatch(suppressWarnings(sf::st_is_valid(g)), error = function(e) NULL)
+  bad <- if (length(ok) == length(g)) which(!(ok %in% TRUE)) else seq_along(g)
+  if (length(bad)) {
+    .warn_and_log(paste0(
+      "assign_features_to_polygons(): %d of the %d polygon(s) whose areas the ",
+      "smallest-area tie-break compares have invalid geometry (usually a ",
+      "self-intersecting ring), so their areas are undefined; they were repaired ",
+      "with sf::st_make_valid() to measure them for the tie-break. The polygons are ",
+      "not changed and the features are returned with the geometry they arrived ",
+      "with; repair them yourself to silence this."),
+      length(bad), length(g))
+    g[bad] <- .safe_make_valid(g[bad])
+  }
+  withCallingHandlers(
+    suppressWarnings(as.numeric(sf::st_area(g))),
+    error = function(e) {
+      if (!.is_s2_ring_error(e) || !isTRUE(sf::st_is_longlat(g)) ||
+          !isTRUE(sf::sf_use_s2())) return()
+      still <- .s2_refused_rows(g)
+      if (is.null(still) || !length(still$rows)) return()
+      .raise_cells_degenerate(e, rows[still$rows], still$reasons, n,
+                              "assign_features_to_polygons", "`polygons_sf`",
+                              "the smallest-area tie-break", .JOIN_AGAIN, no_crs,
+                              s2_forced = !isTRUE(s2_session))
+    })
 }
 
 

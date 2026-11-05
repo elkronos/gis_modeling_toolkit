@@ -1154,7 +1154,8 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
           "call cell_values_at() again; the locations are then placed in that CRS",
           no_crs = is.na(sf::st_crs(cells_at)),
           of = if (all(has_id)) NULL
-               else sprintf("the %d polygons of `values` that carry an ID", e$n)),
+               else sprintf("the %d polygons of `values` that carry an ID", e$n),
+          s2_forced = isTRUE(e$s2_forced)),
       finally = answered())
     if (nrow(held) != length(live))
       stop("cell_values_at(): the assignment returned ", nrow(held), " rows for ",
