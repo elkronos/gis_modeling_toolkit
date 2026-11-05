@@ -29,16 +29,19 @@ a \code{ranger} object, a \code{brmsfit}, ...).  Nothing inspects it
 except your own methods.}
 
 \item{formula}{A formula: the model, as \code{print()} and
-\code{summary()} show it.}
+\code{summary()} show it.  Its left side, when it has one, holds
+\code{response_var} (\code{log(price) ~ elev} for \code{"price"}).}
 
 \item{response_var}{Character(1): the name of the response column of
 \code{data_sf}, an attribute column (not the geometry).}
 
 \item{predictor_vars}{Character vector of attribute column names of
-\code{data_sf}; \code{character(0)} for a model without predictors.}
+\code{data_sf}, not including \code{response_var};
+\code{character(0)} for a model without predictors.}
 
-\item{data_sf}{An sf object: the rows the model was fitted on, with their
-geometry, in the order \code{fitted()} returns its values.}
+\item{data_sf}{An sf object with its geometry column: the rows the model
+was fitted on, with their geometry, in the order \code{fitted()}
+returns its values.}
 
 \item{info}{Named list of model-specific extras (\code{list()} for
 none).  Set \code{fitted_are_oob = TRUE} when your \code{fitted()} values
@@ -72,12 +75,14 @@ naming the method to define, without one.  \code{\link{residuals}()} and
 
 The constructor checks the fields the package's functions read from a fit,
 and stops with an error that names the argument: \code{subclass} must be
-one class name, \code{data_sf} an sf object, \code{formula} a formula,
-\code{response_var} the name of one attribute column of \code{data_sf}
-(a column other than its geometry), \code{predictor_vars} a character
-vector of its attribute columns, and \code{info} a list.  It does not
-check the response's type (a Bayesian fit can have a factor or ordinal
-response); \code{summary()} and \code{model_metrics()} refuse a response
+one class name, \code{data_sf} an sf object with its geometry column,
+\code{formula} a formula whose left side, when it has one, holds the
+response, \code{response_var} the name of one attribute column of
+\code{data_sf} (a column other than its geometry),
+\code{predictor_vars} a character vector of its attribute columns other
+than the response, and \code{info} a list.  It does not check the
+response's type (a Bayesian fit can have a factor or ordinal response);
+\code{summary()} and \code{model_metrics()} refuse a response
 that is not numeric or logical.
 }
 \section{The coef() contract}{

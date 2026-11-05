@@ -491,9 +491,21 @@ old behaviour where there is a way.
   `formula` a formula, `response_var` the name of one attribute column of
   `data_sf` (a column other than its geometry), `predictor_vars` a
   character vector of its attribute columns (`character(0)` for none),
-  `subclass` one class name and `info` a list.  It built a fit from any of
-  them: a column number or a factor as `response_var` made `summary()` and
-  `model_metrics()` score the fitted values against the column at that
+  `subclass` one class name and `info` a list.  It also stops when
+  `predictor_vars` names the response, when the left side of `formula`
+  does not hold `response_var` (a transform such as `log(price) ~ elev`
+  holds it), and when an object classed sf has no geometry column (its
+  `"sf_column"` attribute missing, not one name, or naming a column that is
+  not an sfc).
+  It built a fit from any of them: the response among the predictors was
+  measured in `area_of_applicability()`'s distances and had to be present
+  in the new rows, a formula such as `elev ~ price` with
+  `response_var = "price"` printed one model while `summary()` and
+  `model_metrics()` scored the fitted values against `price`, the object
+  classed sf without geometry made `summary()`, `model_metrics()` and
+  `area_of_applicability()` stop with "missing value where TRUE/FALSE
+  needed", a column number or a factor as `response_var` made `summary()`
+  and `model_metrics()` score the fitted values against the column at that
   position, a misspelt name or the geometry column's name failed later in
   another function with a message about something else, and a `data_sf`
   without geometry made `residual_morans_i()` blame a missing `residuals()`

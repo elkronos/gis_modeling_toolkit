@@ -26,12 +26,14 @@
 #'
 #' The constructor checks the fields the package's functions read from a fit,
 #' and stops with an error that names the argument: \code{subclass} must be
-#' one class name, \code{data_sf} an sf object, \code{formula} a formula,
-#' \code{response_var} the name of one attribute column of \code{data_sf}
-#' (a column other than its geometry), \code{predictor_vars} a character
-#' vector of its attribute columns, and \code{info} a list.  It does not
-#' check the response's type (a Bayesian fit can have a factor or ordinal
-#' response); \code{summary()} and \code{model_metrics()} refuse a response
+#' one class name, \code{data_sf} an sf object with its geometry column,
+#' \code{formula} a formula whose left side, when it has one, holds the
+#' response, \code{response_var} the name of one attribute column of
+#' \code{data_sf} (a column other than its geometry),
+#' \code{predictor_vars} a character vector of its attribute columns other
+#' than the response, and \code{info} a list.  It does not check the
+#' response's type (a Bayesian fit can have a factor or ordinal response);
+#' \code{summary()} and \code{model_metrics()} refuse a response
 #' that is not numeric or logical.
 #'
 #' @section The coef() contract:
@@ -61,13 +63,16 @@
 #'   a \code{ranger} object, a \code{brmsfit}, ...).  Nothing inspects it
 #'   except your own methods.
 #' @param formula  A formula: the model, as \code{print()} and
-#'   \code{summary()} show it.
+#'   \code{summary()} show it.  Its left side, when it has one, holds
+#'   \code{response_var} (\code{log(price) ~ elev} for \code{"price"}).
 #' @param response_var  Character(1): the name of the response column of
 #'   \code{data_sf}, an attribute column (not the geometry).
 #' @param predictor_vars Character vector of attribute column names of
-#'   \code{data_sf}; \code{character(0)} for a model without predictors.
-#' @param data_sf  An sf object: the rows the model was fitted on, with their
-#'   geometry, in the order \code{fitted()} returns its values.
+#'   \code{data_sf}, not including \code{response_var};
+#'   \code{character(0)} for a model without predictors.
+#' @param data_sf  An sf object with its geometry column: the rows the model
+#'   was fitted on, with their geometry, in the order \code{fitted()}
+#'   returns its values.
 #' @param info     Named list of model-specific extras (\code{list()} for
 #'   none).  Set \code{fitted_are_oob = TRUE} when your \code{fitted()} values
 #'   are held out instead of in-sample, so \code{summary()} labels them
@@ -135,15 +140,33 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
   # st_drop_geometry(data_sf), so the geometry column is not one of them.
   # The response is not checked for numeric here: a Bayesian fit can have a
   # factor or ordinal response, and summary() and model_metrics() refuse a
-  # non-numeric one themselves.
+  # non-numeric one themselves.  Past the constructor, an object classed sf
+  # without its geometry column (no "sf_column" attribute, or one naming a
+  # column that is not an sfc) fails in st_drop_geometry() with "missing
+  # value where TRUE/FALSE needed"; the response among the predictors goes
+  # into the area-of-applicability distances and has to be present in the
+  # new rows; and a left side of `formula` that is another column makes
+  # print() show one model while summary() and model_metrics() score another.
   if (!inherits(data_sf, "sf"))
     stop("new_spatial_fit(): `data_sf` must be an sf object (the training ",
          "rows with their geometry); got ",
          paste(class(data_sf), collapse = "/"), ".", call. = FALSE)
+  geom <- attr(data_sf, "sf_column")
+  geom_one <- is.character(geom) && length(geom) == 1L && !is.na(geom)
+  if (!geom_one || !(geom %in% names(data_sf)) ||
+      !inherits(data_sf[[geom]], "sfc"))
+    stop("new_spatial_fit(): `data_sf` must be an sf object with its geometry ",
+         "column; its \"sf_column\" attribute ",
+         if (is.null(geom)) "is NULL"
+         else if (!geom_one) "is not one column name"
+         else if (!(geom %in% names(data_sf)))
+           sprintf("names '%s', which is not one of its columns", geom)
+         else sprintf("names '%s', a column of class %s, not an sfc", geom,
+                      class(data_sf[[geom]])[1L]),
+         ". Build it with sf::st_as_sf() or sf::st_sf().", call. = FALSE)
   if (!inherits(formula, "formula"))
     stop("new_spatial_fit(): `formula` must be a formula; got ",
          class(formula)[1L], ".", call. = FALSE)
-  geom <- attr(data_sf, "sf_column")
   cols <- setdiff(names(data_sf), geom)
   if (!is.character(response_var) || length(response_var) != 1L ||
       !(response_var %in% cols))
@@ -157,6 +180,13 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
            sprintf("; '%s' is its geometry column", response_var)
          else sprintf("; '%s' is not one", response_var),
          ".", call. = FALSE)
+  # A one-sided formula has no left side to check.
+  if (length(formula) == 3L && !(response_var %in% all.vars(formula[[2L]])))
+    stop("new_spatial_fit(): the left side of `formula` (",
+         paste(deparse(formula[[2L]]), collapse = " "), ") does not hold ",
+         "`response_var` ('", response_var, "'); print() shows the formula, ",
+         "while summary() and model_metrics() score the fitted values against '",
+         response_var, "'.", call. = FALSE)
   if (!is.character(predictor_vars))
     stop("new_spatial_fit(): `predictor_vars` must be a character vector of ",
          "column names (character(0) for a model without predictors); got ",
@@ -171,6 +201,10 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
     stop("new_spatial_fit(): `predictor_vars` names '", geom, "', the ",
          "geometry column of `data_sf`; predictors are attribute columns.",
          call. = FALSE)
+  if (response_var %in% predictor_vars)
+    stop("new_spatial_fit(): `predictor_vars` names '", response_var, "', the ",
+         "response (`response_var`); a model cannot use its own response as a ",
+         "predictor.", call. = FALSE)
   # `info` is a list the methods read extras from and the cache is added to:
   # a data.frame stopped below with "replacement has 0 rows", and a vector
   # was coerced to a list with a warning.  NULL is no extras.

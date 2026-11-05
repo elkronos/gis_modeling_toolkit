@@ -980,7 +980,7 @@ test_that("summary() applies the same response guard as model_metrics()", {
   d$z <- 2 * d$a + rnorm(40)
   fit <- new_spatial_fit(
     subclass = "lmsurf_fit", engine = stats::lm(z ~ a, sf::st_drop_geometry(d)),
-    formula = z ~ a, response_var = "z_chr", predictor_vars = "a",
+    formula = z_chr ~ a, response_var = "z_chr", predictor_vars = "a",
     data_sf = transform(d, z_chr = as.character(round(d$z, 3))))
   expect_error(summary(fit), "not numeric")
   expect_error(model_metrics(fit), "not numeric")

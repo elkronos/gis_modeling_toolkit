@@ -17,9 +17,20 @@
 # as a response or a predictor, and failed later: the methods read both from
 # st_drop_geometry(data_sf).
 #
+# Three more forms built a fit.  The response among `predictor_vars` went
+# into area_of_applicability()'s distances, and the new rows had to hold it.
+# A formula whose left side is another column (`elev ~ price` with
+# `response_var = "price"`) printed one model while summary() and
+# model_metrics() scored the fitted values against `price`.  An object
+# classed sf without its geometry column (no "sf_column" attribute, or one
+# naming a column that is not an sfc) made summary(), model_metrics() and
+# area_of_applicability() stop with "missing value where TRUE/FALSE needed".
+#
 # What the constructor still accepts is pinned too: no predictors, a factor
 # or character response (a Bayesian fit can be ordinal; summary() refuses a
-# non-numeric response itself), any engine, `info = NULL`, a zero-row layer.
+# non-numeric response itself), any engine, `info = NULL`, a zero-row layer,
+# a left side that transforms the response (`log(price) ~ elev`), a
+# one-sided formula, and the fits of the package's own fitters.
 # ---------------------------------------------------------------------------
 
 .nsf_site <- function(n = 40) {
@@ -122,7 +133,8 @@ test_that("new_spatial_fit() refuses the geometry column as the response or a pr
                fixed = TRUE)
   f <- .nsf_build(g, formula = price ~ geometry, predictor_vars = "geometry")
   expect_identical(f$predictor_vars, "geometry")
-  expect_identical(.nsf_build(g, response_var = "geometry")$response_var, "geometry")
+  expect_identical(.nsf_build(g, formula = geometry ~ elev,
+                              response_var = "geometry")$response_var, "geometry")
 })
 
 test_that("new_spatial_fit() refuses predictor_vars that are not columns of data_sf", {
@@ -140,6 +152,81 @@ test_that("new_spatial_fit() refuses predictor_vars that are not columns of data
   expect_error(.nsf_build(site, predictor_vars = factor("elev")),
                "must be a character vector of column names (character(0) for a model without predictors); got factor.",
                fixed = TRUE)
+})
+
+test_that("new_spatial_fit() refuses the response among predictor_vars", {
+  site <- .nsf_site()
+  # The fit built, and area_of_applicability(model = fit) measured its
+  # distances on elev and price, and stopped on new rows without a price.
+  expect_error(.nsf_build(site, predictor_vars = c("elev", "price")),
+               paste0("new_spatial_fit(): `predictor_vars` names 'price', the ",
+                      "response (`response_var`); a model cannot use its own ",
+                      "response as a predictor."), fixed = TRUE)
+  expect_error(.nsf_build(site, formula = price ~ 1, predictor_vars = "price"),
+               "`predictor_vars` names 'price', the response (`response_var`)",
+               fixed = TRUE)
+})
+
+test_that("new_spatial_fit() refuses a formula whose left side does not hold response_var", {
+  site <- .nsf_site()
+  # print() showed "Formula : elev ~ price" while summary() and
+  # model_metrics() scored the fitted values against price.
+  expect_error(.nsf_build(site, formula = elev ~ price),
+               paste0("new_spatial_fit(): the left side of `formula` (elev) does ",
+                      "not hold `response_var` ('price'); print() shows the ",
+                      "formula, while summary() and model_metrics() score the ",
+                      "fitted values against 'price'."), fixed = TRUE)
+  expect_error(.nsf_build(site, formula = log(elev) ~ price),
+               "the left side of `formula` (log(elev)) does not hold `response_var` ('price')",
+               fixed = TRUE)
+  expect_error(.nsf_build(site, formula = 1 ~ elev),
+               "the left side of `formula` (1) does not hold `response_var` ('price')",
+               fixed = TRUE)
+  # A left side that holds the response, transformed or beside another
+  # column, builds; so does a one-sided formula, which has no left side.
+  for (fml in list(log(price) ~ elev, cbind(price, elev) ~ 1,
+                   price ~ elev + gp(..x, ..y, k = 5), ~ elev))
+    expect_identical(.nsf_build(site, formula = fml)$formula, fml)
+  expect_s3_class(.nsf_build(site, formula = price ~ 1,
+                             predictor_vars = character(0)), "spatial_fit")
+})
+
+test_that("new_spatial_fit() refuses a data_sf without its geometry column", {
+  site <- .nsf_site()
+  # Classed sf with no "sf_column" attribute: the fit built, and summary(),
+  # model_metrics() and area_of_applicability() stopped in
+  # st_drop_geometry() with "missing value where TRUE/FALSE needed".
+  bare <- structure(sf::st_drop_geometry(site), class = c("sf", "data.frame"))
+  expect_null(attr(bare, "sf_column"))
+  expect_error(.nsf_build(site, data_sf = bare),
+               paste0("new_spatial_fit(): `data_sf` must be an sf object with its ",
+                      "geometry column; its \"sf_column\" attribute is NULL. Build ",
+                      "it with sf::st_as_sf() or sf::st_sf()."), fixed = TRUE)
+  # The attribute naming a column that is not an sfc, or no column at all.
+  s_num <- site
+  attr(s_num, "sf_column") <- "elev"
+  expect_error(.nsf_build(site, data_sf = s_num),
+               paste0("`data_sf` must be an sf object with its geometry column; its ",
+                      "\"sf_column\" attribute names 'elev', a column of class ",
+                      "numeric, not an sfc."), fixed = TRUE)
+  s_gone <- site
+  attr(s_gone, "sf_column") <- "geom_gone"
+  expect_error(.nsf_build(site, data_sf = s_gone),
+               paste0("its \"sf_column\" attribute names 'geom_gone', which is not ",
+                      "one of its columns."), fixed = TRUE)
+  s_two <- site
+  attr(s_two, "sf_column") <- c("geometry", "elev")
+  expect_error(.nsf_build(site, data_sf = s_two),
+               "its \"sf_column\" attribute is not one column name.", fixed = TRUE)
+  # An NA attribute, or one that is a factor or a list naming the geometry
+  # column, is not one column name either (an NA one built a fit).
+  for (bad in list(NA_character_, factor("geometry"), list("geometry"))) {
+    s_bad <- site
+    attr(s_bad, "sf_column") <- bad
+    expect_error(.nsf_build(site, data_sf = s_bad),
+                 "its \"sf_column\" attribute is not one column name.",
+                 fixed = TRUE)
+  }
 })
 
 test_that("new_spatial_fit() names `subclass` when it is not one class name, and what it got", {
@@ -185,6 +272,10 @@ test_that("new_spatial_fit()'s argument errors carry no call", {
               list(predictor_vars = NULL),
               list(predictor_vars = "Elev"),
               list(predictor_vars = "geometry"),
+              list(predictor_vars = c("elev", "price")),
+              list(formula = elev ~ price),
+              list(data_sf = structure(sf::st_drop_geometry(site),
+                                       class = c("sf", "data.frame"))),
               list(info = "oob"))
   for (b in bad) {
     err <- tryCatch(do.call(.nsf_build, c(list(site), b)), error = identity)
@@ -205,8 +296,9 @@ test_that("new_spatial_fit() still builds what its methods can use", {
   s2 <- site
   s2$ord <- factor(cut(s2$price, 3), ordered = TRUE)
   s2$price_chr <- as.character(round(s2$price, 2))
-  expect_s3_class(.nsf_build(s2, response_var = "ord"), "spatial_fit")
-  chr <- .nsf_build(s2, response_var = "price_chr")
+  expect_s3_class(.nsf_build(s2, formula = ord ~ elev, response_var = "ord"),
+                  "spatial_fit")
+  chr <- .nsf_build(s2, formula = price_chr ~ elev, response_var = "price_chr")
   registerS3method("fitted", "nsf_fit",
                    function(object, ...) as.numeric(stats::fitted(object$engine)))
   expect_error(model_metrics(chr), "response 'price_chr' is character, not numeric")
@@ -216,6 +308,52 @@ test_that("new_spatial_fit() still builds what its methods can use", {
   # A layer with no rows: the checks are on the arguments' form and names,
   # not on the rows, and the fit's n says it holds none.
   expect_identical(.nsf_build(site, data_sf = site[0, ])$n, 0L)
+})
+
+test_that("the package's own fitters and the ?new_spatial_fit example still build", {
+  site <- .nsf_site(80)
+  site$b <- stats::rnorm(80)
+  # The example's lm_fit, run once on the whole layer.
+  lm_fit <- function(train_sf)
+    new_spatial_fit(subclass = "lm_fit",
+                    engine = stats::lm(price ~ elev, sf::st_drop_geometry(train_sf)),
+                    formula = price ~ elev, response_var = "price",
+                    predictor_vars = "elev", data_sf = train_sf)
+  expect_s3_class(lm_fit(site), "spatial_fit")
+
+  skip_if_not_installed("ranger")
+  rf <- suppressMessages(fit_rf_model(site, "price", c("elev", "b"),
+                                      num_trees = 50, seed = 1))
+  expect_s3_class(rf, "rf_fit")
+  rfc <- suppressWarnings(suppressMessages(
+    fit_rf_model(site, "price", c("elev", "b"), num_trees = 50, seed = 1,
+                 include_coords = TRUE)))
+  expect_identical(all.vars(rfc$formula[[2L]]), "price")
+  expect_false("price" %in% rfc$predictor_vars)
+
+  skip_if_not_installed("GWmodel")
+  gw <- suppressWarnings(suppressMessages(
+    fit_gwr_model(site, "price", c("elev", "b"), bandwidth = 30)))
+  expect_s3_class(gw, "gwr_fit")
+
+  skip_if_not_installed("brms")
+  np <- data.frame(Chain = rep(1:4, each = 10), Iteration = rep(1:10, 4),
+                   Parameter = "divergent__", Value = 0)
+  local_mocked_bindings(
+    brm = function(...) structure(list(), class = "brmsfit"),
+    nuts_params = function(...) np,
+    rhat = function(...) c(b_Intercept = 1.001),
+    neff_ratio = function(...) c(b_Intercept = 0.8),
+    .package = "brms")
+  local_mocked_bindings(estimate_sac_range = function(...) 500,
+                        .package = "spatialkit")
+  for (preds in list("elev", character(0))) {
+    by <- suppressWarnings(suppressMessages(
+      fit_bayesian_spatial_model(site, "price", preds, gp_k = 5,
+                                 compute_loo = FALSE)))
+    expect_s3_class(by, "bayesian_fit")
+    expect_identical(all.vars(by$formula[[2L]]), "price")
+  }
 })
 
 test_that("a fit_fn whose fit names a column the training rows lack fails each fold with the reason", {
