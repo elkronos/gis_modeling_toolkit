@@ -46,8 +46,10 @@ seeds a seeding function returned and the seeds of a
 \code{\link[=select_resolution]{select_resolution()}} result, \code{index} gives each seed the cell it
 generates. Other points are indexed by the cell that holds them, and
 one outside the boundary is \code{NA}; with the cell polygons in \code{values}
-such a seed is given its cell (step 3), and without them the locations
-nearest it have none. Passed through \code{get_voronoi_seeds(method = "provided", seeds = )} before the tessellation, points placed by hand
+such a seed is given its cell when step 3 can tell which it is (it is
+not when the points inside several cells no seed names find it as
+their nearest seed), and without them the locations nearest it have
+none. Passed through \code{get_voronoi_seeds(method = "provided", seeds = )} before the tessellation, points placed by hand
 are seeds (see \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}). Two seeds at different
 locations with one ID are an error; seeds that share a location share
 its cell, as \code{index} gives them. \code{NA} marks a seed without a cell.
@@ -103,7 +105,9 @@ summary's record of how the cell count was set, or \code{NULL}). It describes
 the call: a subset of the frame's rows keeps it as it is.
 
 The function raises no classed warning of its own; the warning that
-says how \code{seeds} without a CRS were read (step 1) is a plain one. It
+says how \code{seeds} without a CRS were read (step 1) and the one that
+counts the seeds outside the polygons of \code{values} left without a cell
+(step 3) are plain ones. It
 passes on what \code{\link[=coerce_to_points]{coerce_to_points()}}, a CRS transformation and
 \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} raise, but for one warning: the one
 that function raises when no location at all falls in a polygon is
@@ -156,8 +160,13 @@ here: a seed with an \code{NA} ID that lies in no polygon of \code{values} takes
 the ID of the polygon, among those no seed names, that a point inside
 it finds as its nearest seed. That is the cell the seed generates,
 since every point of a Voronoi cell is nearer its own seed than any
-other. A seed with an \code{NA} ID inside a polygon keeps it, and so does
-one whose cell \code{values} does not hold. Without \code{seeds}, the polygon of
+other. A seed that the points inside several such polygons find as
+their nearest seed generates at most one of them (the seeds of the
+others are missing from \code{seeds} or have no location), and nothing says
+which: it keeps its \code{NA} ID, with a warning, so the locations nearest
+it have no cell and are filled (step 5). A seed with an \code{NA} ID inside
+a polygon keeps it, and so does one whose cell \code{values} does not hold.
+Without \code{seeds}, the polygon of
 \code{values} that holds the location, by \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}
 with its default \code{tie_break} and the summary's record of the count, so
 a location on the edge between two cells the profile scored is placed

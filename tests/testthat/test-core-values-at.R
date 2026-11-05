@@ -1585,14 +1585,17 @@ test_that("seeds of which no ID is an ID of `values` are refused, and one that i
     "cell's value. Set the column from the tessellation the cells of `values` came from ",
     "(seeds$cell_id <- tess$index). A point placed by hand outside the boundary is NA there: ",
     "with the cell polygons in `values` (built with `cells_sf`) it is given the cell it ",
-    "generates, and passed through get_voronoi_seeds(method = \"provided\", seeds = ) before ",
+    "generates when step 3 of ?cell_values_at can tell which, and passed through ",
+    "get_voronoi_seeds(method = \"provided\", seeds = ) before ",
     "the tessellation it has that cell in `index`."))
   e <- .va_error(.va_at(L, L$held, seeds = none))
   expect_identical(conditionMessage(e), paste0(
     "cell_values_at(): every ID in `seeds$cell_id` is NA, so no location could take its own ",
     "cell's value. With the cell polygons in `values` a seed with an NA ID that lies outside ",
-    "all of them is given the cell it generates, and none of these seeds is. Set the column ",
-    "from the tessellation the cells of `values` came from (seeds$cell_id <- tess$index)."))
+    "all of them is given the cell it generates when it is the nearest seed of the point inside ",
+    "one cell no seed names, and of no other such point, and none of these seeds is. Set the ",
+    "column from the tessellation the cells of `values` came from ",
+    "(seeds$cell_id <- tess$index)."))
   expect_null(e$call)
   expect_identical(class(e), c("simpleError", "error", "condition"))
   # The ID column of another layer's tessellation.
@@ -1775,8 +1778,10 @@ test_that("seeds with the IDs of cells and no location are refused, and one with
   expect_identical(conditionMessage(.va_error(.va_at(L, L$held, seeds = none))), paste0(
     "cell_values_at(): every ID in `seeds$cell_id` is NA, so no location could take its own ",
     "cell's value. With the cell polygons in `values` a seed with an NA ID that lies outside ",
-    "all of them is given the cell it generates, and none of these seeds is. Set the column ",
-    "from the tessellation the cells of `values` came from (seeds$cell_id <- tess$index)."))
+    "all of them is given the cell it generates when it is the nearest seed of the point inside ",
+    "one cell no seed names, and of no other such point, and none of these seeds is. Set the ",
+    "column from the tessellation the cells of `values` came from ",
+    "(seeds$cell_id <- tess$index)."))
   r <- .va_catch(.va_error(.va_at(L, L$held, seeds = sf::st_set_crs(none, NA))))
   expect_match(conditionMessage(r$value), "every ID in `seeds$cell_id` is NA", fixed = TRUE)
   expect_length(r$warnings, 0L)
@@ -1957,8 +1962,10 @@ test_that("points placed by hand whose IDs are all NA outside the cell polygons 
   poly_text <- paste0(
     "cell_values_at(): every ID in `seeds$cell_id` is NA, so no location could take its own ",
     "cell's value. With the cell polygons in `values` a seed with an NA ID that lies outside ",
-    "all of them is given the cell it generates, and none of these seeds is. Set the column ",
-    "from the tessellation the cells of `values` came from (seeds$cell_id <- tess$index).")
+    "all of them is given the cell it generates when it is the nearest seed of the point inside ",
+    "one cell no seed names, and of no other such point, and none of these seeds is. Set the ",
+    "column from the tessellation the cells of `values` came from ",
+    "(seeds$cell_id <- tess$index).")
   e <- .va_error(call(inside))
   expect_identical(conditionMessage(e), poly_text)
   expect_null(e$call)
@@ -1969,6 +1976,187 @@ test_that("points placed by hand whose IDs are all NA outside the cell polygons 
     "cell_values_at(): no seed in `seeds$cell_id` has the ID of a cell of `values`, so no ",
     "location could take its own cell's value. Set the column from the tessellation the cells ",
     "of `values` came from (seeds$cell_id <- tess$index)."))
+})
+
+test_that("a seed with an NA ID outside the polygons that the points inside several cells no seed names find keeps NA, whatever the order of `values`", {
+  L <- .va_full()
+  # `values` with its rows reversed and its records kept.
+  rev_rows <- function(v) {
+    r <- v[rev(seq_len(nrow(v))), ]
+    for (a in setdiff(names(attributes(v)), c("names", "row.names", "class")))
+      if (is.null(attr(r, a))) attr(r, a) <- attr(v, a)
+    r
+  }
+  back <- rev_rows(L$pooled)
+  expect_false(identical(back$cell_id, L$pooled$cell_id))
+  expect_identical(attr(back, "count_rule"), attr(L$pooled, "count_rule"))
+  # The tessellation's own seeds give the same frame in both orders.
+  expect_identical(.va_cols(.va_at(L, L$held, values = back)), .va_cols(.va_at(L, L$held)))
+  hand <- function(xy, ids = NA_integer_)
+    sf::st_sf(cell_id = rep(ids, length.out = nrow(xy)),
+              geometry = sf::st_sfc(lapply(seq_len(nrow(xy)), function(i)
+                sf::st_point(xy[i, ])), crs = 32617))
+  # The tessellation's seeds with their IDs and no other column.
+  S <- hand(.va_xy(L$seeds), L$seeds$cell_id)
+  union <- sf::st_union(sf::st_geometry(L$pooled))
+  outside <- function(s) all(lengths(sf::st_intersects(s, union)) == 0L)
+  poly_text <- paste0(
+    "cell_values_at(): every ID in `seeds$cell_id` is NA, so no location could take its own ",
+    "cell's value. With the cell polygons in `values` a seed with an NA ID that lies outside ",
+    "all of them is given the cell it generates when it is the nearest seed of the point inside ",
+    "one cell no seed names, and of no other such point, and none of these seeds is. Set the ",
+    "column from the tessellation the cells of `values` came from ",
+    "(seeds$cell_id <- tess$index).")
+  # One point placed by hand outside the boundary, alone, is the nearest seed of the point
+  # inside every cell, and two are each the nearest of many: neither is given a cell, so no
+  # seed has a cell's ID and the call is refused, with `values` as built and reversed.
+  lone <- hand(rbind(c(4e5, 4.9e6)))
+  two  <- hand(rbind(c(4e5, 4.9e6), c(7e5, 5.2e6)))
+  expect_true(outside(two))
+  for (s in list(lone, two))
+    for (v in list(L$pooled, back)) {
+      r <- .va_catch(.va_error(.va_at(L, L$held, values = v, seeds = s)))
+      expect_s3_class(r$value, "simpleError")
+      expect_identical(conditionMessage(r$value), poly_text)
+      expect_null(r$value$call)
+      expect_length(r$warnings, 0L)
+    }
+  # The seeds with the IDs of cells, every point emptied, beside the lone point: refused
+  # with the text for seeds without a location.
+  empty <- sf::st_set_geometry(S, sf::st_sfc(rep(list(sf::st_point()), nrow(S)), crs = 32617))
+  for (v in list(L$pooled, back))
+    expect_match(conditionMessage(.va_error(.va_at(L, L$held, values = v,
+                                                   seeds = rbind(empty, lone)))),
+                 "^cell_values_at\\(\\): every seed in `seeds` with the ID of a cell of `values` has no location")
+  # The tessellation's seeds without those of cells 23 and 35, and a point outside the
+  # boundary south of them that the points inside both cells find as their nearest seed.
+  P <- c(5.25e5, 4.995e6)
+  pt <- hand(rbind(P))
+  expect_true(outside(pt))
+  drop <- S$cell_id %in% c(23L, 35L)
+  expect_identical(sum(drop), 2L)
+  inner <- sf::st_point_on_surface(sf::st_geometry(L$pooled)[match(c(23L, 35L),
+                                                                   L$pooled$cell_id)])
+  kept <- S[!drop, ]
+  with_pt <- rbind(kept, pt)
+  expect_identical(sf::st_nearest_feature(inner, with_pt), rep(nrow(with_pt), 2L))
+  # The locations asked for: the held-out rows, the two points inside the cells and P.
+  nd <- rbind(L$held[, 0], sf::st_sf(geometry = c(inner, sf::st_sfc(sf::st_point(P),
+                                                                     crs = 32617))))
+  near_pt <- sf::st_nearest_feature(nd, with_pt) == nrow(with_pt)
+  # Five held-out rows among them.
+  expect_identical(sum(near_pt), 8L)
+  expect_true(all(tail(near_pt, 3L)))
+  warn_text <- function(k) paste0(
+    "cell_values_at(): ", k, if (k == 1L) " seed" else " seeds", " with an NA ID outside every ",
+    "cell of `values` ", if (k == 1L) "is" else "are each", " the nearest seed of the points ",
+    "inside more than one cell of `values` that no seed names, so ",
+    if (k == 1L) "it is" else "they are", " given none of them; the locations nearest ",
+    if (k == 1L) "it" else "them", " have no cell and are filled from the cell of their ",
+    "nearest scored row.")
+  r <- .va_catch(.va_at(L, nd, seeds = with_pt))
+  expect_length(r$warnings, 1L)
+  expect_identical(class(r$warnings[[1L]]), c("simpleWarning", "warning", "condition"))
+  expect_identical(conditionMessage(r$warnings[[1L]]), warn_text(1L))
+  expect_null(r$warnings[[1L]]$call)
+  at <- r$value
+  # The locations nearest P have no cell and are filled from their nearest scored row; the
+  # others are as the seeds without P place them.
+  expect_true(all(is.na(at$cell_id[near_pt])))
+  expect_true(all(at$filled[near_pt]))
+  u <- .va_xy(L$asg)
+  nearest <- .va_nearest(.va_xy(nd)[near_pt, , drop = FALSE], u)
+  expect_identical(at$filled_from[near_pt], L$asg$cell_id[nearest])
+  expect_identical(attr(at, "values_at")$filled, sum(at$filled))
+  without <- .va_at(L, nd, seeds = kept)
+  expect_identical(.va_cols(at[!near_pt, ]), .va_cols(without[!near_pt, ]))
+  expect_false(any(at$cell_id %in% c(23L, 35L)))
+  # The same frame and the same warning with `values` reversed.
+  r_back <- .va_catch(.va_at(L, nd, values = back, seeds = with_pt))
+  expect_identical(.va_cols(r_back$value), .va_cols(at))
+  expect_identical(lapply(r_back$warnings, conditionMessage), list(warn_text(1L)))
+  # Cell 35's seed kept with its ID and an empty point: cell 35 is still one no seed with a
+  # location names, and the call gives the same frame and warning.
+  ghost <- S
+  g <- sf::st_geometry(ghost)
+  g[[which(ghost$cell_id == 35L)]] <- sf::st_point()
+  ghost <- sf::st_set_geometry(ghost, g)
+  r_ghost <- .va_catch(.va_at(L, nd, seeds = rbind(ghost[ghost$cell_id != 23L, ], pt)))
+  expect_identical(.va_cols(r_ghost$value), .va_cols(at))
+  expect_identical(lapply(r_ghost$warnings, conditionMessage), list(warn_text(1L)))
+  # Two seeds at P share its fate, and are both counted.
+  r_twice <- .va_catch(.va_at(L, nd, seeds = rbind(kept, pt, pt)))
+  expect_identical(.va_cols(r_twice$value), .va_cols(at))
+  expect_identical(lapply(r_twice$warnings, conditionMessage), list(warn_text(2L)))
+  # Cell 1's seed left out as well, and a point Q just west of the boundary at the height of
+  # the point inside cell 1, which finds Q and no other seed missing its own: in one call Q
+  # takes cell 1 and P keeps NA, whatever the order of `values` or of `seeds`.
+  Q <- c(4.97e5, 5.0562e6)
+  qt <- hand(rbind(Q))
+  expect_true(outside(qt))
+  inner3 <- sf::st_point_on_surface(sf::st_geometry(L$pooled)[match(c(23L, 35L, 1L),
+                                                                    L$pooled$cell_id)])
+  mixed <- rbind(S[!S$cell_id %in% c(23L, 35L, 1L), ], pt, qt)
+  expect_identical(sf::st_nearest_feature(inner3, mixed),
+                   c(nrow(mixed) - 1L, nrow(mixed) - 1L, nrow(mixed)))
+  # The point inside every other cell finds that cell's own seed.
+  others <- L$pooled$cell_id[!L$pooled$cell_id %in% c(23L, 35L, 1L)]
+  inner_o <- sf::st_point_on_surface(sf::st_geometry(L$pooled)[match(others,
+                                                                     L$pooled$cell_id)])
+  expect_identical(mixed$cell_id[sf::st_nearest_feature(inner_o, mixed)], others)
+  nd3 <- rbind(L$held[, 0], sf::st_sf(geometry = c(inner3, sf::st_sfc(sf::st_point(P),
+                                                                       sf::st_point(Q),
+                                                                       crs = 32617))))
+  near3 <- sf::st_nearest_feature(nd3, mixed)
+  by_p <- near3 == nrow(mixed) - 1L
+  by_q <- near3 == nrow(mixed)
+  expect_true(all(by_p[nrow(nd3) - c(4L, 3L, 1L)]))
+  expect_true(all(by_q[nrow(nd3) - c(2L, 0L)]))
+  for (v in list(L$pooled, back))
+    for (s in list(mixed, mixed[rev(seq_len(nrow(mixed))), ])) {
+      m <- .va_catch(.va_at(L, nd3, values = v, seeds = s))
+      expect_identical(lapply(m$warnings, conditionMessage), list(warn_text(1L)))
+      expect_identical(m$value$cell_id[by_q], rep(1L, sum(by_q)))
+      expect_false(any(m$value$filled[by_q]))
+      expect_true(all(is.na(m$value$cell_id[by_p])))
+      expect_true(all(m$value$filled[by_p]))
+      expect_identical(m$value$filled_from[by_p],
+                       L$asg$cell_id[.va_nearest(.va_xy(nd3)[by_p, , drop = FALSE], u)])
+      expect_false(any(m$value$filled[!by_p]))
+      expect_identical(attr(m$value, "values_at")$filled, sum(by_p))
+      if (identical(v, L$pooled) && identical(s, mixed)) first <- .va_cols(m$value)
+      else expect_identical(.va_cols(m$value), first)
+    }
+  # The seeds of the cells whose inner points lie within 40 km of P left out: P is the
+  # nearest seed of the points inside three of them, and is counted once.
+  ip <- .va_xy(sf::st_point_on_surface(sf::st_geometry(L$pooled)))
+  far <- L$pooled$cell_id[sqrt((ip[, 1L] - P[1L])^2 + (ip[, 2L] - P[2L])^2) < 4e4]
+  wide <- rbind(S[!S$cell_id %in% far, ], pt)
+  inner_far <- sf::st_point_on_surface(sf::st_geometry(L$pooled)[match(far,
+                                                                       L$pooled$cell_id)])
+  expect_identical(sum(sf::st_nearest_feature(inner_far, wide) == nrow(wide)), 3L)
+  nd_far <- rbind(L$held[, 0], sf::st_sf(geometry = c(inner_far,
+                                                      sf::st_sfc(sf::st_point(P), crs = 32617))))
+  by_far <- sf::st_nearest_feature(nd_far, wide) == nrow(wide)
+  for (v in list(L$pooled, back)) {
+    w3 <- .va_catch(.va_at(L, nd_far, values = v, seeds = wide))
+    expect_identical(lapply(w3$warnings, conditionMessage), list(warn_text(1L)))
+    expect_true(all(is.na(w3$value$cell_id[by_far])))
+    expect_true(all(w3$value$filled[by_far]))
+    if (identical(v, L$pooled)) first_far <- .va_cols(w3$value)
+    else expect_identical(.va_cols(w3$value), first_far)
+  }
+  # With only cell 23's seed left out, P is the nearest seed of the point inside that one
+  # cell, and takes it, with no warning, in both orders: the locations nearest P lie in
+  # cell 23 and none is filled.
+  for (v in list(L$pooled, back)) {
+    one <- .va_catch(.va_at(L, nd, values = v,
+                            seeds = rbind(S[S$cell_id != 23L, ], pt)))
+    expect_length(one$warnings, 0L)
+    expect_identical(one$value$cell_id[nrow(nd) - 2L], 23L)
+    expect_identical(one$value$cell_id[nrow(nd)], 23L)
+    expect_false(any(one$value$filled))
+  }
 })
 
 test_that("`seeds` without a CRS beside rows with one are read as build_tessellation() reads a boundary without one", {

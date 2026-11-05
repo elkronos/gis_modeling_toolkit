@@ -381,11 +381,14 @@
                          "could take its own cell's value."), id_col)
   if (polygons)
     return(paste(head, paste0("With the cell polygons in `values` a seed with an NA ID that ",
-                              "lies outside all of them is given the cell it generates, and ",
-                              "none of these seeds is."), set))
+                              "lies outside all of them is given the cell it generates when ",
+                              "it is the nearest seed of the point inside one cell no seed ",
+                              "names, and of no other such point, and none of these seeds ",
+                              "is."), set))
   paste(head, set, paste0("A point placed by hand outside the boundary is NA there: with the ",
                           "cell polygons in `values` (built with `cells_sf`) it is given the ",
-                          "cell it generates, and passed through get_voronoi_seeds(method = ",
+                          "cell it generates when step 3 of ?cell_values_at can tell which, ",
+                          "and passed through get_voronoi_seeds(method = ",
                           "\"provided\", seeds = ) before the tessellation it has that cell ",
                           "in `index`."))
 }
@@ -475,8 +478,13 @@
 #'    the ID of the polygon, among those no seed names, that a point inside
 #'    it finds as its nearest seed. That is the cell the seed generates,
 #'    since every point of a Voronoi cell is nearer its own seed than any
-#'    other. A seed with an `NA` ID inside a polygon keeps it, and so does
-#'    one whose cell `values` does not hold. Without `seeds`, the polygon of
+#'    other. A seed that the points inside several such polygons find as
+#'    their nearest seed generates at most one of them (the seeds of the
+#'    others are missing from `seeds` or have no location), and nothing says
+#'    which: it keeps its `NA` ID, with a warning, so the locations nearest
+#'    it have no cell and are filled (step 5). A seed with an `NA` ID inside
+#'    a polygon keeps it, and so does one whose cell `values` does not hold.
+#'    Without `seeds`, the polygon of
 #'    `values` that holds the location, by [assign_features_to_polygons()]
 #'    with its default `tie_break` and the summary's record of the count, so
 #'    a location on the edge between two cells the profile scored is placed
@@ -618,8 +626,10 @@
 #'   [select_resolution()] result, `index` gives each seed the cell it
 #'   generates. Other points are indexed by the cell that holds them, and
 #'   one outside the boundary is `NA`; with the cell polygons in `values`
-#'   such a seed is given its cell (step 3), and without them the locations
-#'   nearest it have none. Passed through `get_voronoi_seeds(method =
+#'   such a seed is given its cell when step 3 can tell which it is (it is
+#'   not when the points inside several cells no seed names find it as
+#'   their nearest seed), and without them the locations nearest it have
+#'   none. Passed through `get_voronoi_seeds(method =
 #'   "provided", seeds = )` before the tessellation, points placed by hand
 #'   are seeds (see [create_voronoi_polygons()]). Two seeds at different
 #'   locations with one ID are an error; seeds that share a location share
@@ -675,7 +685,9 @@
 #'   the call: a subset of the frame's rows keeps it as it is.
 #'
 #'   The function raises no classed warning of its own; the warning that
-#'   says how `seeds` without a CRS were read (step 1) is a plain one. It
+#'   says how `seeds` without a CRS were read (step 1) and the one that
+#'   counts the seeds outside the polygons of `values` left without a cell
+#'   (step 3) are plain ones. It
 #'   passes on what [coerce_to_points()], a CRS transformation and
 #'   [assign_features_to_polygons()] raise, but for one warning: the one
 #'   that function raises when no location at all falls in a polygon is
@@ -872,7 +884,9 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
     # given no cell in step 3.  The coordinates are read as given, before any
     # CRS work, and again once the seeds are placed in the working CRS.
     # A seed with an NA ID outside every polygon of `values` is given the
-    # cell it generates in step 3, and points placed by hand outside the
+    # cell it generates in step 3, when that step can tell which (the point
+    # inside one cell no seed names finds it, and no other such point
+    # does), and points placed by hand outside the
     # boundary can all be such seeds.  Beside polygons the check then
     # waits for that step and reads the IDs it gives; other seeds are refused
     # here, before any CRS work or search.
@@ -1010,20 +1024,29 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
   # ---- 3. the cell of a location ----------------------------------------------
   cell <- rep(NA_character_, length(live))
   if (by_seeds) {
+    left <- integer(0)
     if (length(seed_at) && n_free > 0L) {
       # A seed with an NA ID outside every cell takes the ID of the cell it
       # generates: the cell no seed names that a point inside it finds as its
       # nearest seed.  Seeds at its location share it, as `index` gives them.
+      # A seed that the points inside several such cells find generates at
+      # most one of them (the seeds of the others are missing or have no
+      # location), and nothing says which: it keeps its NA ID, whatever the
+      # order of the rows of `values`.
       own <- seed_at[.values_at_nearest(free$xy[, 1L], free$xy[, 2L], seed_xy[seed_at, 1L],
                                         seed_xy[seed_at, 2L], use_fnn)]
-      take <- own %in% free$lost & !duplicated(own)
+      mine <- own %in% free$lost
+      many <- unique(own[mine][duplicated(own[mine])])
+      at_seed <- function(s)
+        free$lost[seed_xy[free$lost, 1L] == seed_xy[s, 1L] &
+                  seed_xy[free$lost, 2L] == seed_xy[s, 2L]]
       given <- integer(0)
-      for (k in which(take)) {
-        here <- free$lost[seed_xy[free$lost, 1L] == seed_xy[own[k], 1L] &
-                          seed_xy[free$lost, 2L] == seed_xy[own[k], 2L]]
+      for (k in which(mine & !(own %in% many))) {
+        here <- at_seed(own[k])
         seed_ids[here] <- free$id[k]
         given <- c(given, here)
       }
+      for (s in many) left <- c(left, at_seed(s))
       if (length(given))
         .log_info(paste0("cell_values_at(): %d seed(s) with an NA ID lie outside every cell ",
                          "of `values`; each takes the ID of the cell it generates, which no ",
@@ -1033,6 +1056,17 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
     if (ids_later && !of_cells(seed_ids, seed_on))
       stop(.values_at_no_seed_cell(seed_ids, id_col, polygons = TRUE,
                                    nowhere = of_cells(seed_ids, !located)), call. = FALSE)
+    if (length(left))
+      warning(sprintf(paste0("cell_values_at(): %d seed%s with an NA ID outside every cell of ",
+                             "`values` %s the nearest seed of the points inside more than one ",
+                             "cell of `values` that no seed names, so %s given none of them; ",
+                             "the locations nearest %s have no cell and are filled from the ",
+                             "cell of their nearest scored row."),
+                      length(left), if (length(left) == 1L) "" else "s",
+                      if (length(left) == 1L) "is" else "are each",
+                      if (length(left) == 1L) "it is" else "they are",
+                      if (length(left) == 1L) "it" else "them"),
+              call. = FALSE)
     if (length(live) && length(seed_at)) {
       # Seeds that are the centres the profile scored, in any order, are
       # searched at the centres as the record holds them and in its order, so

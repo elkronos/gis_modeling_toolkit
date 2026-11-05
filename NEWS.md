@@ -2244,6 +2244,25 @@ old behaviour where there is a way.
   polygons, gets that error too.  A `values` with some IDs `NA` runs as
   before.
 
+* **`cell_values_at(seeds = )` gave a seed with an `NA` ID outside the
+  polygons of `values` the first of several cells by the row order of
+  `values`.**  Such a seed takes the cell no seed names whose inner point
+  finds it as its nearest seed.  When the inner points of several such
+  cells found it, it took the first of them in the order of the rows of
+  `values`, and every location nearest it took that cell's value, not
+  filled: one point placed by hand outside the boundary, passed alone as
+  `seeds`, put all 120 locations of a layer of 107 cells in cell 1, and in
+  cell 107 with the rows of `values` reversed.  Such a seed generates at
+  most one of those cells, and nothing says which, so it now keeps its
+  `NA` ID: the locations nearest it have no cell and are filled, and a
+  warning gives the count of such seeds.  When no seed is then left with
+  the ID of a cell of `values`, as for that lone point, the call stops with
+  the error for seeds whose IDs are all `NA`; its text, with the polygons
+  in `values` and without, now says when a seed outside the polygons is
+  given its cell.  A seed that the inner point
+  of one such cell alone finds, such as a point placed by hand in the bend
+  of a boundary that is not convex, takes that cell as before.
+
 * **`cell_values_at()` refused `seeds` without a CRS beside `points` with
   one, with an error that did not say which CRS to set.**  For rows without
   a CRS whose coordinates look like longitude and latitude,
