@@ -372,8 +372,9 @@ test_that("a valued row without a location is left out of the pooled mean, with 
   expect_identical(.ps_fields(w), list(n = 1L, cells = 1L, columns = "z"))
   expect_identical(
     conditionMessage(w),
-    paste0("summarize_by_cell(): 1 row(s) in 1 cell(s) have empty or non-finite coordinates. ",
-           "They count in `n` and the plain columns and take no part in the pooled columns."))
+    paste0("summarize_by_cell(): 1 row(s) in 1 cell(s) have no location (an empty point, ",
+           "or a coordinate that is not finite or lies beyond 1e150). They count in `n` and ",
+           "the plain columns and take no part in the pooled columns."))
   out <- r$value
   rec <- attr(out, "pooled")$columns$resp_z
   expect_identical(rec$skipped, 1L)

@@ -457,8 +457,9 @@
 #'    longitude and latitude are taken to be in it, and others stop the call.
 #'    `newdata` without a CRS beside `points` with one stops the call.
 #' 2. *The scored rows.* The rows of `points` with a finite `response_var`,
-#'    a cell ID and finite coordinates. Their distinct locations are the
-#'    observations every distance below is taken from.
+#'    a cell ID and a location: a point whose coordinates are finite and
+#'    within 1e150, as given and in the working CRS. Their distinct
+#'    locations are the observations every distance below is taken from.
 #' 3. *The cell of a location.* With `seeds`, the cell of the nearest seed.
 #'    That is the Voronoi cell before its clip to the cover, so every
 #'    location has one, unless its nearest seed has an `NA` ID: a location
@@ -655,7 +656,8 @@
 #'       scored rows sit on one location.}
 #'   }
 #'   A row of `newdata` with an empty geometry, or with a coordinate that is
-#'   not finite or lies beyond 1e150, has `NA` in every column. The two ID
+#'   not finite or lies beyond 1e150 as given or in the working CRS, has `NA`
+#'   in every column. The two ID
 #'   columns have the class of the ID column of `values`; when a cell that
 #'   `values` has no row for has an ID that class cannot hold (a string
 #'   beside numbers), both are character.
@@ -948,6 +950,9 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
   where <- .values_at_points(newdata)
   placed <- .values_at_place(where, "newdata", "locations", crs, points_crs, as_lonlat)
   q     <- .values_at_xy(placed)
+  # A row of `newdata` without a location as given has none here either, though
+  # a move between CRSs can bring a coordinate beyond 1e150 back finite.
+  q[is.na(.values_at_xy(where)[, 1L]), ] <- NA_real_
   live  <- which(is.finite(q[, 1L]) & is.finite(q[, 2L]))
   qx <- q[live, 1L]
   qy <- q[live, 2L]

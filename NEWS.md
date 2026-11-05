@@ -2203,6 +2203,34 @@ old behaviour where there is a way.
   placed by hand outside the boundary take their cells beside such a seed,
   where the locations in the cell it named were filled.
 
+* **A row of `newdata` or `points` with a coordinate beyond 1e150 in
+  another CRS than the working one was read where the move to that CRS put
+  it.**  Such a coordinate stands for no location, but the bound was read
+  only after the move, and a move can bring it back finite: a northing of
+  1e200 in EPSG:32616 lands at (87304, 5766268) in EPSG:32617, and one in
+  EPSG:3857 at (5e5, 9997965).  In `cell_values_at()` such a row of
+  `newdata` took a cell, a value and a distance, where the help says it has
+  `NA` in every column; a row of `points` was a scored location, which
+  moved the spacing and so `dist_ratio` at every location.  In
+  `summarize_by_cell(estimate = "pooled")` such a row of `points` took part
+  in the pooled columns and their record with no
+  `spatialkit_pool_rows_skipped` warning.  Such a row of `points` also took
+  part in choosing how the other rows are read: in EPSG:4326 a longitude of
+  1e200 made `summarize_by_cell()` without a count record stop with an sf
+  "invalid crs" error, and a latitude of 1e200 raised two sf warnings about
+  the bounding box; in a layer without a CRS whose coordinates are lon/lat,
+  one such row made every other row read as planar degrees, so that
+  `summarize_by_cell()` recorded no CRS and `cell_values_at()` took the
+  degrees for metres in the summary's CRS, with no warning.  The bound is
+  now read on the coordinates as given, and again after the move, and the
+  rows of `points` beyond it as given are emptied before the CRS is chosen:
+  each such row gives what the same row with an empty point gives.  Rows in
+  the working CRS itself are read as before.  The text of `spatialkit_pool_rows_skipped`, and its
+  entry in `?summarize_by_cell`, said such rows "have empty or non-finite
+  coordinates", which a row beyond 1e150 does not; they now read "no
+  location (an empty point, or a coordinate that is not finite or lies
+  beyond 1e150)".
+
 * **`cell_values_at()` without `seeds` gave every location the value `NA`,
   marked filled, when `values` had no cell ID.**  A `values` whose ID
   column is all `NA` placed no location in a cell, so every location was

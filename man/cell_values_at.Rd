@@ -84,7 +84,8 @@ row, in the units of the working CRS.}
 scored rows sit on one location.}
 }
 A row of \code{newdata} with an empty geometry, or with a coordinate that is
-not finite or lies beyond 1e150, has \code{NA} in every column. The two ID
+not finite or lies beyond 1e150 as given or in the working CRS, has \code{NA}
+in every column. The two ID
 columns have the class of the ID column of \code{values}; when a cell that
 \code{values} has no row for has an ID that class cannot hold (a string
 beside numbers), both are character.
@@ -137,8 +138,9 @@ EPSG:4326 and transformed, and others are taken to be in the CRS of
 longitude and latitude are taken to be in it, and others stop the call.
 \code{newdata} without a CRS beside \code{points} with one stops the call.
 \item \emph{The scored rows.} The rows of \code{points} with a finite \code{response_var},
-a cell ID and finite coordinates. Their distinct locations are the
-observations every distance below is taken from.
+a cell ID and a location: a point whose coordinates are finite and
+within 1e150, as given and in the working CRS. Their distinct
+locations are the observations every distance below is taken from.
 \item \emph{The cell of a location.} With \code{seeds}, the cell of the nearest seed.
 That is the Voronoi cell before its clip to the cover, so every
 location has one, unless its nearest seed has an \code{NA} ID: a location

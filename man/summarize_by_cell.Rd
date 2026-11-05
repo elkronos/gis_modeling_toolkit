@@ -959,9 +959,11 @@ values"). The text says which of the two tests failed, and \code{beats} is
 does not tell the cell means from one mean (also \code{criterion = "loo"},
 \code{estimate = "pooled"}, and by column \code{n}, the cells, \code{one_cell}, \code{loo}
 and \code{structure_p}).
-\item \code{"spatialkit_pool_rows_skipped"}: rows with a value and a cell have
-empty or non-finite coordinates. They count in \code{n} and the plain
-columns and take no part in the pooled ones (\code{n}, \code{cells}).
+\item \code{"spatialkit_pool_rows_skipped"}: rows with a value and a cell have no
+location: an empty point, or a coordinate that is not finite or lies
+beyond 1e150, as given or in the CRS the distances are measured in.
+They count in \code{n} and the plain columns and take no part in the pooled
+ones (\code{n}, \code{cells}).
 \item \code{"spatialkit_repeated_locations"}, with \code{obs_level}: rows with a value
 share a location. A residual leaves one row out and keeps the others at
 its location, so the interval then describes a further observation at a

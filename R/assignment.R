@@ -1908,9 +1908,11 @@ assign_features_to_polygons <- function(
 #'   does not tell the cell means from one mean (also `criterion = "loo"`,
 #'   `estimate = "pooled"`, and by column `n`, the cells, `one_cell`, `loo`
 #'   and `structure_p`).
-#' * `"spatialkit_pool_rows_skipped"`: rows with a value and a cell have
-#'   empty or non-finite coordinates. They count in `n` and the plain
-#'   columns and take no part in the pooled ones (`n`, `cells`).
+#' * `"spatialkit_pool_rows_skipped"`: rows with a value and a cell have no
+#'   location: an empty point, or a coordinate that is not finite or lies
+#'   beyond 1e150, as given or in the CRS the distances are measured in.
+#'   They count in `n` and the plain columns and take no part in the pooled
+#'   ones (`n`, `cells`).
 #' * `"spatialkit_repeated_locations"`, with `obs_level`: rows with a value
 #'   share a location. A residual leaves one row out and keeps the others at
 #'   its location, so the interval then describes a further observation at a
@@ -3798,9 +3800,15 @@ summarize_by_cell <- function(assigned_points_sf,
 #'
 #' A feature with an empty geometry has \code{NA} coordinates, and so has one
 #' with a coordinate beyond \code{.POOL_XY_MAX}: both are rows without a
-#' location to the caller.  The warning sf raises when it takes a point on
-#' the surface of a lon/lat polygon is not passed on: the point is one of the
-#' polygon's, and it is projected before any distance is taken.
+#' location to the caller.  The bound is read on the coordinates as given,
+#' before the projection, and again after it: a move between CRSs can bring
+#' a coordinate beyond the bound back finite (a northing of 1e200 in
+#' EPSG:32616 lands at a finite point in EPSG:32617), and a transform of it
+#' is not a place the caller gave.  The rows beyond it as given are emptied
+#' before the projection, so they take no part in choosing it: the layer is
+#' read as it is read with those rows empty.  The warning sf raises when it takes a
+#' point on the surface of a lon/lat polygon is not passed on: the point is
+#' one of the polygon's, and it is projected before any distance is taken.
 #'
 #' @param layer The assigned layer.
 #' @param crs \code{NULL}, or the projected CRS to measure in: the one the
@@ -3822,11 +3830,26 @@ summarize_by_cell <- function(assigned_points_sf,
         if (grepl("st_point_on_surface may not give correct results",
                   conditionMessage(w), fixed = TRUE))
           invokeRestart("muffleWarning"))
+  given <- unname(sf::st_coordinates(layer)[, 1:2, drop = FALSE])
+  far_given <- abs(given[, 1L]) > .POOL_XY_MAX | abs(given[, 2L]) > .POOL_XY_MAX
+  # Those rows are emptied before the projection: the bounding box it is
+  # chosen from, and the test of a layer without a CRS for lon/lat, then read
+  # what they read with the rows emptied.  The empty point keeps the
+  # dimensions of the feature, as sf needs one dimension per layer.
+  far_at <- which(far_given)
+  if (length(far_at)) {
+    g <- sf::st_geometry(layer)
+    g[far_at] <- sf::st_sfc(lapply(far_at, function(i) {
+      d <- class(g[[i]])[1L]
+      sf::st_point(rep(NA_real_, nchar(d)), dim = d)
+    }), crs = sf::st_crs(g))
+    layer <- sf::st_set_geometry(layer, g)
+  }
   layer <- if (is.null(crs)) ensure_projected(layer)
            else ensure_projected(layer, target_crs = crs)
   xy <- unname(sf::st_coordinates(layer)[, 1:2, drop = FALSE])
   far <- abs(xy[, 1L]) > .POOL_XY_MAX | abs(xy[, 2L]) > .POOL_XY_MAX
-  xy[which(far), ] <- NA_real_
+  xy[which(far | far_given), ] <- NA_real_
   list(xy = xy, crs = sf::st_crs(layer))
 }
 
@@ -4173,9 +4196,9 @@ summarize_by_cell <- function(assigned_points_sf,
   # ---- rows left out, and what the interval rests on --------------------------
   if (ev$skipped_rows > 0L)
     .warn_classed("spatialkit_pool_rows_skipped", paste0(
-      "summarize_by_cell(): %d row(s) in %d cell(s) have empty or non-finite ",
-      "coordinates. They count in `n` and the plain columns and take no part in the ",
-      "pooled columns."),
+      "summarize_by_cell(): %d row(s) in %d cell(s) have no location (an empty point, ",
+      "or a coordinate that is not finite or lies beyond 1e150). They count in `n` and ",
+      "the plain columns and take no part in the pooled columns."),
       ev$skipped_rows, ev$skipped_cells,
       data = list(n = ev$skipped_rows, cells = ev$skipped_cells,
                   columns = cols[of("skipped", as.integer) > 0L]))
