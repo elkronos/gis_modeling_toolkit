@@ -946,6 +946,12 @@
 #' the precision test, and a \code{[0, 1]}-normalised planar layer passes it too.
 #' When the data are planar, set the CRS explicitly, as the warning says.
 #'
+#' The precision test reads the coordinates of a layer that mixes XY and XYZ
+#' (or XYM) geometries in XY: \code{sf::st_coordinates()} reads such a layer
+#' in the dimension of its first geometry and stops on it, which made a
+#' layer in degrees look planar.  It leaves empty geometries out: an empty
+#' polygon stops \code{sf::st_coordinates()} too.
+#'
 #' @param x An sf/sfc object with no CRS.
 #' @return A list: \code{lonlat} (logical) and \code{bb} (the bbox, or
 #'   \code{NULL} if it could not be taken).
@@ -964,7 +970,12 @@
   has_large_extent <- (x_range > 1) || (y_range > 1)
   has_geo_precision <- FALSE
   if (!has_large_extent) {
-    coords_mat <- try(sf::st_coordinates(x), silent = TRUE)
+    xc <- x
+    if (inherits(x, c("sf", "sfc"))) {
+      xc <- sf::st_geometry(x)
+      xc <- .xy_if_mixed(xc[!sf::st_is_empty(xc)])
+    }
+    coords_mat <- try(sf::st_coordinates(xc), silent = TRUE)
     if (!inherits(coords_mat, "try-error") && nrow(coords_mat) > 0) {
       frac <- abs(c(coords_mat[, 1], coords_mat[, 2]) %% 1)
       has_geo_precision <- any(frac > 0.001 & frac < 0.999)
@@ -1135,6 +1146,14 @@
 #'   \code{"none"} is returned untouched, with the heuristic skipped, which is
 #'   how a \code{predict()} method replays a fit's negative decision so that a
 #'   subset of the training rows is not judged differently from the whole.
+#'   A layer that mixes XY and XYZ (or XYM) geometries is returned in XY
+#'   when it is transformed, with a warning of class
+#'   \code{"spatialkit_zm_dropped"}: [sf::st_transform()] reads a layer in
+#'   the dimension of its first geometry and misplaces the others.  The
+#'   projection is then chosen from the layer in XY.  A layer in one
+#'   dimension is transformed with its Z and M, and so is a layer whose
+#'   only geometries of another dimension than the first are empty and not
+#'   points.  A layer that is not transformed is returned with its own geometry.
 #' @family spatial data preparation
 #' @examples
 #' library(sf)
@@ -1197,7 +1216,7 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
           tcrs$input %||% "unknown"
         )
         sf::st_crs(x) <- sf::st_crs(4326)
-        x <- sf::st_transform(x, tcrs)
+        x <- sf::st_transform(.xy_if_mixed_warn(x, "ensure_projected", "x"), tcrs)
         attr(x, "crs_assumed") <- "EPSG:4326"
         return(x)
       }
@@ -1208,7 +1227,8 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
       sf::st_crs(x) <- tcrs
       return(x)
     }
-    if (!identical(xcrs, tcrs)) x <- sf::st_transform(x, tcrs)
+    if (!identical(xcrs, tcrs))
+      x <- sf::st_transform(.xy_if_mixed_warn(x, "ensure_projected", "x"), tcrs)
     return(x)
   }
 
@@ -1227,6 +1247,9 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
         ll$bb["xmin"], ll$bb["xmax"], ll$bb["ymin"], ll$bb["ymax"]
       )
       sf::st_crs(x) <- sf::st_crs(4326)
+      # A layer that mixes dimensions is read in XY before the CRS is chosen
+      # from it, as below.
+      x <- .xy_if_mixed_warn(x, "ensure_projected", "x")
       tr <- .pick_local_projected_crs(x, purpose = purpose)
       x <- sf::st_transform(x, tr$crs)
       attr(x, "crs_choice") <- tr$candidates
@@ -1254,6 +1277,11 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
     # the result as `crs_choice`: the number the warning above quotes for
     # the winner and the zone is kept for every candidate, and on the
     # ordinary path -- a zone kept without a comparison -- for the zone.
+    # A layer that mixes XY and XYZ (or XYM) geometries is read in XY before
+    # the CRS is chosen from it: sf reads the layer in the dimension of its
+    # first geometry, so the centre and the scores read a mangled ring (a
+    # layer in Missouri got UTM zone 25 South), and the transform returns it.
+    x <- .xy_if_mixed_warn(x, "ensure_projected", "x")
     tr <- .pick_local_projected_crs(x, purpose = purpose)
     x <- sf::st_transform(x, tr$crs)
     attr(x, "crs_choice") <- tr$candidates
@@ -1262,7 +1290,9 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
     # the caller should know whether this CRS can deliver them.  Measured, as
     # the distance choice is: the spread of planar-to-geodesic area ratios
     # over probe polygons on the extent.
-    err <- .crs_area_error(x)
+    # Measured on the layer in XY when it mixes dimensions; the layer is
+    # returned as it came.
+    err <- .crs_area_error(.xy_if_mixed(x))
     if (is.finite(err) && err > .area_error_tol)
       .log_warn(
         paste0("ensure_projected(purpose = \"area\"): the input's CRS (%s) ",
@@ -1302,7 +1332,15 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
 #'   NOT reprojected, only the CRS label is overwritten). The \code{"set_crs"}
 #'   option exists only for rare edge cases where you are certain the
 #'   coordinates already match the target CRS definition.
-#' @return A named list with components a and b.
+#' @return A named list with components a and b.  A layer that is
+#'   transformed and mixes XY and XYZ (or XYM) geometries is returned in XY,
+#'   with a warning of class \code{"spatialkit_zm_dropped"}:
+#'   [sf::st_transform()] reads a layer in the dimension of its first
+#'   geometry and misplaces the others.  A layer in one dimension is
+#'   transformed with its Z and M, and so is a layer whose only geometries
+#'   of another dimension than the first are empty and not points.  A layer
+#'   that is not
+#'   transformed is returned as it came.
 #' @family spatial data preparation
 #' @examples
 #' library(sf)
@@ -1329,7 +1367,12 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   crs_a <- sf::st_crs(a)
   crs_b <- sf::st_crs(b)
 
-  .safe_transform <- function(x, to) {
+  # A layer that mixes XY and XYZ (or XYM) geometries is transformed, and
+  # returned, in XY, with a warning: sf reads the layer in the dimension of
+  # its first geometry, so its transform returns an XYZ ring among XY rows
+  # as a ring of other points, or stops with "OGR error".
+  .safe_transform <- function(x, to, which_obj) {
+    x <- .xy_if_mixed_warn(x, "harmonize_crs", which_obj)
     tryCatch(
       sf::st_transform(x, to),
       error = function(e) {
@@ -1372,7 +1415,7 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
                "explicitly with sf::st_crs() to suppress this."),
         which_obj, ll$bb[["xmin"]], ll$bb[["xmax"]], ll$bb[["ymin"]],
         ll$bb[["ymax"]], lbl)
-      return(.safe_transform(sf::st_set_crs(x, 4326), to))
+      return(.safe_transform(sf::st_set_crs(x, 4326), to, which_obj))
     }
     .warn_and_log(
       "harmonize_crs(): `%s` has no CRS and its coordinates do not look like lon/lat; stamping '%s' onto it WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set it explicitly with sf::st_crs().",
@@ -1385,12 +1428,12 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
     if (is.na(crs_a)) {
       a <- .resolve_crsless(a, "a", target_crs)
     } else {
-      a <- .safe_transform(a, target_crs)
+      a <- .safe_transform(a, target_crs, "a")
     }
     if (is.na(crs_b)) {
       b <- .resolve_crsless(b, "b", target_crs)
     } else {
-      b <- .safe_transform(b, target_crs)
+      b <- .safe_transform(b, target_crs, "b")
     }
     return(list(a = a, b = b))
   }
@@ -1409,9 +1452,9 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   if (identical(sf::st_crs(a), sf::st_crs(b))) return(list(a = a, b = b))
 
   if (prefer == "a") {
-    b <- .safe_transform(b, crs_a)
+    b <- .safe_transform(b, crs_a, "b")
   } else {
-    a <- .safe_transform(a, crs_b)
+    a <- .safe_transform(a, crs_b, "a")
   }
   list(a = a, b = b)
 }
@@ -1460,6 +1503,47 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' @noRd
 .xy_if_mixed <- function(x) {
   if (.mixes_zm(x)) sf::st_zm(x, drop = TRUE, what = "ZM") else x
+}
+
+#' A layer about to be transformed and returned, read in x and y when it
+#' mixes dimensions, with a warning
+#'
+#' \code{sf::st_transform()} reads a layer in the dimension of its first
+#' geometry: an XYZ ring among XY rows comes back as a ring of other points,
+#' and an XY geometry among XYZ-first rows stops it with "OGR error".  A
+#' function that returns its transformed copy of the caller's layer hands
+#' it over in XY when the layer mixes dimensions, and says so with a warning
+#' of class \code{"spatialkit_zm_dropped"}, which carries the rows that held
+#' Z or M as \code{rows}.  A layer in one dimension is returned as it came,
+#' and is transformed with its Z.  So is a layer whose only geometries of
+#' another dimension than the first are empty and not points: they have no
+#' coordinates to misplace, and sf transforms the rest with their Z.  An
+#' empty point holds \code{NA} coordinates, which sf misreads as any other.
+#'
+#' @param x An sf or sfc object.
+#' @param caller The function whose result it is, for the message.
+#' @param arg The argument that holds the layer, for the message.
+#' @return \code{x}, or its copy in XY when it mixes dimensions.
+#' @keywords internal
+#' @noRd
+.xy_if_mixed_warn <- function(x, caller, arg) {
+  g <- if (inherits(x, "sfc")) x else sf::st_geometry(x)
+  d <- vapply(g, function(s) class(s)[1L], character(1), USE.NAMES = FALSE)
+  if (length(unique(d)) < 2L) return(x)
+  # sf writes every geometry in the dimension of the first; an empty one
+  # after it has no coordinates to be written wrongly, save an empty point,
+  # whose NA coordinates are written as values.
+  bare <- sf::st_is_empty(g) & !vapply(g, inherits, logical(1), "POINT")
+  if (!any(d[-1L] != d[1L] & !bare[-1L])) return(x)
+  zm <- which(d != "XY")
+  .warn_classed("spatialkit_zm_dropped",
+                paste0("%s(): `%s` mixes geometries with and without Z or M ",
+                       "coordinates (%d of its %d geometries carry them), which ",
+                       "sf::st_transform() reads wrongly, so Z and M are dropped ",
+                       "and the layer is returned in XY. Drop them with ",
+                       "sf::st_zm() first to silence this."),
+                caller, arg, length(zm), length(d), data = list(rows = zm))
+  sf::st_zm(x, drop = TRUE, what = "ZM")
 }
 
 #' Fast center points of per-feature bounding boxes

@@ -35,6 +35,16 @@
 #' refuses a polygon it repaired, such as one whose hole crosses its outer
 #' ring.
 #'
+#' sf reads a layer in the dimension of its first geometry, so s2, GEOS and
+#' [sf::st_transform()] read a layer that mixes XY and XYZ (or XYM)
+#' geometries wrongly; `rbind()` of an XY and an XYZ layer gives one. When
+#' either layer mixes dimensions, the join runs on a copy of it without Z and
+#' M, and the rows come back with the geometry they arrived with, Z and M
+#' included. Features without a CRS that mix dimensions and are moved from
+#' lon/lat into the polygons' CRS come back moved and in XY, with a warning
+#' of class `"spatialkit_zm_dropped"`, unless their only geometries of
+#' another dimension than the first are empty and not points.
+#'
 #' @param features_sf An sf object containing features to assign.
 #' @param polygons_sf An sf or sfc polygonal layer.
 #' @param polygon_id_col Name of the polygon identifier column: the column of
@@ -244,13 +254,38 @@ assign_features_to_polygons <- function(
   # ended up outside their largest-overlap cell.
   crs_p <- sf::st_crs(polygons_sf)
   join_in_p <- !is.na(crs_p) && !isTRUE(sf::st_is_longlat(crs_p))
-  hh <- harmonize_crs(features_sf, polygons_sf,
+  # A layer that mixes XY and XYZ (or XYM) geometries is joined in XY.  sf
+  # reads a layer in the dimension of its first geometry: s2 drops Z and M
+  # only when the first geometry carries them, and GEOS and the transform
+  # read an XYZ ring among XY rows as XY pairs.  With a clean XYZ square in
+  # row 3 of six XY squares, the point in it fell in no polygon and three
+  # others in two; in a projected CRS GEOS stopped on the ring.  Every
+  # geometric step of the join below reads these copies.
+  features_mixed <- .mixes_zm(features_sf)
+  features_xy <- if (features_mixed) sf::st_zm(features_sf, drop = TRUE, what = "ZM")
+                 else features_sf
+  polygons_xy <- .xy_if_mixed(polygons_sf)
+  hh <- harmonize_crs(features_xy, polygons_xy,
                       prefer = if (join_in_p) "b" else "a")
   f <- hh$a; p <- hh$b
   # `f` is only the join's copy.  The rows returned keep the geometry the
-  # features arrived with; a CRS-less layer is resolved into the polygons'
-  # CRS and returned there, as before.
+  # features arrived with, Z and M included; a CRS-less layer is resolved
+  # into the polygons' CRS and returned there, as before.  A CRS-less layer
+  # that mixes dimensions keeps them when it was only given a CRS; when it
+  # was moved from lon/lat, the rows come back moved, in XY, and a warning
+  # says so, unless sf transforms the layer right (below).
   f_geom <- if (is.na(orig_crs)) sf::st_geometry(f) else sf::st_geometry(features_sf)
+  if (is.na(orig_crs) && features_mixed) {
+    if (identical(f_geom, sf::st_set_crs(sf::st_geometry(features_xy), sf::st_crs(f))))
+      f_geom <- sf::st_set_crs(sf::st_geometry(features_sf), sf::st_crs(f))
+    else if (identical(.xy_if_mixed_warn(features_sf, "assign_features_to_polygons",
+                                         "features_sf"), features_sf))
+      # Its only geometries of another dimension than the first are empty
+      # and not points, which sf transforms right: the rows are moved with their Z, from
+      # EPSG:4326 as harmonize_crs() took them.
+      f_geom <- sf::st_transform(sf::st_set_crs(sf::st_geometry(features_sf), 4326),
+                                 sf::st_crs(f))
+  }
   # Cells in longitude and latitude whose record says a profile scored them
   # (the Voronoi cells of the scored centres that build_tessellation()
   # returns in a geographic `crs`) were drawn in the record's projected CRS,
@@ -261,14 +296,14 @@ assign_features_to_polygons <- function(
   # the same distance from one point, two cells meet at two corners a
   # fraction of a nanometre apart, which the transform to degrees puts at
   # one point ("duplicate vertex"), and the join of rows in degrees stopped.
-  # The polygons are moved from `polygons_sf`, not from `p`, which holds
+  # The polygons are moved from `polygons_xy`, not from `p`, which holds
   # them in the features' CRS when that is projected.  Projected cells are
   # joined in their own CRS whatever CRS their record names, and cells
   # without a CRS have none to be moved from.
   crs_s <- if (!join_in_p && !is.na(crs_p)) .scored_crs(count_rule) else NULL
   if (!is.null(crs_s)) {
     if (!isTRUE(sf::st_crs(f) == crs_s)) f <- sf::st_transform(f, crs_s)
-    p <- sf::st_transform(polygons_sf, crs_s)
+    p <- sf::st_transform(polygons_xy, crs_s)
   }
 
   id_candidates <- unique(c(polygon_id_col, "poly_id", "polygon_id", "id", "cell_id", "grid_id"))
@@ -569,7 +604,7 @@ assign_features_to_polygons <- function(
   # holds are the rows its count was scored on.
   if (!is.null(count_rule)) {
     on_edge <- .scored_edge_cells(f, p, id_col, joined, polygon_id_col, count_rule,
-                                  features_sf)
+                                  features_xy)
     if (length(on_edge$rows)) {
       joined[[polygon_id_col]][on_edge$rows] <- on_edge$ids
       .log_info(paste0("assign_features_to_polygons(): %d point(s) on the edge between two ",
@@ -2104,6 +2139,9 @@ assign_features_to_polygons <- function(
 #'   distortion check passes by construction; with s2 switched off, sf needs
 #'   the lwgeom package for that area and the request is refused without
 #'   it.  The measured spread is attached as `attr(, "area_error")`.
+#'   Cells that mix XY and XYZ (or XYM) geometries are measured, and their
+#'   spread taken, without Z and M, since sf reads a layer in the dimension
+#'   of its first geometry; the cells are returned with their own geometry.
 #' @param conf_level Optional confidence level in (0, 1), such as `0.95`.
 #'   When given, every numeric response and predictor column also gets
 #'   `..neff_*`, `..df_*`, `..ci_lo_*` and `..ci_hi_*` (see "Confidence
@@ -2491,7 +2529,11 @@ summarize_by_cell <- function(assigned_points_sf,
       stop("summarize_by_cell(): `area = TRUE` needs `cells_sf` to carry a CRS: ",
            "without one there is no way to tell whether its areas are ",
            "comparable between cells. Set it with sf::st_crs().", call. = FALSE)
-    area_err <- .crs_area_error(cells_sf)
+    # Measured on the cells in XY when they mix XY and XYZ (or XYM)
+    # geometries: GEOS and s2 read such a layer in the dimension of its first
+    # geometry, and the area of an XYZ cell among XY ones came out wrong or
+    # could not be taken.
+    area_err <- .crs_area_error(.xy_if_mixed(cells_sf))
     if (!is.finite(area_err))
       stop("summarize_by_cell(): `area = TRUE`: the area distortion of `cells_sf`'s ",
            "CRS could not be measured (no polygon areas, or geodesic areas ",
@@ -3732,7 +3774,11 @@ summarize_by_cell <- function(assigned_points_sf,
           # unit area.  Cells with no observations have n = NA after the
           # join and get a density of NA, not 0: no point was counted there
           # because the layer had none, which is not the same finding.
-          cell_area <- suppressWarnings(as.numeric(sf::st_area(sf::st_geometry(out))))
+          # Taken on the cells in XY when they mix dimensions (an XYZ cell
+          # among XY ones measured 1.6e14 square metres for 95 square km);
+          # `out` keeps the cells' own geometry.
+          cell_area <- suppressWarnings(as.numeric(
+            sf::st_area(.xy_if_mixed(sf::st_geometry(out)))))
           cell_area[!is.finite(cell_area) | cell_area <= 0] <- NA_real_
           out$cell_area  <- cell_area
           out$n_per_area <- as.numeric(out$n) / cell_area

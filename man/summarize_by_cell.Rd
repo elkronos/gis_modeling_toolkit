@@ -212,7 +212,10 @@ cells in it.  Lon/lat cells are measured geodesically instead: their
 with s2, sf's default), not a planar area in squared degrees, and the
 distortion check passes by construction; with s2 switched off, sf needs
 the lwgeom package for that area and the request is refused without
-it.  The measured spread is attached as \code{attr(, "area_error")}.}
+it.  The measured spread is attached as \code{attr(, "area_error")}.
+Cells that mix XY and XYZ (or XYM) geometries are measured, and their
+spread taken, without Z and M, since sf reads a layer in the dimension
+of its first geometry; the cells are returned with their own geometry.}
 
 \item{estimate}{Which value of a cell the frame reports: \code{"pooled"}
 (default) or \code{"mean"}. With \code{"mean"} the frame is the one described

@@ -28,7 +28,15 @@ option exists only for rare edge cases where you are certain the
 coordinates already match the target CRS definition.}
 }
 \value{
-A named list with components a and b.
+A named list with components a and b.  A layer that is
+transformed and mixes XY and XYZ (or XYM) geometries is returned in XY,
+with a warning of class \code{"spatialkit_zm_dropped"}:
+\code{\link[sf:st_transform]{sf::st_transform()}} reads a layer in the dimension of its first
+geometry and misplaces the others.  A layer in one dimension is
+transformed with its Z and M, and so is a layer whose only geometries
+of another dimension than the first are empty and not points.  A layer
+that is not
+transformed is returned as it came.
 }
 \description{
 Aligns two sf objects to a common CRS.

@@ -221,6 +221,16 @@ projected CRS, where the join runs. The largest-overlap join repairs such
 polygons first (see \code{largest}), and stops with that error when s2 still
 refuses a polygon it repaired, such as one whose hole crosses its outer
 ring.
+
+sf reads a layer in the dimension of its first geometry, so s2, GEOS and
+\code{\link[sf:st_transform]{sf::st_transform()}} read a layer that mixes XY and XYZ (or XYM)
+geometries wrongly; \code{rbind()} of an XY and an XYZ layer gives one. When
+either layer mixes dimensions, the join runs on a copy of it without Z and
+M, and the rows come back with the geometry they arrived with, Z and M
+included. Features without a CRS that mix dimensions and are moved from
+lon/lat into the polygons' CRS come back moved and in XY, with a warning
+of class \code{"spatialkit_zm_dropped"}, unless their only geometries of
+another dimension than the first are empty and not points.
 }
 \examples{
 library(sf)

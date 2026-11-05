@@ -56,6 +56,14 @@ attribute is also read on the way IN.  An object already carrying
 \code{"none"} is returned untouched, with the heuristic skipped, which is
 how a \code{predict()} method replays a fit's negative decision so that a
 subset of the training rows is not judged differently from the whole.
+A layer that mixes XY and XYZ (or XYM) geometries is returned in XY
+when it is transformed, with a warning of class
+\code{"spatialkit_zm_dropped"}: \code{\link[sf:st_transform]{sf::st_transform()}} reads a layer in
+the dimension of its first geometry and misplaces the others.  The
+projection is then chosen from the layer in XY.  A layer in one
+dimension is transformed with its Z and M, and so is a layer whose
+only geometries of another dimension than the first are empty and not
+points.  A layer that is not transformed is returned with its own geometry.
 }
 \description{
 Coerces spatial objects to a projected coordinate reference system suitable

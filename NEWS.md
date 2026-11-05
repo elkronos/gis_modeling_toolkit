@@ -2254,6 +2254,53 @@ old behaviour where there is a way.
   before.  Neither function returns these layers' geometry, so the
   caller's points keep their Z.
 
+* **A layer that mixed XY and XYZ (or XYM) geometries was joined, measured
+  and projected wrongly, depending on which row came first.**  sf reads a
+  layer in the dimension of its first geometry: s2 drops Z and M only when
+  the first geometry carries them, and GEOS and `sf::st_transform()` read
+  an XYZ ring among XY rows as XY pairs.  `rbind()` of an XY and an XYZ
+  layer gives such a layer without a word.  With a clean XYZ square in row
+  3 of six lon/lat squares, `assign_features_to_polygons()` left the point
+  in it unassigned under the warning that it fell inside no polygon and
+  counted three others as ties; an XYZ square whose ring repeats a vertex
+  in x and y passed the validity test and misplaced its points, where the
+  same square alone gets the `spatialkit_cells_degenerate` error; polygon
+  features that mixed dimensions went to the wrong cell under the
+  largest-overlap join; in a projected CRS the join stopped with GEOS's
+  "Points of LinearRing do not form a closed linestring".
+  `summarize_by_cell(area = TRUE)` gave the XYZ square 1.6e14 square metres
+  for its 95 square km, and refused mixed projected cells as not
+  measurable.  `ensure_projected()` chose UTM zone 25 South for a layer in
+  Missouri and returned the XYZ row as a ring of other points, and stopped
+  with "OGR error" on points with an XYZ point first; `harmonize_crs()`
+  did the same; both took such a layer in degrees without a CRS, a degree
+  or less across, for planar coordinates, as their lon/lat test read its
+  coordinates with `sf::st_coordinates()`, which stops on it;
+  `ensure_projected(purpose = "area")` skipped its area distortion warning
+  for such a layer in a projected CRS, as the distortion measured on it
+  was `NA`; `create_grid_polygons()`, `create_voronoi_polygons()`,
+  `build_tessellation()` and `clip_target_for()` stopped with GEOS's
+  message on such a `boundary`.  Each geometry is now tested, and a layer
+  that mixes dimensions is handed to sf without Z and M: both layers of
+  the join, the cells whose areas and distortion `summarize_by_cell()`
+  measures, the layer `ensure_projected()` chooses a projection from, and
+  the builders' `boundary`.  The rows the join returns and the cells the
+  summary returns keep the geometry they arrived with, Z and M included.
+  `ensure_projected()` and `harmonize_crs()` return a transformed copy of a
+  mixed layer in XY, with a warning of class `spatialkit_zm_dropped`, and
+  so does the join for features without a CRS that are moved from lon/lat.
+  A layer in one dimension, XY or XYZ throughout, is read and transformed
+  as before, and so is a layer whose only geometries of another dimension
+  than the first are empty and not points, which sf transforms with its Z.
+
+* **A polygon layer without a CRS, in degrees and a degree or less
+  across, was taken as planar when it held an empty polygon.**  The lon/lat test of
+  `ensure_projected()` and `harmonize_crs()` reads the coordinates of such
+  a layer to see whether they have the precision of decimal degrees;
+  `sf::st_coordinates()` stops on a polygon layer with an empty polygon,
+  so the test found no precision and the layer was not moved from lon/lat.
+  The test now leaves empty geometries out.
+
 * **`cell_values_at()` without `seeds` gave every location the value `NA`,
   marked filled, when `values` had no cell ID.**  A `values` whose ID
   column is all `NA` placed no location in a cell, so every location was

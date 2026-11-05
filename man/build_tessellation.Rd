@@ -42,7 +42,9 @@ otherwise. When neither has one, both are read by the lon/lat heuristic
 of \code{\link[=ensure_projected]{ensure_projected()}}: taken as EPSG:4326 and projected when the points
 look like degrees (a boundary whose coordinates do not fit the lon/lat
 envelope is then refused with an error), otherwise left in the same
-unnamed planar space.}
+unnamed planar space. A boundary that mixes XY and XYZ (or XYM)
+geometries is read without Z and M, since sf reads a layer in the
+dimension of its first geometry.}
 
 \item{method}{One of "voronoi", "triangles", "hex", "square".}
 

@@ -748,7 +748,9 @@
 #'   does: coordinates that look like lon/lat are taken as EPSG:4326 and
 #'   reprojected, anything else is stamped with the points' CRS. With lon/lat
 #'   points it is read as lon/lat when its coordinates fit the lon/lat
-#'   envelope, and refused with an error otherwise.
+#'   envelope, and refused with an error otherwise. A boundary that mixes XY
+#'   and XYZ (or XYM) geometries is read without Z and M, since sf reads a
+#'   layer in the dimension of its first geometry.
 #' @param expand Numeric expansion distance or fraction (0–1 = fraction of
 #'   extent). Absolute values are expressed in the units of the CRS the clip
 #'   target is built in. Because [sf::st_buffer()] interprets `dist` as
@@ -777,6 +779,10 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   .msg <- function(...) if (!quiet) message(...)
   .assert_sf(points_sf, c("POINT", "MULTIPOINT"), "points_sf")
   .check_boundary_arg(boundary, "clip_target_for")
+  # A boundary that mixes XY and XYZ (or XYM) geometries is read in XY: sf
+  # reads a layer in the dimension of its first geometry, and GEOS stopped on
+  # an XYZ ring among XY ones.
+  if (!is.null(boundary)) boundary <- .xy_if_mixed(boundary)
   # .expand_distance() below TOLERATES a malformed `expand` by returning 0,
   # which turned `expand = c(0.05, 0.05)` into a silent no-op -- the returned
   # bbox was byte-identical to expand = 0, with no condition raised -- and a
@@ -1047,7 +1053,9 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   refused with an error. A CRS-less boundary given with lon/lat points (or
 #'   with CRS-less points taken as lon/lat) is read as lon/lat when its
 #'   coordinates fit the lon/lat envelope, and refused with an error
-#'   otherwise.
+#'   otherwise. A boundary that mixes XY and XYZ (or XYM) geometries is read
+#'   without Z and M, since sf reads a layer in the dimension of its first
+#'   geometry.
 #' @param cover Optional sf or sfc layer the cells have to hold, read when
 #'   there is no `boundary`: the observations (points), or a polygon. The
 #'   boundary is then derived from it instead of from `points_sf`: the convex
@@ -1173,6 +1181,10 @@ create_voronoi_polygons <- function(
 ) {
   .assert_sf(points_sf, c("POINT", "MULTIPOINT"), "points_sf")
   .check_boundary_arg(boundary, "create_voronoi_polygons")
+  # A boundary that mixes XY and XYZ (or XYM) geometries is read in XY: sf
+  # reads a layer in the dimension of its first geometry, and GEOS stopped on
+  # an XYZ ring among XY ones.
+  if (!is.null(boundary)) boundary <- .xy_if_mixed(boundary)
   .check_boundary_arg(cover, "create_voronoi_polygons", label = "cover",
                       what = "point or polygon")
   if (nrow(points_sf) < 1) stop("create_voronoi_polygons(): `points_sf` has no rows.")
@@ -1508,7 +1520,9 @@ create_voronoi_polygons <- function(
 #' units) or `n` (a fixed number of columns and rows). See `@param cellsize`
 #' for what happens when more than one is given.
 #'
-#' @param boundary Polygonal sf or sfc object.
+#' @param boundary Polygonal sf or sfc object. One that mixes XY and XYZ (or
+#'   XYM) geometries is read without Z and M, since sf reads a layer in the
+#'   dimension of its first geometry.
 #' @param target_cells Optional approximate desired number of cells.  The cell
 #'   \emph{size} is derived from it as \code{sqrt(area / target_cells)}, where
 #'   \code{area} is that of the boundary's bounding box, so square grids get
@@ -1594,7 +1608,10 @@ create_grid_polygons <- function(
                 .tess_hint(x, "$boundary"), "."))
   }
 
-  boundary <- .as_sf(boundary)
+  # A boundary that mixes XY and XYZ (or XYM) geometries is read in XY: sf
+  # reads a layer in the dimension of its first geometry, and GEOS stopped on
+  # an XYZ ring among XY ones.
+  boundary <- .xy_if_mixed(.as_sf(boundary))
   # A layer as `crs` means its CRS; passed on as it was, it stopped with "the
   # condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
@@ -1885,7 +1902,9 @@ create_grid_polygons <- function(
 #'   of [ensure_projected()]: taken as EPSG:4326 and projected when the points
 #'   look like degrees (a boundary whose coordinates do not fit the lon/lat
 #'   envelope is then refused with an error), otherwise left in the same
-#'   unnamed planar space.
+#'   unnamed planar space. A boundary that mixes XY and XYZ (or XYM)
+#'   geometries is read without Z and M, since sf reads a layer in the
+#'   dimension of its first geometry.
 #' @param method One of "voronoi", "triangles", "hex", "square".
 #' @param approx_n_cells Approximate number of cells.  Read by
 #'   \code{method = "hex"} and \code{"square"} only: \code{"voronoi"} grows
@@ -2104,6 +2123,10 @@ build_tessellation <- function(
              stop(paste0(conditionMessage(e), hint), call. = FALSE)
            })
   .check_boundary_arg(boundary, "build_tessellation")
+  # A boundary that mixes XY and XYZ (or XYM) geometries is read in XY: sf
+  # reads a layer in the dimension of its first geometry, and GEOS stopped on
+  # an XYZ ring among XY ones.
+  if (!is.null(boundary)) boundary <- .xy_if_mixed(boundary)
   .check_boundary_arg(cover, "build_tessellation", label = "cover",
                       what = "point or polygon")
   # A layer as `crs` means its CRS (as ensure_projected(target_crs =) reads

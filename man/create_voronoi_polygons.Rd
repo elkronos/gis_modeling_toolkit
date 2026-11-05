@@ -30,7 +30,9 @@ do not look like lon/lat cannot take a geographic boundary's CRS, and are
 refused with an error. A CRS-less boundary given with lon/lat points (or
 with CRS-less points taken as lon/lat) is read as lon/lat when its
 coordinates fit the lon/lat envelope, and refused with an error
-otherwise.}
+otherwise. A boundary that mixes XY and XYZ (or XYM) geometries is read
+without Z and M, since sf reads a layer in the dimension of its first
+geometry.}
 
 \item{expand}{Numeric; absolute distance, in the working CRS's units, by
 which the boundary (or the hull derived from the points) is grown before

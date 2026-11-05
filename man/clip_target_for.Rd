@@ -15,7 +15,9 @@ warning. With points in a projected CRS it is read as \code{\link[=harmonize_crs
 does: coordinates that look like lon/lat are taken as EPSG:4326 and
 reprojected, anything else is stamped with the points' CRS. With lon/lat
 points it is read as lon/lat when its coordinates fit the lon/lat
-envelope, and refused with an error otherwise.}
+envelope, and refused with an error otherwise. A boundary that mixes XY
+and XYZ (or XYM) geometries is read without Z and M, since sf reads a
+layer in the dimension of its first geometry.}
 
 \item{expand}{Numeric expansion distance or fraction (0–1 = fraction of
 extent). Absolute values are expressed in the units of the CRS the clip
