@@ -136,8 +136,12 @@ test_that("the help bounds the rounding the cells survive by the spacing of the 
   ex <- sqrt(sum(apply(m, 2L, function(v) diff(range(v)))^2))
   expect_lt(max(abs(ft4 * 0.3048 - m)) / ex, 1e-8)
   expect_gt(.pt_moved(base, fit(ft4)), 0L)
-  # And the help says so.
-  rd <- tools::parse_Rd(test_path("..", "..", "man", "resolution_profile.Rd"))
+  # And the help says so: the source page from the source tree, the installed
+  # page under R CMD check, which runs the tests where there is no man/.
+  file <- test_path("..", "..", "man", "resolution_profile.Rd")
+  rd <- if (file.exists(file)) tools::parse_Rd(file)
+        else tools::Rd_db("spatialkit")[["resolution_profile.Rd"]]
+  expect_s3_class(rd, "Rd")
   txt <- gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
   expect_match(txt, "forty-millionth of the distance between neighbouring locations",
                fixed = TRUE)
