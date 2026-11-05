@@ -106,7 +106,11 @@ they carry the hull of the points the profile was computed on.}
 that it was ignored.  When both \code{cellsize} and \code{approx_n_cells}
 are given, \code{cellsize} wins and \code{approx_n_cells} is ignored with
 a logged warning; supply one or the other.  With a geographic \code{crs}
-it is in that CRS's degrees, and the grid is laid in degrees.}
+it is in that CRS's degrees, and the grid is laid in degrees, as
+\code{\link[=create_grid_polygons]{create_grid_polygons()}} lays it; where s2 refuses a row of
+\code{boundary} or a cell even repaired, the call stops with an error of
+class \code{"spatialkit_cells_degenerate"} that says to pass a projected
+\code{crs} or to size the grid by \code{approx_n_cells}.}
 
 \item{expand}{Buffer distance, in the working CRS's units, by which the
 Voronoi boundary is grown before the diagram is built. Applied by

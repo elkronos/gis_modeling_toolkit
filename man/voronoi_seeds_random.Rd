@@ -10,7 +10,10 @@ voronoi_seeds_random(boundary, k, set_seed = NULL)
 \item{boundary}{An sf or sfc polygonal object. One that mixes XY and XYZ
 (or XYM) geometries is read without Z and M, since sf reads a layer in
 the dimension of its first geometry. So is one whose
-geometries carry M (XYM or XYZM), which GEOS refuses.}
+geometries carry M (XYM or XYZM), which GEOS refuses. Rows that GEOS
+(in a projected CRS) or s2 (in longitude and latitude) refuses are
+repaired before the rows are unioned, as in \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}};
+valid rows are used as they are.}
 
 \item{k}{Integer; number of random seeds.}
 

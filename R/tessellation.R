@@ -1539,6 +1539,87 @@ create_voronoi_polygons <- function(
 # Grid Tessellations (Hex / Square)
 # -----------------------------------------------------------------------------
 
+#' The error for polygons of a grid laid in degrees that s2 refuses
+#'
+#' create_grid_polygons() lays a grid sized by `cellsize` with a geographic
+#' `crs` in degrees, and measures and joins on such cells, and on the
+#' boundary they are clipped to, run with s2.  Three sites can meet a polygon
+#' s2 refuses: `boundary` itself, after its repair (\code{site =
+#' "boundary"}); the cells of the lattice before the clip, which s2's clip
+#' stops on (\code{"lattice"}: a lattice that runs past latitude 90); and the
+#' clipped cells, after their repeated vertices are dropped (\code{"grid"}).
+#' The error is of class \code{"spatialkit_cells_degenerate"}
+#' (\code{.raise_cells_degenerate()}) and carries \code{site}, so
+#' build_tessellation(), which hands its arguments on, raises it again in its
+#' own words.  The remedy names the arguments that lay the grid in a
+#' projected CRS.
+#'
+#' @param parent s2's error.
+#' @param rows,reasons,n The rows s2 refuses, its reason for each, and the
+#'   number of polygons it was handed.
+#' @param s2_forced Whether the session has \code{sf::sf_use_s2(FALSE)}.
+#' @param site \code{"boundary"}, \code{"lattice"} or \code{"grid"}.
+#' @param caller \code{"create_grid_polygons"} or \code{"build_tessellation"}.
+#' @param clipped \code{FALSE} for a grid laid with \code{clip = FALSE}: its
+#'   cells were not clipped, so the error does not say they were.
+#' @param call_it \code{FALSE} to return the arguments of
+#'   \code{.raise_cells_degenerate()} that depend on \code{site} and
+#'   \code{caller} (\code{layer}, \code{task}, \code{of}, \code{source},
+#'   \code{remedy}) as a list instead of raising the error.
+#' @return Does not return, unless \code{call_it} is \code{FALSE}.
+#' @keywords internal
+#' @noRd
+.grid_refused <- function(parent, rows, reasons, n, s2_forced = FALSE,
+                          site = c("grid", "lattice", "boundary"),
+                          caller = "create_grid_polygons", clipped = TRUE,
+                          call_it = TRUE) {
+  site  <- match.arg(site)
+  count <- if (identical(caller, "build_tessellation")) "`approx_n_cells`"
+           else "`target_cells` or `n`"
+  plural <- function(k, one, many) sprintf("%d %s", k, if (k == 1L) one else many)
+  args <- switch(site,
+    boundary = list(
+      layer = "`boundary`", task = "the clip of the grid to it",
+      of = sprintf("the %s of `boundary`", plural(n, "polygon", "polygons")),
+      source = ""),
+    lattice = list(
+      layer = "the grid", task = "the clip of the grid to `boundary`",
+      of = sprintf("the %s of the grid laid in degrees over `boundary`, before its clip",
+                   plural(n, "cell", "cells")),
+      source = .GRID_DEGREES_SOURCE),
+    grid = list(
+      layer = "the grid", task = "a measure or a join on these cells",
+      of = sprintf("the %s of the grid laid in degrees%s", plural(n, "cell", "cells"),
+                   if (isTRUE(clipped)) " and clipped to `boundary`" else ""),
+      source = if (isTRUE(clipped)) .GRID_DEGREES_SOURCE else ""))
+  args$remedy <- sprintf(paste0(
+    "Pass a projected `crs` and a `cellsize` in its units, or size the grid by %s, ",
+    "which lays it in a projected CRS and returns it in degrees, and call %s() again%s."),
+    count, caller,
+    if (site == "boundary")
+      "; `boundary` is then repaired in that CRS with sf::st_make_valid(), which splits crossing edges"
+    else "")
+  if (!isTRUE(call_it)) return(args)
+  .raise_cells_degenerate(parent, rows, reasons, n, caller, args$layer, args$task,
+                          again = NULL, of = args$of, s2_forced = s2_forced,
+                          source = args$source, remedy = args$remedy, site = site)
+}
+
+# Where cells of a grid laid in degrees get two corners s2 reads as one
+# point, for the error .grid_refused() raises.
+.GRID_DEGREES_SOURCE <- paste0(
+  "A grid laid in degrees and clipped to `boundary` can hold such corners where ",
+  "the clip cuts a cell within rounding of one of its corners or edges. A corner ",
+  "listed twice in a row, or within 1e-12 degrees of the one before it, is ",
+  "dropped before this check, unless that leaves the cell fewer than three corners. ")
+
+# Two corners of a clipped cell in degrees no farther apart than this, in x
+# and in y, are read as one (.drop_repeated_vertices()): the clip writes
+# corners 7e-15 degrees apart, which s2 reads as one point.  1e-12 degrees
+# is under a micrometre on the ground.
+.GRID_SAME_CORNER <- 1e-12
+
+
 #' Create square or hexagonal grid polygons over a boundary
 #'
 #' Lays a regular grid of equal-area cells over `boundary` and clips it to that
@@ -1604,7 +1685,20 @@ create_voronoi_polygons <- function(
 #'   projected CRS and then transformed, with long edges densified. A
 #'   `cellsize` is in the units of `crs`, so with a geographic `crs` it is in
 #'   degrees and the grid is laid in degrees, as asked; such cells are not
-#'   equal-area.
+#'   equal-area. With [sf::sf_use_s2()] on (the default) such a grid is
+#'   clipped with sf's spherical engine s2, and s2 measures and joins its
+#'   cells after; s2 refuses a polygon that is not valid on the sphere. The
+#'   rows of `boundary` and the cells are checked with s2 whatever
+#'   [sf::sf_use_s2()] says. Before the clip, a row of `boundary` that s2
+#'   refuses is repaired, with crossing edges split. A cell that lists a
+#'   corner twice in a row, or two corners within 1e-12 degrees of each
+#'   other, which s2 reads as one point, is returned with one of them, which
+#'   moves no corner and changes the cell's area by rounding. A row of
+#'   `boundary`, or a cell, that s2 refuses even then (a cell of a grid laid
+#'   past latitude 90, say) stops the call with an error of class
+#'   `"spatialkit_cells_degenerate"` that names its rows and s2's reason, and
+#'   says to pass a projected `crs` or to size the grid by `target_cells` or
+#'   `n`.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
@@ -1676,6 +1770,19 @@ create_grid_polygons <- function(
            "CRS; the returned grid uses that CRS. Pass `crs` to control it.")
   }
   boundary <- .safe_make_valid(boundary)
+  # A grid sized by `cellsize` with a geographic `crs` is laid in degrees,
+  # and its clip to `boundary` and every measure on its cells run with s2.
+  # In degrees, with s2 on, .safe_make_valid() is s2's rebuild, which
+  # leaves crossing edges as they are: a bowtie boundary stopped the clip
+  # with s2's bare "Loop 0 is not valid: Edge 0 crosses edge 2", where a
+  # projected one is split by GEOS.  The rows s2 refuses are rebuilt with those edges split
+  # (.boundary_mend()); a row s2 refuses even then stops the call with the
+  # error .grid_refused() builds.  With clip = FALSE only the bounding box of
+  # `boundary` is read, so it is left as it is.
+  in_degrees <- .is_longlat(boundary)
+  if (in_degrees && isTRUE(clip))
+    boundary <- .boundary_mend(boundary, refuse = function(...)
+      .grid_refused(..., site = "boundary", caller = "create_grid_polygons"))
 
   bb <- sf::st_bbox(boundary)
   w  <- as.numeric(bb["xmax"] - bb["xmin"])
@@ -1874,11 +1981,65 @@ create_grid_polygons <- function(
     # cells into one row per boundary feature and graft the boundary's
     # attribute columns onto the grid.
     clip_to <- sf::st_union(sf::st_geometry(boundary))
-    grid_sf <- suppressWarnings(sf::st_intersection(.safe_make_valid(grid_sf), clip_to))
+    lattice <- .safe_make_valid(grid_sf)
+    # In degrees s2 clips, and stopped with its bare message on a cell of the
+    # lattice it refuses (a lattice laid past latitude 90).
+    grid_sf <- withCallingHandlers(
+      suppressWarnings(sf::st_intersection(lattice, clip_to)),
+      error = function(e) {
+        if (!in_degrees) return()
+        a <- .grid_refused(NULL, integer(0), character(0), nrow(lattice),
+                           site = "lattice", call_it = FALSE)
+        .stop_cells_degenerate(e, lattice, "create_grid_polygons", a$layer, a$task,
+                               NULL, of = a$of, source = a$source, remedy = a$remedy,
+                               site = "lattice")
+      })
     # st_intersection can produce non-polygon slivers, and collections that
     # hold a cell's area; keep the polygonal part of each.
     grid_sf <- .keep_polygonal(grid_sf)
     grid_sf$poly_id <- seq_len(nrow(grid_sf))
+  }
+  # The clip in degrees writes cells that list a corner twice in a row (a
+  # ring that ends on its first vertex twice), which s2 refuses: on a plain
+  # 0.5 degree square at cellsize 0.1 one square cell of 25 and three
+  # hexagons of 39, and build_tessellation() then stopped with s2's bare
+  # "Edge 5 is degenerate (duplicate vertex)".  The cells s2 refuses are
+  # returned without the vertices that repeat the one before them, which
+  # leaves their points in degrees and their areas as they were
+  # (.s2_mend()).  The clip also writes two corners that differ by rounding
+  # (7e-15 degrees on that square at cellsize 0.05, hexagon 128), which s2
+  # reads as one point or as edges that cross; a cell s2 still refuses is
+  # returned without the corners that lie within .GRID_SAME_CORNER degrees
+  # of the one kept before them, which moves no corner and changes its area
+  # by rounding.  A cell s2 refuses even then stops the call with the error
+  # .grid_refused() builds, before anything measures it.  Cells s2 accepts
+  # are returned as they were.
+  if (in_degrees && nrow(grid_sf)) {
+    s2_forced <- !isTRUE(sf::sf_use_s2())
+    g <- sf::st_geometry(grid_sf)
+    m <- .with_s2(.s2_mend(g, split = FALSE))
+    for (i in m$refused) {
+      d <- tryCatch(.drop_repeated_vertices(m$g[i], tol = .GRID_SAME_CORNER),
+                    error = function(e) NULL)
+      if (!is.null(d) && !length(.with_s2(.s2_refused(d)))) {
+        m$g[i]   <- d
+        m$mended <- sort(c(m$mended, i))
+        m$refused <- setdiff(m$refused, i)
+      }
+    }
+    if (length(m$refused)) {
+      sub    <- m$g[m$refused]
+      parent <- .with_s2(tryCatch({ suppressMessages(sf::st_as_s2(sub)); NULL },
+                                  error = function(e) e))
+      if (is.null(parent)) parent <- simpleError("s2 refuses the cell")
+      why <- .with_s2(.s2_refused_rows(sub))
+      .grid_refused(parent, m$refused,
+                    if (!is.null(why) && length(why$rows) == length(m$refused)) why$reasons
+                    else rep(conditionMessage(parent), length(m$refused)),
+                    length(g), s2_forced, site = "grid", caller = "create_grid_polygons",
+                    clipped = isTRUE(clip))
+    }
+    if (length(m$mended)) sf::st_geometry(grid_sf) <- m$g
   }
   .to_output_crs(grid_sf, crs_out)
 }
@@ -2000,7 +2161,11 @@ create_grid_polygons <- function(
 #'   that it was ignored.  When both \code{cellsize} and \code{approx_n_cells}
 #'   are given, \code{cellsize} wins and \code{approx_n_cells} is ignored with
 #'   a logged warning; supply one or the other.  With a geographic \code{crs}
-#'   it is in that CRS's degrees, and the grid is laid in degrees.
+#'   it is in that CRS's degrees, and the grid is laid in degrees, as
+#'   [create_grid_polygons()] lays it; where s2 refuses a row of
+#'   \code{boundary} or a cell even repaired, the call stops with an error of
+#'   class \code{"spatialkit_cells_degenerate"} that says to pass a projected
+#'   \code{crs} or to size the grid by \code{approx_n_cells}.
 #' @param cover Optional sf or sfc layer the cells have to hold: the
 #'   observations (points), or a polygon. Read by `method = "voronoi"` when
 #'   there is no `boundary`: the boundary is then derived from the cover (the
@@ -2426,15 +2591,26 @@ build_tessellation <- function(
     # Pass the points' CRS through: without it create_grid_polygons() would
     # re-project the boundary on its own, leaving grid and points in different
     # CRSs and breaking the st_intersects() below.
-    grid <- create_grid_polygons(
-      boundary = boundary, target_cells = approx_n_cells,
-      type = method, cellsize = cellsize, clip = clip,
-      # NA (not NULL) when the points are CRS-less: keep the boundary in the
-      # points' unnamed space instead of letting create_grid_polygons() run
-      # its own projection heuristic on it.
-      crs = if (is.null(crs_arg)) sf::NA_crs_ else crs_arg,
-      quiet = quiet
-    )
+    # A grid laid in degrees (a `cellsize` with a geographic `crs`) whose
+    # boundary or cells s2 refuses stops create_grid_polygons() with an error
+    # that names its arguments; it is raised again here in this function's
+    # words, which name `approx_n_cells`.
+    grid <- tryCatch(
+      create_grid_polygons(
+        boundary = boundary, target_cells = approx_n_cells,
+        type = method, cellsize = cellsize, clip = clip,
+        # NA (not NULL) when the points are CRS-less: keep the boundary in the
+        # points' unnamed space instead of letting create_grid_polygons() run
+        # its own projection heuristic on it.
+        crs = if (is.null(crs_arg)) sf::NA_crs_ else crs_arg,
+        quiet = quiet
+      ),
+      spatialkit_cells_degenerate = function(e) {
+        if (is.null(e$site)) stop(e)
+        .grid_refused(e$parent, e$rows, e$reasons, e$n, isTRUE(e$s2_forced),
+                      site = e$site, caller = "build_tessellation",
+                      clipped = isTRUE(clip))
+      })
     # Build point-to-cell index for grid tessellations
     id_col <- if ("poly_id" %in% names(grid)) "poly_id" else "cell_id"
     if (!id_col %in% names(grid)) {
@@ -2448,7 +2624,20 @@ build_tessellation <- function(
     if (id_col != "cell_id") {
       grid$cell_id <- grid[[id_col]]
     }
-    index   <- .build_point_cell_index(points_sf, grid)
+    # In degrees the index is s2's join, which stopped with s2's bare
+    # message on a cell it refuses; such a cell gets the error that names it
+    # (.stop_cells_degenerate()).
+    index <- withCallingHandlers(
+      .build_point_cell_index(points_sf, grid),
+      error = function(e) {
+        a <- .grid_refused(NULL, integer(0), character(0), nrow(grid),
+                           site = "grid", caller = "build_tessellation",
+                           clipped = isTRUE(clip), call_it = FALSE)
+        .stop_cells_degenerate(e, grid, "build_tessellation", a$layer,
+                               "the index of the points in the cells", NULL,
+                               of = a$of, source = a$source, remedy = a$remedy,
+                               site = "grid")
+      })
     snapped <- attr(index, "snapped")
     attr(index, "snapped") <- NULL
 

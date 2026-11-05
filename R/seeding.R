@@ -39,7 +39,15 @@
 #' @param boundary Optional polygonal sf object defining the sampling area.
 #'   One that mixes XY and XYZ (or XYM) geometries is read without Z and M,
 #'   since sf reads a layer in the dimension of its first geometry. So is one whose
-#'   geometries carry M (XYM or XYZM), which GEOS refuses.
+#'   geometries carry M (XYM or XYZM), which GEOS refuses. Where seeds or
+#'   the k-means cloud are sampled inside it, its rows are repaired with
+#'   [sf::st_make_valid()] before they are unioned. In
+#'   longitude and latitude the union runs with s2, and a row s2 still
+#'   refuses (crossing edges, a vertex listed twice) is repaired again, with
+#'   crossing edges split as GEOS splits them in a projected CRS; a row s2
+#'   refuses even then stops the call with an error of class
+#'   `"spatialkit_cells_degenerate"` that names it and says to transform
+#'   `boundary` to a projected CRS.
 #' @param method One of "kmeans", "random", "provided".
 #' @param n Integer; number of seeds to return. Required for
 #'   `method = "kmeans"` and `method = "random"`. **Ignored** for
@@ -399,13 +407,19 @@ get_voronoi_seeds <- function(boundary = NULL,
   cleanup <- .with_seed(set_seed)
   on.exit(cleanup(), add = TRUE)
 
-  # On the sphere for a lon/lat boundary, whatever sf_use_s2() says: with it
-  # off, sf printed "although coordinates are longitude/latitude, st_union
-  # assumes that they are planar" on every random or k-means seeding.
-  boundary_union <- function(b) {
-    b <- .safe_make_valid(b)
-    if (.is_longlat(b)) .with_s2(sf::st_union(b)) else sf::st_union(b)
-  }
+  # Every row repaired, then unioned, on the sphere for a lon/lat boundary
+  # whatever sf_use_s2() says (.boundary_union()).  In degrees
+  # .safe_make_valid() is s2's rebuild, which leaves crossing edges as they
+  # are, and the union of a bowtie stopped with s2's bare "Loop 0 is not
+  # valid: Edge 0 crosses edge 2"; the rows s2 still refuses are rebuilt with
+  # those edges split, as GEOS does in a projected CRS, and a row s2 refuses
+  # even then stops the call with an error that names it.
+  boundary_union <- function(b)
+    .boundary_union(b, caller = "get_voronoi_seeds",
+                    task = if (identical(method, "kmeans"))
+                      "the sampling of the k-means cloud inside it"
+                    else "the sampling of random seeds inside it",
+                    all = TRUE)
 
   out <- switch(
     method,
@@ -1025,7 +1039,10 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
 #' @param boundary An sf or sfc polygonal object. One that mixes XY and XYZ
 #'   (or XYM) geometries is read without Z and M, since sf reads a layer in
 #'   the dimension of its first geometry. So is one whose
-#'   geometries carry M (XYM or XYZM), which GEOS refuses.
+#'   geometries carry M (XYM or XYZM), which GEOS refuses. Rows that GEOS
+#'   (in a projected CRS) or s2 (in longitude and latitude) refuses are
+#'   repaired before the rows are unioned, as in [get_voronoi_seeds()];
+#'   valid rows are used as they are.
 #' @param k Integer; number of random seeds.
 #' @param set_seed Optional integer RNG seed. Default `NULL`: the seeds are
 #'   drawn from the session's random-number stream, so consecutive calls give
@@ -1079,9 +1096,14 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   cleanup <- .with_seed(set_seed)
   on.exit(cleanup(), add = TRUE)
   # On the sphere for lon/lat, as in get_voronoi_seeds(): with s2 off sf
-  # otherwise printed its planar-union message on every call.
-  geom <- if (.is_longlat(boundary)) .with_s2(sf::st_union(boundary)) else
-    sf::st_union(boundary)
+  # otherwise printed its planar-union message on every call.  The rows were
+  # unioned as they came, so a boundary get_voronoi_seeds() repairs and
+  # samples stopped here with GEOS's or s2's bare message (a vertex listed
+  # twice in degrees, a bowtie among valid rows).  The rows GEOS or s2
+  # refuses are repaired first (.boundary_union()); valid rows are unioned as
+  # they arrived, so their seeds are those they were.
+  geom <- .boundary_union(boundary, caller = "voronoi_seeds_random",
+                          task = "the sampling of random seeds inside it")
   pts <- .robust_st_sample(geom, k)
   out <- sf::st_sf(geometry = pts) |> sf::st_set_crs(sf::st_crs(boundary))
   # Same output contract as get_voronoi_seeds(), so the three seeding
@@ -1090,6 +1112,126 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   out$method  <- "random"
   # The ground the seeds stand for: the area they were drawn in.
   .set_cover(out, boundary)
+}
+
+
+#' Repair the rows of a boundary before they are unioned
+#'
+#' get_voronoi_seeds(), voronoi_seeds_random(), the key of
+#' create_grid_polygons_cached(), make_folds(method = "block_kfold") and a
+#' grid laid in degrees by create_grid_polygons() union `boundary` or clip to
+#' it.  A row GEOS calls invalid (a bowtie among valid rows) stopped the
+#' union with GEOS's bare "TopologyException", and in longitude and latitude,
+#' where sf hands the union to s2, a row s2 refuses (a vertex listed twice, a
+#' figure eight, crossing edges) stopped it with s2's bare "Loop 0 is not
+#' valid".
+#'
+#' In a projected CRS (or none), a row is repaired with
+#' \code{.safe_make_valid()}, which splits crossing edges there.  In
+#' longitude and latitude a row s2 refuses is repaired with it too, under s2
+#' whatever \code{sf::sf_use_s2()} says, and the rows s2 still refuses are
+#' repaired one by one (\code{.s2_mend()}): first without the vertices that
+#' repeat the one before them, which moves no area, then rebuilt with
+#' crossing edges split (\code{.split_crossing_edges()}), which
+#' \code{sf::st_make_valid()} does not do in degrees.  A row s2 refuses even
+#' then is passed to \code{refuse}, which stops.
+#'
+#' @param b The boundary, sf or sfc.
+#' @param refuse A function of \code{parent} (s2's error), \code{rows},
+#'   \code{reasons}, \code{n} and \code{s2_forced} that raises the caller's
+#'   error; \code{NULL} for the error \code{.boundary_refused()} builds,
+#'   which names \code{caller}.
+#' @param caller Name of the exported function, for that error.
+#' @param task What cannot run in degrees, for that error.
+#' @param all \code{TRUE} to put every row through \code{.safe_make_valid()}
+#'   first, under the engine of the session, as get_voronoi_seeds() and
+#'   create_grid_polygons() always have; \code{FALSE} to repair only the rows
+#'   the engine of the union refuses (GEOS's validity in a projected CRS,
+#'   s2's conversion in degrees), so a boundary of valid rows is unioned as it
+#'   arrived, to the bit.
+#' @return \code{b}, of the same class, with the rows repaired.
+#' @keywords internal
+#' @noRd
+.boundary_mend <- function(b, refuse = NULL, caller = NULL, task = NULL, all = FALSE) {
+  g  <- sf::st_geometry(b)
+  ll <- .is_longlat(g)
+  if (isTRUE(all)) {
+    g <- .safe_make_valid(g)
+  } else if (!ll && length(g)) {
+    bad <- which(!(suppressWarnings(sf::st_is_valid(g)) %in% TRUE))
+    if (length(bad)) g[bad] <- .safe_make_valid(g[bad])
+  }
+  if (ll && length(g)) {
+    s2_forced <- !isTRUE(sf::sf_use_s2())
+    g <- .with_s2({
+      # Without `all`, the rows s2 refuses get the repair the others skip,
+      # s2's rebuild, as get_voronoi_seeds() gives every row with s2 on.
+      if (!isTRUE(all)) {
+        bad <- .s2_refused(g)
+        if (length(bad)) g[bad] <- .safe_make_valid(g[bad])
+      }
+      m <- .s2_mend(g, split = TRUE)
+      if (length(m$refused)) {
+        sub    <- m$g[m$refused]
+        parent <- tryCatch({ suppressMessages(sf::st_as_s2(sub)); NULL },
+                           error = function(e) e)
+        if (is.null(parent))
+          parent <- simpleError("s2 refuses the polygon")
+        why <- .s2_refused_rows(sub)
+        reasons <- if (!is.null(why) && length(why$rows) == length(m$refused))
+          why$reasons else rep(conditionMessage(parent), length(m$refused))
+        if (is.null(refuse))
+          .boundary_refused(parent, m$refused, reasons, length(g), caller, task, s2_forced)
+        refuse(parent = parent, rows = m$refused, reasons = reasons, n = length(g),
+               s2_forced = s2_forced)
+      }
+      m$g
+    })
+  }
+  if (!inherits(b, "sf")) return(g)
+  if (!identical(g, sf::st_geometry(b))) sf::st_geometry(b) <- g
+  b
+}
+
+#' The union of a boundary's rows, each repaired first
+#'
+#' \code{.boundary_mend()}, then \code{sf::st_union()}, on the sphere for a
+#' boundary in longitude and latitude whatever \code{sf::sf_use_s2()} says:
+#' with it off, sf printed "although coordinates are longitude/latitude,
+#' st_union assumes that they are planar" on every call.
+#'
+#' @inheritParams .boundary_mend
+#' @return An sfc of one geometry.
+#' @keywords internal
+#' @noRd
+.boundary_union <- function(b, refuse = NULL, caller = NULL, task = NULL, all = FALSE) {
+  g <- sf::st_geometry(.boundary_mend(b, refuse, caller, task, all))
+  if (.is_longlat(g)) .with_s2(sf::st_union(g)) else sf::st_union(g)
+}
+
+#' The error for a boundary row s2 refuses even repaired
+#'
+#' Of class \code{"spatialkit_cells_degenerate"}, built by
+#' \code{.raise_cells_degenerate()}: it names `boundary`, its rows and s2's
+#' reason for each, and says to transform `boundary` to a projected CRS,
+#' where GEOS repairs it.  It carries \code{site = "boundary"}.
+#'
+#' @param parent,rows,reasons,n,s2_forced As \code{.boundary_mend()} gives
+#'   them.
+#' @param caller Name of the exported function.
+#' @param task What cannot run in degrees.
+#' @return Does not return.
+#' @keywords internal
+#' @noRd
+.boundary_refused <- function(parent, rows, reasons, n, caller, task, s2_forced = FALSE) {
+  .raise_cells_degenerate(
+    parent, rows, reasons, n, caller, "`boundary`", task, again = NULL,
+    of = sprintf("the %d %s of `boundary`", n, if (n == 1L) "polygon" else "polygons"),
+    s2_forced = s2_forced, source = "", site = "boundary",
+    remedy = sprintf(paste0(
+      "Transform `boundary` to a projected CRS, such as the one ensure_projected() picks ",
+      "for it (sf::st_transform()), and call %s() again; it is then repaired there with ",
+      "sf::st_make_valid(), which splits crossing edges."), caller))
 }
 
 

@@ -3224,6 +3224,64 @@ old behaviour where there is a way.
   skipped with a log line that gives the cause, as it is when one side has
   a CRS and the other has none.
 
+* **A grid laid in degrees (`cellsize` with a geographic `crs`) returned
+  cells s2 refuses, and `build_tessellation(method = "square")` or `"hex"`
+  stopped on them with s2's bare message.**  With s2 on (the default) sf
+  clips such a grid with s2, which writes some clipped cells with a corner
+  listed twice in a row, or with two corners that differ by rounding (7e-15
+  degrees), which s2 reads as one point: on a 0.5 degree square at
+  `cellsize = 0.1`, one of 25 square cells and three of 39 hexagons, and at
+  `cellsize = 0.05` seven of 137 hexagons; `build_tessellation()` stopped
+  with "Loop 0 is not valid: Edge 5 is degenerate (duplicate vertex)".
+  `sf::st_area()` of the grid stopped the same way, and
+  `assign_features_to_polygons()` gave a cause that speaks of seeds and of
+  cells built in a projected CRS.  `create_grid_polygons()` now returns
+  such a cell without the repeat, and without a corner that lies within
+  1e-12 degrees of the one kept before it, which moves no corner and changes
+  its area by rounding, and `build_tessellation()` runs on the grid; cells
+  s2 accepts are returned as they were.  A cell s2
+  refuses even then, or a cell of the grid before the clip that s2 refuses
+  (a grid laid past latitude 90, on which the clip stopped with s2's
+  message), stops the call with an error of class
+  `"spatialkit_cells_degenerate"` that names the cells and s2's reason and
+  says to pass a projected `crs` or to size the grid by `target_cells` or
+  `n` (`approx_n_cells` in `build_tessellation()`).  The index of the points
+  in a grid laid in degrees gets the same error where s2 refuses a cell.
+
+* **`voronoi_seeds_random()`, `create_grid_polygons_cached()` and
+  `make_folds(method = "block_kfold", boundary = )` unioned the rows of
+  `boundary` before repairing them.**  A boundary that `get_voronoi_seeds()`,
+  `create_grid_polygons()` and the tessellation builders repair and use
+  stopped these three with GEOS's or s2's bare message: in degrees, a
+  square with a vertex listed twice or a figure eight stopped
+  `voronoi_seeds_random()` ("Loop 0 is not valid: Edge 1 is degenerate
+  (duplicate vertex)"), with s2 on or off; in a projected CRS, a bowtie row
+  beside a square stopped all three with "TopologyException: side location
+  conflict".  The rows GEOS (in a projected CRS) or s2 (in degrees) refuses
+  are now repaired before the union; valid rows are unioned as they
+  arrived, so a boundary of valid rows gives the seeds, the cache key and
+  the folds it gave.  The key of the cache no longer stops on a boundary it
+  cannot union: it then hashes the rows, and `create_grid_polygons()` gives
+  the outcome it gives uncached.
+
+* **A lon/lat boundary with crossing edges (a bowtie) stopped
+  `get_voronoi_seeds(method = "random")` and `"kmeans"`, and
+  `create_grid_polygons(cellsize = , crs = <geographic>)`, with s2's bare
+  "Loop 0 is not valid: Edge 0 crosses edge 2".**  In degrees, with s2 on
+  (the default), `sf::st_make_valid()` is s2's rebuild, which leaves
+  crossing edges as they are, where GEOS splits them in a projected CRS, so
+  the same boundary ran
+  through `create_grid_polygons(target_cells = )` and
+  `create_voronoi_polygons()`.  The rows s2 still refuses after the repair
+  are now rebuilt with crossing edges split, so the seeds and the grid in
+  degrees are placed in the two lobes, as the projected builders place
+  them; `voronoi_seeds_random()` repairs them the same way.  A row s2
+  refuses even then stops the call with an error of class
+  `"spatialkit_cells_degenerate"` that names `boundary`, its rows and s2's
+  reason, and says to transform `boundary` to a projected CRS (for the
+  grid, to pass a projected `crs` or to size the grid by `target_cells` or
+  `n`).
+
 * **Cells built on seeds placed from lon/lat points could leave observations
   near the edge of a wide layer in no cell.**  The seeding functions attach
   the convex hull of the points they cluster as the seeds' cover, and

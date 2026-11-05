@@ -72,7 +72,20 @@ returned in: a grid sized by \code{target_cells} or \code{n} is laid in that
 projected CRS and then transformed, with long edges densified. A
 \code{cellsize} is in the units of \code{crs}, so with a geographic \code{crs} it is in
 degrees and the grid is laid in degrees, as asked; such cells are not
-equal-area.}
+equal-area. With \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} on (the default) such a grid is
+clipped with sf's spherical engine s2, and s2 measures and joins its
+cells after; s2 refuses a polygon that is not valid on the sphere. The
+rows of \code{boundary} and the cells are checked with s2 whatever
+\code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} says. Before the clip, a row of \code{boundary} that s2
+refuses is repaired, with crossing edges split. A cell that lists a
+corner twice in a row, or two corners within 1e-12 degrees of each
+other, which s2 reads as one point, is returned with one of them, which
+moves no corner and changes the cell's area by rounding. A row of
+\code{boundary}, or a cell, that s2 refuses even then (a cell of a grid laid
+past latitude 90, say) stops the call with an error of class
+\code{"spatialkit_cells_degenerate"} that names its rows and s2's reason, and
+says to pass a projected \code{crs} or to size the grid by \code{target_cells} or
+\code{n}.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo

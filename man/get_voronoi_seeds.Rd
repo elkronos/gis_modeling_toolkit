@@ -23,7 +23,15 @@ get_voronoi_seeds(
 \item{boundary}{Optional polygonal sf object defining the sampling area.
 One that mixes XY and XYZ (or XYM) geometries is read without Z and M,
 since sf reads a layer in the dimension of its first geometry. So is one whose
-geometries carry M (XYM or XYZM), which GEOS refuses.}
+geometries carry M (XYM or XYZM), which GEOS refuses. Where seeds or
+the k-means cloud are sampled inside it, its rows are repaired with
+\code{\link[sf:st_make_valid]{sf::st_make_valid()}} before they are unioned. In
+longitude and latitude the union runs with s2, and a row s2 still
+refuses (crossing edges, a vertex listed twice) is repaired again, with
+crossing edges split as GEOS splits them in a projected CRS; a row s2
+refuses even then stops the call with an error of class
+\code{"spatialkit_cells_degenerate"} that names it and says to transform
+\code{boundary} to a projected CRS.}
 
 \item{method}{One of "kmeans", "random", "provided".}
 

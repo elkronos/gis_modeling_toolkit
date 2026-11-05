@@ -814,6 +814,8 @@ assign_features_to_polygons <- function(
 #'   longitude and latitude.
 #' @param pick The projected CRS the remedy names after the one the cells
 #'   were built in, as in "or \code{pick}".
+#' @param ... Passed to \code{.raise_cells_degenerate()} (\code{of},
+#'   \code{source}, \code{remedy}, \code{site}, \code{s2_forced}).
 #' @return \code{NULL}, invisibly, when \code{e} is not s2's refusal of a
 #'   polygon or s2 refuses no polygon of \code{polygons} (the refusal is
 #'   another layer's, or of a piece the call made): the caller then raises
@@ -823,14 +825,15 @@ assign_features_to_polygons <- function(
 #' @noRd
 .stop_cells_degenerate <- function(e, polygons, caller, layer, task, again,
                                    no_crs = FALSE,
-                                   pick = "the one ensure_projected() picks for it") {
+                                   pick = "the one ensure_projected() picks for it",
+                                   ...) {
   if (!.is_s2_ring_error(e)) return(invisible(NULL))
   g <- sf::st_geometry(polygons)
   if (!isTRUE(sf::st_is_longlat(g)) || !isTRUE(sf::sf_use_s2())) return(invisible(NULL))
   bad <- .s2_refused_rows(g)
   if (is.null(bad) || !length(bad$rows)) return(invisible(NULL))
   .raise_cells_degenerate(e, bad$rows, bad$reasons, length(g), caller, layer, task,
-                          again, no_crs, pick = pick)
+                          again, no_crs, pick = pick, ...)
 }
 
 # The ID columns summarize_by_cell() looks for, in order: among the rows'
@@ -1040,9 +1043,20 @@ assign_features_to_polygons <- function(
 #'   on that the caller offers.
 #' @param pick As for \code{.stop_cells_degenerate()}; read for the cells of a
 #'   layer with a CRS.
+#' @param source Where the cells' corners that s2 reads as one point come
+#'   from, the sentence after the one that names them; \code{NULL} for cells
+#'   built in a projected CRS and returned in degrees.  \code{""} leaves out
+#'   both sentences, for polygons that are not cells (a boundary).
+#' @param remedy The remedy sentence, in place of the one built from
+#'   \code{layer}, \code{again} and \code{pick}; \code{NULL} for that one.
+#'   \code{more} is still added after it.
+#' @param site A word stored on the condition as \code{site}, which tells a
+#'   caller that raises it again in its own words which polygons were
+#'   refused; \code{NULL} for none.
 #' @return Does not return.  The condition carries \code{rows}, \code{n},
 #'   \code{reasons}, \code{parent}, \code{repaired} and \code{s2_forced},
-#'   and \code{features_rows} when \code{also} is given.
+#'   \code{features_rows} when \code{also} is given, and \code{site} when
+#'   \code{site} is given.
 #' @keywords internal
 #' @noRd
 .raise_cells_degenerate <- function(parent, rows, reasons, n, caller, layer, task, again,
@@ -1050,7 +1064,8 @@ assign_features_to_polygons <- function(
                                     kind = c("cells", "features"), repaired = FALSE,
                                     also = NULL, fixable = FALSE, s2_forced = FALSE,
                                     advise_predicate = FALSE, more = NULL,
-                                    pick = "the one ensure_projected() picks for it") {
+                                    pick = "the one ensure_projected() picks for it",
+                                    source = NULL, remedy = NULL, site = NULL) {
   kind <- match.arg(kind)
   said <- trimws(strsplit(conditionMessage(parent), "\n", fixed = TRUE)[[1L]][1L])
   rows_text <- function(r) {
@@ -1085,7 +1100,8 @@ assign_features_to_polygons <- function(
                 else ""
   # s2 gives "duplicate vertex" for two corners it reads as one point; the
   # cause and its usual source are named for those polygons only.
-  dup <- kind == "cells" & grepl("duplicate vertex", reasons, fixed = TRUE)
+  dup <- kind == "cells" & !identical(source, "") &
+    grepl("duplicate vertex", reasons, fixed = TRUE)
   other <- which(!dup)
   cause <- if (!any(dup)) "" else paste0(
     if (!length(other)) {
@@ -1095,16 +1111,18 @@ assign_features_to_polygons <- function(
                           "s2 refuses the other %d for another reason (%s: \"%s\"). "),
                    sum(dup), if (sum(dup) == 1L) "has" else "have", length(other),
                    rows_text(rows[other[1L]]), reasons[other[1L]]),
+    if (!is.null(source)) source else paste0(
     "Cells built in a projected CRS and returned in longitude and latitude (by ",
     "build_tessellation() or create_voronoi_polygons() with a geographic `crs`) can ",
     "hold such corners: where four seeds stand the same distance from one point, two ",
     "cells meet there at two corners that differ only by rounding, which the ",
-    "transform to degrees puts at one point. ")
+    "transform to degrees puts at one point. "))
   also_text <- if (length(also$rows))
     sprintf("s2 also refuses %d of the %d features of `features_sf` (%s). ",
             length(also$rows), also$n, rows_why(also$rows, also$reasons))
   else ""
-  remedy <- if (kind == "features") paste0(
+  fix <- if (!is.null(remedy)) remedy
+  else if (kind == "features") paste0(
     if (isTRUE(no_crs))
       sprintf(paste0("%s has no CRS and was read as longitude and latitude: give it its ",
                      "CRS with sf::st_set_crs(), transform it to a projected CRS with ",
@@ -1126,10 +1144,10 @@ assign_features_to_polygons <- function(
   # With s2 off the join by `predicate` runs with GEOS, which reads these
   # polygons in degrees.
   if (isTRUE(advise_predicate))
-    remedy <- paste0(remedy, " Or pass largest = FALSE to assign every feature by ",
-                     "`predicate` and `tie_break` instead; with sf::sf_use_s2(FALSE), as in ",
-                     "this session, that join runs with GEOS.")
-  if (length(more)) remedy <- paste(remedy, more)
+    fix <- paste0(fix, " Or pass largest = FALSE to assign every feature by ",
+                  "`predicate` and `tie_break` instead; with sf::sf_use_s2(FALSE), as in ",
+                  "this session, that join runs with GEOS.")
+  if (length(more)) fix <- paste(fix, more)
   engine <- if (isTRUE(s2_forced))
     "s2, which the package uses here in longitude and latitude whatever sf::sf_use_s2() says,"
   else "s2, the engine sf uses for geometry in longitude and latitude,"
@@ -1137,10 +1155,11 @@ assign_features_to_polygons <- function(
   msg <- sprintf(paste0(
     "%s(): %s refuses %d ",
     "of %s (%s), so %s cannot run in degrees. %s%s%s%s%s"),
-    caller, engine, k, of, named, task, told, cause, other_said, also_text, remedy)
+    caller, engine, k, of, named, task, told, cause, other_said, also_text, fix)
   fields <- list(rows = rows, n = n, reasons = reasons, parent = parent,
                  repaired = isTRUE(repaired), s2_forced = isTRUE(s2_forced))
   if (!is.null(also)) fields$features_rows <- also$rows
+  if (!is.null(site)) fields$site <- site
   stop(do.call(errorCondition, c(list(msg, class = paste0("spatialkit_", kind, "_degenerate"),
                                       call = NULL), fields)))
 }

@@ -514,13 +514,17 @@ ensure_stable_poly_id <- function(polygons_sf,
                    !is.null(crs_obj$wkt) && nzchar(crs_obj$wkt)) crs_obj$wkt
                else "NA_CRS"
 
-  # Use binary (WKB) digest for geometry — much faster than WKT for complex shapes
+  # The binary (WKB) digest of the union of the rows, each repaired first as
+  # create_grid_polygons() repairs them (.boundary_union()), so a boundary of
+  # valid rows keeps the key it had.  The rows were unioned as they came, and
+  # a boundary create_grid_polygons() builds a grid on (a bowtie row beside a
+  # square) stopped here with GEOS's bare "TopologyException"; the fallback
+  # unioned again and stopped the same way.  A key needs no topology: when
+  # the union cannot be taken, the WKB of the rows is hashed, and
+  # create_grid_polygons() gives the outcome it gives uncached.
   geom_hash <- tryCatch(
-    digest::digest(sf::st_as_binary(sf::st_union(sf::st_geometry(boundary)))),
-    error = function(e) {
-      # Fallback to WKT if binary fails
-      digest::digest(sf::st_as_text(sf::st_union(boundary)))
-    }
+    digest::digest(sf::st_as_binary(.boundary_union(boundary))),
+    error = function(e) digest::digest(sf::st_as_binary(sf::st_geometry(boundary)))
   )
 
   dots <- list(...)

@@ -1156,15 +1156,36 @@
 #' by \code{.crs_area_error()} on a probe s2 refuses in degrees, and by
 #' \code{.s2_mend()}.
 #'
+#' With \code{tol} above 0 a vertex is also dropped when neither its x nor
+#' its y differs by more than \code{tol} from the last vertex kept, and a
+#' vertex that close to the ring's last vertex is dropped before it; the
+#' last vertex is kept, so the ring stays closed.  No vertex moves, and the
+#' area changes by less than the ring's length times \code{tol}.  A ring
+#' that would keep fewer than four vertices is kept as it was.  Used by
+#' create_grid_polygons() on clipped cells s2 refuses in degrees.
+#'
 #' @param g An sfc of one POLYGON, MULTIPOLYGON or GEOMETRYCOLLECTION.
+#' @param tol How far apart, in the units of the coordinates, two vertices
+#'   are read as one; 0 for exact repeats only.
 #' @return The same sfc with each ring's repeats dropped.
 #' @keywords internal
 #' @noRd
-.drop_repeated_vertices <- function(g) {
+.drop_repeated_vertices <- function(g, tol = 0) {
   ring <- function(r) {
     if (nrow(r) < 2L) return(r)
-    moved <- r[-1L, 1L] != r[-nrow(r), 1L] | r[-1L, 2L] != r[-nrow(r), 2L]
-    r[c(TRUE, moved), , drop = FALSE]
+    if (!(tol > 0)) {
+      moved <- r[-1L, 1L] != r[-nrow(r), 1L] | r[-1L, 2L] != r[-nrow(r), 2L]
+      return(r[c(TRUE, moved), , drop = FALSE])
+    }
+    n <- nrow(r)
+    apart <- function(i, j) max(abs(r[i, 1:2] - r[j, 1:2])) > tol
+    keep <- 1L
+    for (k in seq_len(max(0L, n - 2L)) + 1L)
+      if (apart(k, keep[length(keep)])) keep <- c(keep, k)
+    while (length(keep) > 1L && !apart(keep[length(keep)], n))
+      keep <- keep[-length(keep)]
+    if (length(keep) + 1L < 4L) return(r)
+    r[c(keep, n), , drop = FALSE]
   }
   one <- function(geom) {
     cls <- class(geom)

@@ -5573,7 +5573,12 @@ make_folds <- function(points_sf, k,
            else .transform_or_stamp(boundary, sf::st_crs(pts),
                                     what = "boundary", caller = "make_folds")
       if (inherits(b, "sfc")) b <- sf::st_sf(geometry = b)
-      b <- .safe_make_valid(sf::st_union(b))
+      # The rows are repaired before the union (.boundary_union()): unioned
+      # as they came, a bowtie row beside a valid one stopped the call with
+      # GEOS's bare "TopologyException", where the builders repair it.  Valid
+      # rows are unioned as they arrived, and the union is repaired as before.
+      b <- .safe_make_valid(.boundary_union(
+        b, caller = "make_folds", task = "the union of the block region"))
       mat <- sf::st_intersects(pts, b, sparse = FALSE)
       inside_any <- apply(mat, 1L, any)
       if (!any(inside_any))
