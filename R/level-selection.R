@@ -306,7 +306,8 @@
 #' \code{stats::kmeans(centers = k, nstart = nstart)} makes, so the best of
 #' them is the fit that call returns, and their spread is kept as well.
 #'
-#' @param xy Numeric matrix of coordinates.
+#' @param xy Numeric matrix of coordinates, in the caller's unit.  The
+#'   restarts see them in the frame of \code{.kmeans_frame()}.
 #' @param k Number of clusters (\code{>= 2}).
 #' @param nstart Number of restarts.
 #' @param iter.max Passed to \code{stats::kmeans()}.
@@ -314,25 +315,30 @@
 #'   restart's starting centres are drawn.
 #' @return \code{NULL} when every restart failed; otherwise a list with
 #'   \code{km} (the best \code{kmeans} fit), \code{wss} (its
-#'   \code{tot.withinss}), \code{spread} (\code{(max - min) / min} of
-#'   \code{tot.withinss} across the restarts that ran) and \code{n_ok}.
+#'   \code{tot.withinss}, both in the caller's coordinates), \code{spread}
+#'   (\code{(max - min) / min} of \code{tot.withinss} across the restarts
+#'   that ran, in the frame) and \code{n_ok}.
 #' @keywords internal
 #' @noRd
 .kmeans_best <- function(xy, k, nstart = 25L, iter.max = 50L, init = "kmeans++") {
   best <- NULL; w <- rep(NA_real_, nstart)
   random <- identical(init, "random")
+  # The starts are drawn from, run on and ranked by the coordinates in the
+  # frame of .kmeans_frame(), which does not move with the unit or the
+  # origin; the kept fit is taken back to the caller's coordinates.
+  z <- .kmeans_frame(xy)$z
   # The distinct rows random starts are drawn from, found once.  Fewer of
   # them than centres is what stats::kmeans() refuses as "more cluster
   # centers than distinct data points".
-  cn <- if (random) unique(xy) else NULL
+  cn <- if (random) unique(z) else NULL
   if (random && nrow(cn) < k) return(NULL)
   for (r in seq_len(nstart)) {
     km <- if (random)
-      try(suppressWarnings(stats::kmeans(xy, centers = .random_centers(xy, cn, k, nstart),
+      try(suppressWarnings(stats::kmeans(z, centers = .random_centers(z, cn, k, nstart),
                                          iter.max = iter.max, nstart = 1L)),
           silent = TRUE)
     else
-      try(suppressWarnings(stats::kmeans(xy, centers = .kmeanspp_centers(xy, k),
+      try(suppressWarnings(stats::kmeans(z, centers = .kmeanspp_centers(z, k),
                                          iter.max = iter.max, nstart = 1L)),
           silent = TRUE)
     if (inherits(km, "try-error")) next
@@ -341,6 +347,7 @@
   }
   if (is.null(best)) return(NULL)
   ok <- w[is.finite(w)]
+  best <- .kmeans_back(best, xy)
   list(km = best, wss = best$tot.withinss,
        spread = if (length(ok) > 1L && min(ok) > 0) (max(ok) - min(ok)) / min(ok) else 0,
        n_ok = length(ok))
@@ -1214,7 +1221,9 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # the same layer with its rows permuted used to get different cells and a
   # different count.  Coordinates first; the response and the predictors
   # break ties between repeat visits to one location.
-  ord <- do.call(order, c(list(xy[, 1], xy[, 2]),
+  # First coordinates equal but for their last bits are one column
+  # (.near_columns()), so the order does not move with the unit or the origin.
+  ord <- do.call(order, c(list(.near_columns(xy[, 1], xy[, 2]), xy[, 2], xy[, 1]),
                           if (has_model_vars)
                             c(list(resp_vec),
                               lapply(seq_len(ncol(pred_mat)), function(j) pred_mat[, j]))))
@@ -1232,8 +1241,9 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # One centre per distinct location at most, which with repeat visits is
   # below nrow(xy) - 1 (stats::kmeans() refuses as many centres as points).
   # It was one short of the distinct locations, so five stations visited
-  # thirty times each could not reach k = 5.
-  n_uniq <- nrow(unique(round(xy, 8)))
+  # thirty times each could not reach k = 5.  Counted as stats::kmeans() is
+  # handed them (.n_locations()), so the count does not move with the unit.
+  n_uniq <- .n_locations(xy)
   k_max <- min(k_max, n_uniq)
   if (k_max < 2L) {
     na <- .not_a_finding(1L, NA_real_,

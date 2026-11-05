@@ -143,7 +143,13 @@
 #'   `"kmeans"` is the same sum unweighted: compact cells, with several
 #'   times the points in a cell of a dense place that a cell of a sparse
 #'   place holds. It is the run of earlier versions, whose default it was:
-#'   [stats::kmeans()] from 10 random starts on the rows as they come. The
+#'   [stats::kmeans()] from 10 random starts on the rows as they come, with
+#'   the coordinates centred, divided by the diagonal of their bounding box
+#'   and rounded to 2^-30 of it, so that the seeds do not move with the unit
+#'   or the origin; on gridded locations they can differ from those of
+#'   earlier versions, and where the locations span less than a kilometre a
+#'   change of unit or origin can still move them (see "The partition" in
+#'   [resolution_profile()]). The
 #'   density kind follows the
 #'   density of `sample_points`; a cloud this function draws inside
 #'   `boundary` is uniform and has none to follow. Without the 'FNN' package
@@ -467,7 +473,9 @@ get_voronoi_seeds <- function(boundary = NULL,
       # centers than distinct data points"; nrow(xy) - 1L is "number of cluster
       # centres must lie between 1 and nrow(x)", which fires at k == nrow(x)
       # exactly -- so n = nrow(sample_points) used to die on a raw kmeans error.
-      n_uniq <- nrow(unique(round(xy, 10)))
+      # The distinct positions are counted as stats::kmeans() is handed them
+      # (.n_locations()), so the count does not move with the unit.
+      n_uniq <- .n_locations(xy)
       k_max  <- min(n_uniq, nrow(xy) - 1L)
       k_use  <- max(1L, min(as.integer(n), k_max))
       if (k_use < n) {
@@ -737,7 +745,12 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   unweighted; compact cells whose counts are several times higher in
 #'   dense places than in sparse ones. It is the run of earlier versions,
 #'   whose default it was: [stats::kmeans()] from 10 random starts on the
-#'   rows as they come. Without the 'FNN' package the density kind
+#'   rows as they come, with the coordinates centred, divided by the
+#'   diagonal of their bounding box and rounded to 2^-30 of it, so that the
+#'   seeds do not move with the unit or the origin; on gridded locations
+#'   they can differ from those of earlier versions, and where the locations
+#'   span less than a kilometre a change of unit or origin can still move
+#'   them (see "The partition" in [resolution_profile()]). Without the 'FNN' package the density kind
 #'   finds its weights by comparing every pair of distinct locations, so its
 #'   time grows with the square of their number; the seeds are the same, and
 #'   nothing stops the call. See "Details".
@@ -898,7 +911,7 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
   # k >= nrow(x), the latter with "number of cluster centres must lie between 1
   # and nrow(x)".  k = nrow(points_sf) therefore used to error rather than
   # clamp, despite `@return` promising "at most k".
-  n_uniq <- nrow(unique(round(coords, 10)))
+  n_uniq <- .n_locations(coords)
   k_max  <- min(n_uniq, n - 1L)
   k_use  <- max(1L, min(as.integer(k), k_max))
   if (k_use < k) {

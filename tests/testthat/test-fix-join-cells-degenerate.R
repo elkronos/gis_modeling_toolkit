@@ -456,10 +456,12 @@ test_that("cell_values_at() without seeds on lon/lat summary cells s2 refuses na
 test_that("the cells of centres refitted to every point, returned in lon/lat, stop with the error where s2 refuses one", {
   .jd_s2(TRUE)
   # Since the density kind counts near ties as ties, s2 refuses none of its
-  # cells of this lattice here; it refuses two of the k-means cells.
+  # cells of this lattice here.  Since the kind "kmeans" is fitted in the
+  # frame of .kmeans_frame(), it refuses none of the k-means cells under
+  # seed 123 either, and two of them under seed 2.
   pts <- sf::st_transform(.jd_lattice(50L, 40L, 250), 4326)
   prof <- suppressWarnings(resolution_profile(pts, "z", partition = "kmeans", nstart = 3,
-                                              seed = 123, estimate = NULL))
+                                              seed = 2, estimate = NULL))
   sel <- suppressWarnings(select_resolution(prof))
   seeds <- suppressWarnings(get_voronoi_seeds(method = "kmeans", n = sel, sample_points = pts))
   tess <- suppressWarnings(build_tessellation(seeds, method = "voronoi", crs = 4326, quiet = TRUE))

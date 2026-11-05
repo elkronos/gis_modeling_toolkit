@@ -131,7 +131,13 @@ below that the counts are about as uneven as under \code{"kmeans"}.
 \code{"kmeans"} is the same sum unweighted: compact cells, with several
 times the points in a cell of a dense place that a cell of a sparse
 place holds. It is the run of earlier versions, whose default it was:
-\code{\link[stats:kmeans]{stats::kmeans()}} from 10 random starts on the rows as they come. The
+\code{\link[stats:kmeans]{stats::kmeans()}} from 10 random starts on the rows as they come, with
+the coordinates centred, divided by the diagonal of their bounding box
+and rounded to 2^-30 of it, so that the seeds do not move with the unit
+or the origin; on gridded locations they can differ from those of
+earlier versions, and where the locations span less than a kilometre a
+change of unit or origin can still move them (see "The partition" in
+\code{\link[=resolution_profile]{resolution_profile()}}). The
 density kind follows the
 density of \code{sample_points}; a cloud this function draws inside
 \code{boundary} is uniform and has none to follow. Without the 'FNN' package

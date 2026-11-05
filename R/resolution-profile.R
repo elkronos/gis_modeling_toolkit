@@ -540,7 +540,9 @@
 #' ladder of counts described below, scored for pooled values as well.
 #' \code{estimate = NULL, obs_per_cell = NULL, sac = NULL, partition =
 #' "kmeans"} gives the profile of earlier versions: the ladder, its columns
-#' and its k-means regions from 25 starts.
+#' and its k-means regions from 25 starts, but for the rounding of the
+#' coordinates described in "The partition", which can give other regions on
+#' gridded locations.
 #'
 #' @section The partition:
 #' The regions at every level are the Voronoi cells of a set of centres: a
@@ -591,7 +593,9 @@
 #' \code{levels}, large sizes, or the low levels of the automatic ladder)
 #' may not, and at those levels the density kind does not even the counts.
 #' \code{partition = "kmeans"} gives the k-means regions, with 25
-#' k-means++ starts, as earlier versions built them.
+#' k-means++ starts, as earlier versions built them, but for the rounding of
+#' the coordinates described below, which can give other regions on gridded
+#' locations.
 #'
 #' \code{init} says how each of the \code{nstart} starts is drawn before it
 #' is refined; the best start is kept.  \code{"kmeans++"} draws the centres
@@ -646,6 +650,26 @@
 #' when it is installed.  The result is the same without it; the search then
 #' takes time that grows with the square of the number of points, about
 #' thirty times as long for 10,000 points and 2,000 centres.
+#'
+#' The kind \code{"kmeans"} meets the same ties inside
+#' \code{\link[stats]{kmeans}()}, which settles them by the last bits of the
+#' coordinates and takes no tolerance.  So it is handed the coordinates
+#' centred on the middle of their bounding box, divided by its diagonal and
+#' rounded to \eqn{2^{-30}} of it (about a billionth); the starts are drawn
+#' from those coordinates and ranked by their sums, and the cells it returns
+#' are read back in the layer's own coordinates, so the centres, \code{wss}
+#' and every column are in its unit.  The rows are put in order as for the
+#' density kind.  The cells are then the same in another unit or with
+#' another origin unless the change moves a coordinate across the middle of
+#' a rounding step, which the rounding PROJ leaves (about \eqn{10^{-9}} m)
+#' does more often the smaller the extent.  Over 60 lattices with 5 m to
+#' 1 km between neighbouring locations, each in US feet, in feet, in
+#' kilometres and with two other false origins, at 5, 25 and 60 cells from
+#' two seeds and both starting rules, the cells were the same in all 2,040
+#' partitions of the 34 lattices that span a kilometre or more, and other
+#' cells came back in 205 of the 1,560 partitions of the 26 lattices that
+#' span less (78 to 719 m).  Distinct locations that would round to one
+#' point keep their coordinates unrounded, so they stay distinct.
 #'
 #' The columns keep their meaning under \code{"density"}, because each is
 #' read off the cells and not off the way they were drawn.  \code{wss} is the
@@ -2022,10 +2046,9 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   bb   <- sf::st_bbox(data_sf)
   bbw  <- as.numeric(bb["xmax"] - bb["xmin"]); bbh <- as.numeric(bb["ymax"] - bb["ymin"])
   if (!is.finite(area) || area <= 0) area <- bbw * bbh
-  # duplicated() on a complex vector, because unique() on an n x 2 matrix
-  # pastes every row into a string: 0.01 s against 5 s at a million points.
-  n_uniq_all <- sum(!duplicated(complex(real = round(xy[, 1], 8),
-                                        imaginary = round(xy[, 2], 8))))
+  # Counted as stats::kmeans() is handed them (.n_locations()), so the count
+  # does not move with the unit or the origin.
+  n_uniq_all <- .n_locations(xy)
 
   # Subsample, keeping everything aligned, from the rows in a canonical order:
   # the subsample and every k-means++ draw index rows, so the same layer with
@@ -2147,7 +2170,7 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
 
   # The distinct locations.  `n_uniq_all` is the layer's (see above);
   # `n_uniq` is the subsample's, the locations k-means can place centres on.
-  n_uniq  <- nrow(unique(round(xy, 8)))
+  n_uniq  <- .n_locations(xy)
   if (n == n_all) n_uniq_all <- n_uniq
   # k-means can put a centre on every distinct location but no more, and
   # stats::kmeans() refuses as many centres as points (see the present
@@ -4816,12 +4839,14 @@ select_resolution <- function(profile,
 #' row in the cells of the centres as fitted, keeps none, and is not
 #' refitted.  The level chosen is refitted to every point by the
 #' kind's own iteration, from the centres scored: \code{stats::kmeans()}
-#' (Hartigan and Wong) for the kind \code{"kmeans"}, Lloyd's iteration on
+#' (Hartigan and Wong, in the frame of \code{.kmeans_frame()}, centres
+#' included) for the kind \code{"kmeans"}, Lloyd's iteration on
 #' the density weights of every point for the kind \code{"density"}, with
 #' the profile's iteration limit.  No start is drawn, so no random number
 #' is used, and the count is the level's.  Where Hartigan and Wong's
-#' algorithm refuses the centres (two centres in one place, or a centre
-#' with no point of the layer nearest it), Lloyd's iteration with every
+#' algorithm refuses the centres (two centres in one place, or within one
+#' rounding step of that frame, or a centre with no point of the layer
+#' nearest it), Lloyd's iteration with every
 #' weight one is run in its place, with a log line.
 #'
 #' The work is bounded as a profile bounds its fits: the points times the
@@ -4895,7 +4920,11 @@ select_resolution <- function(profile,
   a0 <- .nearest_centre(xy[, 1L], xy[, 2L], centres[, 1L], centres[, 2L], use_fnn)
   fit <- NULL
   if (!density) {
-    km <- tryCatch(suppressWarnings(stats::kmeans(xy, centers = centres, iter.max = iter_max)),
+    # In the frame of .kmeans_frame(), centres included, as the profile's own
+    # fits; the centres and the sum come back in the layer's coordinates.
+    fr <- .kmeans_frame(xy)
+    km <- tryCatch(.kmeans_back(suppressWarnings(stats::kmeans(fr$z, centers = fr$to(centres),
+                                                               iter.max = iter_max)), xy),
                    error = function(e) NULL)
     if (!is.null(km))
       fit <- list(centers = unname(km$centers[, 1:2, drop = FALSE]), wss = km$tot.withinss,

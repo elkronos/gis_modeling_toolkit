@@ -463,7 +463,9 @@ gives the
 ladder of counts described below, scored for pooled values as well.
 \code{estimate = NULL, obs_per_cell = NULL, sac = NULL, partition =
 "kmeans"} gives the profile of earlier versions: the ladder, its columns
-and its k-means regions from 25 starts.
+and its k-means regions from 25 starts, but for the rounding of the
+coordinates described in "The partition", which can give other regions on
+gridded locations.
 }
 \section{The partition}{
 
@@ -515,7 +517,9 @@ the default count go together.  A coarse ladder the caller sets (with
 \code{levels}, large sizes, or the low levels of the automatic ladder)
 may not, and at those levels the density kind does not even the counts.
 \code{partition = "kmeans"} gives the k-means regions, with 25
-k-means++ starts, as earlier versions built them.
+k-means++ starts, as earlier versions built them, but for the rounding of
+the coordinates described below, which can give other regions on gridded
+locations.
 
 \code{init} says how each of the \code{nstart} starts is drawn before it
 is refined; the best start is kept.  \code{"kmeans++"} draws the centres
@@ -570,6 +574,26 @@ is not zero where locations repeat.  The neighbour searches use \pkg{FNN}
 when it is installed.  The result is the same without it; the search then
 takes time that grows with the square of the number of points, about
 thirty times as long for 10,000 points and 2,000 centres.
+
+The kind \code{"kmeans"} meets the same ties inside
+\code{\link[stats]{kmeans}()}, which settles them by the last bits of the
+coordinates and takes no tolerance.  So it is handed the coordinates
+centred on the middle of their bounding box, divided by its diagonal and
+rounded to \eqn{2^{-30}} of it (about a billionth); the starts are drawn
+from those coordinates and ranked by their sums, and the cells it returns
+are read back in the layer's own coordinates, so the centres, \code{wss}
+and every column are in its unit.  The rows are put in order as for the
+density kind.  The cells are then the same in another unit or with
+another origin unless the change moves a coordinate across the middle of
+a rounding step, which the rounding PROJ leaves (about \eqn{10^{-9}} m)
+does more often the smaller the extent.  Over 60 lattices with 5 m to
+1 km between neighbouring locations, each in US feet, in feet, in
+kilometres and with two other false origins, at 5, 25 and 60 cells from
+two seeds and both starting rules, the cells were the same in all 2,040
+partitions of the 34 lattices that span a kilometre or more, and other
+cells came back in 205 of the 1,560 partitions of the 26 lattices that
+span less (78 to 719 m).  Distinct locations that would round to one
+point keep their coordinates unrounded, so they stay distinct.
 
 The columns keep their meaning under \code{"density"}, because each is
 read off the cells and not off the way they were drawn.  \code{wss} is the

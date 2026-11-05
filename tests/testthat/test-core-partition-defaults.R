@@ -40,19 +40,27 @@
 
 
 test_that("the engine's k-means kind from k-means++ starts is .kmeans_best() bit for bit", {
+  # And the run of earlier versions to rounding: stats::kmeans() is now handed
+  # the coordinates in the frame of .kmeans_frame() and the sums are taken
+  # back in the caller's coordinates, so they differ in their last bits.
   xy <- partition_sorted(partition_clustered_xy(n_bg = 100L, n_cl = 200L, seed = 5L))
   for (k in c(2L, 9L, 40L)) {
     set.seed(31); old <- .pd_old_best(xy, k, nstart = 6L)
     set.seed(31); kb  <- spatialkit:::.kmeans_best(xy, k, nstart = 6L)
     set.seed(31); eng <- spatialkit:::.partition_centres(xy, k, partition = "kmeans",
                                                         init = "kmeans++", nstart = 6L)
-    expect_identical(kb$km, old)
-    expect_identical(eng$km, old)
-    expect_identical(eng$centers, unname(old$centers))
+    expect_identical(eng$km, kb$km)
+    expect_identical(kb$km$cluster, old$cluster)
+    expect_equal(kb$km$centers, old$centers, tolerance = 1e-12)
+    expect_equal(kb$km$withinss, old$withinss, tolerance = 1e-12)
+    expect_equal(kb$km$tot.withinss, old$tot.withinss, tolerance = 1e-12)
+    expect_identical(kb$km$iter, old$iter)
+    expect_identical(eng$centers, unname(kb$km$centers))
     expect_identical(eng$cluster, old$cluster)
-    expect_identical(eng$wss, old$tot.withinss)
-    expect_identical(eng$objective, old$tot.withinss)
-    expect_identical(eng$withinss, as.numeric(old$withinss))
+    expect_identical(eng$wss, kb$wss)
+    expect_identical(eng$objective, kb$wss)
+    expect_equal(eng$wss, old$tot.withinss, tolerance = 1e-12)
+    expect_identical(eng$withinss, as.numeric(kb$km$withinss))
     expect_identical(eng$spread, kb$spread)
   }
 })
@@ -139,8 +147,10 @@ test_that("the k-means profile's centres are those of the k-means++ run it alway
   xs  <- partition_sorted(partition_xy(pts))
   prof <- resolution_profile(pts, levels = 7L, nstart = 6, seed = 19, partition = "kmeans")
   set.seed(19); old <- .pd_old_best(xs, 7L, nstart = 6L)
-  expect_identical(attr(prof, "centres")[["7"]], unname(old$centers))
-  expect_identical(prof$wss, old$tot.withinss)
+  expect_equal(attr(prof, "centres")[["7"]], unname(old$centers), tolerance = 1e-12)
+  # The sum is taken in the layer's coordinates from the clusters of the
+  # frame of .kmeans_frame(): the old one to rounding.
+  expect_equal(prof$wss, old$tot.withinss, tolerance = 1e-12)
   # The default profile's centres are the density kind's, from 3 k-means++
   # starts under the same seed: other centres.
   dflt <- resolution_profile(pts, levels = 7L, seed = 19)
@@ -320,10 +330,14 @@ test_that("get_voronoi_seeds() with partition = \"kmeans\" named is the run it a
   set.seed(3)
   km <- stats::kmeans(x = sf::st_coordinates(pts)[, 1:2], centers = 9, iter.max = 100,
                       nstart = 10)
-  expect_identical(partition_xy(plain), unname(km$centers))
+  # The clusters and the iterations of that run; the centres and sums,
+  # taken in the cloud's coordinates from the clusters stats::kmeans() finds
+  # in the frame of .kmeans_frame(), to rounding.
+  expect_equal(partition_xy(plain), unname(km$centers), tolerance = 1e-12)
   expect_identical(attr(plain, "kmeans")$cluster, as.integer(km$cluster))
-  expect_identical(attr(plain, "kmeans")$withinss, as.numeric(km$withinss))
-  expect_identical(attr(plain, "kmeans")$tot_withinss, as.numeric(km$tot.withinss))
+  expect_equal(attr(plain, "kmeans")$withinss, as.numeric(km$withinss), tolerance = 1e-12)
+  expect_equal(attr(plain, "kmeans")$tot_withinss, as.numeric(km$tot.withinss),
+               tolerance = 1e-12)
   expect_identical(attr(plain, "kmeans")$iter, as.integer(km$iter))
 
   # A cloud drawn inside a boundary is clustered the same way, and the other
@@ -431,7 +445,11 @@ test_that("determine_optimal_levels() takes no partition argument and keeps plai
   wss <- c(sum(sweep(xs, 2L, colMeans(xs))^2),
            vapply(2:length(diag$wss), function(k) .pd_old_best(xs, k)$tot.withinss, numeric(1)))
   expect_equal(diag$wss, wss, tolerance = 1e-12)
-  expect_identical(diag$wss[-1L], wss[-1L])
+  # Bit for bit, the sweep is .kmeans_best() under the same seed, which runs
+  # those starts in the frame of .kmeans_frame().
+  set.seed(5)
+  now <- vapply(2:length(diag$wss), function(k) spatialkit:::.kmeans_best(xs, k)$wss, numeric(1))
+  expect_identical(diag$wss[-1L], now)
 })
 
 test_that("the argument order of the three functions is unchanged ahead of the new ones", {

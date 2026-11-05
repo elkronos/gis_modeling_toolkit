@@ -59,7 +59,12 @@ uneven as \code{"kmeans"} gives below that. \code{"kmeans"}: the same sum
 unweighted; compact cells whose counts are several times higher in
 dense places than in sparse ones. It is the run of earlier versions,
 whose default it was: \code{\link[stats:kmeans]{stats::kmeans()}} from 10 random starts on the
-rows as they come. Without the 'FNN' package the density kind
+rows as they come, with the coordinates centred, divided by the
+diagonal of their bounding box and rounded to 2^-30 of it, so that the
+seeds do not move with the unit or the origin; on gridded locations
+they can differ from those of earlier versions, and where the locations
+span less than a kilometre a change of unit or origin can still move
+them (see "The partition" in \code{\link[=resolution_profile]{resolution_profile()}}). Without the 'FNN' package the density kind
 finds its weights by comparing every pair of distinct locations, so its
 time grows with the square of their number; the seeds are the same, and
 nothing stops the call. See "Details".}

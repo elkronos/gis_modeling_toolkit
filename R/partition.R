@@ -312,6 +312,130 @@
 }
 
 
+# The step the coordinates handed to stats::kmeans() are rounded to, as a
+# fraction of the diagonal of their bounding box (about a billionth).
+.KMEANS_STEP <- 2^-30
+
+
+#' The coordinates the kind "kmeans" hands to stats::kmeans()
+#'
+#' On gridded locations many points are equally far from two centres, and
+#' \code{stats::kmeans()} (Hartigan and Wong) settles each such tie by the
+#' last bits of the coordinates.  Those bits move with the unit and the
+#' origin, so the same layer in metres, in feet or with another false origin
+#' got other regions.  The algorithm takes no tolerance, so it is handed the
+#' coordinates in a frame that does not move with either: centred on the
+#' middle of their bounding box, divided by its diagonal and rounded to
+#' \code{.KMEANS_STEP}.  A coordinate that lies within its own rounding noise
+#' of the middle of a step can still fall on either side of it.  Rows at
+#' distinct locations that would round to one point keep their coordinates
+#' centred and scaled but not rounded, so the frame has as many distinct
+#' points as the layer: the callers count the locations a partition can
+#' separate on the layer itself, and \code{stats::kmeans()} refuses more
+#' centres than distinct points.  Such rows lie within a billionth of the
+#' extent of each other, which the locations of a lattice never do.  The
+#' starting centres, drawn at random or by k-means++, are drawn from these
+#' coordinates too, and so is the count of distinct points
+#' \code{stats::kmeans()} refuses on.  \code{.kmeans_back()} takes the
+#' result back to the caller's coordinates.
+#'
+#' @param xy Numeric matrix of finite coordinates, in the caller's unit.
+#' @return A list: \code{z} (the matrix in the frame, with the dimnames of
+#'   \code{xy}) and \code{to} (the function that maps a matrix of points in
+#'   the caller's coordinates, such as starting centres, to the frame,
+#'   rounded).
+#' @keywords internal
+#' @noRd
+.kmeans_frame <- function(xy) {
+  xy <- as.matrix(xy)
+  lo <- apply(xy, 2L, min); hi <- apply(xy, 2L, max)
+  mid <- lo / 2 + hi / 2
+  d <- sqrt(sum((hi - lo)^2))
+  # One location: every point maps to 0.
+  if (!is.finite(d) || d <= 0) d <- 1
+  scaled <- function(p) sweep(as.matrix(p), 2L, mid) / d
+  to <- function(p) {
+    z <- round(scaled(p) / .KMEANS_STEP) * .KMEANS_STEP
+    dimnames(z) <- dimnames(as.matrix(p))
+    z
+  }
+  z <- to(xy)
+  # Distinct locations that round to one point keep their unrounded
+  # coordinates.  Rows are keyed as complex numbers for two columns
+  # (duplicated() on a matrix pastes every row into a string).
+  key <- function(m) if (ncol(m) == 2L) complex(real = m[, 1L], imaginary = m[, 2L])
+                     else apply(m, 1L, function(r) paste(format(r, digits = 17L), collapse = " "))
+  kz <- key(z); kx <- key(xy)
+  gz <- match(kz, unique(kz))
+  nd <- tabulate(gz[!duplicated(kx)], nbins = max(gz))
+  merged <- nd[gz] > 1L
+  if (any(merged)) z[merged, ] <- scaled(xy[merged, , drop = FALSE])
+  list(z = z, to = to)
+}
+
+
+#' A stats::kmeans() fit made in the frame of .kmeans_frame(), in the
+#' caller's coordinates
+#'
+#' The clusters are the fit's.  The centres are the means of their points
+#' in the caller's coordinates, and \code{withinss}, \code{tot.withinss},
+#' \code{totss} and \code{betweenss} are sums of squares in those
+#' coordinates, so they agree with what \code{stats::kmeans()} would report
+#' on them to rounding.  \code{cluster}, \code{size}, \code{iter} and
+#' \code{ifault} are kept as they are.
+#'
+#' @param km A \code{kmeans} fit to \code{.kmeans_frame(xy)$z}.
+#' @param xy The coordinates in the caller's unit, in the rows of the fit.
+#' @return \code{km} with its centres and sums of squares replaced.
+#' @keywords internal
+#' @noRd
+.kmeans_back <- function(km, xy) {
+  xy <- as.matrix(xy)
+  k  <- nrow(km$centers)
+  cl <- as.integer(km$cluster)
+  nk <- tabulate(cl, nbins = k)
+  s  <- rowsum(xy, cl, reorder = TRUE)
+  g  <- as.integer(rownames(s))
+  cen <- matrix(NA_real_, k, ncol(xy))
+  cen[g, ] <- s / nk[g]
+  dimnames(cen) <- dimnames(km$centers)
+  w <- numeric(k)
+  w[g] <- as.numeric(rowsum(rowSums((xy - cen[cl, , drop = FALSE])^2), cl, reorder = TRUE))
+  km$centers <- cen
+  km$withinss <- w
+  km$tot.withinss <- sum(w)
+  km$totss <- sum(scale(xy, scale = FALSE)^2)
+  km$betweenss <- km$totss - km$tot.withinss
+  km
+}
+
+
+#' The number of distinct locations a partition can put a centre on
+#'
+#' Counted on the coordinates \code{stats::kmeans()} is handed, the frame of
+#' \code{.kmeans_frame()}, so the count does not move with the unit or the
+#' origin and \code{stats::kmeans()} accepts as many centres.  The callers
+#' used to count after rounding the coordinates to 8 or 10 decimals of the
+#' layer's unit, so two locations a micrometre apart were two in metres and
+#' one in kilometres, and the ceiling of a ladder or the number of seeds
+#' changed with the unit.  The density kind places its centres on the
+#' layer's own distinct locations, of which there are at least as many.
+#'
+#' @param xy Numeric matrix of finite coordinates; the first two columns are
+#'   used.
+#' @return Integer: the number of distinct rows of the frame.
+#' @keywords internal
+#' @noRd
+.n_locations <- function(xy) {
+  xy <- as.matrix(xy)
+  if (nrow(xy) < 2L) return(nrow(xy))
+  z <- .kmeans_frame(xy[, 1:2, drop = FALSE])$z
+  # duplicated() on a complex vector, because unique() on an n x 2 matrix
+  # pastes every row into a string: 0.01 s against 5 s at a million points.
+  sum(!duplicated(complex(real = z[, 1L], imaginary = z[, 2L])))
+}
+
+
 #' The centres of a partition of the points into k regions
 #'
 #' The one place the package computes region centres.
@@ -323,7 +447,10 @@
 #' drawn at random, as \code{stats::kmeans(centers = k)} draws them;
 #' \code{one_call = TRUE} hands the whole job to one
 #' \code{stats::kmeans(centers = k, nstart = nstart)} call, which is what the
-#' seeding functions have always run, warnings and errors included.
+#' seeding functions have always run, warnings and errors included.  Every
+#' call of \code{stats::kmeans()} is given the coordinates in the frame of
+#' \code{.kmeans_frame()}, and the centres and sums of squares are taken
+#' back to the caller's coordinates (\code{.kmeans_back()}).
 #'
 #' \strong{Kind \code{"density"}.}  See \code{.density_kmeans()}.
 #'
@@ -338,8 +465,8 @@
 #' @param density_power,density_k The weight's power and the number of
 #'   neighbours the local density is read from.  Kind \code{"density"} only.
 #' @param sort_rows Kind \code{"kmeans"} only: put the rows in coordinate
-#'   order before the starts are drawn, so that the result does not depend on
-#'   the order they come in.  \code{FALSE} where the caller has already put
+#'   order, by columns (\code{.near_columns()}), before the starts are drawn,
+#'   so that the result does not depend on the order they come in.  \code{FALSE} where the caller has already put
 #'   them in an order of its own, and where the rows are clustered as given.
 #'   The kind \code{"density"} always works in coordinate order.
 #' @param one_call See above.
@@ -374,10 +501,16 @@
     return(.density_kmeans(xy, k, power = density_power, k_nn = density_k,
                            init = init, nstart = nstart, iter.max = iter.max,
                            use_fnn = use_fnn))
-  o <- if (isTRUE(sort_rows)) order(xy[, 1L], xy[, 2L]) else NULL
+  # Coordinate order by columns (.near_columns()): first coordinates equal
+  # but for their last bits are one column, so the order, and with it the
+  # rows the starts draw, does not move with the unit or the origin.
+  o <- if (isTRUE(sort_rows)) order(.near_columns(xy[, 1L], xy[, 2L]), xy[, 2L], xy[, 1L])
+       else NULL
   xs <- if (is.null(o)) xy else xy[o, , drop = FALSE]
   if (identical(init, "random") && isTRUE(one_call)) {
-    km <- stats::kmeans(xs, centers = k, iter.max = iter.max, nstart = nstart)
+    # In the frame of .kmeans_frame(), as every start of .kmeans_best().
+    km <- .kmeans_back(stats::kmeans(.kmeans_frame(xs)$z, centers = k, iter.max = iter.max,
+                                     nstart = nstart), xs)
     spread <- NA_real_; n_ok <- NA_integer_
   } else {
     kb <- .kmeans_best(xs, k, nstart = nstart, iter.max = iter.max, init = init)
@@ -385,7 +518,10 @@
     km <- kb$km; spread <- kb$spread; n_ok <- kb$n_ok
   }
   cluster <- km$cluster
-  if (!is.null(o)) { cluster <- integer(length(o)); cluster[o] <- km$cluster }
+  if (!is.null(o)) {
+    cluster <- integer(length(o)); cluster[o] <- km$cluster
+    km$cluster <- cluster
+  }
   list(centers = unname(km$centers[, 1:2, drop = FALSE]), cluster = cluster,
        size = as.integer(km$size), withinss = as.numeric(km$withinss),
        wss = km$tot.withinss, objective = km$tot.withinss,

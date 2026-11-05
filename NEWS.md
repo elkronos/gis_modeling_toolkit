@@ -2449,6 +2449,61 @@ old behaviour where there is a way.
   `partition = "kmeans"` too, so there a layer with two first coordinates
   that close can also get other regions for the same seed.
 
+* **On gridded locations the k-means partition depended on the unit and the
+  origin of the coordinates.**  The regions `resolution_profile()`,
+  `get_voronoi_seeds()` and `voronoi_seeds_kmeans()` draw under `partition =
+  "kmeans"`, the refit of such a profile by `select_resolution()` and the
+  sweep of `determine_optimal_levels()` differed between metres and feet, or
+  with the origin moved by 0.1 m: on a 40 by 30 lattice at 250 m the
+  default profile under `partition = "kmeans"` gave `loo` 0.2963 in
+  EPSG:26915, 0.2998 in UTM 15N in US feet and 0.3000 with the false origin
+  moved, and `voronoi_seeds_kmeans(k = 40, partition = "kmeans")` put 391
+  and 363 of the 1,200 points in other cells.  `stats::kmeans()` (Hartigan
+  and Wong) settles a tie between two centres by the last bits of the
+  coordinates, which move with the unit and the origin, and it takes no
+  tolerance.  It is now handed the coordinates centred on the middle of
+  their bounding box, divided by its diagonal and rounded to 2^-30 of it
+  (about a billionth).  The starts are drawn from those coordinates and the
+  best start is chosen by its sum on them.  Distinct locations that would
+  round to one point keep their coordinates unrounded, so distinct
+  locations stay distinct and `stats::kmeans()` refuses no count the
+  callers allow.  The cells come back in the order of the rows given, and the
+  centres, the within-cell sums of squares and every figure read off the
+  cells are taken in the layer's own coordinates.  The seeding functions with `init = "kmeans++"` and
+  `determine_optimal_levels()` put the rows in order as `resolution_profile()`
+  does, first coordinates equal but for their last bits counting as one
+  column.  The lattice above gives `loo` 0.2974 and the same regions in all
+  three.  A change of unit or origin can still move a coordinate across the
+  middle of a rounding step, and does so more often the smaller the extent:
+  over 60 lattices, each in five other units or origins, the regions were
+  the same on every lattice that spans a kilometre or more and differed in
+  205 of 1,560 partitions of lattices that span less ("The partition" in
+  `?resolution_profile`).  On layers where no tie decides a cell the regions
+  are those of earlier versions, and the centres and sums of squares differ
+  from before in their last bits; where two starts reach the same regions
+  with sums equal to rounding, the start kept can be the other one, so the
+  centres, the seeds and the cells numbered by them can come in another
+  order.  On gridded locations the regions, and every figure drawn from
+  them, can differ from before for the same seed.
+
+* **The count of distinct locations that caps the ladders and the seeds
+  depended on the unit of the coordinates.**  `resolution_profile()` (its
+  support ceiling, under both kinds), `determine_optimal_levels()` (the top
+  of its ladder) and `get_voronoi_seeds()` and `voronoi_seeds_kmeans()` (the
+  most seeds they return) counted the distinct locations after rounding the
+  coordinates to 8 or 10 decimals of the layer's unit.  Forty locations,
+  each listed twice 2e-8 m apart, counted 80 in metres and 40 in UTM 15N in
+  kilometres: the profile's ladder stopped at 40 cells in kilometres and at
+  79 in metres, `voronoi_seeds_kmeans(k = 79)` returned 58 seeds in
+  kilometres and 79 in metres, and `determine_optimal_levels()` returned
+  other counts.  The locations are now counted on the coordinates
+  `stats::kmeans()` is handed (centred, divided by the diagonal of their
+  bounding box and rounded to 2^-30 of it, distinct locations kept
+  distinct), so the count is the same in every unit: 80 in metres, in
+  kilometres and in US feet.  Locations closer than 1e-8 of the layer's
+  unit (1e-10 for the seeds) could count as one and now count as distinct,
+  so such a layer can get a higher ceiling and more seeds than before.
+
 * **`summarize_by_cell()` read columns at extreme scales as having no
   spread.**  The test compared the spread inside the cells with the size of
   the values, so 1e15 plus a spread of 1 was called constant, and so were

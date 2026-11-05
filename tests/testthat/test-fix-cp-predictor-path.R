@@ -893,7 +893,8 @@ test_that("NEWS and ?spatialkit say what the ways back to the earlier results no
   # Whether `text` says `x`, failing with `x` alone and not the whole text.
   says <- function(text, x) expect_true(grepl(x, text, fixed = TRUE), info = x)
   never <- function(text, x) expect_false(grepl(x, text, fixed = TRUE), info = x)
-  says(pk, "the profile it returned before, with two exceptions.")
+  says(pk, "the profile it returned before, with three exceptions.")
+  says(pk, "so on gridded locations the regions can differ, and elsewhere the centres, and the cells numbered by them, can come in another order.")
   says(pk, "so cp and the count it chooses differ wherever either applies, and nothing gives the earlier noise variance back.")
   says(pk, "is refitted to every point before its seeds are handed on; the centres the profile scored are attr(profile, \"centres\")[[as.character(sel$best)]].")
   never(pk, "the profile it returned before. The seeding functions")
