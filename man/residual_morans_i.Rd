@@ -131,8 +131,18 @@ Returns \code{NULL} with a warning if computation fails, saying why:
 \code{residuals()} raised an error (its message is quoted), or returned
 \code{NULL} and the response minus \code{fitted()} could not be
 formed either (the reason is quoted), fewer than 4 valid
-residuals, or a residual vector whose length does not match the fit's
-\code{data_sf}.
+residuals, a residual vector whose length does not match the fit's
+\code{data_sf}, weights that sum to less than
+\code{.Machine$double.eps}, or residuals that leave I a ratio of
+rounding: they do not vary, or vary by no more than the rounding of the
+response (a standard deviation of 3 units in the last place of its
+largest value, or a root mean square of \eqn{10\epsilon} times that of
+the response about its centre), or are the OLS residuals of an exact fit
+of the response on the predictors (a root mean square of
+\eqn{10\epsilon} times that of the fit's terms).
+The test reads the residuals against the response, so residuals in
+any unit are scored or refused alike, and I, z and the p-value do not
+depend on the unit.
 }
 \description{
 Given a \code{spatial_fit} object, extracts the residuals and the
@@ -185,7 +195,20 @@ precision.
 \code{X}, regresses the response on it, and uses the residual moments only
 when the supplied residuals \emph{are} those OLS residuals to numerical
 tolerance.  A GWR wide enough to have collapsed to global OLS passes that
-test; the same GWR at a working bandwidth does not.
+test; the same GWR at a working bandwidth does not.  The response, and
+each predictor whose centre is more than 1000 times its spread, are taken
+about their centres before the regression, which leaves its residuals as
+they are, so a timestamp or a response at 1e10 gives the null, moments and
+rank \eqn{p} of the same columns at 0.  The supplied residuals pass where
+none differs from the OLS residuals by more than 1e-7 of the response's
+standard deviation, or where the differences are no more than the
+rounding a regression of the raw columns leaves: a root mean square of
+\eqn{10\epsilon} (\eqn{\epsilon} = \code{.Machine$double.eps}) times
+that of the fit's terms, the response's offset among them.  They also
+pass where none differs by more than 1e-7 of the response's standard
+deviation from the residuals \code{lm()} gives on the raw columns, where
+the raw design keeps the rank of the centred one: that rounding grows
+with the number of rows.
 
 \strong{For the flexible backends neither null is exact}, and \code{"auto"}
 leaves them on \code{"randomisation"} because forcing the OLS moments on

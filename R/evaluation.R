@@ -371,6 +371,60 @@
 }
 
 
+#' The response a fit's residuals are of, scaled and taken about its centre
+#'
+#' The tests of the residuals read the response on a scale where its largest
+#' absolute value lies in [1, 2): divided by a power of two, which is exact,
+#' so that no sum of squares overflows or underflows and the tests give the
+#' same answer in any unit.  The centre is that of
+#' \code{.residual_centre()}: residuals do not change under a shift of the
+#' response, and a response at a large offset regressed on its raw values
+#' leaves residuals that carry the rounding of the offset.
+#'
+#' @param fit A \code{spatial_fit}.
+#' @param keep Logical vector over the rows of \code{fit$data_sf} marking the
+#'   observations that survived the finite-residual filter.
+#' @return \code{NULL} when the response cannot be read as finite numbers on
+#'   those rows, otherwise a list: \code{y}, the response on the kept rows;
+#'   \code{s}, the power of two at or below its largest absolute value (1
+#'   for a response of zeros); \code{ys}, \code{y / s}; \code{yc}, the centre
+#'   of \code{ys}; and \code{yd}, \code{ys - yc}.
+#' @keywords internal
+#' @noRd
+.morans_response <- function(fit, keep) {
+  d  <- fit$data_sf
+  rv <- fit$response_var
+  if (!inherits(d, "sf")) return(NULL)
+  if (!is.character(rv) || length(rv) != 1L || is.na(rv)) return(NULL)
+  df <- tryCatch(sf::st_drop_geometry(d), error = function(e) NULL)
+  if (is.null(df) || nrow(df) != length(keep) || !rv %in% names(df)) return(NULL)
+  y <- df[[rv]][keep]
+  if (!is.numeric(y) || length(y) < 2L || !all(is.finite(y))) return(NULL)
+  y  <- as.numeric(y)
+  s  <- .pow2_below(max(abs(y)))
+  ys <- y / s
+  yc <- .residual_centre(ys, bounded = FALSE)
+  list(y = y, s = s, ys = ys, yc = yc, yd = ys - yc)
+}
+
+
+#' The power of two at or below a positive number, or 1
+#'
+#' @param a A number.
+#' @return \code{2^floor(log2(a))}, kept within the doubles, or 1 when
+#'   \code{a} is not a positive finite number.
+#' @keywords internal
+#' @noRd
+.pow2_below <- function(a) {
+  if (!is.finite(a) || !(a > 0)) return(1)
+  # As in .spread_scaled(): log2() of the largest doubles rounds up to 1024,
+  # and of a value just below a power of two can round up to it.
+  p <- 2^max(min(floor(log2(a)), 1023), -1022)
+  if (p > a) p <- p / 2
+  p
+}
+
+
 #' Rebuild a fitted model's design matrix and test whether its residuals are
 #' the OLS residuals on it
 #'
@@ -383,51 +437,152 @@
 #' gracefully: a GWR whose bandwidth is wide enough to be global OLS passes,
 #' the same GWR at a small bandwidth does not.
 #'
+#' The regression reads the response of \code{.morans_response()}, scaled
+#' and taken about its centre, and the design with its predictor columns at
+#' an offset taken about their centres (\code{.lm_fit_centred()}): a
+#' predictor whose spread is under about 1e-7 of its size is otherwise
+#' dropped by the QR as collinear with the intercept, and a response at an
+#' offset leaves the rounding of the offset in the residuals.  The OLS
+#' residuals do not change under either shift.  The same centred design goes
+#' to \code{.morans_residual_moments()}.
+#'
+#' The residuals supplied are OLS residuals when they lie within 1e-7 of the
+#' response's standard deviation of those of the fit here, or within the
+#' rounding of a regression on the size of its terms: a root mean square of
+#' \code{.FIT_EPS} \code{.Machine$double.eps} times that of the terms, as
+#' \code{.residuals_rounding()} takes it, the terms being those of the
+#' predictors as given and of the response's offset.  A backend that
+#' regressed the raw response at an offset returns residuals that carry that
+#' rounding.  The rounding of \code{lm()} grows with the rows, so the
+#' residuals also pass where they lie within 1e-7 of the response's standard
+#' deviation of the OLS residuals of the raw columns (\code{qr.resid()}, the
+#' arithmetic of \code{lm.fit()}), where the raw design has the rank of the
+#' centred one.
+#'
 #' @param fit A \code{spatial_fit}.
 #' @param resid The residual vector already extracted and subset by \code{keep}.
 #' @param keep Logical vector over the rows of \code{fit$data_sf} marking the
 #'   observations that survived the finite-residual filter.
+#' @param resp \code{.morans_response(fit, keep)}.
 #' @return \code{NULL} when the design cannot be rebuilt, otherwise a list with
-#'   \code{X} (the model matrix, rows subset by \code{keep}) and \code{is_ols}.
+#'   \code{X} (the model matrix, rows subset by \code{keep}, predictor columns
+#'   at an offset taken about their centres), \code{is_ols}, \code{b} (the
+#'   coefficients of \code{resp$yd} on \code{X}) and \code{centres} (for
+#'   \code{.rounding_design()}).
 #' @keywords internal
 #' @noRd
-.morans_ols_design <- function(fit, resid, keep) {
+.morans_ols_design <- function(fit, resid, keep, resp) {
+  if (is.null(resp)) return(NULL)
   d  <- fit$data_sf
-  rv <- fit$response_var
   pv <- fit$predictor_vars
-  if (!inherits(d, "sf")) return(NULL)
-  if (!is.character(rv) || length(rv) != 1L || is.na(rv)) return(NULL)
   if (is.null(pv)) pv <- character(0)
   if (!is.character(pv)) return(NULL)
 
   df <- tryCatch(sf::st_drop_geometry(d), error = function(e) NULL)
   if (is.null(df) || nrow(df) != length(keep)) return(NULL)
-  if (!all(c(rv, pv) %in% names(df))) return(NULL)
+  if (!all(pv %in% names(df))) return(NULL)
 
-  df <- df[keep, c(rv, pv), drop = FALSE]
-  if (nrow(df) != length(resid) || anyNA(df)) return(NULL)
-
-  y <- df[[rv]]
-  if (!is.numeric(y) || !all(is.finite(y))) return(NULL)
+  df <- df[keep, pv, drop = FALSE]
+  if (length(resp$y) != length(resid) || anyNA(df)) return(NULL)
 
   X <- if (length(pv) == 0L) {
     # An intercept-only model.  tr(MW) = -S0/n for any W with a zero diagonal,
     # so the residual moments reduce to E[I] = -1/(n - 1) exactly -- the
     # classical value -- which is a useful sanity check on the general path.
-    matrix(1, nrow(df), 1L, dimnames = list(NULL, "(Intercept)"))
+    matrix(1, length(resid), 1L, dimnames = list(NULL, "(Intercept)"))
   } else {
     tryCatch(
-      stats::model.matrix(~ ., data = df[, pv, drop = FALSE]),
+      stats::model.matrix(~ ., data = df),
       error = function(e) NULL
     )
   }
-  if (!is.matrix(X) || nrow(X) != nrow(df) || !all(is.finite(X))) return(NULL)
+  if (!is.matrix(X) || nrow(X) != length(resid) || !all(is.finite(X))) return(NULL)
 
-  e_ols <- tryCatch(qr.resid(qr(X), y), error = function(e) NULL)
-  if (is.null(e_ols) || length(e_ols) != length(resid)) return(NULL)
+  cf <- .lm_fit_centred(X, resp$yd)
+  if (inherits(cf$fit, "try-error")) return(NULL)
+  e_ols <- as.numeric(cf$fit$residuals)
+  if (length(e_ols) != length(resid) || !all(is.finite(e_ols))) return(NULL)
+  b <- cf$fit$coefficients
 
-  scale <- max(stats::sd(y), .Machine$double.eps)
-  list(X = X, is_ols = max(abs(resid - e_ols)) <= 1e-7 * scale)
+  # The test reads the residuals on the scale of the response it was fitted
+  # on, so it gives the same answer in any unit.  The rounding a regression
+  # of the raw response leaves is bounded on the size of its terms: the
+  # predictors as given (.rounding_design()) and the intercept with the
+  # response's centre put back.
+  dif <- resid / resp$s - e_ols
+  rd  <- .rounding_design(cf$X, b, cf$centres)
+  br  <- as.numeric(rd$b)
+  br[!is.finite(br)] <- 0
+  br[1L] <- br[1L] + resp$yc
+  size <- drop(abs(rd$X) %*% abs(br))
+  tol <- 1e-7 * .cell_sd(resp$ys)
+  is_ols <- max(abs(dif)) <= tol ||
+    sum(dif^2) <= (.FIT_EPS * .Machine$double.eps)^2 * sum(size^2)
+  if (!isTRUE(is_ols)) {
+    # The rounding lm() and lm.fit() leave on the raw columns grows with the
+    # rows (10 to 30 eps times the terms on 10,000 rows, 500 on 30,000), so
+    # a backend that regressed them is read against the same regression:
+    # qr() and qr.resid() are lm.fit()'s arithmetic, and the division by a
+    # power of two commutes with it.  Only where the raw design keeps the
+    # rank of the centred one: a backend that dropped a predictor at an
+    # offset does not return the OLS residuals on the design.
+    qx <- tryCatch(qr(X), error = function(e) NULL)
+    if (!is.null(qx) && identical(qx$rank, cf$fit$rank)) {
+      e_raw <- tryCatch(qr.resid(qx, resp$ys), error = function(e) NULL)
+      is_ols <- length(e_raw) == length(resid) && all(is.finite(e_raw)) &&
+        max(abs(resid / resp$s - e_raw)) <= tol
+    }
+  }
+  list(X = cf$X, is_ols = isTRUE(is_ols), b = b, centres = cf$centres)
+}
+
+
+#' Why a set of residuals leaves Moran's I unidentified
+#'
+#' Moran's I is a ratio of sums of the centred residuals, unchanged by
+#' their unit.  Residuals that do not vary, or vary by no more than the
+#' rounding of the response they are of, leave it a ratio of rounding.  The
+#' bound is that of \code{.residuals_rounding()}, read on the response and
+#' residuals of \code{.morans_response()}'s scale: where the residuals are
+#' the OLS residuals on the rebuilt design (\code{des$is_ols}), on the size
+#' of that fit's terms with the predictors as given, so that the residuals
+#' of an exact fit are refused at every scale and the reason names the exact
+#' fit; for any other residuals, on the response alone.  Without a response,
+#' or where the residuals divided by the response's power of two pass the
+#' largest double (so they are not its rounding), the residuals are read
+#' against their own rounding.
+#'
+#' @param resid The residuals.
+#' @param resp \code{.morans_response()}, or \code{NULL}.
+#' @param des \code{.morans_ols_design()}, or \code{NULL}.
+#' @return \code{NA} when the residuals vary, otherwise the reason as a
+#'   phrase.
+#' @keywords internal
+#' @noRd
+.morans_no_spread <- function(resid, resp, des) {
+  if (!is.null(resp) && !all(is.finite(resid / resp$s))) {
+    resp <- NULL
+    des  <- NULL
+  }
+  s  <- if (is.null(resp)) .pow2_below(max(abs(resid))) else resp$s
+  e  <- resid / s
+  ys <- if (is.null(resp)) e else resp$ys
+  yd <- if (is.null(resp)) e - mean(e) else resp$yd
+  if (!any(e - mean(e) != 0))
+    return("the residuals do not vary (zero residual variance)")
+  what <- if (is.null(resp)) "their own rounding" else
+    "the rounding of the response"
+  if (!is.null(des) && isTRUE(des$is_ols)) {
+    # OLS residuals within rounding: the design fits the response exactly.
+    rd <- .rounding_design(des$X, des$b, des$centres)
+    if (!.residuals_rounding(e, ys, yd, rd$X, rd$b)) return(NA_character_)
+    return(if (ncol(des$X) > 1L)
+      "the residuals are the rounding of an exact fit of the response on the predictors"
+    else "the response does not vary beyond its rounding")
+  }
+  if (.residuals_rounding(e, ys, yd))
+    return(paste("the residuals do not vary beyond", what))
+  NA_character_
 }
 
 
@@ -542,7 +697,20 @@
 #' \code{X}, regresses the response on it, and uses the residual moments only
 #' when the supplied residuals \emph{are} those OLS residuals to numerical
 #' tolerance.  A GWR wide enough to have collapsed to global OLS passes that
-#' test; the same GWR at a working bandwidth does not.
+#' test; the same GWR at a working bandwidth does not.  The response, and
+#' each predictor whose centre is more than 1000 times its spread, are taken
+#' about their centres before the regression, which leaves its residuals as
+#' they are, so a timestamp or a response at 1e10 gives the null, moments and
+#' rank \eqn{p} of the same columns at 0.  The supplied residuals pass where
+#' none differs from the OLS residuals by more than 1e-7 of the response's
+#' standard deviation, or where the differences are no more than the
+#' rounding a regression of the raw columns leaves: a root mean square of
+#' \eqn{10\epsilon} (\eqn{\epsilon} = \code{.Machine$double.eps}) times
+#' that of the fit's terms, the response's offset among them.  They also
+#' pass where none differs by more than 1e-7 of the response's standard
+#' deviation from the residuals \code{lm()} gives on the raw columns, where
+#' the raw design keeps the rank of the centred one: that rounding grows
+#' with the number of rows.
 #'
 #' \strong{For the flexible backends neither null is exact}, and \code{"auto"}
 #' leaves them on \code{"randomisation"} because forcing the OLS moments on
@@ -683,8 +851,18 @@
 #'   \code{residuals()} raised an error (its message is quoted), or returned
 #'   \code{NULL} and the response minus \code{fitted()} could not be
 #'   formed either (the reason is quoted), fewer than 4 valid
-#'   residuals, or a residual vector whose length does not match the fit's
-#'   \code{data_sf}.
+#'   residuals, a residual vector whose length does not match the fit's
+#'   \code{data_sf}, weights that sum to less than
+#'   \code{.Machine$double.eps}, or residuals that leave I a ratio of
+#'   rounding: they do not vary, or vary by no more than the rounding of the
+#'   response (a standard deviation of 3 units in the last place of its
+#'   largest value, or a root mean square of \eqn{10\epsilon} times that of
+#'   the response about its centre), or are the OLS residuals of an exact fit
+#'   of the response on the predictors (a root mean square of
+#'   \eqn{10\epsilon} times that of the fit's terms).
+#'   The test reads the residuals against the response, so residuals in
+#'   any unit are scored or refused alike, and I, z and the p-value do not
+#'   depend on the unit.
 #' @references Cliff, A. D. and Ord, J. K. (1981) \emph{Spatial Processes:
 #'   Models and Applications}. Pion, London. Section 8.3.
 #' @family model evaluation
@@ -854,7 +1032,7 @@ residual_morans_i <- function(fit,
     } else {
       W <- weights
       # Every moment below sums W.  One NA anywhere makes S0 NA, and the
-      # `S0 < eps || ss_c < eps` guard then fails with "missing value where
+      # `S0 < eps` guard then fails with "missing value where
       # TRUE/FALSE needed" after a log line reading "row sums range from NA to
       # NA".  The shape, diagonal and row-standardisation are all checked
       # above; finiteness was the one property that was not.
@@ -907,18 +1085,44 @@ residual_morans_i <- function(fit,
   }
   S0 <- sum(W)
 
-  # Moran's I is a function of the CENTRED residuals, so the degeneracy guard
-  # has to test their sum of squares rather than the raw one.  Constant
-  # non-zero residuals pass sum(resid^2) but give resid_c == 0, and the
-  # variance block below then computes m2 = 0 -> b2 = NaN -> VI = NaN, so
-  # `if (VI > 0)` raises "missing value where TRUE/FALSE needed" instead of
-  # this function returning NULL.
-  resid_c <- resid - mean(resid)
-  ss_c    <- sum(resid_c^2)
-  if (S0 < .Machine$double.eps || ss_c < .Machine$double.eps) {
-    .warn_and_log("residual_morans_i(): degenerate weights or zero residual variance.")
+  if (S0 < .Machine$double.eps) {
+    .warn_and_log(paste0("residual_morans_i(): degenerate weights: the weight ",
+                         "matrix sums to %s, so Moran's I is not defined."),
+                  format(S0, digits = 3))
     return(NULL)
   }
+
+  # The response and the rebuilt design, read for the test below whatever
+  # the null, so that the residuals are refused or scored the same way
+  # under each.
+  resp <- tryCatch(.morans_response(fit, ok), error = function(e) NULL)
+  des  <- tryCatch(.morans_ols_design(fit, resid, ok, resp),
+                   error = function(e) NULL)
+
+  # Moran's I is a ratio of sums of the CENTRED residuals, unchanged by their
+  # unit, and is not identified where they do not vary beyond rounding.  The
+  # test was an absolute floor on their sum of squares, so residuals of real
+  # spread in small units were refused as "zero residual variance", and the
+  # residuals of an exact fit in large units were scored.  It now reads the
+  # rounding of the response, and of an exact fit where the residuals are
+  # the OLS residuals on the rebuilt design (.morans_no_spread()).  Constant
+  # residuals are refused there too: centred they are all zero, and the
+  # kurtosis below would be NaN.
+  why <- .morans_no_spread(resid, resp, des)
+  if (!is.na(why)) {
+    .warn_and_log("residual_morans_i(): %s, so Moran's I is not identified.", why)
+    return(NULL)
+  }
+
+  # The sums below are taken on the residuals divided by the power of two at
+  # or below their largest absolute value, which is exact and leaves I as
+  # it is, so that the squares and fourth powers neither underflow nor
+  # overflow, and the residuals in any power-of-two unit give the same
+  # numbers.  The kurtosis can move in the last bit against the unscaled
+  # residuals: x^4 is pow(), which does not commute with the division.
+  resid   <- resid / .pow2_below(max(abs(resid)))
+  resid_c <- resid - mean(resid)
+  ss_c    <- sum(resid_c^2)
 
   # --- Moran's I ---
   # sum(resid_c * (W %*% resid_c)) rather than crossprod(): see the dispatch
@@ -942,8 +1146,7 @@ residual_morans_i <- function(fit,
   # ?residual_morans_i, section "Which null, and when it is approximate", for
   # the measured size and power cost and for why "auto" refuses to apply the
   # OLS residual moments to a backend whose residuals are not OLS residuals.
-  des <- if (identical(null, "randomisation")) NULL else
-    .morans_ols_design(fit, resid, ok)
+  if (identical(null, "randomisation")) des <- NULL
 
   use_residual <- switch(null,
     randomisation = FALSE,

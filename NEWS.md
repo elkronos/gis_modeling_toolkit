@@ -3664,6 +3664,43 @@ old behaviour where there is a way.
   to the precision a double holds them to there.  Every response whose raw
   values show their spread gives the numbers it gave.
 
+* **`residual_morans_i()` read its response, design and residuals at their
+  origin and unit.**  It rebuilt the design and regressed the response on
+  the raw columns to test whether the residuals are OLS residuals, and gave
+  the same design to the residual moments.  A predictor at 1e8 plus a spread
+  of 1 was dropped by the QR, so the moments had rank 1, and a response at
+  1e8 left the rounding of the offset in the reference residuals.  On 300
+  points with OLS residuals that are the same at every offset, `null =
+  "auto"` used the randomisation null with nothing said (`exact` `FALSE`, z
+  28.24 where offset 0 gives 28.25), and `null = "residual"` logged that the
+  residuals were not OLS residuals.  The tolerance of that test was 1e-7
+  times `max(sd(y), .Machine$double.eps)`, so for a response whose standard
+  deviation is below about 1e-22 it passed residuals that are not OLS
+  residuals.  The test for residuals with no spread was an absolute floor on
+  their sum of squares: residuals of real spread whose sum of squares was
+  below `.Machine$double.eps` (a standard deviation of 1e-9 on 200 rows)
+  were refused with the warning "degenerate weights or zero residual
+  variance", and `compare_models()` gave `NA` Moran's I columns for them,
+  while the residuals of an exact fit multiplied by 2^20 were scored.  Now
+  the response is taken about its centre and the predictors at an offset
+  about theirs, as in the other OLS fits, and the moments read that
+  design.  Residuals pass as OLS residuals within 1e-7 of the response's
+  standard deviation, read at any size, of the OLS residuals about the
+  centres or of those `lm()` gives on the raw columns where the raw design
+  keeps the rank, or within the rounding a regression of the raw columns
+  leaves, so a backend that regressed the raw response at an offset passes
+  too, on any number of rows.  Residuals are refused where they do not vary beyond
+  the rounding of the response, or where they are the OLS residuals of an
+  exact fit, the bound `resolution_profile()` and `estimate_sac_range()`
+  read; the warning names that cause, and degenerate weights have their
+  own.  The sums are taken on the residuals divided by a power of two, so I,
+  z and the p-value are the same in every unit.  `compare_models()` and the
+  residual check of `fit_bayesian_spatial_model()` read the same function.  A
+  fit whose columns show their spread, with residuals above the bound, gives
+  the numbers it gave, except that the kurtosis, and through it the
+  randomisation variance, can differ in the last bit: R takes the fourth
+  power with `pow()`, which does not commute with the division.
+
 * **The print of a profile of one level read "1 levels" and "WSS rises at 0
   step(s)".**  Every default profile has one level.  The print now reads "1
   level", and leaves out the count of steps the WSS curve rises at when
