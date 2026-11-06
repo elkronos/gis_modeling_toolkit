@@ -199,9 +199,12 @@ test_that("coerce_to_points() and prep_model_data() keep their own words", {
     e <- tryCatch(.pc_quiet(prep_model_data(bad, "v", "x1", pointize = pz)),
                   error = function(e) e)
     expect_match(conditionMessage(e), "^prep_model_data\\(\\): .* of `data_sf` \\(row 3; ")
-    expect_match(conditionMessage(e),
-                 if (pz == "auto") "Or pass pointize = \"point_on_surface\", which takes"
-                 else "Or pass pointize = \"auto\", which takes", fixed = TRUE)
+    # Row 3 is a collection, which pointize = "auto" takes the centroid of
+    # and refuses again, so "auto" is not offered under "centroid" either
+    # (BUG-190).
+    expect_match(conditionMessage(e), "Or pass pointize = \"point_on_surface\", which takes",
+                 fixed = TRUE)
+    expect_false(grepl("pointize = \"auto\"", conditionMessage(e), fixed = TRUE))
     expect_false(grepl("reduce `data_sf` to points first", conditionMessage(e), fixed = TRUE))
   }
 })

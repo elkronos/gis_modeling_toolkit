@@ -2511,12 +2511,18 @@ coerce_to_points <- function(
   # the call.  One s2 refuses even then (crossing
   # edges, a figure eight) stops the call with the features' class, naming
   # its rows of `x`.  It is not repaired: its centroid would be that of
-  # another shape.
+  # another shape.  The message offers mode "auto" only when every row
+  # refused is a POLYGON or MULTIPOLYGON, which "auto" reduces with a point
+  # on the surface; "auto" takes the centroid of a collection, through this
+  # function, and refuses the same row again.  The case is kept on the
+  # condition (auto_helps) for the callers that raise it again.
   centroids_of <- function(sub, rows) {
     sc <- .s2_centroids(sub, split = FALSE)
     if (length(sc$refused)) {
       bad  <- rows[sc$refused]
       why  <- .s2_refused_rows(sub[sc$refused])
+      auto_helps <- all(as.character(sf::st_geometry_type(
+        sub[sc$refused], by_geometry = TRUE)) %in% c("POLYGON", "MULTIPOLYGON"))
       .raise_cells_degenerate(
         sc$error, bad,
         if (!is.null(why) && length(why$reasons) == length(bad)) why$reasons
@@ -2524,10 +2530,11 @@ coerce_to_points <- function(
         length(g), "coerce_to_points", "`x`", "sf::st_centroid()",
         "call coerce_to_points() again; the centroids are then taken in that CRS",
         of = sprintf("the %d features of `x`", length(g)), kind = "features",
-        more = if (mode == "auto")
+        more = if (mode == "auto" || !auto_helps)
           "Or pass mode = \"point_on_surface\", which takes a point on each geometry with GEOS."
         else
-          "Or pass mode = \"auto\", which takes a point on the surface of each polygon with GEOS.")
+          "Or pass mode = \"auto\", which takes a point on the surface of each polygon with GEOS.",
+        auto_helps = auto_helps)
     }
     # A centroid GEOS puts outside its feature (a ring whose edges cross,
     # a hole outside its shell) is refused, naming its rows of `x`; it was

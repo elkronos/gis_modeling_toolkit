@@ -528,3 +528,170 @@ test_that("compare_models_cv() and the cv_*() functions name `data_sf` and its r
   # With a repeated vertex the call runs, on the centroid of the same ring.
   expect_no_error(.sc_quiet(cv_rf(.sc_layer(.sc_rep), "v", "x1", k = 3, pointize = "centroid")))
 })
+
+# ---- BUG-190: the remedy offered names a mode that runs on the rows refused --
+# Under mode "centroid" (pointize = "centroid") the refusal offered mode
+# "auto" for every row.  "auto" takes a point on the surface of a POLYGON or
+# MULTIPOLYGON, but the centroid of a collection, so a collection row it was
+# offered for was refused again with the same reason.
+
+.sc_coll <- function(maker, rows = 3L) {
+  x <- .sc_layer()
+  for (r in rows) {
+    bb <- sf::st_bbox(sf::st_geometry(x)[r])
+    sf::st_geometry(x)[r] <- sf::st_geometrycollection(list(maker(bb[["xmin"]], bb[["ymin"]])))
+  }
+  x
+}
+
+test_that("a collection row refused under centroid offers point_on_surface, which runs", {
+  .sc_s2(TRUE)
+  for (maker in list(.sc_bow, .sc_fig8)) {
+    x <- .sc_coll(maker)
+    e <- tryCatch(coerce_to_points(x, "centroid"), error = function(e) e)
+    expect_s3_class(e, "spatialkit_features_degenerate")
+    expect_identical(e$rows, 3L)
+    expect_identical(e$n, 20L)
+    expect_false(e$auto_helps)
+    expect_match(conditionMessage(e), paste0(
+      "Or pass mode = \"point_on_surface\", which takes a point on each geometry ",
+      "with GEOS.$"))
+    expect_false(grepl("mode = \"auto\"", conditionMessage(e), fixed = TRUE))
+    expect_match(conditionMessage(e), "Transform `x` to a projected CRS", fixed = TRUE)
+    expect_no_error(.sc_quiet(coerce_to_points(x, "point_on_surface")))
+    e <- tryCatch(.sc_quiet(prep_model_data(x, "v", "x1", pointize = "centroid")),
+                  error = function(e) e)
+    expect_s3_class(e, "spatialkit_features_degenerate")
+    expect_identical(e$rows, 3L)
+    expect_false(e$auto_helps)
+    expect_match(conditionMessage(e), paste0(
+      "^prep_model_data\\(\\): s2, .* refuses 1 of the 20 features of `data_sf` ",
+      "\\(row 3; "))
+    expect_match(conditionMessage(e), paste0(
+      "Or pass pointize = \"point_on_surface\", which takes a point on each geometry ",
+      "with GEOS.$"))
+    expect_false(grepl("pointize = \"auto\"", conditionMessage(e), fixed = TRUE))
+    expect_no_error(.sc_quiet(prep_model_data(x, "v", "x1", pointize = "point_on_surface")))
+  }
+})
+
+test_that("compare_models_cv() offers pointize = \"point_on_surface\" for a collection row", {
+  skip_if_not_installed("ranger")
+  .sc_s2(TRUE)
+  x <- .sc_coll(.sc_bow)
+  e <- tryCatch(.sc_quiet(compare_models_cv(x, "v", "x1", models = "RF", k = 3,
+                                            pointize = "centroid", quiet = TRUE)),
+                error = function(e) e)
+  expect_s3_class(e, "spatialkit_features_degenerate")
+  expect_identical(e$rows, 3L)
+  expect_match(conditionMessage(e),
+               "^compare_models_cv\\(\\): s2, .* refuses 1 of the 20 features of `data_sf` \\(row 3; ")
+  expect_match(conditionMessage(e), "Or pass pointize = \"point_on_surface\"", fixed = TRUE)
+  expect_false(grepl("pointize = \"auto\"", conditionMessage(e), fixed = TRUE))
+  expect_no_error(.sc_quiet(compare_models_cv(x, "v", "x1", models = "RF", k = 3,
+                                              pointize = "point_on_surface", quiet = TRUE)))
+})
+
+test_that("POLYGON and MULTIPOLYGON rows refused under centroid still offer auto, which runs", {
+  .sc_s2(TRUE)
+  mbow <- function(x0, y0, d = 0.1) sf::st_multipolygon(list(unclass(.sc_bow(x0, y0, d))))
+  for (maker in list(.sc_bow, .sc_fig8, mbow)) {
+    x <- .sc_layer(maker)
+    for (mode in c("centroid", "line_midpoint")) {
+      e <- tryCatch(coerce_to_points(x, mode), error = function(e) e)
+      expect_s3_class(e, "spatialkit_features_degenerate")
+      expect_identical(e$rows, 6L)
+      expect_true(e$auto_helps)
+      expect_match(conditionMessage(e), paste0(
+        "Or pass mode = \"auto\", which takes a point on the surface of each polygon ",
+        "with GEOS.$"))
+    }
+    e <- tryCatch(prep_model_data(x, "v", "x1", pointize = "centroid"), error = function(e) e)
+    expect_true(e$auto_helps)
+    expect_match(conditionMessage(e), paste0(
+      "Or pass pointize = \"auto\", which takes a point on the surface of each polygon ",
+      "with GEOS.$"))
+    expect_no_error(.sc_quiet(coerce_to_points(x, "auto")))
+    expect_no_error(.sc_quiet(prep_model_data(x, "v", "x1", pointize = "auto")))
+  }
+})
+
+test_that("a refused POLYGON row beside a refused collection row offers point_on_surface", {
+  .sc_s2(TRUE)
+  x <- .sc_coll(.sc_bow)
+  sf::st_geometry(x)[6] <- .sc_bow(-93.5, 39)
+  e <- tryCatch(coerce_to_points(x, "centroid"), error = function(e) e)
+  expect_s3_class(e, "spatialkit_features_degenerate")
+  expect_identical(e$rows, c(3L, 6L))
+  expect_false(e$auto_helps)
+  expect_match(conditionMessage(e), "Or pass mode = \"point_on_surface\"", fixed = TRUE)
+  expect_false(grepl("mode = \"auto\"", conditionMessage(e), fixed = TRUE))
+  e2 <- tryCatch(.sc_quiet(coerce_to_points(x, "auto")), error = function(e) e)
+  expect_identical(e2$rows, 3L)
+  e <- tryCatch(.sc_quiet(prep_model_data(x, "v", "x1", pointize = "centroid")),
+                error = function(e) e)
+  expect_identical(e$rows, c(3L, 6L))
+  expect_match(conditionMessage(e), "Or pass pointize = \"point_on_surface\"", fixed = TRUE)
+  expect_false(grepl("pointize = \"auto\"", conditionMessage(e), fixed = TRUE))
+  expect_no_error(.sc_quiet(prep_model_data(x, "v", "x1", pointize = "point_on_surface")))
+})
+
+test_that("a collection row s2 accepts does not change the offer for a refused POLYGON row", {
+  .sc_s2(TRUE)
+  # Row 6 a bowtie POLYGON (refused), row 3 a collection holding a plain
+  # square (accepted): only the refused rows decide the offer.
+  x <- .sc_layer(.sc_bow)
+  bb <- sf::st_bbox(sf::st_geometry(x)[3])
+  sf::st_geometry(x)[3] <- sf::st_geometrycollection(list(.sc_sq(bb[["xmin"]], bb[["ymin"]])))
+  e <- tryCatch(coerce_to_points(x, "centroid"), error = function(e) e)
+  expect_s3_class(e, "spatialkit_features_degenerate")
+  expect_identical(e$rows, 6L)
+  expect_true(e$auto_helps)
+  expect_match(conditionMessage(e), paste0(
+    "Or pass mode = \"auto\", which takes a point on the surface of each polygon ",
+    "with GEOS.$"))
+  e <- tryCatch(.sc_quiet(prep_model_data(x, "v", "x1", pointize = "centroid")),
+                error = function(e) e)
+  expect_s3_class(e, "spatialkit_features_degenerate")
+  expect_identical(e$rows, 6L)
+  expect_true(e$auto_helps)
+  expect_match(conditionMessage(e), paste0(
+    "Or pass pointize = \"auto\", which takes a point on the surface of each polygon ",
+    "with GEOS.$"))
+  expect_no_error(.sc_quiet(coerce_to_points(x, "auto")))
+  expect_no_error(.sc_quiet(prep_model_data(x, "v", "x1", pointize = "auto")))
+})
+
+test_that("the refusal under mode auto, and a condition without auto_helps, read as before", {
+  .sc_s2(TRUE)
+  x <- .sc_coll(.sc_bow)
+  e <- tryCatch(.sc_quiet(coerce_to_points(x, "auto")), error = function(e) e)
+  expect_false(e$auto_helps)
+  expect_match(conditionMessage(e), paste0(
+    "Or pass mode = \"point_on_surface\", which takes a point on each geometry ",
+    "with GEOS.$"))
+  e <- tryCatch(.sc_quiet(prep_model_data(x, "v", "x1", pointize = "auto")),
+                error = function(e) e)
+  expect_match(conditionMessage(e), paste0(
+    "Or pass pointize = \"point_on_surface\", which takes a point on each geometry ",
+    "with GEOS.$"))
+  e <- tryCatch(.sc_quiet(prep_model_data(x, "v", "x1")), error = function(e) e)
+  expect_match(conditionMessage(e), "Or pass pointize = \"point_on_surface\"", fixed = TRUE)
+  # The callers that take no `pointize` keep their words.
+  e <- tryCatch(.sc_quiet(make_folds(x, k = 3, method = "random")), error = function(e) e)
+  expect_s3_class(e, "spatialkit_features_degenerate")
+  expect_match(conditionMessage(e), paste0(
+    "Or reduce `points_sf` to points first, for example with ",
+    "coerce_to_points(points_sf, \"point_on_surface\")"), fixed = TRUE)
+  # A condition raised without the field (another caller) keeps the offer
+  # of "auto" under another pointize.
+  parent <- simpleError("Loop 0 is not valid: Edge 0 crosses edge 2")
+  old <- errorCondition("x", class = "spatialkit_features_degenerate", rows = 2L, n = 5L,
+                        reasons = "Loop 0 is not valid: Edge 0 crosses edge 2",
+                        parent = parent)
+  e <- tryCatch(.pointize_refused(old, "prep_model_data", "centroid"), error = function(e) e)
+  expect_null(e$auto_helps)
+  expect_match(conditionMessage(e), paste0(
+    "Or pass pointize = \"auto\", which takes a point on the surface of each polygon ",
+    "with GEOS.$"))
+})

@@ -3203,7 +3203,11 @@ old behaviour where there is a way.
   gives its rows (`rows` on the condition), quotes s2, and says to
   transform the layer to a projected CRS, or to pass another `mode` or
   `pointize`, or, in a function that takes neither, to reduce the layer to
-  points first.  Each function raises it in its own name, naming its
+  points first.  The `mode` or `pointize` it offers runs on the rows it
+  names: `"auto"` when each is a polygon or multipolygon, which `"auto"`
+  reduces with a point on the surface, and `"point_on_surface"` when one
+  is a collection, which `"auto"` takes the centroid of and refuses
+  again.  Each function raises it in its own name, naming its
   argument and that argument's rows: `prep_model_data()`,
   `compare_models_cv()`, `resolution_profile()` and
   `determine_optimal_levels()` name `data_sf`, `make_folds()` `points_sf`

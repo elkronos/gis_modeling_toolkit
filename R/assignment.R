@@ -1053,10 +1053,17 @@ assign_features_to_polygons <- function(
 #' @param site A word stored on the condition as \code{site}, which tells a
 #'   caller that raises it again in its own words which polygons were
 #'   refused; \code{NULL} for none.
+#' @param auto_helps Whether every row refused is a POLYGON or MULTIPOLYGON,
+#'   which mode \code{"auto"} of \code{coerce_to_points()} reduces with a
+#'   point on the surface, so a caller that raises the error again offers
+#'   \code{"auto"}; \code{FALSE} when a row is another type (a collection),
+#'   which \code{"auto"} takes the centroid of and refuses again.  Stored on
+#'   the condition as \code{auto_helps}; \code{NULL} stores nothing.
 #' @return Does not return.  The condition carries \code{rows}, \code{n},
 #'   \code{reasons}, \code{parent}, \code{repaired} and \code{s2_forced},
-#'   \code{features_rows} when \code{also} is given, and \code{site} when
-#'   \code{site} is given.
+#'   \code{features_rows} when \code{also} is given, \code{site} when
+#'   \code{site} is given, and \code{auto_helps} when \code{auto_helps} is
+#'   given.
 #' @keywords internal
 #' @noRd
 .raise_cells_degenerate <- function(parent, rows, reasons, n, caller, layer, task, again,
@@ -1065,7 +1072,8 @@ assign_features_to_polygons <- function(
                                     also = NULL, fixable = FALSE, s2_forced = FALSE,
                                     advise_predicate = FALSE, more = NULL,
                                     pick = "the one ensure_projected() picks for it",
-                                    source = NULL, remedy = NULL, site = NULL) {
+                                    source = NULL, remedy = NULL, site = NULL,
+                                    auto_helps = NULL) {
   kind <- match.arg(kind)
   said <- trimws(strsplit(conditionMessage(parent), "\n", fixed = TRUE)[[1L]][1L])
   rows_text <- function(r) {
@@ -1160,6 +1168,7 @@ assign_features_to_polygons <- function(
                  repaired = isTRUE(repaired), s2_forced = isTRUE(s2_forced))
   if (!is.null(also)) fields$features_rows <- also$rows
   if (!is.null(site)) fields$site <- site
+  if (!is.null(auto_helps)) fields$auto_helps <- isTRUE(auto_helps)
   stop(do.call(errorCondition, c(list(msg, class = paste0("spatialkit_", kind, "_degenerate"),
                                       call = NULL), fields)))
 }

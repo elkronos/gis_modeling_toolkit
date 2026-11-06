@@ -781,6 +781,10 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
                "geometry with GEOS, or repair the features with sf::st_make_valid() ",
                "and run the call again."))
   }
+  # pointize = "auto" is offered only when every row refused is a POLYGON
+  # or MULTIPOLYGON (auto_helps): "auto" takes the centroid of a collection
+  # and refuses the same row again.  A condition without the field keeps
+  # the offer.
   .raise_cells_degenerate(
     e$parent, rows, e$reasons, n, caller, arg, "sf::st_centroid()",
     "run the call again; the centroids are then taken in that CRS",
@@ -789,12 +793,13 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
       sprintf(paste0("Or reduce %s to points first, for example with ",
                      "coerce_to_points(%s, \"point_on_surface\"), which takes a point ",
                      "on each geometry with GEOS."), arg, gsub("`", "", arg, fixed = TRUE))
-    else if (identical(pointize, "auto"))
+    else if (identical(pointize, "auto") || isFALSE(e$auto_helps))
       paste0("Or pass pointize = \"point_on_surface\", which takes a point on ",
              "each geometry with GEOS.")
     else
       paste0("Or pass pointize = \"auto\", which takes a point on the ",
-             "surface of each polygon with GEOS."))
+             "surface of each polygon with GEOS."),
+    auto_helps = e$auto_helps)
 }
 
 
