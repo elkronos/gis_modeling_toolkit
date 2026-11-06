@@ -128,6 +128,26 @@
 }
 
 
+#' Whether an Albers conic with these standard parallels is a candidate
+#'
+#' The cone constant must be at least 0.05 in absolute value (parallels that
+#' straddle the equator degenerate, and PROJ refuses lat_1 = -lat_2), and
+#' both parallels must lie between -90 and 90: the fallback parallels
+#' \code{lat - 5} and \code{lat + 5} pass a pole when the centre is within 5
+#' degrees of it, and PROJ refuses them.  A conic at a pole is the polar
+#' azimuthal case, which the Lambert azimuthal candidate centred there
+#' covers.
+#'
+#' @param lat1,lat2 Standard parallels in degrees.
+#' @return \code{TRUE} or \code{FALSE}.
+#' @keywords internal
+#' @noRd
+.albers_parallels_ok <- function(lat1, lat2) {
+  cone_n <- (sin(lat1 * pi / 180) + sin(lat2 * pi / 180)) / 2
+  isTRUE(is.finite(cone_n) && abs(cone_n) >= 0.05 &&
+           abs(lat1) <= 90 && abs(lat2) <= 90)
+}
+
 #' Pick a sensible local projected CRS for an sf/sfc object
 #'
 #' Chooses an appropriate projected coordinate reference system for spatial
@@ -172,6 +192,8 @@
 #' part, \code{.located_vertices()}).  One that does not gets
 #' \code{distance_error} \code{NA}, is not chosen, and the log line names
 #' it.  When no candidate places every vertex, the global fallback is used.
+#' The Albers candidate is built only where \code{.albers_parallels_ok()}
+#' holds for its standard parallels.
 #'
 #' @param x An sf or sfc object.
 #' @return A list with \code{crs} (the chosen \code{sf::crs}) and
@@ -462,12 +484,11 @@
     if (!is.finite(lat1) || !is.finite(lat2) || isTRUE(all.equal(lat1, lat2))) {
       lat1 <- lat - 5; lat2 <- lat + 5
     }
-    cone_n <- (sin(lat1 * pi / 180) + sin(lat2 * pi / 180)) / 2
     cands <- list(list(
       name = sprintf("Lambert azimuthal equal-area centred on (%.1f, %.1f)", lon, lat),
       crs = sf::st_crs(sprintf(
         "+proj=laea +lat_0=%f +lon_0=%f +datum=WGS84 +units=m +no_defs", lat, lon))))
-    if (is.finite(cone_n) && abs(cone_n) >= 0.05) {
+    if (.albers_parallels_ok(lat1, lat2)) {
       cands <- c(cands, list(list(
         name = sprintf("Albers equal-area (lat_1=%.1f, lat_2=%.1f, lon_0=%.1f)",
                        lat1, lat2, lon),
@@ -516,7 +537,6 @@
     if (!is.finite(lat1) || !is.finite(lat2) || isTRUE(all.equal(lat1, lat2))) {
       lat1 <- lat - 5; lat2 <- lat + 5
     }
-    cone_n <- (sin(lat1 * pi / 180) + sin(lat2 * pi / 180)) / 2
 
     cands <- list(
       list(name = sprintf("UTM zone %d", cand_zone), crs = sf::st_crs(utm_epsg)),
@@ -527,9 +547,11 @@
              lat, lon)))
     )
     # A conic whose parallels straddle the equator is not merely poor, it is
-    # degenerate: |lat_1 + lat_2| = 0 is rejected by PROJ outright.  Leave it
-    # out of the comparison rather than letting st_crs() raise.
-    if (is.finite(cone_n) && abs(cone_n) >= 0.05) {
+    # degenerate: |lat_1 + lat_2| = 0 is rejected by PROJ outright.  Fallback
+    # parallels that pass a pole (a centre within 5 degrees of it) are
+    # rejected too.  Leave such a conic out of the comparison rather than
+    # letting st_crs() raise.
+    if (.albers_parallels_ok(lat1, lat2)) {
       cands <- c(cands, list(list(
         name = sprintf("Albers equal-area (lat_1=%.1f, lat_2=%.1f, lon_0=%.1f)",
                        lat1, lat2, lon),
@@ -1956,8 +1978,8 @@
 #'     ranges, block sizes, GWR bandwidths and GP length-scales. Which
 #'     projection is actually best is then **measured, not assumed**: the zone,
 #'     a Lambert azimuthal equal-area centred on the data and (where its
-#'     standard parallels do not degenerate) an Albers conic are each scored by
-#'     projecting representative points of the data (a non-POINT layer is
+#'     standard parallels do not degenerate or pass a pole) an Albers conic are
+#'     each scored by projecting representative points of the data (a non-POINT layer is
 #'     reduced to one point per feature, plus the vertices of its outline when
 #'     fewer than 40 distinct points remain, so a single study-area polygon is
 #'     scored too, however many rows repeat it; copies of one location count
@@ -2039,8 +2061,9 @@
 #'   per cell are going to be computed, so the CRS must be equal-area.  For
 #'   lon/lat input the choice is then made among equal-area projections only:
 #'   a Lambert azimuthal centred on the data, or an Albers conic where its
-#'   parallels do not degenerate, whichever distorts distances less.  A UTM
-#'   zone (conformal, not equal-area) never enters that comparison, and global
+#'   parallels do not degenerate or pass a pole, whichever distorts distances
+#'   less.  A UTM zone (conformal, not equal-area) never enters that
+#'   comparison, and global
 #'   coverage gets Equal Earth in place of Web Mercator.  Already-projected
 #'   input is still returned untouched, but its area distortion over the
 #'   extent is measured (the spread of planar-to-geodesic area ratios over

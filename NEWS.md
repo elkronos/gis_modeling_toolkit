@@ -1983,6 +1983,24 @@ old behaviour where there is a way.
   has such a vertex gets the global fallback, and the log line says so.
   Layers with no latitude beyond 90 get the CRS they got.
 
+* **`ensure_projected()` stopped with "invalid crs" on a lon/lat layer
+  whose box has no height and whose centre lies within 5 degrees of a
+  pole.**  On such a box the Albers candidate's standard parallels are 5
+  degrees either side of the centre on the sphere, and a line along one
+  parallel that spans 180 degrees of longitude, such as `LINESTRING (0 45,
+  180 45)`, runs over the pole, so its centre is the pole and the
+  parallels were 85 and 95, which PROJ refuses.  With `purpose = "area"`
+  every such layer stopped, a single point included; with `purpose =
+  "distance"` such a layer stopped where it reaches more than 5 degrees
+  from its UTM zone's central meridian.  Every function that moves such a
+  layer through `ensure_projected()` stopped with it.  The Albers
+  candidate is now built only when both standard parallels lie between
+  -90 and 90; otherwise it is left out of the comparison, as a degenerate
+  cone is.  The line gets the Lambert azimuthal CRS centred on the pole,
+  and a point at (10, 89) with `purpose = "area"` gets the one centred on
+  it.  Layers whose parallels lie in that range get the CRS and the
+  `crs_choice` they got.
+
 * **A row of a lon/lat layer with a coordinate that is not finite or lies
   beyond 1e150 shaped the projection chosen for the other rows.**
   `ensure_projected()` read the extent, the longitudes of the antimeridian

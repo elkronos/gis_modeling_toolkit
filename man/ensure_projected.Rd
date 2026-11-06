@@ -21,8 +21,9 @@ length-scales read off the coordinates.  \code{"area"}: densities or rates
 per cell are going to be computed, so the CRS must be equal-area.  For
 lon/lat input the choice is then made among equal-area projections only:
 a Lambert azimuthal centred on the data, or an Albers conic where its
-parallels do not degenerate, whichever distorts distances less.  A UTM
-zone (conformal, not equal-area) never enters that comparison, and global
+parallels do not degenerate or pass a pole, whichever distorts distances
+less.  A UTM zone (conformal, not equal-area) never enters that
+comparison, and global
 coverage gets Equal Earth in place of Web Mercator.  Already-projected
 input is still returned untouched, but its area distortion over the
 extent is measured (the spread of planar-to-geodesic area ratios over
@@ -96,8 +97,8 @@ several percent, and that error propagates straight into variogram
 ranges, block sizes, GWR bandwidths and GP length-scales. Which
 projection is actually best is then \strong{measured, not assumed}: the zone,
 a Lambert azimuthal equal-area centred on the data and (where its
-standard parallels do not degenerate) an Albers conic are each scored by
-projecting representative points of the data (a non-POINT layer is
+standard parallels do not degenerate or pass a pole) an Albers conic are
+each scored by projecting representative points of the data (a non-POINT layer is
 reduced to one point per feature, plus the vertices of its outline when
 fewer than 40 distinct points remain, so a single study-area polygon is
 scored too, however many rows repeat it; copies of one location count
