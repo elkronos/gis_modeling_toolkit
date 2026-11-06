@@ -28,9 +28,12 @@
 #' reference.  \code{max_fits} caps that (default 60: room for up to eleven
 #' sizes at \code{k = 5} plus the reference; the default six-size ladder at
 #' \code{k = 5} needs at most 35).  A sweep that would run past the cap
-#' refuses to start, naming the number of fits it would have needed.  Raise
-#' \code{max_fits} deliberately; the RF example below takes seconds, a Bayesian
-#' \code{fit_fn} takes minutes per fit.
+#' refuses to start, naming the number of fits it would have needed; lower
+#' \code{n_sizes} or \code{k} to cut it (with \code{block_sizes}
+#' supplied: pass fewer \code{block_sizes} or a smaller \code{k}), or pass
+#' \code{include_random = FALSE} when the count includes the reference.
+#' Raise \code{max_fits} deliberately; the RF example below takes seconds, a
+#' Bayesian \code{fit_fn} takes minutes per fit.
 #'
 #' @section The ladder:
 #' When \code{block_sizes} is \code{NULL}, \code{n_sizes} values are
@@ -42,7 +45,9 @@
 #' enough in the other direction; on a roughly square extent at the default
 #' \code{k = 5} the top is about a third of the side.  Any size at which the
 #' grid would hold more than the 1,000,000 \code{make_folds()} will build is
-#' dropped.  The count is of grid cells: on clustered data a grid
+#' dropped; when that drops every size, the sweep refuses and names the
+#' largest size whose grid holds \code{k} blocks, to pass as
+#' \code{block_sizes}.  The count is of grid cells: on clustered data a grid
 #' of \code{k} or more cells can have fewer than \code{k} that hold points,
 #' and \code{make_folds()} then lowers \code{k} at that size, which the
 #' \code{k} column shows; the sweep warns once, naming the sizes.  On an extent much longer than it is wide every
@@ -116,7 +121,9 @@
 #'   the random reference).  Attributes: \code{metric}, \code{sac_range} (the
 #'   effective range, or \code{NA}), \code{crs}, \code{k} (the folds
 #'   requested, which \code{print()} and \code{plot()} report),
-#'   \code{n_fits}, \code{response_var}, and \code{results}, the full
+#'   \code{n_fits} (the fits planned, which the \code{max_fits} check
+#'   reads; \code{print()} and \code{plot()} count the fits made from the
+#'   \code{k} column), \code{response_var}, and \code{results}, the full
 #'   \code{cv_spatial()} result at every size.
 #'   \code{plot()} draws it.
 #' @family cross-validation
@@ -236,6 +243,7 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
     .log_info("cv_block_size_sweep(): dropping %d block size(s) whose grid would exceed %s blocks: %s.",
               sum(too_fine), format(.block_max_cells, big.mark = ",", scientific = FALSE),
               paste(signif(block_sizes[too_fine], 3), collapse = ", "))
+  ladder <- block_sizes
   dropped <- block_sizes[n_blocks < k]
   block_sizes <- block_sizes[n_blocks >= k & !too_fine]
   # Sizes the caller chose are not dropped behind a log line: the table would
@@ -257,20 +265,49 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
     .log_info("cv_block_size_sweep(): dropping %d block size(s) whose grid holds fewer than k = %d blocks: %s.",
               length(dropped), k, paste(signif(dropped, 3), collapse = ", "))
   }
+  # On the default ladder the rungs fall out for holding too many blocks, not
+  # too few: on a transect a hair wide every rung, built from the shorter
+  # side, is below what make_folds() will build.  The refusal advised
+  # "smaller `block_sizes`" to a caller who passed none, and smaller sizes
+  # are refused; larger ones run.
+  if (!length(block_sizes) && default_ladder && all(too_fine)) {
+    b_max <- .sweep_largest_size_for_k(bb, k)
+    stop(sprintf(paste0("cv_block_size_sweep(): every size of the default ladder ",
+                        "(%s to %s) would need a grid of more than %s blocks over ",
+                        "the %s x %s extent (in %s units), which make_folds() ",
+                        "refuses. Pass larger `block_sizes`%s."),
+                 format(signif(min(ladder), 3)), format(signif(max(ladder), 3)),
+                 format(.block_max_cells, big.mark = ",", scientific = FALSE),
+                 signif(w, 3), signif(h, 3), crs_lbl,
+                 if (is.finite(b_max))
+                   sprintf("; the largest size whose grid holds k = %d blocks is %s",
+                           k, format(.signif_down(b_max)))
+                 else ""), call. = FALSE)
+  }
   if (!length(block_sizes))
     stop("cv_block_size_sweep(): no block size leaves at least k = ", k,
          " blocks over the extent (", signif(w, 3), " x ", signif(h, 3),
-         "); pass smaller `block_sizes` or a smaller `k`.", call. = FALSE)
+         "); pass ", if (default_ladder) "`block_sizes`" else "smaller `block_sizes`",
+         " or a smaller `k`.", call. = FALSE)
 
   n_fits <- length(block_sizes) * k + if (isTRUE(include_random)) k else 0L
+  # `n_sizes` is read only for the default ladder.  With `block_sizes`
+  # supplied the refusal advised lowering it, which changed nothing; the
+  # count there is cut by fewer sizes or a smaller k.  On either ladder the
+  # random reference, when the count includes it, can be dropped.
   if (n_fits > max_fits)
     stop(sprintf(paste0("cv_block_size_sweep(): %d block sizes x %d folds%s = %d ",
                         "model fits, above the budget max_fits = %d. Raise ",
-                        "`max_fits` if that cost is intended, or lower ",
-                        "`n_sizes` or `k`."),
+                        "`max_fits` if that cost is intended, or %s."),
                  length(block_sizes), k,
                  if (isTRUE(include_random)) sprintf(" + %d for the random reference", k) else "",
-                 n_fits, as.integer(max_fits)), call. = FALSE)
+                 n_fits, as.integer(max_fits),
+                 if (default_ladder && isTRUE(include_random))
+                   "lower `n_sizes` or `k`, or pass include_random = FALSE"
+                 else if (default_ladder) "lower `n_sizes` or `k`"
+                 else if (isTRUE(include_random))
+                   "pass fewer `block_sizes`, a smaller `k` or include_random = FALSE"
+                 else "pass fewer `block_sizes` or a smaller `k`"), call. = FALSE)
 
   # The autocorrelation range to mark: supplied, or estimated once here.
   sac_range <- NA_real_
@@ -514,6 +551,20 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
 }
 
 
+#' The fits a sweep made
+#'
+#' The sum of the \code{k} column: the folds built at each size, and once
+#' for the random reference.  \code{attr(x, "n_fits")} is the count planned
+#' before any fold was built, which the \code{max_fits} check reads; a size
+#' whose grid has fewer than \code{k} cells holding points builds fewer.
+#'
+#' @param x A \code{block_size_sweep}.
+#' @return A single integer.
+#' @keywords internal
+#' @noRd
+.sweep_fits_made <- function(x) as.integer(sum(x$k, na.rm = TRUE))
+
+
 #' Re-express a length measured in one projected CRS in another
 #'
 #' Transforms two unit segments of length \code{r} (east-west and
@@ -558,8 +609,11 @@ print.block_size_sweep <- function(x, ...) {
     print(as.data.frame(unclass(x)), row.names = FALSE)
     return(invisible(x))
   }
+  # The fits made: the folds built at each size, from the `k` column.
+  # attr(x, "n_fits") is the count planned before any fold was built; it
+  # exceeds the fits made when a size builds fewer than k folds.
   cat(sprintf("Cross-validation %s against block size (%d fits, k = %d, sizes in %s)\n",
-              metric, attr(x, "n_fits"), attr(x, "k"), attr(x, "crs") %||% "CRS units"))
+              metric, .sweep_fits_made(x), attr(x, "k"), attr(x, "crs") %||% "CRS units"))
   if (is.finite(r)) cat(sprintf("  estimated autocorrelation range: %.1f\n", r))
   else cat("  autocorrelation range: not identified\n")
   df <- as.data.frame(x)
@@ -642,8 +696,9 @@ plot.block_size_sweep <- function(x, ...) {
       else "Autocorrelation range not identified; no marker drawn",
       caption = paste(c(
         if (nrow(rnd)) sprintf("Dashed: random folds, %s = %.3g", metric, rnd$value[1L]),
-        sprintf("Band: fold-to-fold range; %d folds per size, %d fits in total; %s",
-                attr(x, "k"), attr(x, "n_fits"), .sweep_better(metric))),
+        sprintf("Band: fold-to-fold range; %s%d folds per size, %d fits in total; %s",
+                if (all(is.finite(df$k) & df$k == attr(x, "k"))) "" else "up to ",
+                attr(x, "k"), .sweep_fits_made(x), .sweep_better(metric))),
         collapse = "\n"),
       x = sprintf("Block edge length (%s, log scale)", unit), y = metric) +
     ggplot2::theme_minimal()

@@ -79,7 +79,9 @@ width and height of the grid cells built at that size, \code{NA} for
 the random reference).  Attributes: \code{metric}, \code{sac_range} (the
 effective range, or \code{NA}), \code{crs}, \code{k} (the folds
 requested, which \code{print()} and \code{plot()} report),
-\code{n_fits}, \code{response_var}, and \code{results}, the full
+\code{n_fits} (the fits planned, which the \code{max_fits} check
+reads; \code{print()} and \code{plot()} count the fits made from the
+\code{k} column), \code{response_var}, and \code{results}, the full
 \code{cv_spatial()} result at every size.
 \code{plot()} draws it.
 }
@@ -108,9 +110,12 @@ Each block size is a full cross-validation, so the cost is
 reference.  \code{max_fits} caps that (default 60: room for up to eleven
 sizes at \code{k = 5} plus the reference; the default six-size ladder at
 \code{k = 5} needs at most 35).  A sweep that would run past the cap
-refuses to start, naming the number of fits it would have needed.  Raise
-\code{max_fits} deliberately; the RF example below takes seconds, a Bayesian
-\code{fit_fn} takes minutes per fit.
+refuses to start, naming the number of fits it would have needed; lower
+\code{n_sizes} or \code{k} to cut it (with \code{block_sizes}
+supplied: pass fewer \code{block_sizes} or a smaller \code{k}), or pass
+\code{include_random = FALSE} when the count includes the reference.
+Raise \code{max_fits} deliberately; the RF example below takes seconds, a
+Bayesian \code{fit_fn} takes minutes per fit.
 }
 
 \section{The ladder}{
@@ -124,7 +129,9 @@ enough for \code{k} up to 4 and, for larger \code{k}, on an extent long
 enough in the other direction; on a roughly square extent at the default
 \code{k = 5} the top is about a third of the side.  Any size at which the
 grid would hold more than the 1,000,000 \code{make_folds()} will build is
-dropped.  The count is of grid cells: on clustered data a grid
+dropped; when that drops every size, the sweep refuses and names the
+largest size whose grid holds \code{k} blocks, to pass as
+\code{block_sizes}.  The count is of grid cells: on clustered data a grid
 of \code{k} or more cells can have fewer than \code{k} that hold points,
 and \code{make_folds()} then lowers \code{k} at that size, which the
 \code{k} column shows; the sweep warns once, naming the sizes.  On an extent much longer than it is wide every

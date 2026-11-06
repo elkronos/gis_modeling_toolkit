@@ -2287,6 +2287,25 @@ old behaviour where there is a way.
   the reductions of its sizes into one warning, and its table gains the
   columns `block_width` and `block_height`.
 
+* **`cv_block_size_sweep()` stated its fits wrongly in four texts.**  With
+  `block_sizes` supplied, the refusal over `max_fits` advised lowering
+  `n_sizes`, which only the default ladder reads; it now advises fewer
+  `block_sizes` or a smaller `k`.  On either ladder, when the count
+  includes the random reference, it also names `include_random = FALSE`,
+  which at `n_sizes = 1` and `k = 2` is the only way to cut the count.
+  When every size of the default ladder needs a grid of more than
+  1,000,000 blocks (points on a line a hair wide), the sweep refused with
+  "no block size leaves at least k = 5 blocks ...; pass smaller
+  `block_sizes`", where the sizes held too many blocks and smaller ones
+  are refused; it now says so and names the largest size whose grid holds
+  `k` blocks, to pass as `block_sizes`.  The header of `print()` and the
+  caption of `plot()` gave the fits planned before any fold was built, and
+  the caption said `k` folds per size, where a size whose grid has fewer
+  than `k` cells holding points builds fewer.  Both now count the fits made
+  from the `k` column, and the caption says "up to `k` folds per size" when
+  a size built fewer.  `attr(, "n_fits")` stays the count planned, which
+  the `max_fits` check reads.
+
 * **`fold_separation()` printed "this score is optimistic" from a share that
   cannot give a direction.**  Which way a score errs depends on how the
   held-out distances compare with the distances from the prediction
