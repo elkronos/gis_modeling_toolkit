@@ -638,13 +638,14 @@
 #' as equal when the rows and the locations are put in order, and so do
 #' weights within that part of each other when the first k-means++ centre is
 #' drawn.  The cells are then the same in another unit or with another origin
-#' as long as no coordinate moves by more than about a forty-millionth of the
-#' distance between neighbouring locations.  The rounding PROJ leaves when it
-#' changes the unit or the false origin, about \eqn{10^{-9}} m, is below that
-#' for locations more than a few centimetres apart.  Coordinates rounded more
-#' coarsely can give other cells: a lattice at 250 m with its coordinates
-#' stored in feet to four decimals does.  Points at one location count as
-#' that many points at it and share a cell; the neighbour distance is
+#' as long as no coordinate moves by more than about a two-hundred-millionth
+#' of the distance between neighbouring locations.  The rounding PROJ leaves
+#' when it changes the unit or the false origin, about \eqn{10^{-9}} m, is
+#' below that for locations more than about a quarter of a metre apart.
+#' Coordinates rounded more coarsely can give other cells: a lattice at
+#' 250 m with its coordinates stored in feet to four decimals does.  Points
+#' at one location count as that many points at it and share a cell; the
+#' neighbour distance is
 #' measured to the \code{density_k}-th nearest \emph{other} location, so it
 #' is not zero where locations repeat.  The neighbour searches use \pkg{FNN}
 #' when it is installed.  The result is the same without it; the search then

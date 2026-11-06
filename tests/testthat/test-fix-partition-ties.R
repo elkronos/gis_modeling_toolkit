@@ -122,10 +122,12 @@ test_that("a profile that draws a subsample draws the same locations in every fr
 test_that("the help bounds the rounding the cells survive by the spacing of the locations", {
   # The tie rule is relative to the squared distances, so the rounding a tie
   # survives is set by the distance between neighbouring locations (about a
-  # forty-millionth of it), not by the extent.  The item's lattice in feet:
-  # to 5 decimals the rounding is 6e-9 of the spacing and the cells are
-  # those of the lattice in metres; to 4 decimals it is 6e-8, which is 1.2e-9
-  # of the extent, and the cells move.
+  # two-hundred-millionth of it, 1e-7 / (16 sqrt(2)) of the spacing), not by
+  # the extent.  The item's lattice in feet: to 5 decimals the rounding is
+  # 6e-9 of the spacing, above that bound, and the cells are still those of
+  # the lattice in metres (the bound is one under which the cells cannot
+  # move, not the move at which they do); to 4 decimals it is 6e-8, which is
+  # 1.2e-9 of the extent, and the cells move.
   g <- expand.grid(i = 0:39, j = 0:29)
   m <- cbind(4.5e5 + g$i * 250, 4.55e6 + g$j * 250)
   fit <- function(a) local({ .pt_seed(1); .density_kmeans(a, 25L) })$cluster
@@ -143,8 +145,11 @@ test_that("the help bounds the rounding the cells survive by the spacing of the 
         else tools::Rd_db("spatialkit")[["resolution_profile.Rd"]]
   expect_s3_class(rd, "Rd")
   txt <- gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
-  expect_match(txt, "forty-millionth of the distance between neighbouring locations",
+  expect_match(txt, "two-hundred-millionth of the distance between neighbouring locations",
                fixed = TRUE)
+  expect_match(txt, "more than about a quarter of a metre apart", fixed = TRUE)
+  expect_no_match(txt, "forty-millionth", fixed = TRUE)
+  expect_no_match(txt, "few centimetres", fixed = TRUE)
   expect_no_match(txt, "ten-millionth of the extent", fixed = TRUE)
 })
 

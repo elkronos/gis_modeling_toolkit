@@ -3753,8 +3753,9 @@ old behaviour where there is a way.
   rows draws the same locations in every frame), and a later start is kept
   only when its sum is lower by more than that part.  The regions are the
   same in another unit or with another origin as long as no coordinate moves
-  by more than about a forty-millionth of the distance between neighbouring
-  locations; coordinates rounded more coarsely can still give other regions.
+  by more than about a two-hundred-millionth of the distance between
+  neighbouring locations; coordinates rounded more coarsely can still give
+  other regions.
   The lattice above gives `loo` 0.3016 and the same regions in all three.
   The scoring of a profile's levels, the refit of `select_resolution()`, the
   edge rule of `assign_features_to_polygons()` and `cell_values_at()` take
