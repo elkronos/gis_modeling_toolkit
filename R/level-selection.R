@@ -1143,10 +1143,13 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # before the coerce and again after it: sf reads a layer in the dimension
   # of its first geometry.  So is one whose geometries carry M, which GEOS
   # refuses in the coerce (.xy_if_mixed_or_m()).  The layer is not
-  # returned, so no warning.
+  # returned, so no warning.  A polygon s2 cannot take a centroid of in
+  # degrees is refused in this function's words, naming `data_sf`
+  # (.pointize_auto()).
   data_sf <- .xy_if_mixed_or_m(data_sf)
   if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")) {
-    data_sf <- .xy_if_mixed(coerce_to_points(data_sf, "auto"))
+    data_sf <- .xy_if_mixed(.pointize_auto(data_sf, "determine_optimal_levels",
+                                           "`data_sf`"))
   }
   data_sf <- ensure_projected(data_sf)
 

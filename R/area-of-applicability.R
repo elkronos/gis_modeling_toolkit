@@ -227,9 +227,13 @@
 #' forest fitted with \code{include_coords = TRUE} is measured in the same
 #' space it was fitted in.
 #'
+#' @param data_sf The training data or \code{newdata}.
+#' @param arg The argument of \code{area_of_applicability()} it is, with its
+#'   backquotes, which a refusal to reduce a feature to a point names
+#'   (\code{.pointize_auto()}).
 #' @keywords internal
 #' @noRd
-.aoa_add_coords <- function(data_sf) {
+.aoa_add_coords <- function(data_sf, arg) {
   # st_coordinates() returns one row per VERTEX, so a POLYGON or MULTIPOINT
   # layer -- this package's own create_grid_polygons() output, say -- produced
   # a longer vector than the data frame has rows and the assignment below died
@@ -244,11 +248,12 @@
   # its coordinates are read from a copy in XY when it mixes dimensions.
   # A feature with a vertex that is not finite or lies beyond .POOL_XY_MAX
   # has no location (.unlocated_features()): it is emptied before it is
-  # pointized, and its point is an empty one.
+  # pointized, and its point is an empty one.  A feature whose centroid
+  # cannot be taken is refused in this function's words, naming `arg`.
   if (inherits(data_sf, "sf") &&
       !all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT"))
-    data_sf <- .xy_if_mixed(coerce_to_points(
-      .empty_unlocated(.xy_if_mixed_or_m(data_sf)), "auto"))
+    data_sf <- .xy_if_mixed(.pointize_auto(
+      .empty_unlocated(.xy_if_mixed_or_m(data_sf)), "area_of_applicability", arg))
   crd <- sf::st_coordinates(.xy_if_mixed(data_sf))
   if (ncol(crd) < 2L)
     stop("area_of_applicability(): could not extract X/Y coordinates.",
@@ -674,9 +679,11 @@
          "the training data is in a geographic CRS (longitude/latitude). ",
          "Project both layers first, with sf::st_transform() or ",
          "ensure_projected(), or pass coords = \"no\".", call. = FALSE)
-  xy <- function(x) {
+  # A feature whose centroid cannot be taken is refused in this function's
+  # words, naming its argument (.pointize_auto()).
+  xy <- function(x, arg) {
     if (!all(sf::st_geometry_type(x, by_geometry = TRUE) == "POINT"))
-      x <- .xy_if_mixed(coerce_to_points(x, "auto"))
+      x <- .xy_if_mixed(.pointize_auto(x, "area_of_applicability", arg))
     crd <- sf::st_coordinates(x)
     if (ncol(crd) < 2L || nrow(crd) != nrow(x))
       stop("area_of_applicability(): could not extract one X/Y coordinate ",
@@ -688,7 +695,7 @@
         abs(m[, 1L]) <= .POOL_XY_MAX & abs(m[, 2L]) <= .POOL_XY_MAX), ] <- NA_real_
     m
   }
-  list(train = xy(train_sf), new = xy(newdata))
+  list(train = xy(train_sf, "`train_sf`"), new = xy(newdata, "`newdata`"))
 }
 
 
@@ -1733,8 +1740,8 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
                                       what = "the training data",
                                       caller = "area_of_applicability")
     }
-    train_sf <- .aoa_add_coords(train_sf)
-    newdata  <- .aoa_add_coords(newdata)
+    train_sf <- .aoa_add_coords(train_sf, "`train_sf`")
+    newdata  <- .aoa_add_coords(newdata, "`newdata`")
     predictor_vars <- unique(c(predictor_vars, "..x", "..y"))
   }
   # After the block above, so that a CRS reconciled there is not reconciled

@@ -3764,10 +3764,13 @@ summarize_by_cell <- function(assigned_points_sf,
       # move stopped with "OGR error" or st_coordinates() below read other
       # coordinates.  So is a layer whose geometries carry M, which GEOS
       # does not read (.xy_if_mixed_or_m()): the coerce stopped on its
-      # polygons.  These points are not returned, so nothing is said.
+      # polygons.  These points are not returned, so nothing is said.  A
+      # polygon s2 cannot take a centroid of in degrees is refused in this
+      # function's words, naming `assigned_points_sf` (.pointize_auto()).
       pts_for_deff <- .xy_if_mixed_or_m(assigned_points_sf)
       if (!all(sf::st_geometry_type(pts_for_deff, by_geometry = TRUE) == "POINT"))
-        pts_for_deff <- .xy_if_mixed(coerce_to_points(pts_for_deff, "auto"))
+        pts_for_deff <- .xy_if_mixed(.pointize_auto(pts_for_deff, "summarize_by_cell",
+                                                    "`assigned_points_sf`"))
 
       # The variogram range is a LENGTH in the CRS the variogram was fitted in
       # -- estimate_sac_range() always fits in a projected CRS, in metres.
@@ -4102,7 +4105,9 @@ summarize_by_cell <- function(assigned_points_sf,
         r <- pooled$record$columns[[paste0("resp_", response_var)]]
         return(list(n = r$n, cells = r$cells, loo = r$loo, status = r$status))
       }
-      loc <- if (!is.null(pooled)) pooled$loc else .pooled_xy(assigned_points_sf, count_crs)
+      loc <- if (!is.null(pooled)) pooled$loc
+             else .pooled_xy(assigned_points_sf, count_crs, "summarize_by_cell",
+                             "`assigned_points_sf`")
       res <- .pool_column(df[[response_var]], df[[id_col]], loc$xy, NULL, want = est,
                           use_fnn = .has_backend("FNN"))
       list(n = res$record$n, cells = res$record$cells,
@@ -4388,12 +4393,17 @@ summarize_by_cell <- function(assigned_points_sf,
 #' @param crs \code{NULL}, or the projected CRS to measure in: the one the
 #'   record of the cells' count names, in which the profile measured.  The
 #'   points are then put in that CRS, and no other is chosen.
+#' @param caller,arg The function and its argument that \code{layer} is,
+#'   which a refusal of a polygon s2 cannot take a centroid of in degrees,
+#'   or of a centroid GEOS puts outside its feature, names
+#'   (\code{.pointize_auto()}); \code{NULL} raises the refusal of
+#'   \code{coerce_to_points()} as it comes.
 #' @return \code{NULL} when the layer has no geometry (a plain data frame);
 #'   otherwise a list with \code{xy}, a two-column matrix, and \code{crs},
 #'   the CRS its distances are measured in.
 #' @keywords internal
 #' @noRd
-.pooled_xy <- function(layer, crs = NULL) {
+.pooled_xy <- function(layer, crs = NULL, caller = NULL, arg = NULL) {
   if (!inherits(layer, "sf")) return(NULL)
   if (nrow(layer) == 0L)
     return(list(xy = matrix(numeric(0), 0L, 2L), crs = sf::st_crs(layer)))
@@ -4406,7 +4416,8 @@ summarize_by_cell <- function(assigned_points_sf,
   layer <- .xy_if_mixed_or_m(layer)
   if (!all(sf::st_geometry_type(layer, by_geometry = TRUE) == "POINT"))
     layer <- .xy_if_mixed(withCallingHandlers(
-      coerce_to_points(layer, "auto"),
+      if (is.null(caller)) coerce_to_points(layer, "auto")
+      else .pointize_auto(layer, caller, arg),
       warning = function(w)
         if (grepl("st_point_on_surface may not give correct results",
                   conditionMessage(w), fixed = TRUE))
@@ -4499,7 +4510,7 @@ summarize_by_cell <- function(assigned_points_sf,
                             obs_level, conf_level, deff_label, crs = NULL) {
   use_fnn <- .has_backend("FNN")
   id   <- df[[id_col]]
-  loc  <- .pooled_xy(layer, crs)
+  loc  <- .pooled_xy(layer, crs, "summarize_by_cell", "`assigned_points_sf`")
   xy   <- loc$xy
   cols <- unique(c(resp_num, pred_num))
   located <- if (is.null(xy)) NULL else is.finite(xy[, 1L]) & is.finite(xy[, 2L])

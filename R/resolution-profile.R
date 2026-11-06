@@ -1867,8 +1867,10 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # Whether the layer came as points: a feature that is not one is scored at
   # the point it is reduced to, and the record of an estimate says so.
   was_points <- all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")
+  # A polygon s2 cannot take a centroid of in degrees is refused in this
+  # function's words, naming `data_sf` (.pointize_auto()).
   if (!was_points)
-    data_sf <- .xy_if_mixed(coerce_to_points(data_sf, "auto"))
+    data_sf <- .xy_if_mixed(.pointize_auto(data_sf, "resolution_profile", "`data_sf`"))
   data_sf <- ensure_projected(data_sf)
   xy <- sf::st_coordinates(data_sf)[, 1:2, drop = FALSE]
   ok_xy <- is.finite(xy[, 1]) & is.finite(xy[, 2])

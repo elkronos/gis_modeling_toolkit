@@ -511,9 +511,13 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   if (identical(select_on, "split")) {
     # A layer that mixes XY and XYZ (or XYM) geometries, or whose
     # geometries carry M, which GEOS does not read, is pointized in x and y,
-    # as prep_model_data() pointizes it.
+    # as prep_model_data() pointizes it.  A polygon s2 cannot take a centroid
+    # of in degrees is refused in this function's words, naming its row of
+    # `train_sf` as passed, before the completeness filter (.pointize_auto()).
     if (!all(sf::st_geometry_type(train_sf, by_geometry = TRUE) == "POINT"))
-      train_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed_or_m(train_sf), "auto"))
+      train_sf <- .xy_if_mixed(.pointize_auto(.xy_if_mixed_or_m(train_sf),
+                                              "select_features_forward", "`train_sf`",
+                                              at = unname(which(keep)), n = length(keep)))
     split <- .spatial_half_split(train_sf, seed = seed,
                                  caller = "select_features_forward")
     holdout_sf <- train_sf[split$estimation, , drop = FALSE]
@@ -568,20 +572,27 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   # argument is fixed across the sweep.  Rebuilding them inside score_set()
   # therefore produced the same splits p^2/2 times -- repeating every
   # block-size warning as many times --
-  # and, worse, put make_folds() OUTSIDE the try() below, so a single
+  # and, worse, put make_folds() OUTSIDE the tryCatch() below, so a single
   # fold-construction failure (block_kfold raising when the geometry collapses
   # to one block, say) killed the whole sweep instead of the candidate being
   # scored NA.  It cannot be a per-candidate NA in any case: if the folds
   # cannot be built, no candidate is scorable, so this is one informative
   # error instead of p^2/2 silent ones.
-  folds <- try(make_folds(train_sf, k = k, method = method, seed = seed,
-                          block_size = block_size, auto_range = auto_range,
-                          response_var = response_var,
-                          predictor_vars = candidate_vars), silent = TRUE)
-  if (inherits(folds, "try-error"))
+  # make_folds() refuses a polygon s2 cannot take a centroid of in degrees
+  # naming its `points_sf`; that refusal is raised again in this function's
+  # words with its class, naming the row of `train_sf` as passed, since
+  # neither `method`, `k` nor `block_size` is the way on.
+  folds <- tryCatch(make_folds(train_sf, k = k, method = method, seed = seed,
+                               block_size = block_size, auto_range = auto_range,
+                               response_var = response_var,
+                               predictor_vars = candidate_vars),
+                    error = function(e) e)
+  if (inherits(folds, "spatialkit_features_degenerate"))
+    .pointize_refused(folds, "select_features_forward", arg = "`train_sf`",
+                      at = unname(which(keep)), n = length(keep))
+  if (inherits(folds, "error"))
     stop("select_features_forward(): could not build the inner CV folds, so no ",
-         "candidate can be scored: ",
-         trimws(conditionMessage(attr(folds, "condition"))),
+         "candidate can be scored: ", trimws(conditionMessage(folds)),
          " Adjust `method`, `k` or `block_size`.", call. = FALSE)
 
   # Every set is scored on ONE fixed row set, `ref_ids`: the rows the null

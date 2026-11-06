@@ -260,10 +260,12 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
   # before the coerce and the move and again after the coerce: sf reads a
   # layer in the dimension of its first geometry.  So is one whose
   # geometries carry M, which GEOS refuses in the coerce.  It is not
-  # returned, so no warning.
+  # returned, so no warning.  A polygon s2 cannot take a centroid of in
+  # degrees is refused in this function's words, naming `data_sf`
+  # (.pointize_auto()).
   pts <- .xy_if_mixed_or_m(data_sf)
   if (!all(sf::st_geometry_type(pts, by_geometry = TRUE) == "POINT"))
-    pts <- .xy_if_mixed(coerce_to_points(pts, "auto"))
+    pts <- .xy_if_mixed(.pointize_auto(pts, "fold_separation", "`data_sf`"))
   pts <- if (is.null(rng_crs)) ensure_projected(pts) else
     .transform_or_stamp(pts, rng_crs, what = "data_sf", caller = "fold_separation")
   pts <- sf::st_zm(pts, drop = TRUE, what = "ZM")
@@ -487,7 +489,8 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
     .log_info(paste0("fold_separation(): `prediction_points` are not POINTs; ",
                      "using one representative point per feature so the ",
                      "target distances are point-to-point."))
-    prediction_points <- .xy_if_mixed(coerce_to_points(prediction_points, "auto"))
+    prediction_points <- .xy_if_mixed(.pointize_auto(prediction_points, "fold_separation",
+                                                     "`prediction_points`"))
   }
   if (is.null(.crs_or_null(pts))) {
     if (!is.na(sf::st_crs(prediction_points)))

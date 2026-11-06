@@ -45,21 +45,27 @@
 #' The geometry of a layer, one point per feature
 #'
 #' @param layer An sf layer.
+#' @param arg The argument of \code{cell_values_at()} the layer is, with its
+#'   backquotes.
 #' @return An sf layer with the geometry column and no other, row for row
 #'   with \code{layer}.  A feature that is not a point is reduced to one by
-#'   \code{coerce_to_points(, "auto")}, whose conditions are passed on; an
-#'   empty geometry stays an empty point.  A layer whose geometries do not
-#'   all have one dimension, or whose geometries carry M, which GEOS does not
-#'   read, is read in XY (\code{.xy_if_mixed_or_m()}), and so is
+#'   \code{coerce_to_points(, "auto")}, whose conditions are passed on but
+#'   for its refusal of a polygon s2 cannot take a centroid of in degrees,
+#'   or of a centroid GEOS puts outside its feature, which is raised again
+#'   naming \code{cell_values_at()} and \code{arg}
+#'   (\code{.pointize_auto()}); an empty geometry stays an empty point.  A
+#'   layer whose geometries do not all have one dimension, or whose
+#'   geometries carry M, which GEOS does not read, is read in XY
+#'   (\code{.xy_if_mixed_or_m()}), and so is
 #'   the point layer reduced from it when its points do not: the point on the
 #'   surface of a POLYGON Z, and the empty point of an empty LINESTRING Z, are
 #'   XY beside the POINT Z rows that are kept.
 #' @keywords internal
 #' @noRd
-.values_at_points <- function(layer) {
+.values_at_points <- function(layer, arg) {
   g <- .xy_if_mixed_or_m(sf::st_sf(geometry = sf::st_geometry(layer)))
   if (nrow(g) > 0L && !all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
-    g <- .xy_if_mixed(coerce_to_points(g, "auto"))
+    g <- .xy_if_mixed(.pointize_auto(g, "cell_values_at", arg))
   g
 }
 
@@ -618,9 +624,13 @@
 #' the package.
 #'
 #' @param newdata The locations: an sf layer. A feature that is not a point
-#'   is reduced to one with [`coerce_to_points(, "auto")`][coerce_to_points].
-#'   No column of it is read. With no CRS while `points` has one, the call
-#'   stops. A layer whose geometries mix dimensions or carry M (XYM or
+#'   is reduced to one with [`coerce_to_points(, "auto")`][coerce_to_points];
+#'   a collection holding a polygon s2 cannot take a centroid of in
+#'   longitude and latitude (edges that cross), or whose centroid GEOS puts
+#'   outside it, stops the call with the error of class
+#'   `spatialkit_features_degenerate`, raised in this function's name and
+#'   naming its rows of `newdata`. No column of it is read. With no CRS
+#'   while `points` has one, the call stops. A layer whose geometries mix dimensions or carry M (XYM or
 #'   XYZM) is read in x and y (step 1).
 #' @param values The [summarize_by_cell()] result for `points`. It must hold
 #'   the ID column and a cell value of `response_var`: the pooled value
@@ -709,10 +719,15 @@
 #'   counts the seeds outside the polygons of `values` left without a cell
 #'   (step 3) are plain ones. It
 #'   passes on what [coerce_to_points()], a CRS transformation and
-#'   [assign_features_to_polygons()] raise, but for one warning: the one
-#'   that function raises when no location at all falls in a polygon is
-#'   neither raised nor logged, since every such row has `filled = TRUE`,
-#'   which says the same row by row.
+#'   [assign_features_to_polygons()] raise, but for one error and one
+#'   warning. The error of class `spatialkit_features_degenerate` with which
+#'   [coerce_to_points()] refuses a polygon s2 cannot take a centroid of, or
+#'   a centroid GEOS puts outside its feature, is raised in this function's
+#'   name, with the same class and fields, naming `newdata` or `points` and
+#'   its rows. The warning
+#'   [assign_features_to_polygons()] raises when no location at all falls in
+#'   a polygon is neither raised nor logged, since every such row has
+#'   `filled = TRUE`, which says the same row by row.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -942,13 +957,13 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
   crs_given <- if (!is.null(rule) && measured(rule$crs)) rule$crs
                else if (is.list(pooled) && measured(pooled$crs)) pooled$crs
                else NULL
-  at_rows <- .pooled_xy(points, crs_given)
+  at_rows <- .pooled_xy(points, crs_given, "cell_values_at", "`points`")
   crs     <- at_rows$crs
   # Points without a CRS whose coordinates the step above took for lon/lat
   # have moved; a layer without a CRS beside them is read the same way.
   as_lonlat <- FALSE
   if (is.na(points_crs) && !is.na(crs) && nrow(points) > 0L) {
-    raw <- .values_at_xy(suppressWarnings(.values_at_points(points)))
+    raw <- .values_at_xy(suppressWarnings(.values_at_points(points, "`points`")))
     as_lonlat <- isTRUE(any(at_rows$xy != raw, na.rm = TRUE))
   }
   # The CRS the coordinates of `points` are read in, which is where the rows
@@ -984,7 +999,7 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
 
   # ---- the locations asked for -----------------------------------------------
   m     <- nrow(newdata)
-  where <- .values_at_points(newdata)
+  where <- .values_at_points(newdata, "`newdata`")
   placed <- .values_at_place(where, "newdata", "locations", crs, points_crs, as_lonlat)
   q     <- .values_at_xy(placed)
   # A row of `newdata` without a location as given has none here either, though
@@ -995,8 +1010,8 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
   qy <- q[live, 2L]
 
   if (by_seeds) {
-    seed_xy <- .values_at_xy(.values_at_place(.values_at_points(seeds), "seeds", "seeds",
-                                              crs, points_crs, as_lonlat))
+    seed_xy <- .values_at_xy(.values_at_place(.values_at_points(seeds, "`seeds`"), "seeds",
+                                              "seeds", crs, points_crs, as_lonlat))
     # A seed without a location as given has none here either, though a move
     # between CRSs can bring a coordinate beyond 1e150 back finite.
     seed_xy[!located, ] <- NA_real_

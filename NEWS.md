@@ -3189,17 +3189,52 @@ old behaviour where there is a way.
   valid: Edge 1 is degenerate (duplicate vertex)", naming neither the row
   nor a way on; a bowtie and a figure eight stopped it the same way.  The
   same held for the rows other than LINESTRINGs under `"line_midpoint"`,
-  for collections under `"auto"`, and for the `cv_*()` and `fit_*()`
-  functions that pass `pointize = "centroid"`.  A polygon s2 refuses for a
+  for collections under `"auto"`, for the `cv_*()` and `fit_*()`
+  functions that pass `pointize = "centroid"`, and for the functions that
+  reduce a layer they are given to points with `"auto"`: `make_folds()`,
+  `fold_separation()`, `estimate_sac_range()`, `resolution_profile()`,
+  `determine_optimal_levels()`, `cell_values_at()`, `summarize_by_cell()`
+  and `select_features_forward()` (the last wrapped the message in a plain
+  error of its own).  A polygon s2 refuses for a
   repeated vertex, on its own or inside a collection, now gets the centroid
   of the same ring without the repeat, whose points are unchanged.  A
   polygon s2 refuses even then stops
   the call with an error of class `spatialkit_features_degenerate` that
   gives its rows (`rows` on the condition), quotes s2, and says to
-  transform the layer to a projected CRS or to pass another `mode` or
-  `pointize`; `prep_model_data()` names `data_sf` and its rows.  Layers s2
-  accepts get the centroids they got, and with s2 off the centroids are
-  GEOS's, as before.
+  transform the layer to a projected CRS, or to pass another `mode` or
+  `pointize`, or, in a function that takes neither, to reduce the layer to
+  points first.  Each function raises it in its own name, naming its
+  argument and that argument's rows: `prep_model_data()`,
+  `compare_models_cv()`, `resolution_profile()` and
+  `determine_optimal_levels()` name `data_sf`, `make_folds()` `points_sf`
+  or `prediction_points`, `fold_separation()` `data_sf` or
+  `prediction_points`, `estimate_sac_range()` `points_sf`,
+  `cell_values_at()` `newdata` or `points`, `summarize_by_cell()`
+  `assigned_points_sf` and `select_features_forward()` `train_sf`, with
+  the rows as passed.  Layers s2 accepts get the centroids they got, and
+  with s2 off the centroids are GEOS's, as before, but for those of the
+  next entry.
+
+* **`coerce_to_points()` returned, without a word, a centroid far outside a
+  polygon whose edges cross, in a projected CRS.**  GEOS, which takes the
+  centroids in a projected CRS, without a CRS, and in degrees with s2 off,
+  weights each part of a ring by its signed area.  Where the edges of a
+  ring cross (a bowtie), or a hole lies outside its shell, parts of the
+  feature count with opposite signs: a bowtie 10 km across, one corner 1 m
+  off symmetric, got a point over 33,000 km away, and the functions that
+  reduce a layer to points ran on it.  The transform that the refusal of
+  the entry above names for such a bowtie in degrees led to that point.
+  This held under `"centroid"`, for the rows other than LINESTRINGs under
+  `"line_midpoint"`, and for collections under `"auto"`.  A centroid
+  outside the bounding box of a feature GEOS reports invalid now stops the
+  call with the error of class `spatialkit_features_degenerate`, which
+  gives the rows (`rows`), quotes GEOS's reason for each (`reasons`),
+  carries `site = "geos_centroid"`, and says to take a point on the surface
+  or to repair the features with `sf::st_make_valid()`.  The functions of
+  the entry above, `area_of_applicability()` (`train_sf` or `newdata`) and
+  `predict_surface()` (`grid`) raise it in their own name, naming their
+  argument and its rows.  A centroid inside the box is GEOS's, as before,
+  and so is every centroid of a valid feature.
 
 * **The projection `ensure_projected()` chose for a layer in longitude and
   latitude moved, in silence, when s2 refused one of its polygons even

@@ -3308,9 +3308,12 @@ estimate_sac_range <- function(points_sf, response_var,
   # coerce_to_points() takes centroids, matching prep_model_data().
   # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y,
   # before the coerce and after it, as prep_model_data() reads it, and so is
-  # one whose geometries carry M, which GEOS refuses in the coerce.
+  # one whose geometries carry M, which GEOS refuses in the coerce.  A
+  # polygon s2 cannot take a centroid of in degrees is refused in this
+  # function's words, naming `points_sf` (.pointize_auto()).
   if (!all(sf::st_geometry_type(points_sf, by_geometry = TRUE) == "POINT"))
-    points_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed_or_m(points_sf), "auto"))
+    points_sf <- .xy_if_mixed(.pointize_auto(.xy_if_mixed_or_m(points_sf),
+                                             "estimate_sac_range", "`points_sf`"))
 
   # gstat::variogram() uses EVERY coordinate dimension, so an XYZ layer has
   # its elevation folded into each lag and the "range" is a length in 3-D,
@@ -5440,8 +5443,10 @@ make_folds <- function(points_sf, k,
   # The provenance probe is taken on the geometry AS SUPPLIED -- before
   # pointization -- because that is what the cv_*() wrappers will probe too.
   row_probe <- .fold_row_probe(points_sf)
+  # A polygon s2 cannot take a centroid of in degrees is refused in this
+  # function's words, naming `points_sf` (.pointize_auto()).
   if (!all(sf::st_geometry_type(points_sf, by_geometry = TRUE) == "POINT"))
-    points_sf <- .xy_if_mixed(coerce_to_points(points_sf, "auto"))
+    points_sf <- .xy_if_mixed(.pointize_auto(points_sf, "make_folds", "`points_sf`"))
 
   # Drop rows with no usable coordinates, AFTER ..row_id is stamped so the
   # survivors keep their original row identities and the dropped rows simply
@@ -7051,7 +7056,8 @@ make_folds <- function(points_sf, k,
     .log_info(paste0("make_folds(%s): `prediction_points` are not POINTs; ",
                      "using representative points so the target distances ",
                      "are point-to-point."), label)
-    prediction_points <- .xy_if_mixed(coerce_to_points(prediction_points, "auto"))
+    prediction_points <- .xy_if_mixed(.pointize_auto(prediction_points, "make_folds",
+                                                     "`prediction_points`"))
   }
   if (is.na(sf::st_crs(pts)) && !is.na(sf::st_crs(prediction_points))) {
     pts <- .transform_or_stamp(pts, sf::st_crs(prediction_points),

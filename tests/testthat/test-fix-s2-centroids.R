@@ -426,9 +426,21 @@ test_that("a polygon s2 refuses even then stops the call with the features' clas
                  "^prep_model_data\\(\\): s2, .* refuses 1 of the 20 features of `data_sf` \\(row 6; ")
     expect_match(conditionMessage(e), "Transform `data_sf` to a projected CRS", fixed = TRUE)
     expect_match(conditionMessage(e), "Or pass pointize = \"auto\"", fixed = TRUE)
-    # The remedies run.
-    expect_no_error(prep_model_data(.sc_quiet(ensure_projected(x)), "v", "x1",
-                                    pointize = "centroid"))
+    # The remedies run.  Moved to a projected CRS, the bowtie's lobes differ
+    # in area and GEOS puts its centroid far outside it: that point is
+    # refused, naming the row, where it was returned without a word (review
+    # finding R-fb180-1 of batch found-bug-180); repaired, it runs.  The
+    # figure eight's centroid lies in it.
+    moved <- .sc_quiet(ensure_projected(x))
+    if (identical(maker, .sc_bow)) {
+      e <- tryCatch(prep_model_data(moved, "v", "x1", pointize = "centroid"),
+                    error = function(e) e)
+      expect_s3_class(e, "spatialkit_features_degenerate")
+      expect_identical(e$site, "geos_centroid")
+      expect_identical(e$rows, 6L)
+      moved <- sf::st_make_valid(moved)
+    }
+    expect_no_error(prep_model_data(moved, "v", "x1", pointize = "centroid"))
     expect_no_error(.sc_quiet(prep_model_data(x, "v", "x1", pointize = "auto")))
     expect_no_error(.sc_quiet(coerce_to_points(x, "auto")))
   }

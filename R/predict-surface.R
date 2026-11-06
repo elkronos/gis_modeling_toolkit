@@ -349,9 +349,10 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
     # a 0-30 response, and a row shuffle of `covariates` moved them by up to
     # 4.7.  Reduce it to representative points first, as
     # area_of_applicability() does, so the surface is the POINT layer the
-    # manual promises.
+    # manual promises.  A cell whose centroid cannot be taken is refused in
+    # this function's words, naming `grid` (.pointize_auto()).
     if (!grid_points)
-      grid <- .xy_if_mixed(coerce_to_points(grid, "auto"))
+      grid <- .xy_if_mixed(.pointize_auto(grid, "predict_surface", "`grid`"))
   }
   res <- attr(grid, "cell_size")
   # The joins below read the grid's points in x and y; a grid returned with

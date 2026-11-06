@@ -15,9 +15,13 @@ cell_values_at(
 }
 \arguments{
 \item{newdata}{The locations: an sf layer. A feature that is not a point
-is reduced to one with \code{\link[=coerce_to_points]{coerce_to_points(, "auto")}}.
-No column of it is read. With no CRS while \code{points} has one, the call
-stops. A layer whose geometries mix dimensions or carry M (XYM or
+is reduced to one with \code{\link[=coerce_to_points]{coerce_to_points(, "auto")}};
+a collection holding a polygon s2 cannot take a centroid of in
+longitude and latitude (edges that cross), or whose centroid GEOS puts
+outside it, stops the call with the error of class
+\code{spatialkit_features_degenerate}, raised in this function's name and
+naming its rows of \code{newdata}. No column of it is read. With no CRS
+while \code{points} has one, the call stops. A layer whose geometries mix dimensions or carry M (XYM or
 XYZM) is read in x and y (step 1).}
 
 \item{values}{The \code{\link[=summarize_by_cell]{summarize_by_cell()}} result for \code{points}. It must hold
@@ -111,10 +115,15 @@ says how \code{seeds} without a CRS were read (step 1) and the one that
 counts the seeds outside the polygons of \code{values} left without a cell
 (step 3) are plain ones. It
 passes on what \code{\link[=coerce_to_points]{coerce_to_points()}}, a CRS transformation and
-\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} raise, but for one warning: the one
-that function raises when no location at all falls in a polygon is
-neither raised nor logged, since every such row has \code{filled = TRUE},
-which says the same row by row.
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} raise, but for one error and one
+warning. The error of class \code{spatialkit_features_degenerate} with which
+\code{\link[=coerce_to_points]{coerce_to_points()}} refuses a polygon s2 cannot take a centroid of, or
+a centroid GEOS puts outside its feature, is raised in this function's
+name, with the same class and fields, naming \code{newdata} or \code{points} and
+its rows. The warning
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} raises when no location at all falls in
+a polygon is neither raised nor logged, since every such row has
+\code{filled = TRUE}, which says the same row by row.
 }
 \description{
 Gives each location of \code{newdata} the value of the cell it lies in, read

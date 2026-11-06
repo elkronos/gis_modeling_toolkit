@@ -1291,6 +1291,97 @@
        error = err)
 }
 
+#' The features whose planar centroid lies outside their bounding box
+#'
+#' GEOS weights each part of a ring by its signed area.  Where a ring's
+#' edges cross (a bowtie), or a hole lies outside its shell, parts of the
+#' feature count with opposite signs, and the point \code{sf::st_centroid()}
+#' gives is not a centroid of the feature: a bowtie 10 km across in a
+#' projected CRS, one corner 1 m off symmetric, got a point over 33,000 km
+#' away.
+#' The centroid of a feature lies in its bounding box, so a point outside
+#' the box of a feature GEOS reports invalid is such a point.  Only the
+#' centroids GEOS takes are read (a projected CRS, no CRS, or degrees with
+#' s2 off): a spherical centroid can lie outside the box of its vertices in
+#' degrees.
+#'
+#' @param g An sfc.
+#' @param pts The centroids \code{sf::st_centroid()} gave, row for row with
+#'   \code{g}.
+#' @return A list: \code{at}, the positions in \code{g} of the features
+#'   whose point lies outside their box, and \code{reasons}, GEOS's reason
+#'   for each (\code{sf::st_is_valid(reason = TRUE)}).
+#' @keywords internal
+#' @noRd
+.centroids_off_box <- function(g, pts) {
+  none <- list(at = integer(0), reasons = character(0))
+  if (!length(g) || (isTRUE(sf::st_is_longlat(g)) && isTRUE(sf::sf_use_s2())))
+    return(none)
+  ok <- tryCatch(suppressWarnings(sf::st_is_valid(g)), error = function(e) NULL)
+  if (length(ok) != length(g)) return(none)
+  bad <- which(!(ok %in% TRUE))
+  if (!length(bad)) return(none)
+  xy <- suppressWarnings(sf::st_coordinates(pts[bad]))
+  if (nrow(xy) != length(bad)) {
+    # An empty point has no coordinates; read the rows one by one.
+    xy <- t(vapply(bad, function(i) {
+      p <- unclass(pts[[i]])
+      if (length(p) >= 2L) as.numeric(p[1:2]) else c(NA_real_, NA_real_)
+    }, numeric(2)))
+  }
+  off <- vapply(seq_along(bad), function(j) {
+    x <- xy[j, 1L]; y <- xy[j, 2L]
+    if (!is.finite(x) || !is.finite(y)) return(FALSE)
+    b <- as.numeric(sf::st_bbox(g[[bad[j]]]))
+    if (!all(is.finite(b))) return(FALSE)
+    tol <- 1e-9 * max(b[3L] - b[1L], b[4L] - b[2L])
+    x < b[1L] - tol || x > b[3L] + tol || y < b[2L] - tol || y > b[4L] + tol
+  }, logical(1))
+  at <- bad[off]
+  if (!length(at)) return(none)
+  why <- tryCatch(suppressWarnings(sf::st_is_valid(g[at], reason = TRUE)),
+                  error = function(e) NULL)
+  if (length(why) != length(at)) why <- rep("invalid geometry", length(at))
+  why[is.na(why)] <- "invalid geometry"
+  list(at = at, reasons = unname(why))
+}
+
+#' Refuse the centroids GEOS puts outside their features
+#'
+#' Raises the error of class \code{"spatialkit_features_degenerate"} for
+#' the features \code{.centroids_off_box()} found, with \code{site =
+#' "geos_centroid"}, so a caller that raises it again in its own words
+#' (\code{.pointize_refused()}) can tell it from s2's refusal.
+#'
+#' @param rows The rows of \code{arg}.
+#' @param reasons GEOS's reason for each.
+#' @param n The number of rows of \code{arg}.
+#' @param caller The function the error names.
+#' @param arg The argument the error names, with its backquotes.
+#' @param remedy The closing sentence.
+#' @return Does not return.  The condition carries \code{rows}, \code{n},
+#'   \code{reasons}, \code{parent} (\code{NULL}) and \code{site}.
+#' @keywords internal
+#' @noRd
+.raise_centroids_off <- function(rows, reasons, n, caller, arg, remedy) {
+  k <- length(rows)
+  shown <- seq_len(min(k, 6L))
+  named <- paste0(paste(sprintf("row %d: \"%s\"", rows[shown], reasons[shown]),
+                        collapse = "; "),
+                  if (k > 6L) sprintf("; and %d more", k - 6L) else "")
+  msg <- sprintf(paste0(
+    "%s(): the %s GEOS takes of %d of the %d features of %s %s outside %s ",
+    "bounding box (%s). GEOS weights each part of a ring by its signed area, so where ",
+    "the edges of a ring cross, or a hole lies outside its shell, parts of the ",
+    "feature count with opposite signs and the point is not a centroid of it. %s"),
+    caller, if (k == 1L) "centroid" else "centroids", k, n, arg,
+    if (k == 1L) "lies" else "lie", if (k == 1L) "the feature's" else "each feature's",
+    named, remedy)
+  stop(errorCondition(msg, class = "spatialkit_features_degenerate", call = NULL,
+                      rows = rows, n = n, reasons = reasons, parent = NULL,
+                      repaired = FALSE, s2_forced = FALSE, site = "geos_centroid"))
+}
+
 #' The vertices of a layer with each ring's closing vertex counted once
 #'
 #' Read feature by feature off the geometry lists, for a layer of any type,
@@ -2312,6 +2403,28 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' says to transform `x` to a projected CRS or to use another `mode`.  With
 #' s2 off, the centroids are GEOS's, planar in degrees, as before.
 #'
+#' GEOS, which takes the centroids in a projected CRS, without a CRS, and in
+#' degrees with s2 off, weights each part of a ring by its signed area.
+#' Where the edges of a ring cross (a bowtie), or a hole lies outside its
+#' shell, parts of the feature count with opposite signs, and the point can
+#' lie far outside the feature: a bowtie 10 km across, one corner 1 m off
+#' symmetric, got a point over 33,000 km away.  A centroid outside the bounding
+#' box of a feature GEOS reports invalid stops the call with an error of
+#' the same class, `spatialkit_features_degenerate`, that gives its rows of
+#' `x` (`rows`), quotes GEOS's reason for each (`reasons`), carries
+#' `site = "geos_centroid"`, and says to pass `mode = "point_on_surface"`
+#' or to repair the features with [sf::st_make_valid()].  A centroid
+#' inside the box is returned as GEOS gives it.
+#'
+#' The functions that reduce a layer they are given to points this way
+#' ([prep_model_data()], [make_folds()], [fold_separation()],
+#' [estimate_sac_range()], [resolution_profile()],
+#' [determine_optimal_levels()], [cell_values_at()], [summarize_by_cell()],
+#' [select_features_forward()], [compare_models_cv()],
+#' [area_of_applicability()], [predict_surface()]) raise either error in
+#' their own name, with the same class and fields, naming their argument and
+#' its rows.
+#'
 #' @param x An sf object.
 #' @param mode One of "auto", "centroid", "point_on_surface", "surface",
 #'   "line_midpoint", "bbox_center".
@@ -2416,6 +2529,16 @@ coerce_to_points <- function(
         else
           "Or pass mode = \"auto\", which takes a point on the surface of each polygon with GEOS.")
     }
+    # A centroid GEOS puts outside its feature (a ring whose edges cross,
+    # a hole outside its shell) is refused, naming its rows of `x`; it was
+    # returned without a word, for a bowtie over 33,000 km away.
+    off <- .centroids_off_box(sub, sc$points)
+    if (length(off$at))
+      .raise_centroids_off(
+        rows[off$at], off$reasons, length(g), "coerce_to_points", "`x`",
+        paste0("Pass mode = \"point_on_surface\", which takes a point on each geometry ",
+               "with GEOS, or repair the features with sf::st_make_valid() and call ",
+               "coerce_to_points() again."))
     sc$points
   }
 

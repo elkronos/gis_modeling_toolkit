@@ -86,6 +86,28 @@ stops the call with an error of class \code{spatialkit_features_degenerate}
 that gives its rows of \code{x} (\code{rows} on the condition), quotes s2, and
 says to transform \code{x} to a projected CRS or to use another \code{mode}.  With
 s2 off, the centroids are GEOS's, planar in degrees, as before.
+
+GEOS, which takes the centroids in a projected CRS, without a CRS, and in
+degrees with s2 off, weights each part of a ring by its signed area.
+Where the edges of a ring cross (a bowtie), or a hole lies outside its
+shell, parts of the feature count with opposite signs, and the point can
+lie far outside the feature: a bowtie 10 km across, one corner 1 m off
+symmetric, got a point over 33,000 km away.  A centroid outside the bounding
+box of a feature GEOS reports invalid stops the call with an error of
+the same class, \code{spatialkit_features_degenerate}, that gives its rows of
+\code{x} (\code{rows}), quotes GEOS's reason for each (\code{reasons}), carries
+\code{site = "geos_centroid"}, and says to pass \code{mode = "point_on_surface"}
+or to repair the features with \code{\link[sf:st_make_valid]{sf::st_make_valid()}}.  A centroid
+inside the box is returned as GEOS gives it.
+
+The functions that reduce a layer they are given to points this way
+(\code{\link[=prep_model_data]{prep_model_data()}}, \code{\link[=make_folds]{make_folds()}}, \code{\link[=fold_separation]{fold_separation()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}}, \code{\link[=resolution_profile]{resolution_profile()}},
+\code{\link[=determine_optimal_levels]{determine_optimal_levels()}}, \code{\link[=cell_values_at]{cell_values_at()}}, \code{\link[=summarize_by_cell]{summarize_by_cell()}},
+\code{\link[=select_features_forward]{select_features_forward()}}, \code{\link[=compare_models_cv]{compare_models_cv()}},
+\code{\link[=area_of_applicability]{area_of_applicability()}}, \code{\link[=predict_surface]{predict_surface()}}) raise either error in
+their own name, with the same class and fields, naming their argument and
+its rows.
 }
 \examples{
 library(sf)

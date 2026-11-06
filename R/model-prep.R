@@ -734,29 +734,85 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #'
 #' coerce_to_points() stops with the error of class
 #' \code{"spatialkit_features_degenerate"} when s2 refuses a polygon whose
-#' centroid it takes in degrees.  Raised as it came, the error named
+#' centroid it takes in degrees, and when GEOS puts the centroid of a
+#' feature outside it (\code{.raise_centroids_off()}, \code{site =
+#' "geos_centroid"}), which is raised again in the same form with remedies
+#' that do not name a transform.  Raised as it came, the error named
 #' \code{x} and \code{coerce_to_points()}, which the caller of
-#' \code{prep_model_data()} or \code{compare_models_cv()} never called, and
-#' offered a \code{mode}.  The rows are the rows of \code{data_sf}, which the
-#' coerce reads row for row.  The remedy says to run the call again, not to
-#' call this function again: the \code{cv_*()} and \code{fit_*()} functions
-#' reach \code{prep_model_data()} with the \code{data_sf} they were given.
+#' \code{prep_model_data()}, \code{make_folds()} or \code{cell_values_at()}
+#' never called, and offered a \code{mode}, which none of them takes.  The
+#' rows are the rows of the caller's argument, which the coerce reads row
+#' for row.  The remedy says to run the call again, not to call this
+#' function again: the \code{cv_*()} and \code{fit_*()} functions reach
+#' \code{prep_model_data()} with the \code{data_sf} they were given.
 #'
-#' @param e The condition coerce_to_points() raised.
+#' @param e The condition coerce_to_points() raised, or one this function
+#'   raised for a function the caller's function called (the inner folds of
+#'   \code{select_features_forward()}).
 #' @param caller The function the error names.
-#' @param pointize The \code{pointize} the caller passed.
+#' @param pointize The \code{pointize} the caller passed; \code{NULL} for a
+#'   function that takes none, which reduces the layer with mode
+#'   \code{"auto"}: the error then says to reduce the layer to points first.
+#' @param arg The argument the error names, with its backquotes.
+#' @param at The rows of the caller's argument the coerce was handed, when
+#'   they are not all of them in order; \code{NULL} when they are.
+#' @param n The number of rows of the caller's argument; \code{NULL} for
+#'   the number the coerce was handed.
 #' @return Does not return.
 #' @keywords internal
 #' @noRd
-.pointize_refused <- function(e, caller, pointize) {
+.pointize_refused <- function(e, caller, pointize = NULL, arg = "`data_sf`", at = NULL,
+                              n = NULL) {
+  rows <- if (is.null(at)) e$rows else at[e$rows]
+  if (is.null(n)) n <- e$n
+  # A centroid GEOS put outside its feature (.raise_centroids_off()): no
+  # transform helps, so the remedies are a point on the surface and a repair.
+  if (identical(e$site, "geos_centroid")) {
+    plain <- gsub("`", "", arg, fixed = TRUE)
+    .raise_centroids_off(
+      rows, e$reasons, n, caller, arg,
+      if (is.null(pointize))
+        sprintf(paste0("Reduce %s to points first, for example with ",
+                       "coerce_to_points(%s, \"point_on_surface\"), which takes a point ",
+                       "on each geometry with GEOS, or repair the features with ",
+                       "sf::st_make_valid(), and run the call again."), arg, plain)
+      else
+        paste0("Pass pointize = \"point_on_surface\", which takes a point on each ",
+               "geometry with GEOS, or repair the features with sf::st_make_valid() ",
+               "and run the call again."))
+  }
   .raise_cells_degenerate(
-    e$parent, e$rows, e$reasons, e$n, caller, "`data_sf`", "sf::st_centroid()",
+    e$parent, rows, e$reasons, n, caller, arg, "sf::st_centroid()",
     "run the call again; the centroids are then taken in that CRS",
-    of = sprintf("the %d features of `data_sf`", e$n), kind = "features",
-    more = if (identical(pointize, "auto"))
+    of = sprintf("the %d features of %s", n, arg), kind = "features",
+    more = if (is.null(pointize))
+      sprintf(paste0("Or reduce %s to points first, for example with ",
+                     "coerce_to_points(%s, \"point_on_surface\"), which takes a point ",
+                     "on each geometry with GEOS."), arg, gsub("`", "", arg, fixed = TRUE))
+    else if (identical(pointize, "auto"))
       paste0("Or pass pointize = \"point_on_surface\", which takes a point on ",
              "each geometry with GEOS.")
     else
       paste0("Or pass pointize = \"auto\", which takes a point on the ",
              "surface of each polygon with GEOS."))
+}
+
+
+#' Reduce the caller's layer to points, or refuse in the caller's words
+#'
+#' \code{coerce_to_points(x, "auto")}, whose refusal of a polygon s2 cannot
+#' take a centroid of, or of a centroid GEOS puts outside its feature, is
+#' raised again by \code{.pointize_refused()}, naming \code{caller} and
+#' \code{arg}.  Other conditions are passed on.
+#'
+#' @param x The layer, row for row with the caller's argument unless
+#'   \code{at} says otherwise.
+#' @param caller,arg,at,n As for \code{.pointize_refused()}.
+#' @return \code{coerce_to_points(x, "auto")}.
+#' @keywords internal
+#' @noRd
+.pointize_auto <- function(x, caller, arg, at = NULL, n = NULL) {
+  tryCatch(coerce_to_points(x, "auto"),
+           spatialkit_features_degenerate = function(e)
+             .pointize_refused(e, caller, arg = arg, at = at, n = n))
 }
