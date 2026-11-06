@@ -441,6 +441,18 @@ test_that("gp_lengthscale_bounds() leaves rows without a location out, with a wa
 
 .ful_unloc <- "without a location (an empty point, or a coordinate that is not finite or lies beyond 1e150)"
 
+# The messages of a call on a layer whose row 1 is put at `at`, against those
+# of the same row emptied (`ctl`).  A latitude beyond 90 has a location as
+# given that the move to the working CRS cannot place, and ensure_projected()
+# says so before the caller drops the row (BUG-193).
+.ful_msgs_at <- function(ctl, at, n, crs = "EPSG:32617")
+  if (identical(at, c(-80, 95)))
+    c(sprintf(paste0("ensure_projected(): the move of `x` to %s cannot place every ",
+                     "vertex of row 1 of its %d, which has a location in longitude ",
+                     "and latitude; it comes back empty or without the vertices it ",
+                     "cannot place. Pass a target_crs that holds every location of ",
+                     "the layer."), crs, n), ctl) else ctl
+
 # A make_folds() result without the probe of the layer as supplied, which
 # records the point a row has as given, so a latitude beyond 90 differs from
 # the same row emptied.
@@ -642,7 +654,7 @@ test_that("resolution_profile() drops a row beyond 1e150 as given, before the pr
           if (grepl("bounding box has potentially an invalid value range",
                     conditionMessage(w), fixed = TRUE)) invokeRestart("muffleWarning")))
       expect_identical(r$value, ctl$value, label = lab)
-      expect_identical(r$msgs, ctl$msgs, label = lab)
+      expect_identical(r$msgs, .ful_msgs_at(ctl$msgs, at, 150L), label = lab)
     }
     expect_true(any(grepl(paste0("resolution_profile(): dropping 1 point(s) ", .ful_unloc, "."),
                           ctl$msgs, fixed = TRUE)))
@@ -801,7 +813,7 @@ test_that("determine_optimal_levels() drops a row beyond 1e150 as given, as the 
           if (grepl("bounding box has potentially an invalid value range",
                     conditionMessage(w), fixed = TRUE)) invokeRestart("muffleWarning")))
       expect_identical(r$value, ctl$value, label = lab)
-      expect_identical(r$msgs, ctl$msgs, label = lab)
+      expect_identical(r$msgs, .ful_msgs_at(ctl$msgs, at, 150L), label = lab)
     }
     expect_true(any(grepl(paste0("determine_optimal_levels(): dropping 1 point(s) ",
                                  .ful_unloc, "."), ctl$msgs, fixed = TRUE)))

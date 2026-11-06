@@ -103,7 +103,13 @@ fewer than 40 distinct points remain, so a single study-area polygon is
 scored too, however many rows repeat it; copies of one location count
 once, and rows without a finite location are left out) and comparing
 planar with geodesic distances over the pairs at least 1 mm apart, and
-the one that distorts least is used.
+the one that distorts least is used. A candidate must place every
+location of the layer to be used: one under which a vertex of the
+layer has no coordinates (a UTM zone about 90 degrees or more from its
+central meridian) gets \code{distance_error} \code{NA} and is not chosen, and
+the log line names it. A vertex at a latitude beyond 90, which no CRS
+places, takes no part in this test. When no candidate places every
+vertex, Web Mercator (Equal Earth for \code{purpose = "area"}) is used.
 The choice, both error figures and this argument are \strong{logged} (see the
 logging note under \code{\link[=spatialkit_quiet]{spatialkit_quiet()}}); they are not R warnings, so
 \code{tryCatch(warning = )} does not see them.}
@@ -145,7 +151,13 @@ row has a location gets Web Mercator (Equal Earth for
 empty, in their own geometry type;
 \code{\link[sf:st_transform]{sf::st_transform()}} would drop the vertex it cannot move, or put a
 coordinate beyond 1e150 at a finite place, and return the rest of the
-feature.}
+feature. A row that has a location and that the move out of lon/lat
+cannot place in full comes back empty, or without the vertices the
+CRS cannot place, and a warning of class \code{spatialkit_rows_unplaced}
+names such rows (\code{rows} on the condition). With the projection chosen
+here that happens only at a coordinate no CRS places, such as a
+latitude beyond 90; with a \code{target_crs}, wherever that CRS cannot
+place the layer.}
 }
 
 \code{target_crs} overrides all of this. Pass it whenever you need a specific,

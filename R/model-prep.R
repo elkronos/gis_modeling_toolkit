@@ -737,7 +737,9 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #' centroid it takes in degrees, and when GEOS puts the centroid of a
 #' feature outside it (\code{.raise_centroids_off()}, \code{site =
 #' "geos_centroid"}), which is raised again in the same form with remedies
-#' that do not name a transform.  Raised as it came, the error named
+#' that do not name a transform.  So is its refusal of a line its temporary
+#' projection cannot place (\code{.raise_unplaced_lines()}, \code{site =
+#' "projection"}), whose remedy is the centroid in longitude and latitude.  Raised as it came, the error named
 #' \code{x} and \code{coerce_to_points()}, which the caller of
 #' \code{prep_model_data()}, \code{make_folds()} or \code{cell_values_at()}
 #' never called, and offered a \code{mode}, which none of them takes.  The
@@ -780,6 +782,21 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
         paste0("Pass pointize = \"point_on_surface\", which takes a point on each ",
                "geometry with GEOS, or repair the features with sf::st_make_valid() ",
                "and run the call again."))
+  }
+  # A line the temporary projection cannot place (.raise_unplaced_lines()):
+  # the centroid in longitude and latitude needs no projection.
+  if (identical(e$site, "projection")) {
+    plain <- gsub("`", "", arg, fixed = TRUE)
+    .raise_unplaced_lines(
+      rows, n, caller, arg, e$crs,
+      if (is.null(pointize))
+        sprintf(paste0("Reduce %s to points first, for example with ",
+                       "coerce_to_points(%s, \"centroid\"), which takes the point in ",
+                       "longitude and latitude, without the projection, and run the ",
+                       "call again."), arg, plain)
+      else
+        paste0("Pass pointize = \"centroid\", which takes the point in longitude ",
+               "and latitude, without the projection, and run the call again."))
   }
   # pointize = "auto" is offered only when every row refused is a POLYGON
   # or MULTIPOLYGON (auto_helps): "auto" takes the centroid of a collection

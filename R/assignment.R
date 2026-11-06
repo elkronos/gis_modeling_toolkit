@@ -4466,8 +4466,14 @@ summarize_by_cell <- function(assigned_points_sf,
   # what they read with the rows emptied.  The empty point keeps the
   # dimensions of the feature, as sf needs one dimension per layer.
   layer <- .empty_unlocated(layer, which(far_given))
-  layer <- if (is.null(crs)) ensure_projected(layer)
-           else ensure_projected(layer, target_crs = crs)
+  # A row the move cannot place comes back empty and gets NA coordinates
+  # below, and both callers (summarize_by_cell(), cell_values_at()) report
+  # it in their own words, so ensure_projected()'s warning about it, which
+  # names `x`, is not given as well.
+  done  <- .answer_for_classed("spatialkit_rows_unplaced")
+  layer <- tryCatch(if (is.null(crs)) ensure_projected(layer)
+                    else ensure_projected(layer, target_crs = crs),
+                    finally = done())
   xy <- unname(sf::st_coordinates(layer)[, 1:2, drop = FALSE])
   far <- abs(xy[, 1L]) > .POOL_XY_MAX | abs(xy[, 2L]) > .POOL_XY_MAX
   xy[which(far | far_given), ] <- NA_real_

@@ -164,6 +164,13 @@
 #' \code{.POOL_XY_MAX} take no part in the choice: it is made on the layer
 #' with those rows emptied (\code{.empty_unlocated()}).
 #'
+#' On the comparison path and the \code{purpose = "area"} path a candidate
+#' is used only if it places every located vertex of the layer
+#' (\code{.places_vertices()}; a vertex at a latitude beyond 90 takes no
+#' part, \code{.located_vertices()}).  One that does not gets
+#' \code{distance_error} \code{NA}, is not chosen, and the log line names
+#' it.  When no candidate places every vertex, the global fallback is used.
+#'
 #' @param x An sf or sfc object.
 #' @return A list with \code{crs} (the chosen \code{sf::crs}) and
 #'   \code{candidates}, a data.frame with one row per projection considered:
@@ -399,6 +406,38 @@
 
   utm_epsg <- if (!is.na(lat) && lat < 0) 32700 + cand_zone else 32600 + cand_zone
 
+  # A candidate is used only if it places every located vertex of the layer.
+  # PROJ gives no coordinates for a point a UTM zone cannot place (about 90
+  # degrees or more from its central meridian on the equator), and the
+  # score left such points out: LINESTRING (0 0, 180 0) kept UTM zone 46,
+  # scored without both of its ends, and ensure_projected() returned the
+  # line empty, without a word.  The vertices are read once, and only where
+  # candidates are compared.
+  vtx <- NULL
+  places <- function(cd) {
+    if (is.null(vtx)) vtx <<- .located_vertices(x_ll)
+    .places_vertices(vtx, sf::st_crs(x_ll), cd$crs)
+  }
+  # Named in the log line: the candidates that cannot place the layer.
+  not_placed <- function(cands, placed, verb = "cannot")
+    if (all(placed)) "" else
+      sprintf(" %s %s place every location of the layer, so %s not used.",
+              paste(vapply(cands[!placed], `[[`, character(1), "name"),
+                    collapse = " and "),
+              verb, if (sum(!placed) == 1L) "it is" else "they are")
+  # No candidate places every vertex: the global fallback, as for global
+  # coverage.
+  none_placed <- function(cands) {
+    .log_warn(
+      paste0(".pick_local_projected_crs(): no candidate projection can place ",
+             "every location of the layer (%s cannot). Falling back to %s. ",
+             "Pass target_crs to ensure_projected() to choose a projection ",
+             "suited to your extent."),
+      paste(vapply(cands, `[[`, character(1), "name"), collapse = " and "),
+      if (purpose == "area") "Equal Earth (equal-area)" else "EPSG:3857")
+    list(crs = global_crs(), candidates = NULL)
+  }
+
   if (purpose == "area") {
     # Areas are what matter, so the zone -- conformal, not equal-area -- is
     # not a candidate at any extent: a UTM zone's area scale runs from 0.9992
@@ -426,16 +465,19 @@
                  "+datum=WGS84 +units=m +no_defs"),
           lat1, lat2, lat, lon)))))
     }
-    err  <- vapply(cands, function(cd) .crs_distance_error(x_ll, cd$crs), numeric(1))
+    placed <- vapply(cands, places, logical(1))
+    if (!any(placed)) return(none_placed(cands))
+    err  <- vapply(seq_along(cands), function(i)
+      if (placed[i]) .crs_distance_error(x_ll, cands[[i]]$crs) else NA_real_, numeric(1))
     best <- which.min(ifelse(is.finite(err), err, Inf))
-    if (!length(best) || !is.finite(err[best])) best <- 1L
+    if (!length(best) || !is.finite(err[best])) best <- which(placed)[1L]
     .log_info(
       paste0(".pick_local_projected_crs(): purpose = \"area\": using %s ",
              "(equal-area; worst-case distance error %s over sampled pairs) ",
-             "rather than UTM zone %d."),
+             "rather than UTM zone %d.%s"),
       cands[[best]]$name,
       if (is.finite(err[best])) sprintf("%.2f%%", 100 * err[best]) else "not measurable",
-      cand_zone
+      cand_zone, not_placed(cands, placed)
     )
     return(scored(cands[[best]]$crs, vapply(cands, `[[`, character(1), "name"),
                   lapply(cands, `[[`, "crs"), err, best))
@@ -486,26 +528,37 @@
           lat1, lat2, lat, lon)))))
     }
 
-    err <- vapply(cands, function(cd) .crs_distance_error(x_ll, cd$crs),
-                  numeric(1))
+    # A candidate that cannot place every located vertex is scored NA and
+    # not chosen; the zone is no longer kept by default when it is such a
+    # candidate.
+    placed <- vapply(cands, places, logical(1))
+    if (!any(placed)) return(none_placed(cands))
+    err <- vapply(seq_along(cands), function(i)
+      if (placed[i]) .crs_distance_error(x_ll, cands[[i]]$crs) else NA_real_,
+      numeric(1))
     best <- which.min(ifelse(is.finite(err), err, Inf))
-    if (!length(best) || !is.finite(err[best])) best <- 1L   # UTM fallback
+    # Nothing measured: the zone when it places the layer, else the first
+    # candidate that does.
+    if (!length(best) || !is.finite(err[best])) best <- which(placed)[1L]
 
     if (identical(cands[[best]]$name, cands[[1L]]$name)) {
       # The figures are only quotable when the comparison actually ran; a
       # candidate that could not be scored comes back NA, and a message
       # reporting "NA% vs NA%" asserts a comparison that never happened.
-      measured <- all(is.finite(err))
+      measured <- all(is.finite(err[placed]))
       .log_warn(
         paste0(".pick_local_projected_crs(): extent reaches %.1f deg from the ",
                "central meridian of UTM zone %d (%.1f deg of longitude in ",
-               "total); the zone is kept%s. Pass target_crs to ",
+               "total); the zone is kept%s.%s Pass target_crs to ",
                "ensure_projected() to override."),
         lon_off, cand_zone, span_lon,
-        if (measured)
+        if (!any(placed[-1L]))
+          " because no other candidate can place every location of the layer"
+        else if (measured)
           sprintf(", because on this extent every equal-area candidate distorts distances more than it does (%.2f%% vs %.2f%% worst-case over sampled pairs)",
-                  100 * min(err[-1L]), 100 * err[1L])
-        else " because the candidate projections could not be scored on this layer"
+                  100 * min(err[-1L][placed[-1L]]), 100 * err[1L])
+        else " because the candidate projections could not be scored on this layer",
+        not_placed(cands, placed)
       )
       return(scored(sf::st_crs(utm_epsg), vapply(cands, `[[`, character(1), "name"),
                     lapply(cands, `[[`, "crs"), err, 1L))
@@ -514,13 +567,18 @@
     .log_warn(
       paste0(".pick_local_projected_crs(): extent reaches %.1f deg from the ",
              "central meridian of UTM zone %d (%.1f deg of longitude in ",
-             "total). Using %s instead: measured worst-case distance error ",
-             "%.2f%% against the zone's %.2f%%, and that error propagates into ",
-             "variogram ranges, block sizes, GWR bandwidth and GP ",
-             "length-scales. Pass target_crs to ensure_projected() to ",
-             "override."),
+             "total). Using %s instead: %s%s%s%s Pass target_crs to ",
+             "ensure_projected() to override."),
       lon_off, cand_zone, span_lon, cands[[best]]$name,
-      100 * err[best], 100 * err[1L]
+      if (is.finite(err[best]))
+        sprintf("measured worst-case distance error %.2f%%", 100 * err[best])
+      else "its worst-case distance error could not be measured",
+      if (placed[1L]) sprintf(" against the zone's %.2f%%", 100 * err[1L]) else "",
+      if (is.finite(err[best]))
+        paste0(", and that error propagates into variogram ranges, block sizes, ",
+               "GWR bandwidth and GP length-scales.")
+      else ".",
+      not_placed(cands, placed)
     )
     return(scored(cands[[best]]$crs, vapply(cands, `[[`, character(1), "name"),
                   lapply(cands, `[[`, "crs"), err, best))
@@ -571,8 +629,9 @@
 #' @param max_n Maximum number of points to sample.  Default 40 (780 pairs).
 #' @return Numeric worst-case \code{|d_planar / d_geodesic - 1|} over the
 #'   sampled pairs 1 mm or more apart on the ellipsoid, or \code{NA} when it
-#'   cannot be computed or no pair is that long (which the caller treats as
-#'   "unusable").
+#'   cannot be computed, no pair is that long, or \code{crs} cannot place a
+#'   sampled point that has a location in degrees (which the caller treats
+#'   as "unusable").
 #' @keywords internal
 #' @noRd
 .crs_distance_error <- function(x_ll, crs, max_n = 40L) {
@@ -801,8 +860,19 @@
     ij  <- which(lower.tri(matrix(0, nrow(ll), nrow(ll))), arr.ind = TRUE)
     d_geo <- .geod_distance(ll[ij[, 2], 1], ll[ij[, 2], 2],
                             ll[ij[, 1], 1], ll[ij[, 1], 2])
-    d_prj <- as.numeric(stats::dist(
-      sf::st_coordinates(sf::st_transform(g, crs))[, 1:2, drop = FALSE]))
+    # A point placed in degrees that `crs` cannot place makes the score NA.
+    # Its pairs were left out, so a UTM zone was scored on the points it
+    # can place: on LINESTRING (0 0, 180 0) zone 46 scored without both
+    # ends of the line, and was kept.
+    # A point at a latitude beyond 90 has no place on the Earth, which no
+    # CRS places, and its pairs are left out as before
+    # (.located_vertices()).
+    pp <- sf::st_coordinates(sf::st_transform(g, crs))[, 1:2, drop = FALSE]
+    if (nrow(pp) != nrow(ll) ||
+        any(is.finite(ll[, 1L]) & is.finite(ll[, 2L]) & abs(ll[, 2L]) <= 90 &
+            !(is.finite(pp[, 1L]) & is.finite(pp[, 2L]))))
+      return(NA_real_)
+    d_prj <- as.numeric(stats::dist(pp))
     # Pairs under 1 mm are left out.  Two listings of one place that are not
     # the same double (a corner two features share, written -107.2 in one
     # and -110.6 + 3.4 in the other; a point listed twice a few bits apart;
@@ -897,6 +967,131 @@
   s <- cc[o, 1:2, drop = FALSE]
   keep <- o[c(TRUE, s[-1L, 1L] != s[-nrow(s), 1L] | s[-1L, 2L] != s[-nrow(s), 2L])]
   if (length(keep) == length(g)) g else g[sort(keep)]
+}
+
+
+#' The distinct located vertices of a layer in longitude and latitude
+#'
+#' Read with \code{.vertex_coords()}, so a layer of mixed types or of
+#' collections is read feature by feature.  A vertex with a coordinate that
+#' is not finite or lies beyond \code{.POOL_XY_MAX} is left out, and so is
+#' one at a latitude beyond 90, which no CRS places; copies of one vertex
+#' count once.  Left in, a swapped row at (40, -96) among 39 stations over
+#' the conterminous United States failed every candidate, and the layer got
+#' Web Mercator, which cannot place that row either.
+#'
+#' @param x An sf or sfc object in longitude and latitude.
+#' @return A two-column matrix of x and y; \code{NULL} when the vertices
+#'   cannot be read.
+#' @keywords internal
+#' @noRd
+.located_vertices <- function(x) {
+  xy <- tryCatch(.vertex_coords(sf::st_geometry(x)), error = function(e) NULL)
+  if (is.null(xy)) return(NULL)
+  xy <- xy[, 1:2, drop = FALSE]
+  ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L]) &
+    abs(xy[, 1L]) <= .POOL_XY_MAX & abs(xy[, 2L]) <= 90
+  xy <- xy[ok, , drop = FALSE]
+  if (nrow(xy) < 2L) return(unname(xy))
+  o <- order(xy[, 1L], xy[, 2L])
+  s <- xy[o, , drop = FALSE]
+  unname(s[c(TRUE, s[-1L, 1L] != s[-nrow(s), 1L] | s[-1L, 2L] != s[-nrow(s), 2L]), ,
+           drop = FALSE])
+}
+
+
+#' Whether a CRS places every one of a set of points
+#'
+#' The points are moved from \code{from} to \code{crs} with
+#' \code{sf::st_transform()} as one MULTIPOINT.  GDAL returns a MULTIPOINT
+#' with a member it cannot move as an empty geometry, and drops such a
+#' vertex from a line or a ring; either way the count or a coordinate tells.
+#'
+#' @param xy A two-column matrix (\code{.located_vertices()}); \code{NULL}
+#'   when the vertices could not be read, which places nothing that can be
+#'   tested and gives \code{TRUE}.
+#' @param from The CRS of \code{xy}.
+#' @param crs The candidate CRS.
+#' @return \code{TRUE} when every point comes back with finite coordinates.
+#' @keywords internal
+#' @noRd
+.places_vertices <- function(xy, from, crs) {
+  if (is.null(xy) || !nrow(xy)) return(TRUE)
+  pp <- tryCatch(
+    sf::st_coordinates(sf::st_transform(sf::st_sfc(sf::st_multipoint(xy), crs = from), crs)),
+    error = function(e) NULL)
+  !is.null(pp) && nrow(pp) == nrow(xy) && all(is.finite(pp[, 1:2]))
+}
+
+
+#' The rows of a layer that a move left without some of their location
+#'
+#' Compares a layer before a move between CRSs with the layer after it.  A
+#' row that had a location (not empty, and no coordinate that is not finite
+#' or lies beyond \code{.POOL_XY_MAX}; \code{.unlocated_features()}) and
+#' comes back empty, with fewer coordinates, or with a coordinate that is no
+#' longer finite was not placed by the move: \code{sf::st_transform()}
+#' returns a point it cannot move as an empty point and drops such a vertex
+#' from a line or a ring.
+#'
+#' @param before,after The layer before and after the move, row for row.
+#' @return The positions of those rows, possibly none.
+#' @keywords internal
+#' @noRd
+.rows_unplaced <- function(before, after) {
+  gb  <- sf::st_geometry(before)
+  ga  <- sf::st_geometry(after)
+  if (length(gb) != length(ga) || !length(gb)) return(integer(0))
+  had <- !sf::st_is_empty(.drop_empty_parts(gb)) & !.unlocated_features(gb)
+  if (!any(had)) return(integer(0))
+  gone <- sf::st_is_empty(.drop_empty_parts(ga)) & had
+  lost <- function(b, a) length(a) != length(b) || any(is.finite(b) & !is.finite(a))
+  # One pass over the whole layer when nothing is lost, which is nearly
+  # always; row by row otherwise.
+  if (!any(gone) && !lost(unlist(unclass(gb)[had]), unlist(unclass(ga)[had])))
+    return(integer(0))
+  rows <- which(had)
+  rows[gone[rows] | vapply(rows, function(i)
+    lost(unlist(unclass(gb[[i]])), unlist(unclass(ga[[i]]))), logical(1))]
+}
+
+
+#' Warn that a move out of longitude and latitude left rows unplaced
+#'
+#' @param before,after As for \code{.rows_unplaced()}.
+#' @param caller,arg The function and the argument the warning names.
+#' @return \code{NULL}, invisibly.  The warning, of class
+#'   \code{"spatialkit_rows_unplaced"}, carries \code{rows} and \code{n}.
+#' @keywords internal
+#' @noRd
+.warn_rows_unplaced <- function(before, after, caller = "ensure_projected", arg = "x") {
+  rows <- .rows_unplaced(before, after)
+  if (!length(rows)) return(invisible(NULL))
+  n <- length(sf::st_geometry(before))
+  .warn_classed("spatialkit_rows_unplaced",
+                paste0("%s(): the move of `%s` to %s cannot place every vertex of %s ",
+                       "of its %d, which %s a location in longitude and latitude; ",
+                       "%s back empty or without the vertices it cannot place. ",
+                       "Pass a target_crs that holds every location of the layer."),
+                caller, arg, .fold_crs_label(after), .rows_text(rows), n,
+                if (length(rows) == 1L) "has" else "have",
+                if (length(rows) == 1L) "it comes" else "they come",
+                data = list(rows = rows, n = n))
+  invisible(NULL)
+}
+
+
+#' Rows named in a message
+#'
+#' @param r Row numbers.
+#' @return "row 3", "rows 2, 5 and 7", or the first six and how many more.
+#' @keywords internal
+#' @noRd
+.rows_text <- function(r) {
+  k <- length(r)
+  if (k == 1L) sprintf("row %d", r)
+  else if (k <= 6L) sprintf("rows %s and %d", paste(r[-k], collapse = ", "), r[k])
+  else sprintf("rows %s and %d more", paste(r[1:6], collapse = ", "), k - 6L)
 }
 
 
@@ -1390,6 +1585,44 @@
                       repaired = FALSE, s2_forced = FALSE, site = "geos_centroid"))
 }
 
+#' Refuse the lines the temporary projection cannot place
+#'
+#' Raises the error of class \code{"spatialkit_features_degenerate"} for
+#' the rows of \code{arg} whose line the temporary projection of
+#' \code{coerce_to_points()} returned empty, without some of its vertices,
+#' or with a coordinate that is not finite.  \code{sf::st_line_sample()}
+#' segfaults on an empty line, and a crash cannot be caught, so such a line
+#' is never sampled.  \code{site = "projection"} lets a caller that raises
+#' it again in its own words (\code{.pointize_refused()}) tell it from the
+#' other refusals.
+#'
+#' @param rows The rows of \code{arg}.
+#' @param n The number of rows of \code{arg}.
+#' @param caller The function the error names.
+#' @param arg The argument the error names, with its backquotes.
+#' @param crs_label The CRS of the temporary projection, as
+#'   \code{.fold_crs_label()} gives it.
+#' @param remedy The closing sentence.
+#' @return Does not return.  The condition carries \code{rows}, \code{n},
+#'   \code{reasons}, \code{parent} (\code{NULL}), \code{site} and
+#'   \code{crs} (\code{crs_label}).
+#' @keywords internal
+#' @noRd
+.raise_unplaced_lines <- function(rows, n, caller, arg, crs_label, remedy) {
+  k <- length(rows)
+  msg <- sprintf(paste0(
+    "%s(): the temporary projection to %s, which takes the midpoints of lines, ",
+    "cannot place every vertex of %s of the %d features of %s: %s back empty or ",
+    "without the vertices it cannot place, so no midpoint is taken. %s"),
+    caller, crs_label, .rows_text(rows), n, arg,
+    if (k == 1L) "it comes" else "they come", remedy)
+  stop(errorCondition(msg, class = "spatialkit_features_degenerate", call = NULL,
+                      rows = rows, n = n,
+                      reasons = rep(sprintf("not placed in %s", crs_label), k),
+                      parent = NULL, repaired = FALSE, s2_forced = FALSE,
+                      site = "projection", crs = crs_label))
+}
+
 #' The vertices of a layer with each ring's closing vertex counted once
 #'
 #' Read feature by feature off the geometry lists, for a layer of any type,
@@ -1690,7 +1923,13 @@
 #'     scored too, however many rows repeat it; copies of one location count
 #'     once, and rows without a finite location are left out) and comparing
 #'     planar with geodesic distances over the pairs at least 1 mm apart, and
-#'     the one that distorts least is used.
+#'     the one that distorts least is used. A candidate must place every
+#'     location of the layer to be used: one under which a vertex of the
+#'     layer has no coordinates (a UTM zone about 90 degrees or more from its
+#'     central meridian) gets `distance_error` `NA` and is not chosen, and
+#'     the log line names it. A vertex at a latitude beyond 90, which no CRS
+#'     places, takes no part in this test. When no candidate places every
+#'     vertex, Web Mercator (Equal Earth for `purpose = "area"`) is used.
 #'     The choice, both error figures and this argument are **logged** (see the
 #'     logging note under [spatialkit_quiet()]); they are not R warnings, so
 #'     `tryCatch(warning = )` does not see them.}
@@ -1732,7 +1971,13 @@
 #'     empty, in their own geometry type;
 #'     [sf::st_transform()] would drop the vertex it cannot move, or put a
 #'     coordinate beyond 1e150 at a finite place, and return the rest of the
-#'     feature.}
+#'     feature. A row that has a location and that the move out of lon/lat
+#'     cannot place in full comes back empty, or without the vertices the
+#'     CRS cannot place, and a warning of class `spatialkit_rows_unplaced`
+#'     names such rows (`rows` on the condition). With the projection chosen
+#'     here that happens only at a coordinate no CRS places, such as a
+#'     latitude beyond 90; with a `target_crs`, wherever that CRS cannot
+#'     place the layer.}
 #' }
 #'
 #' `target_crs` overrides all of this. Pass it whenever you need a specific,
@@ -1863,7 +2108,9 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
           tcrs$input %||% "unknown"
         )
         sf::st_crs(x) <- sf::st_crs(4326)
-        x <- .transform_keep_unlocated(.xy_if_mixed_warn(x, "ensure_projected", "x"), tcrs)
+        x0 <- .xy_if_mixed_warn(x, "ensure_projected", "x")
+        x  <- .transform_keep_unlocated(x0, tcrs)
+        .warn_rows_unplaced(x0, x)
         attr(x, "crs_assumed") <- "EPSG:4326"
         return(x)
       }
@@ -1875,8 +2122,11 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
       return(x)
     }
     if (!identical(xcrs, tcrs)) {
-      x <- .xy_if_mixed_warn(x, "ensure_projected", "x")
-      x <- .transform_keep_unlocated(x, tcrs)
+      x0 <- .xy_if_mixed_warn(x, "ensure_projected", "x")
+      x  <- .transform_keep_unlocated(x0, tcrs)
+      # A move out of lon/lat that leaves a located row empty, or without
+      # some of its vertices, is said.
+      if (isTRUE(sf::st_is_longlat(xcrs))) .warn_rows_unplaced(x0, x)
     }
     return(x)
   }
@@ -1900,7 +2150,9 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
       # from it, as below.
       x <- .xy_if_mixed_warn(x, "ensure_projected", "x")
       tr <- .pick_local_projected_crs(x, purpose = purpose)
-      x <- .transform_keep_unlocated(x, tr$crs)
+      x0 <- x
+      x  <- .transform_keep_unlocated(x0, tr$crs)
+      .warn_rows_unplaced(x0, x)
       attr(x, "crs_choice") <- tr$candidates
       # Recorded so a predict() on CRS-less newdata can replay the same
       # interpretation (see .replay_crs_assumption()).
@@ -1932,7 +2184,15 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
     # layer in Missouri got UTM zone 25 South), and the transform returns it.
     x <- .xy_if_mixed_warn(x, "ensure_projected", "x")
     tr <- .pick_local_projected_crs(x, purpose = purpose)
-    x <- .transform_keep_unlocated(x, tr$crs)
+    # Where candidates are compared, one is chosen only if it places every
+    # located vertex.  A located row can still come back empty, or without
+    # some of its vertices, from the paths that compare nothing (a zone on a
+    # local extent, the global fallback) at a coordinate no CRS places, such
+    # as a latitude beyond 90.  sf::st_transform() does that without a
+    # word; it is said here.
+    x0 <- x
+    x  <- .transform_keep_unlocated(x0, tr$crs)
+    .warn_rows_unplaced(x0, x)
     attr(x, "crs_choice") <- tr$candidates
   } else if (purpose == "area") {
     # Projected input is never reprojected, but when areas are what matter
@@ -2453,14 +2713,26 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' or to repair the features with [sf::st_make_valid()].  A centroid
 #' inside the box is returned as GEOS gives it.
 #'
+#' Modes `"auto"` and `"line_midpoint"` take the midpoint of a line in a
+#' temporary projection (`tmp_project`), the one [ensure_projected()]
+#' chooses for the lines.  A line that projection returns empty or without
+#' some of its vertices is never sampled, since [sf::st_line_sample()] ends
+#' the R session on an empty line: the call stops with an error of the
+#' same class, `spatialkit_features_degenerate`, that gives its rows of `x`
+#' (`rows`), carries `site = "projection"`, and says to pass
+#' `mode = "centroid"` or `tmp_project = FALSE`, which take the point in
+#' longitude and latitude, without the projection.  A line with a
+#' coordinate that is not finite or lies beyond 1e150 has no location, and
+#' gets an EMPTY POINT under these modes, as an empty line does.
+#'
 #' The functions that reduce a layer they are given to points this way
 #' ([prep_model_data()], [make_folds()], [fold_separation()],
 #' [estimate_sac_range()], [resolution_profile()],
 #' [determine_optimal_levels()], [cell_values_at()], [summarize_by_cell()],
 #' [select_features_forward()], [compare_models_cv()],
-#' [area_of_applicability()], [predict_surface()]) raise either error in
-#' their own name, with the same class and fields, naming their argument and
-#' its rows.
+#' [area_of_applicability()], [predict_surface()]) raise each of these
+#' errors in their own name, with the same class and fields, naming their
+#' argument and its rows.
 #'
 #' @param x An sf object.
 #' @param mode One of "auto", "centroid", "point_on_surface", "surface",
@@ -2624,12 +2896,35 @@ coerce_to_points <- function(
   # and prep_model_data() and make_folds() drop them like any empty geometry.
   # This used to be an error, which made a line layer with one null geometry
   # the only kind of layer those "drop empty rows" paths could not clean.
+  # The temporary projection of the lines whose midpoints are taken, rows
+  # `rows` of `x`.  A line it returns empty, without some of its vertices,
+  # or with a coordinate that is not finite is refused, naming its rows of
+  # `x`: st_line_sample() segfaults on an empty line, and a crash cannot be
+  # caught.  LINESTRING (0 0, 180 0) in UTM zone 46 ended the R session.
+  # ensure_projected()'s warning about such rows would name the rows of this
+  # subset, so it is not given; the refusal names them.
+  projected_lines <- function(lines_sf, rows) {
+    done <- .answer_for_classed("spatialkit_rows_unplaced")
+    proj <- tryCatch(ensure_projected(lines_sf), finally = done())
+    bad  <- .rows_unplaced(lines_sf, proj)
+    if (length(bad))
+      .raise_unplaced_lines(
+        rows[bad], length(g), "coerce_to_points", "`x`", .fold_crs_label(proj),
+        paste0("Pass mode = \"centroid\", or tmp_project = FALSE, which take the ",
+               "point in longitude and latitude, without the projection."))
+    proj
+  }
+
+  # A line with a coordinate that is not finite or lies beyond .POOL_XY_MAX
+  # has no location: it is read as an empty line, as elsewhere.  In lon/lat
+  # the temporary projection emptied it, and st_line_sample() segfaulted on
+  # the empty copy.
   .line_midpoints <- function(idx_ls) {
     res  <- rep(list(sf::st_point()), length(idx_ls))
-    full <- which(!sf::st_is_empty(g[idx_ls]))
+    full <- which(!sf::st_is_empty(g[idx_ls]) & !.unlocated_features(g[idx_ls]))
     if (!length(full)) return(res)
     g_ls_sf   <- sf::st_sf(geometry = g[idx_ls[full]])
-    g_ls_proj <- if (tmp_project) ensure_projected(g_ls_sf) else g_ls_sf
+    g_ls_proj <- if (tmp_project) projected_lines(g_ls_sf, idx_ls[full]) else g_ls_sf
     midps     <- sf::st_line_sample(sf::st_geometry(g_ls_proj), sample = 0.5)
     midps     <- sf::st_cast(midps, "POINT")
     midps     <- .back_to_input_crs(midps, g_ls_proj, crs)
@@ -2712,7 +3007,11 @@ coerce_to_points <- function(
       # feature holding one came back EMPTY as a whole, losing its real part.
       g_mls     <- .drop_empty_parts(g[idx_mls])
       g_mls_sf  <- sf::st_sf(geometry = g_mls)
-      g_mls_proj <- if (tmp_project) ensure_projected(g_mls_sf) else g_mls_sf
+      # A located row the projection cannot place is refused, as for a
+      # LINESTRING; it came back as an empty point.  A row without a
+      # location comes back empty from the projection and gets an empty
+      # point below.
+      g_mls_proj <- if (tmp_project) projected_lines(g_mls_sf, idx_mls) else g_mls_sf
       proj_geom  <- sf::st_geometry(g_mls_proj)
       proj_crs   <- sf::st_crs(g_mls_proj)
       for (j in seq_along(idx_mls)) {

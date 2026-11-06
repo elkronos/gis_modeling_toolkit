@@ -1930,6 +1930,43 @@ old behaviour where there is a way.
   an Albers CRS.  Such a row now takes no part in the scores, as an empty
   row does, and the zone's figure is the stations'.
 
+* **`ensure_projected()` kept a UTM zone that cannot place every location
+  of a lon/lat layer, and `coerce_to_points()` then ended the R session.**
+  PROJ gives no coordinates for a point a UTM zone cannot place, about 90
+  degrees or more from its central meridian on the equator, and the
+  distance score left such points out, so the zone was scored on the rest.
+  `LINESTRING (0 0, 180 0)` kept UTM zone 46, which holds neither end of
+  the line (278.82% against 1169.31% for the Lambert azimuthal CRS);
+  `ensure_projected()` returned the line empty, and five points on the
+  equator at longitudes 0 to 180 with two of them empty, without a word;
+  and `coerce_to_points()` in mode `"auto"` (the default, also of
+  `prep_model_data()` and of the functions that reduce a layer to points)
+  or `"line_midpoint"` handed the empty line to `sf::st_line_sample()`,
+  which segfaulted.  A candidate is now used only if it places every
+  located vertex of the layer (a vertex at a latitude beyond 90, which no
+  CRS places, takes no part in this test): one that does not gets
+  `distance_error` `NA` in `attr(, "crs_choice")`, is not chosen and is
+  named in the log line, and when no candidate places the layer the global
+  fallback (Web Mercator, Equal Earth for `purpose = "area"`) is used.  A
+  sampled point that a candidate cannot place makes its score `NA`.  The
+  line and the five points now get the Lambert azimuthal CRS, and the
+  line's midpoint is (90, 0).  When a move out of lon/lat still leaves a located row empty,
+  or without some of its vertices (`sf::st_transform()` drops a vertex it
+  cannot move), `ensure_projected()` warns with class
+  `spatialkit_rows_unplaced`, naming the rows.  `coerce_to_points()` never
+  samples a line that its temporary projection did not place in full: it
+  stops with class `spatialkit_features_degenerate` and
+  `site = "projection"`, naming the rows and offering `mode = "centroid"`
+  or `tmp_project = FALSE`, and the functions that reduce a layer to
+  points raise it in their own words.  A lon/lat line with a coordinate
+  that is not finite or lies beyond 1e150, which crashed the same way,
+  gets an empty point, as an empty line does.  Layers on which every
+  candidate places each vertex and each point the score samples get the
+  CRS, the scores and the points they got.  A candidate that places every
+  vertex but not a point the score samples along an edge now scores `NA`:
+  on `LINESTRING (0 0, 180 0)` with `purpose = "area"`, the Lambert
+  azimuthal CRS, which is still used.
+
 * **A row of a lon/lat layer with a coordinate that is not finite or lies
   beyond 1e150 shaped the projection chosen for the other rows.**
   `ensure_projected()` read the extent, the longitudes of the antimeridian

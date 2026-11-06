@@ -104,6 +104,11 @@
     stop(sprintf(paste0("cell_values_at(): `%s` has a CRS and `points` has none; set the ",
                         "CRS of `points` with sf::st_set_crs() so the %s can be placed."),
                  arg, what), call. = FALSE)
+  # The rows the move leaves without a location are read again after it and
+  # reported or refused here in cell_values_at()'s words (.values_at_xy()),
+  # so ensure_projected()'s warning about them is not given as well.
+  done <- .answer_for_classed("spatialkit_rows_unplaced")
+  on.exit(done(), add = TRUE)
   ensure_projected(pts, target_crs = crs)
 }
 

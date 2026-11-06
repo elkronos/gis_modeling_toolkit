@@ -103,14 +103,26 @@ the same class, \code{spatialkit_features_degenerate}, that gives its rows of
 or to repair the features with \code{\link[sf:st_make_valid]{sf::st_make_valid()}}.  A centroid
 inside the box is returned as GEOS gives it.
 
+Modes \code{"auto"} and \code{"line_midpoint"} take the midpoint of a line in a
+temporary projection (\code{tmp_project}), the one \code{\link[=ensure_projected]{ensure_projected()}}
+chooses for the lines.  A line that projection returns empty or without
+some of its vertices is never sampled, since \code{\link[sf:st_line_sample]{sf::st_line_sample()}} ends
+the R session on an empty line: the call stops with an error of the
+same class, \code{spatialkit_features_degenerate}, that gives its rows of \code{x}
+(\code{rows}), carries \code{site = "projection"}, and says to pass
+\code{mode = "centroid"} or \code{tmp_project = FALSE}, which take the point in
+longitude and latitude, without the projection.  A line with a
+coordinate that is not finite or lies beyond 1e150 has no location, and
+gets an EMPTY POINT under these modes, as an empty line does.
+
 The functions that reduce a layer they are given to points this way
 (\code{\link[=prep_model_data]{prep_model_data()}}, \code{\link[=make_folds]{make_folds()}}, \code{\link[=fold_separation]{fold_separation()}},
 \code{\link[=estimate_sac_range]{estimate_sac_range()}}, \code{\link[=resolution_profile]{resolution_profile()}},
 \code{\link[=determine_optimal_levels]{determine_optimal_levels()}}, \code{\link[=cell_values_at]{cell_values_at()}}, \code{\link[=summarize_by_cell]{summarize_by_cell()}},
 \code{\link[=select_features_forward]{select_features_forward()}}, \code{\link[=compare_models_cv]{compare_models_cv()}},
-\code{\link[=area_of_applicability]{area_of_applicability()}}, \code{\link[=predict_surface]{predict_surface()}}) raise either error in
-their own name, with the same class and fields, naming their argument and
-its rows.
+\code{\link[=area_of_applicability]{area_of_applicability()}}, \code{\link[=predict_surface]{predict_surface()}}) raise each of these
+errors in their own name, with the same class and fields, naming their
+argument and its rows.
 }
 \examples{
 library(sf)
