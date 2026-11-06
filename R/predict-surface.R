@@ -115,8 +115,13 @@
 #' least are a tie, and the tie goes to the point in the lowest column
 #' (\code{.near_columns()}: first coordinates within \code{.TIE_TOL} of the
 #' diagonal of the points' box are one column), then the lowest y, then the
-#' lower row.  Lines and polygons, and points in degrees, are searched by
-#' \code{sf::st_nearest_feature()} as before.
+#' lower row.  A layer of lines or polygons (or one that mixes them with
+#' points) is searched by \code{.surface_nearest_shapes()}, the same rule
+#' read on distances to the features and on the centres of their bounding
+#' boxes.  A layer in degrees is searched by \code{sf::st_nearest_feature()}
+#' as before.  A grid point without a location gets \code{NA} whatever the
+#' layer, where \code{st_nearest_feature()} gave a line, polygon or point in
+#' degrees a row.
 #'
 #' @param pts The grid's points, an sfc in the CRS of \code{covariates}.
 #' @param covariates The covariate layer.
@@ -126,15 +131,20 @@
 #' @noRd
 .surface_nearest_rows <- function(pts, covariates) {
   cg <- sf::st_geometry(covariates)
-  if (!all(sf::st_geometry_type(cg, by_geometry = TRUE) == "POINT") ||
-      isTRUE(sf::st_is_longlat(cg)))
-    return(sf::st_nearest_feature(pts, cg))
+  if (!isTRUE(sf::st_is_longlat(cg)) &&
+      !all(sf::st_geometry_type(cg, by_geometry = TRUE) == "POINT"))
+    return(.surface_nearest_shapes(pts, cg))
   out  <- rep(NA_integer_, length(pts))
-  cxy  <- .values_at_xy(sf::st_sf(geometry = cg))
   gxy  <- .values_at_xy(sf::st_sf(geometry = pts))
-  live <- which(!is.na(cxy[, 1L]))
   q    <- which(!is.na(gxy[, 1L]))
-  if (!length(live) || !length(q)) return(out)
+  if (!length(q)) return(out)
+  if (isTRUE(sf::st_is_longlat(cg))) {
+    out[q] <- sf::st_nearest_feature(pts[q], cg)
+    return(out)
+  }
+  cxy  <- .values_at_xy(sf::st_sf(geometry = cg))
+  live <- which(!is.na(cxy[, 1L]))
+  if (!length(live)) return(out)
   cx <- cxy[live, 1L]; cy <- cxy[live, 2L]
   # By column, then y, then row: order() keeps the row order among ties.
   o <- order(.near_columns(cx, cy), cy)
@@ -142,6 +152,91 @@
                           use_fnn = .has_backend("FNN"))
   out[q] <- live[o[j]]
   out
+}
+
+
+#' The line or polygon nearest each grid point
+#'
+#' A grid point on the edge two covariate polygons share (or at the shared
+#' end of two lines) is at distance 0 from both, and
+#' \code{sf::st_nearest_feature()} gave it whichever one GEOS met first,
+#' which moved with the last bits of the coordinates and with the row order
+#' of the layer.  Here the least distance \code{d} is
+#' \code{st_nearest_feature()}'s, and the features within
+#' \code{d * (1 + .TIE_TOL) + .edge_tol()} of the point (the margin of the
+#' layer's bounding box, \code{.edge_join()}'s) are a tie.  A point with one
+#' such feature takes it, as before.  Among several, the one whose
+#' bounding-box centre is in the lowest column (\code{.near_columns()} over
+#' the centres of the layer's features that have a location), then in the
+#' lowest row by the same rule read on y (\code{.near_columns(y, x)}), then
+#' in the lower row of the layer, is taken.  The features near a point are
+#' shortlisted by the square of half-side a hair above that reach around it
+#' (\code{st_intersects()} uses GEOS's index, where
+#' \code{st_is_within_distance()} takes a distance for every pair of a
+#' projected layer), then by the distance from the point to their bounding
+#' box, which is never more than the distance to the feature (a point far
+#' from the layer has a large square), and kept by their distance.  A point
+#' without a location (an empty point, or a coordinate that is not finite or
+#' lies beyond \code{.POOL_XY_MAX}) gets \code{NA}.
+#'
+#' @param pts The grid's points, an sfc in the CRS of \code{cg}.
+#' @param cg The covariates' geometry, not in degrees.
+#' @return Integer vector, one feature of \code{cg} per point; \code{NA}
+#'   for a point without a location and where \code{st_nearest_feature()}
+#'   gives none.
+#' @keywords internal
+#' @noRd
+.surface_nearest_shapes <- function(pts, cg) {
+  nn <- sf::st_nearest_feature(pts, cg)
+  pxy <- .values_at_xy(sf::st_sf(geometry = pts))
+  nn[is.na(pxy[, 1L])] <- NA_integer_
+  q <- which(!is.na(nn))
+  if (!length(q)) return(nn)
+  d   <- as.numeric(sf::st_distance(pts[q], cg[nn[q]], by_element = TRUE))
+  tol <- .edge_tol(sf::st_bbox(cg))
+  r   <- d * (1 + .TIE_TOL) + tol
+  # The square holds every feature within r of the point; its corners are
+  # computed in floating point, so it is taken a hair wider.
+  sq   <- sf::st_buffer(pts[q], r * (1 + 1e-6) + tol, endCapStyle = "SQUARE")
+  hits <- sf::st_intersects(sq, cg)
+  many <- which(lengths(hits) > 1L)
+  if (!length(many)) return(nn)
+
+  # The bounding box of each feature (NA for an empty one), for its centre
+  # and for the box distance below.
+  live <- which(!sf::st_is_empty(cg))
+  bbm  <- matrix(NA_real_, length(cg), 4L)
+  bbm[live, ] <- matrix(vapply(cg[live], function(g) as.numeric(sf::st_bbox(g)),
+                               numeric(4)), ncol = 4L, byrow = TRUE)
+  # The rank of each feature by its box centre: column, then row by the
+  # same rule on y, then row of the layer (order() keeps it among ties).
+  cx <- (bbm[live, 1L] + bbm[live, 3L]) / 2
+  cy <- (bbm[live, 2L] + bbm[live, 4L]) / 2
+  rank <- rep(NA_integer_, length(cg))
+  rank[live[order(.near_columns(cx, cy), .near_columns(cy, cx))]] <-
+    seq_along(live)
+
+  pk <- rep(many, lengths(hits[many]))
+  fj <- unlist(hits[many], use.names = FALSE)
+  # The distance to a feature's box is never more than the distance to the
+  # feature, so a pair whose box lies beyond the reach is not a tie.  Far
+  # from the layer the square holds many features that are not near.
+  px <- pxy[q[pk], 1L]; py <- pxy[q[pk], 2L]
+  bx <- pmax(bbm[fj, 1L] - px, 0, px - bbm[fj, 3L])
+  by <- pmax(bbm[fj, 2L] - py, 0, py - bbm[fj, 4L])
+  near <- sqrt(bx^2 + by^2) <= r[pk] * (1 + 1e-6) + tol
+  pk <- pk[near]; fj <- fj[near]
+  two <- pk %in% pk[duplicated(pk)]
+  pk <- pk[two]; fj <- fj[two]
+  if (!length(pk)) return(nn)
+  dj <- as.numeric(sf::st_distance(pts[q[pk]], cg[fj], by_element = TRUE))
+  ok <- dj <= r[pk]
+  pk <- pk[ok]; fj <- fj[ok]
+  # The lowest rank among the features each point ties with.
+  o  <- order(pk, rank[fj])
+  first <- !duplicated(pk[o])
+  nn[q[pk[o][first]]] <- fj[o][first]
+  nn
 }
 
 
@@ -221,11 +316,18 @@
 #'   diagonal of the points' bounding box counting as one, then the one
 #'   lowest in y, then the first in row order, so a grid laid between the
 #'   points of a lattice takes the same covariates in another unit or with
-#'   another origin, and with or without the \pkg{FNN} package.  For lines
-#'   and polygons, and for points in degrees, the nearest feature is
-#'   \code{sf::st_nearest_feature()}'s, which settles such a tie in the
-#'   order its search meets the features (GEOS, or s2 for a layer in
-#'   degrees while \code{sf::sf_use_s2()} is on).
+#'   another origin, and with or without the \pkg{FNN} package.  A grid
+#'   point the same distance from several features of a layer of lines or
+#'   polygons, or of one that mixes them with points (on the edge two
+#'   polygons share, say: distances within one part in ten million of the
+#'   least, plus one part in 1e10 of the largest coordinate of
+#'   \code{covariates}, count as the same) takes the one whose bounding-box
+#'   centre is lowest in x, then lowest in y, x values and y values within
+#'   one part in ten million of the diagonal of the centres' bounding box
+#'   counting as one, then the first in row order.  For a layer in degrees
+#'   the nearest feature is \code{sf::st_nearest_feature()}'s, which settles
+#'   such a tie in the order its search meets the features (GEOS, or s2 for
+#'   a layer in degrees while \code{sf::sf_use_s2()} is on).
 #' @param chunk_size Rows per prediction call. Default 5000.  A pure
 #'   performance knob: rows do not interact, and for a \code{bayesian_fit} the
 #'   GP boundary is held at its fitted value whatever the chunk holds; see

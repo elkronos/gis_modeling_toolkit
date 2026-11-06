@@ -83,11 +83,18 @@ the one lowest in x, x values within one part in ten million of the
 diagonal of the points' bounding box counting as one, then the one
 lowest in y, then the first in row order, so a grid laid between the
 points of a lattice takes the same covariates in another unit or with
-another origin, and with or without the \pkg{FNN} package.  For lines
-and polygons, and for points in degrees, the nearest feature is
-\code{sf::st_nearest_feature()}'s, which settles such a tie in the
-order its search meets the features (GEOS, or s2 for a layer in
-degrees while \code{sf::sf_use_s2()} is on).}
+another origin, and with or without the \pkg{FNN} package.  A grid
+point the same distance from several features of a layer of lines or
+polygons, or of one that mixes them with points (on the edge two
+polygons share, say: distances within one part in ten million of the
+least, plus one part in 1e10 of the largest coordinate of
+\code{covariates}, count as the same) takes the one whose bounding-box
+centre is lowest in x, then lowest in y, x values and y values within
+one part in ten million of the diagonal of the centres' bounding box
+counting as one, then the first in row order.  For a layer in degrees
+the nearest feature is \code{sf::st_nearest_feature()}'s, which settles
+such a tie in the order its search meets the features (GEOS, or s2 for
+a layer in degrees while \code{sf::sf_use_s2()} is on).}
 
 \item{chunk_size}{Rows per prediction call. Default 5000.  A pure
 performance knob: rows do not interact, and for a \code{bayesian_fit} the

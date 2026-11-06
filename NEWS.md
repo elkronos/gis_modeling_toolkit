@@ -3887,7 +3887,7 @@ old behaviour where there is a way.
   so such a layer can get a higher ceiling and more seeds than before.
 
 * **`predict_surface()` took a grid point's covariates from whichever of
-  several equally near points of `covariates` GEOS met first, so the
+  several equally near features of `covariates` GEOS met first, so the
   surface moved with the unit and the origin of the coordinates.**  A grid
   laid between the points of a lattice is the same distance from four of
   them, and `sf::st_nearest_feature()` settled the tie by the last bits of
@@ -3900,12 +3900,27 @@ old behaviour where there is a way.
   million of the diagonal of the points' bounding box counting as one),
   then lowest in y, then first in row order.  The grid above takes the same
   covariates in all three frames, with or without the FNN package.  A grid
-  point that ties with no other point takes the row it took before.  A
-  point of a grid kept as given with a coordinate that is not finite or
-  lies beyond 1e150 now gets `NA` covariates, where it took those of a row
-  GEOS gave it; its `.pred` is `NA` as before.  Lines, polygons and
-  points in degrees are searched as before.  `?predict_surface`
-  (`covariates`) states the rule.
+  point that ties with no other point takes the row it took before.  Lines
+  and polygons had the same fault: a grid point on the edge two covariate
+  polygons share, or at the shared end of two lines, is at distance 0 from
+  both, and GEOS gave it either.  On 10 by 8 square cells of 500 m with
+  the grid on their shared edges, 34 of 72 grid points took another cell
+  with the false origin moved by 0.1 m, and 29 with the rows of
+  `covariates` shuffled.  Distances within one part in ten million of the
+  least, plus one part in 1e10 of the largest coordinate of `covariates`,
+  are now a tie, and the tie goes to the feature whose bounding-box centre
+  is lowest in x, then lowest in y (x values and y values within one part
+  in ten million of the diagonal of the centres' bounding box counting as
+  one), then first in row order: each of the 72 takes the cell to its left
+  in every frame and row order.  A grid point with one nearest feature
+  takes the row it took before.  Layers in degrees are searched as before.
+  `?predict_surface` (`covariates`) states the rule.  A point of a grid
+  kept as given with a coordinate that is not finite or lies beyond 1e150
+  now gets `NA` covariates, whatever the layer, where it took those of a
+  row GEOS gave it.  With point covariates its `.pred` was `NA` as well;
+  with lines or polygons, or with a layer in degrees, it got a finite
+  `.pred` from that row where `?predict_surface` (`grid`) states `NA`, and
+  now gets `NA`.
 
 * **The `attr(, "kmeans")` record of `get_voronoi_seeds()` for the scored
   centres of a profile or selection gave a point the same distance from two
