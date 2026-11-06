@@ -5828,6 +5828,24 @@ old behaviour where there is a way.
   response of one value up to rounding still gets `NA`.  Every response
   the first test passes gets the R-squared it got.
 
+* **RMSE and R-squared were wrong for a response whose squares underflow
+  or overflow.**  `model_metrics()`, `summary()`, `evaluate_insample()`,
+  `compare_models()`, every fold and the pooled scores of the `cv_*()`
+  functions and `compare_models_cv()`, and `select_features_forward()` took
+  the sums of squared errors and deviations on the values as they stand.
+  For 200 rows with R-squared 0.768, scaled by 2^-540 every squared error
+  fell below the smallest double: RMSE was 0 and R-squared 1, and at 2^-560
+  R-squared was `NA`.  Scaled by 2^510 or more, the sums passed the largest
+  double: RMSE was `Inf` and R-squared `NA`.  One prediction of 1e200
+  gave RMSE `Inf`.  Where a sum is not finite, or is below `n * 1e-300`
+  with errors or deviations that are not all 0, that sum is now taken
+  again on its errors or deviations divided by a power of two, which is
+  exact, and RMSE is multiplied back: RMSE over the scale, R-squared and
+  adjusted R-squared are those of the unscaled response, and RMSE is `Inf`
+  only where it passes the largest double.  MAE, MAPE and SMAPE do not
+  change, and where both sums lie between `n * 1e-300` and the largest
+  double every score is as it was.
+
 * **`compare_models()` set out-of-bag random-forest metrics beside in-sample
   ones without saying so.**  Without `newdata` an `rf_fit`'s fitted values
   are out-of-bag and every other backend's are in-sample, and the table could

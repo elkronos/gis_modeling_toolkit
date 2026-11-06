@@ -369,6 +369,71 @@
 }
 
 
+#' The power of two at or below a positive value
+#'
+#' The first divisor of \code{.spread_scaled()}: \code{log2()} of the
+#' largest doubles rounds up to 1024, whose power is \code{Inf}, and of a
+#' value just below a power of two can round up to it.
+#'
+#' @param a A positive finite value.
+#' @return A power of two in \code{(a / 2, a]}.
+#' @keywords internal
+#' @noRd
+.pow2_floor <- function(a) {
+  s <- 2^min(floor(log2(a)), 1023)
+  if (s > a) s / 2 else s
+}
+
+
+#' The mean of a column at any size
+#'
+#' \code{mean()} sums in a double where a long double is not wider, and a
+#' column near the largest double then has a mean of \code{Inf}.  The
+#' column is divided by the power of two at or below its largest absolute
+#' value, which is exact, and the mean multiplied back.
+#'
+#' @param y Finite values, at least one.
+#' @return The mean of \code{y}.
+#' @keywords internal
+#' @noRd
+.mean_pow2 <- function(y) {
+  a <- max(abs(y))
+  if (!(a > 0)) return(0)
+  s <- .pow2_floor(a)
+  mean(y / s) * s
+}
+
+
+#' A sum of squared differences at any size
+#'
+#' The differences \code{u - v} are divided by the power of two at or below
+#' their largest absolute value, so that the largest lies in [1, 2) and no
+#' square underflows or overflows where the sum is not itself beyond a
+#' double.  Division by a power of two is exact.  Where a difference
+#' overflows, the differences are taken on the halves, \code{f = 2}.
+#'
+#' @param u,v The values; \code{v} one value or one per value of \code{u}.
+#' @return A list with \code{m}, \code{s} and \code{f}, the sum being
+#'   \code{m * (s * f)^2}, \code{m} between 1 and \code{4 * length(u)} (0
+#'   where every difference is 0); \code{NULL} where a difference is not
+#'   finite on the halves either (\code{v} not finite).
+#' @keywords internal
+#' @noRd
+.ss_pow2 <- function(u, v) {
+  d <- u - v
+  f <- 1
+  if (!all(is.finite(d))) {
+    d <- u / 2 - v / 2
+    f <- 2
+  }
+  a <- max(abs(d))
+  if (!is.finite(a)) return(NULL)
+  if (!(a > 0)) return(list(m = 0, s = 1, f = 1))
+  s <- .pow2_floor(a)
+  list(m = sum((d / s)^2), s = s, f = f)
+}
+
+
 #' Compute basic regression metrics (RMSE, MAE, MAPE, SMAPE, R-squared, Adjusted R-squared)
 #'
 #' Shared across model-prep, cross-validation, and evaluation modules.
@@ -454,7 +519,25 @@
 
   baseline <- if (!is.null(y_train_mean)) y_train_mean else mean(y)
   tss  <- sum((y - baseline)^2)
-  rmse <- sqrt(rss / n)
+  # Squares of errors below about 1e-162 fall below the smallest double, and
+  # squares of large errors sum past the largest one: on the values as they
+  # stand RSS is 0 (RMSE 0, R2 1 whatever the fit) or Inf (RMSE Inf, R2 NA
+  # or -Inf), and TSS the same.  Where a sum is not finite, or is below
+  # n * .POOL_Y_MIN^2 while its terms are not all 0, that sum alone is read
+  # again on its own terms divided by a power of two (.ss_pow2()), which is
+  # exact: the sum is m * (s * f)^2.  The other sum keeps its value, as m
+  # with s = f = 1, so a far prediction or baseline does not move the scale
+  # of the sum it is not part of.  RMSE is multiplied back, and R2 takes
+  # the ratio of the sums as m_rss / m_tss times the square of the ratio of
+  # their scales.  With both sums as they stand, every product below is by
+  # 1 and the arithmetic is the old one to the bit.
+  lim <- n * .POOL_Y_MIN^2
+  sr <- if (!is.finite(rss) || (rss < lim && any(y != yhat))) .ss_pow2(y, yhat)
+  if (is.null(sr)) sr <- list(m = rss, s = 1, f = 1)
+  st <- if (!is.finite(tss) || (tss < lim && any(y != baseline)))
+    .ss_pow2(y, if (!is.null(y_train_mean)) y_train_mean else .mean_pow2(y))
+  if (is.null(st)) st <- list(m = tss, s = 1, f = 1)
+  rmse <- sqrt(sr$m / n) * sr$s * sr$f
   mae  <- mean(abs(y - yhat))
 
   # "Zero" means zero at the scale of the data, 100 machine epsilons of its
@@ -490,8 +573,16 @@
   # finds none either.  TSS and RSS are sums of differences, which a double
   # holds at the offset, so only the test changes.  The test reads y's own
   # spread whatever the baseline.
-  r2 <- if (tss > tol^2 * sum(y^2)) 1 - rss / tss
-        else if (is.finite(tss) && tss > 0 && !.constant_column(y)) 1 - rss / tss
+  # On a TSS read again the test reads y in the units of its scale.  An
+  # exact fit has RSS 0 at any scale (0 times an Inf ratio would be NaN).
+  # .constant_column() takes y as it stands: its own second reading is on
+  # the column scaled, and where its raw sums underflow or overflow they do
+  # so together and leave the answer to that reading.
+  ss_y <- sum(((y / st$f) / st$s)^2)
+  g  <- ((sr$s / st$f) / st$s) * sr$f
+  rr <- if (sr$m == 0) 0 else sr$m / st$m * g * g
+  r2 <- if (st$m > tol^2 * ss_y) 1 - rr
+        else if (is.finite(st$m) && st$m > 0 && !.constant_column(y)) 1 - rr
         else NA_real_
 
   adj_r2 <- NA_real_
