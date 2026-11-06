@@ -47,9 +47,13 @@ boundary is the one returned as \code{boundary}.}
 
 \item{clip}{Logical; intersect cells with boundary.}
 
-\item{keep_duplicates}{Logical. Has no effect on the result: coincident
-points are merged before the diagram is built either way, so they share
-one cell and all of them are indexed to it.}
+\item{keep_duplicates}{Logical. With \code{FALSE} (the default), points
+are merged before the diagram is built when they round to one point in
+coordinates centred on the middle of their bounding box, divided by its
+diagonal and rounded to 2^-30 of it, so points within about a billionth
+of the extent of each other count as coincident in any unit or origin
+and share one cell. With \code{TRUE} only points at exactly one
+location are merged. Every point is indexed to the cell that holds it.}
 
 \item{crs}{Optional target CRS: anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, including
 an sf or sfc layer, whose CRS is used. A projected CRS is the working

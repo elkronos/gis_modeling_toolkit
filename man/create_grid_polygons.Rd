@@ -45,7 +45,13 @@ the working CRS. Takes precedence over \code{n}: if both are supplied,
 \code{cellsize} is used, \code{n} is ignored and a warning is logged. Supply exactly
 one of \code{target_cells}, \code{cellsize} and \code{n}.  For \code{type = "hex"} a hexagon
 is defined by a single edge-to-edge distance, so only \code{cellsize[1]} is
-used and a differing \code{cellsize[2]} is ignored with a logged warning.}
+used and a differing \code{cellsize[2]} is ignored with a logged warning.
+A side of the boundary's bounding box that exceeds a whole number of
+square cells, of this size or of the size derived from \code{target_cells},
+by no more than a margin of one part in 1e10 of the largest coordinate
+of the boundary gets that number of cells, so a box of 9000 by 6000 at
+1000 gets 9 by 6 cells in any unit or origin, where rounding could add
+a row or column.}
 
 \item{n}{Optional grid resolution (integer, length 1 or 2) giving the number
 of columns and rows to divide the boundary's bounding box into; the cell
@@ -57,7 +63,11 @@ warning) when \code{cellsize} is also supplied. Passing both would otherwise
 truncate the grid to \code{n[1]} x \code{n[2]} cells anchored at the bounding-box
 corner, covering only part of the boundary.}
 
-\item{clip}{Logical; clip grid to boundary.}
+\item{clip}{Logical; clip grid to boundary. In a projected or CRS-less
+grid, a cell that meets the boundary only within a margin of one part in
+1e10 of the largest coordinate of the boundary from the cell's edge (a
+cell whose edge lies on the boundary's edge but for rounding) is
+dropped, rather than kept as a sliver.}
 
 \item{crs}{Optional target CRS: anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, including
 an sf or sfc layer, whose CRS is used. When \code{NULL} (default) a lon/lat

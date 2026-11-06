@@ -293,8 +293,22 @@ test_that("a cell s2 refuses even repaired stops the grid with the classed error
 
 test_that("a cell with two corners s2 reads as one point names the clip in degrees as the cause", {
   local_s2(TRUE)
-  # The clip of cells wider than 180 degrees leaves a sliver whose corners
-  # differ by rounding.
+  # The box is 20 degrees tall, 4 rows of cells of 5 degrees, but the
+  # boundary's height after its repair in degrees is 20.000000000000004, so
+  # sf counted a hair over 4 rows and laid a fifth, whose clip is a sliver
+  # with corners that differ by rounding, which s2 refuses.  A side that
+  # exceeds a whole number of cells by no more than the margin of an edge
+  # now gets that number (BUG-112): the lattice is 2 columns by 4 rows, and
+  # the clip keeps one part of each of the 4 cells of the west column (s2
+  # reads the box's 340 degree edges the short way, across 180 degrees).
+  g <- quiet(create_grid_polygons(box(-170, -10, 170, 10), cellsize = c(190, 5),
+                                  crs = 4326, quiet = TRUE))
+  expect_identical(nrow(g), 4L)
+  expect_length(s2_refused(g), 0L)
+  # The side counted as sf counts it, as before, still lays that row, and
+  # the error names the clip.
+  testthat::local_mocked_bindings(.grid_side_counts = function(span, cellsize, bb)
+    as.integer(pmax(1, ceiling(span / cellsize))))
   e <- tryCatch(quiet(create_grid_polygons(box(-170, -10, 170, 10), cellsize = c(190, 5),
                                            crs = 4326, quiet = TRUE)), error = function(e) e)
   expect_s3_class(e, "spatialkit_cells_degenerate")

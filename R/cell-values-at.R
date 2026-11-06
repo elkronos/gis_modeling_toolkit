@@ -578,10 +578,12 @@
 #' cell [assign_features_to_polygons()] gives a row there, with `seeds` and
 #' without. Other seeds, among them a subset of the centres, are searched as
 #' given. A location the same distance from two locations of scored rows takes
-#' the one with the lower x coordinate, then the lower y; among scored rows at
-#' one location that lie in different cells, the cell that comes first in the
-#' order of the IDs (ascending for numbers, the C-locale order for strings,
-#' the order of the levels for a factor). Neither rule depends on the order of
+#' the one in the lower column (x values within one part in ten million of the
+#' diagonal of the scored locations' bounding box counting as one), then the
+#' one lower in y; among scored rows at one location that lie in different
+#' cells, the cell that comes first in the order of the IDs (ascending for
+#' numbers, the C-locale order for strings, the order of the levels for a
+#' factor). Neither rule depends on the order of
 #' the rows of `points`, or on whether the \pkg{FNN} package is installed. A
 #' tie is a tie between distances computed from the coordinates in the working
 #' CRS, so on gridded locations the same layer in another projected CRS can
@@ -994,10 +996,17 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
   sid <- row_id[scored]
   # The cells in the order of their IDs, and the rows by location and then by
   # cell: the first row of a location is the one in the first of those cells.
+  # The locations are in column order (.near_columns(): x values within
+  # .TIE_TOL of the diagonal of their bounding box are one column), then by
+  # y, then by x, so rows at one location stay together.  The search below
+  # gives a tie to the lower location number, and in exact x order a
+  # lattice moved to another false origin no longer has one x per column,
+  # so of two locations of a column the one whose x was lower in its last
+  # bits won, not the lower one.
   cells <- unique(sid)
   cells <- cells[order(cells, method = "radix")]
   gi    <- match(sid, cells)
-  o     <- order(sx, sy, gi)
+  o     <- order(.near_columns(sx, sy), sy, sx, gi)
   sx <- sx[o]; sy <- sy[o]
   first <- c(TRUE, sx[-1L] != sx[-n_scored] | sy[-1L] != sy[-n_scored])
   ux <- sx[first]

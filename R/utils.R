@@ -268,18 +268,29 @@
 }
 
 
-#' Remove duplicate features by rounded coordinate key
+#' Remove duplicate features by a coordinate key that does not move with
+#' the unit or the origin
 #'
 #' Works on sf objects and bare sfc vectors with POINT geometry, and also
 #' handles MULTIPOINT (or mixed) input by keying each feature on all of its
 #' vertices, keeping the deduplication mask aligned per feature.
 #'
+#' The key is a vertex's place in the frame of \code{.kmeans_frame()}: the
+#' coordinates centred on the middle of the bounding box of every vertex with
+#' a location, divided by its diagonal and rounded to \code{.KMEANS_STEP}
+#' (about a billionth of it).  Ten decimals of the layer's unit merged copies
+#' 3e-8 m apart in kilometres and not in metres, and copies 1e-9 m apart with
+#' one false origin and not with another; points within about a billionth of
+#' the extent of each other now key alike in any unit or origin, but for a
+#' point that lies within its own rounding noise of the middle of a step.  A
+#' vertex without a location (not finite, or beyond 1e150) is keyed by its
+#' coordinates as they are.
+#'
 #' @param g An sf object or sfc vector with POINT/MULTIPOINT geometry.
-#' @param digits Rounding precision. Default 10.
 #' @return `g` with duplicates removed (same class as input).
 #' @keywords internal
 #' @noRd
-.dedup_points <- function(g, digits = 10L) {
+.dedup_points <- function(g) {
   geom <- if (inherits(g, "sfc")) g else sf::st_geometry(g)
   n <- length(geom)
   if (n == 0L) {
@@ -288,20 +299,34 @@
   }
 
   gtypes <- as.character(sf::st_geometry_type(geom, by_geometry = TRUE))
-  if (all(gtypes == "POINT")) {
-    # Fast path: one coordinate row per feature, so the key aligns 1:1.
-    m <- sf::st_coordinates(geom)
-    key <- paste0(round(m[, 1], digits), "_", round(m[, 2], digits))
+  fast <- all(gtypes == "POINT")
+  # The vertices of each feature: one row per feature on the fast path;
+  # MULTIPOINT (or mixed) input has one row per *vertex* in
+  # st_coordinates(), which would misalign a per-feature mask.
+  verts <- if (fast) {
+    m <- sf::st_coordinates(geom)[, 1:2, drop = FALSE]
+    list(xy = m, of = seq_len(n))
   } else {
-    # MULTIPOINT (or mixed) input: st_coordinates() returns one row per
-    # *vertex*, which would misalign a per-feature mask.  Build one key
-    # per feature from all of its vertices instead.
-    key <- vapply(seq_len(n), function(i) {
-      m <- sf::st_coordinates(geom[i])
-      if (nrow(m) == 0L) return("<empty>")
-      paste(round(m[, 1], digits), round(m[, 2], digits),
-            sep = "_", collapse = ";")
-    }, character(1))
+    ms <- lapply(seq_len(n), function(i) sf::st_coordinates(geom[i])[, 1:2, drop = FALSE])
+    list(xy = do.call(rbind, ms), of = rep(seq_len(n), vapply(ms, nrow, integer(1))))
+  }
+  xy <- verts$xy
+  ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L]) &
+    abs(xy[, 1L]) <= .POOL_XY_MAX & abs(xy[, 2L]) <= .POOL_XY_MAX
+  vkey <- character(nrow(xy))
+  if (any(ok)) {
+    z <- .kmeans_frame(xy[ok, , drop = FALSE])$to(xy[ok, , drop = FALSE])
+    # + 0 reads -0 as 0, so a point that rounds to the middle from below
+    # keys as one that rounds to it from above.
+    vkey[ok] <- sprintf("%a %a", z[, 1L] + 0, z[, 2L] + 0)
+  }
+  vkey[!ok] <- sprintf("raw %a %a", xy[!ok, 1L], xy[!ok, 2L])
+  key <- if (fast) vkey else {
+    k <- rep("<empty>", n)
+    have <- unique(verts$of)
+    k[have] <- vapply(split(vkey, factor(verts$of, levels = have)),
+                      paste, character(1), collapse = ";")
+    k
   }
 
   mask <- !duplicated(key)

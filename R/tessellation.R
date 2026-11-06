@@ -907,9 +907,19 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 
 #' Assign each point to its containing cell, returning cell_id values
 #'
-#' Uses st_intersects then falls back to st_nearest_feature for unmatched
-#' points. The returned vector uses the cell_id column of `cells_sf`, not
-#' raw row indices.
+#' A point within the margin \code{.edge_tol()} takes from the cells'
+#' bounding box of a cell is in it (\code{.edge_join()}), and a point in
+#' several cells takes the smallest cell_id among them.  On a lattice the
+#' points sit on the edges of
+#' a grid laid over them, and a change of unit or a shift of the origin moves
+#' the last bits of the coordinates, so the same point lay a hair inside one
+#' cell in one frame and inside the other in the next.  A point in no cell
+#' goes to the nearest cell when it is within a thousandth of the median cell
+#' width of it, and among the cells as near to one part in ten million (plus
+#' the same margin) to the smallest cell_id: a point outside the study area
+#' beside a corner two cells share is the same distance from both, and the
+#' last bits of the distances chose between them.  The returned vector uses
+#' the cell_id column of `cells_sf`, not raw row indices.
 #'
 #' @param pts An sf POINT object.
 #' @param cells_sf An sf polygon object with a `cell_id` column.
@@ -928,15 +938,23 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
                      snapped = list(n = 0L, which = integer(0), distance = numeric(0))))
 
   cell_ids <- cells_sf$cell_id
-  hits <- sf::st_intersects(pts, cells_sf)
-  
-  index <- vapply(hits, function(row_idx) {
-    row_idx <- as.integer(row_idx)
-    if (length(row_idx) == 0L)     return(NA_integer_)
-    if (length(row_idx) == 1L)     return(cell_ids[row_idx])
-    # Ambiguous: pick the cell with the smallest cell_id
-    min(cell_ids[row_idx])
-  }, integer(1))
+  # The margin of an edge is taken from the cells alone: a point without a
+  # location (a coordinate beyond 1e150) would set it otherwise.  Rows
+  # without a location are in no cell and are not searched.
+  etol    <- .edge_tol(sf::st_bbox(cells_sf))
+  located <- .located_rows(pts)
+  index   <- rep(NA_integer_, n)
+  if (any(located)) {
+    at   <- which(located)
+    hits <- attr(.edge_join(sf::st_geometry(pts)[at], cells_sf,
+                            bb = sf::st_bbox(cells_sf)), "hits")
+    # A point in several cells, or within the margin of their shared edge,
+    # takes the smallest cell_id among them.
+    index[at] <- vapply(hits, function(row_idx) {
+      row_idx <- as.integer(row_idx)
+      if (length(row_idx) == 0L) NA_integer_ else min(cell_ids[row_idx])
+    }, integer(1))
+  }
 
   # Points that fall in no cell.  For a Voronoi tessellation, or a grid clipped
   # to a boundary, "outside every cell" means outside the study area, and
@@ -947,7 +965,7 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   # right repair for a point a hair outside a cell edge (floating-point, a
   # clipped sliver), so keep it -- but bound it by the cell size and say how
   # many points were snapped, and leave the genuinely-outside ones NA.
-  unmatched <- which(is.na(index))
+  unmatched <- which(is.na(index) & located)
   snapped   <- list(n = 0L, which = integer(0), distance = numeric(0))
   if (length(unmatched) > 0L) {
     near  <- suppressWarnings(sf::st_nearest_feature(pts[unmatched, ], cells_sf))
@@ -967,10 +985,18 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
       tol <- if (is.finite(cw) && cw > 0) cw / 1000 else 0
       snap <- valid
       snap[valid] <- is.finite(d) & d <= tol
-      index[unmatched[snap]] <- cell_ids[near[snap]]
+      # The cell each snapped point goes to: among the cells as near as the
+      # nearest, to one part in ten million plus the margin of an edge, the
+      # smallest cell_id.  sf::st_nearest_feature() settled such a tie by
+      # the last bits of the distances.
+      d_all <- rep(NA_real_, length(unmatched)); d_all[valid] <- d
+      to <- .snap_lowest_cell(sf::st_geometry(pts)[unmatched[snap]], cells_sf,
+                              d_all[snap], etol)
+      miss <- is.na(to)
+      to[miss] <- cell_ids[near[snap]][miss]
+      index[unmatched[snap]] <- to
       # Which points were repaired, and how far outside each sat: the comment
       # above promised to say how many, and nothing did.
-      d_all <- rep(NA_real_, length(unmatched)); d_all[valid] <- d
       snapped <- list(n = sum(snap), which = as.integer(unmatched[snap]),
                       distance = as.numeric(d_all[snap]))
       if (snapped$n > 0L)
@@ -1008,6 +1034,78 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 
   attr(index, "snapped") <- snapped
   index
+}
+
+
+#' The Delaunay triangles of points, triangulated by GEOS in the frame of
+#' .kmeans_frame()
+#'
+#' The fallback of \code{build_tessellation(method = "triangles")} when
+#' \pkg{geometry} is not there.  \code{sf::st_triangulate()} is handed the
+#' points centred on the middle of their bounding box, divided by its
+#' diagonal and rounded to \code{.KMEANS_STEP}, so co-circular points are
+#' split the same in any unit or origin, and each triangle is drawn on the
+#' original coordinates of the points at its corners.
+#'
+#' @param coords Numeric matrix of finite coordinates, two columns.
+#' @param crs The CRS of the triangles.
+#' @return An sfc of POLYGON, possibly empty.
+#' @keywords internal
+#' @noRd
+.triangulate_in_frame <- function(coords, crs) {
+  z   <- .kmeans_frame(coords)$z
+  key <- complex(real = z[, 1L], imaginary = z[, 2L])
+  tri <- sf::st_triangulate(sf::st_sfc(sf::st_multipoint(unique(z))))
+  tri <- sf::st_collection_extract(tri, "POLYGON", warn = FALSE)
+  polys <- lapply(tri, function(t) {
+    v  <- sf::st_coordinates(t)[1:3, 1:2, drop = FALSE]
+    at <- match(complex(real = v[, 1L], imaginary = v[, 2L]), key)
+    if (anyNA(at)) return(NULL)
+    ring <- coords[c(at, at[1L]), , drop = FALSE]
+    signed_area <- sum(ring[-4L, 1] * ring[-1L, 2] - ring[-1L, 1] * ring[-4L, 2]) / 2
+    if (signed_area < 0) ring <- ring[4:1, , drop = FALSE]
+    sf::st_polygon(list(unname(ring)))
+  })
+  sf::st_sfc(polys[!vapply(polys, is.null, logical(1))], crs = crs)
+}
+
+
+#' The cell a point just outside every cell is snapped to
+#'
+#' Among the cells whose distance from the point is within one part in ten
+#' million of the least, plus \code{tol}, the smallest cell_id.  The
+#' candidates are found with the point grown by a little more than that
+#' reach (a buffer's sides lie inside its circle), and the distances are
+#' then taken exactly; in degrees, with \code{sf::st_is_within_distance()}.
+#'
+#' @param g Points (sfc), each within the snapping distance of a cell.
+#' @param cells_sf The cells, with a \code{cell_id} column.
+#' @param d The least distance of each point from a cell.
+#' @param tol The margin of an edge (\code{.edge_tol()}), in the units of
+#'   the CRS.
+#' @return Integer vector of cell_id values, one per point.
+#' @keywords internal
+#' @noRd
+.snap_lowest_cell <- function(g, cells_sf, d, tol) {
+  if (!length(g)) return(integer(0))
+  gc <- sf::st_geometry(cells_sf)
+  in_degrees <- isTRUE(sf::st_is_longlat(gc))
+  # In degrees the distances are in metres on the sphere, and the margin is
+  # taken as an arc, as .edge_join() does.
+  if (in_degrees) tol <- tol * pi / 180 * 6371010
+  reach <- d * (1 + .TIE_TOL) + tol
+  cand <- if (in_degrees) {
+    sf::st_is_within_distance(g, gc, dist = max(reach) * 1.01)
+  } else {
+    sf::st_intersects(sf::st_buffer(g, reach * 1.01), gc)
+  }
+  vapply(seq_along(g), function(i) {
+    r <- as.integer(cand[[i]])
+    if (!length(r)) return(NA_integer_)
+    dd <- suppressWarnings(as.numeric(sf::st_distance(g[i], gc[r])))
+    keep <- r[is.finite(dd) & dd <= min(dd, na.rm = TRUE) * (1 + .TIE_TOL) + tol]
+    if (!length(keep)) NA_integer_ else as.integer(min(cells_sf$cell_id[keep]))
+  }, integer(1))
 }
 
 # -----------------------------------------------------------------------------
@@ -1121,9 +1219,13 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   up to `expand` outside it gets a cell and an `index` value. The grown
 #'   boundary is the one returned as `boundary`.
 #' @param clip Logical; intersect cells with boundary.
-#' @param keep_duplicates Logical. Has no effect on the result: coincident
-#'   points are merged before the diagram is built either way, so they share
-#'   one cell and all of them are indexed to it.
+#' @param keep_duplicates Logical. With \code{FALSE} (the default), points
+#'   are merged before the diagram is built when they round to one point in
+#'   coordinates centred on the middle of their bounding box, divided by its
+#'   diagonal and rounded to 2^-30 of it, so points within about a billionth
+#'   of the extent of each other count as coincident in any unit or origin
+#'   and share one cell. With \code{TRUE} only points at exactly one
+#'   location are merged. Every point is indexed to the cell that holds it.
 #' @param crs Optional target CRS: anything [sf::st_crs()] accepts, including
 #'   an sf or sfc layer, whose CRS is used. A projected CRS is the working
 #'   CRS. A geographic one (EPSG:4326, say) is the CRS the result is returned
@@ -1696,6 +1798,12 @@ create_voronoi_polygons <- function(
 #'   one of `target_cells`, `cellsize` and `n`.  For `type = "hex"` a hexagon
 #'   is defined by a single edge-to-edge distance, so only `cellsize[1]` is
 #'   used and a differing `cellsize[2]` is ignored with a logged warning.
+#'   A side of the boundary's bounding box that exceeds a whole number of
+#'   square cells, of this size or of the size derived from `target_cells`,
+#'   by no more than a margin of one part in 1e10 of the largest coordinate
+#'   of the boundary gets that number of cells, so a box of 9000 by 6000 at
+#'   1000 gets 9 by 6 cells in any unit or origin, where rounding could add
+#'   a row or column.
 #' @param n Optional grid resolution (integer, length 1 or 2) giving the number
 #'   of columns and rows to divide the boundary's bounding box into; the cell
 #'   size is derived from it. [sf::st_make_grid()] derives hexagon placement
@@ -1705,7 +1813,11 @@ create_voronoi_polygons <- function(
 #'   warning) when `cellsize` is also supplied. Passing both would otherwise
 #'   truncate the grid to `n[1]` x `n[2]` cells anchored at the bounding-box
 #'   corner, covering only part of the boundary.
-#' @param clip Logical; clip grid to boundary.
+#' @param clip Logical; clip grid to boundary. In a projected or CRS-less
+#'   grid, a cell that meets the boundary only within a margin of one part in
+#'   1e10 of the largest coordinate of the boundary from the cell's edge (a
+#'   cell whose edge lies on the boundary's edge but for rounding) is
+#'   dropped, rather than kept as a sliver.
 #' @param crs Optional target CRS: anything [sf::st_crs()] accepts, including
 #'   an sf or sfc layer, whose CRS is used. When `NULL` (default) a lon/lat
 #'   boundary is projected with [ensure_projected()], which changes the CRS of the returned
@@ -2001,8 +2113,24 @@ create_grid_polygons <- function(
   #
   # For hex grids sf short-circuits to make_hex_grid() and reads `cellsize`
   # only, so the extra argument is inert there.
+  #
+  # Where `n` is not forwarded (a caller's `cellsize`, or the square side
+  # derived from `target_cells`), sf counts the cells per side as
+  # ceiling(w / cellsize) on the exact extent.  A side that is a whole number
+  # of cells then gained a row or column whenever rounding put the quotient
+  # a hair over that number (9.0000000000001741 for a 9000 m box at 1000 m
+  # with the false origin moved by 0.1 m), and the clip kept that row or
+  # column as cells of 1e-8 m^2.  A side that exceeds a whole number of
+  # cells by no more than the margin of an edge is that number here
+  # (.grid_side_counts()), and that count is passed with the cell size for a
+  # square grid.  Hexagons are placed from `cellsize` alone; their slivers
+  # are dropped after the clip (.drop_edge_slivers()).
   if (!is.null(cellsize)) grid_args$cellsize <- cellsize
-  if (!is.null(n) && !cellsize_supplied) grid_args$n <- n
+  if (!is.null(n) && !cellsize_supplied) {
+    grid_args$n <- n
+  } else if (identical(type, "square") && !is.null(cellsize)) {
+    grid_args$n <- .grid_side_counts(c(w, h), cellsize, bb)
+  }
   grid_sfc <- do.call(sf::st_make_grid, grid_args)
   if (length(grid_sfc) == 0L)
     stop("create_grid_polygons(): st_make_grid() produced zero cells.")
@@ -2031,6 +2159,13 @@ create_grid_polygons <- function(
     # st_intersection can produce non-polygon slivers, and collections that
     # hold a cell's area; keep the polygonal part of each.
     grid_sf <- .keep_polygonal(grid_sf)
+    # A cell whose edge lies on the boundary's edge but for rounding meets
+    # the boundary only within the margin of that edge, and the clip kept
+    # the part as a cell of 1e-8 m^2, in some units and origins and not in
+    # others.  Such parts are dropped; a point on that edge is in the cell
+    # beside it, within the margin (.build_point_cell_index()).
+    if (!in_degrees)
+      grid_sf <- .drop_edge_slivers(grid_sf, lattice, .edge_tol(bb))
     grid_sf$poly_id <- seq_len(nrow(grid_sf))
   }
   # The clip in degrees writes cells that list a corner twice in a row (a
@@ -2078,6 +2213,65 @@ create_grid_polygons <- function(
   .to_output_crs(grid_sf, crs_out)
 }
 
+#' The number of square cells along each side of a grid
+#'
+#' \code{sf::st_make_grid()} counts \code{ceiling(span / cellsize)} cells on
+#' a side, so a side that is a whole number of cells but for rounding gains a
+#' row or column.  A side that exceeds a whole number of cells by no more
+#' than the margin of an edge (\code{.edge_tol(bb)}) is that number here,
+#' the rule \code{.block_occupied_fast()} applies to a quotient.  The margin
+#' is absolute, so the strip of the boundary such a count leaves outside the
+#' grid is never wider than the margin \code{.build_point_cell_index()}
+#' joins a point to a cell with, however many cells the side holds.
+#'
+#' @param span The width and height of the bounding box.
+#' @param cellsize The cell width and height.
+#' @param bb The bounding box the margin is taken from.
+#' @return Integer vector of two counts, each at least 1.
+#' @keywords internal
+#' @noRd
+.grid_side_counts <- function(span, cellsize, bb) {
+  q <- span / cellsize
+  f <- floor(q)
+  q <- ifelse(is.finite(q) & q - f <= .edge_tol(bb) / cellsize, f, q)
+  as.integer(pmax(1, ceiling(q)))
+}
+
+#' Drop the parts of grid cells that lie within the margin of the cell's edge
+#'
+#' After the clip of a lattice to a boundary, a cell whose edge lies on the
+#' boundary's edge but for rounding meets the boundary in a strip no wider
+#' than that rounding.  Such a part lies wholly within \code{tol} of the
+#' cell's edge, so it does not meet the cell shrunk by \code{tol}.  Only
+#' parts whose area is at most the cell's bounding-box perimeter times
+#' \code{tol} can be such strips, and only those are shrunk and tested.
+#'
+#' @param parts The clipped cells, with the \code{poly_id} of the lattice
+#'   cell each came from.
+#' @param lattice The lattice before the clip, with \code{poly_id}.
+#' @param tol The margin of an edge (\code{.edge_tol()}).
+#' @return \code{parts} without those strips.
+#' @keywords internal
+#' @noRd
+.drop_edge_slivers <- function(parts, lattice, tol) {
+  if (!nrow(parts) || !(tol > 0)) return(parts)
+  bb  <- sf::st_bbox(sf::st_geometry(lattice)[1L])
+  per <- 2 * (as.numeric(bb[["xmax"]] - bb[["xmin"]]) +
+                as.numeric(bb[["ymax"]] - bb[["ymin"]]))
+  a <- suppressWarnings(as.numeric(sf::st_area(parts)))
+  cand <- which(is.finite(a) & a <= 1.01 * per * tol)
+  if (!length(cand)) return(parts)
+  cells <- sf::st_geometry(lattice)[match(parts$poly_id[cand], lattice$poly_id)]
+  inner <- suppressWarnings(sf::st_buffer(cells, -tol))
+  reach <- vapply(seq_along(cand), function(i)
+    !sf::st_is_empty(inner[i]) &&
+      lengths(sf::st_intersects(sf::st_geometry(parts)[cand[i]], inner[i])) > 0L,
+    logical(1))
+  drop <- cand[!reach]
+  if (length(drop)) parts[-drop, , drop = FALSE] else parts
+}
+
+
 # -----------------------------------------------------------------------------
 # Unified Tessellation Builder
 # -----------------------------------------------------------------------------
@@ -2102,6 +2296,12 @@ create_grid_polygons <- function(
 #' axis-aligned artefacts of squares and have uniform neighbour distances.
 #' \code{"triangles"} returns the Delaunay triangulation, useful for
 #' interpolation and adjacency work; it is not meant as an aggregation unit.
+#' Points on one circle, such as the four corners of each square of a
+#' lattice, have more than one Delaunay triangulation; they are triangulated
+#' in coordinates centred on the middle of their bounding box, divided by its
+#' diagonal and rounded to 2^-30 of it, so they are split the same way in any
+#' unit or origin, but for a point that lies within its own rounding noise of
+#' the middle of such a step.
 #' \code{\link{determine_optimal_levels}()} suggests a cell count from the
 #' elbow of the WSS curve of the points' k-means clustering, and returns
 #' \code{NA}, which \code{approx_n_cells} refuses, when the curve has none.
@@ -2199,7 +2399,10 @@ create_grid_polygons <- function(
 #'   [create_grid_polygons()] lays it; where s2 refuses a row of
 #'   \code{boundary} or a cell even repaired, the call stops with an error of
 #'   class \code{"spatialkit_cells_degenerate"} that says to pass a projected
-#'   \code{crs} or to size the grid by \code{approx_n_cells}.
+#'   \code{crs} or to size the grid by \code{approx_n_cells}.  A side of the
+#'   boundary's bounding box that exceeds a whole number of square cells by
+#'   no more than a margin of one part in 1e10 of the largest coordinate of
+#'   the boundary gets that number of cells (see [create_grid_polygons()]).
 #' @param cover Optional sf or sfc layer the cells have to hold: the
 #'   observations (points), or a polygon. Read by `method = "voronoi"` when
 #'   there is no `boundary`: the boundary is then derived from the cover (the
@@ -2229,10 +2432,14 @@ create_grid_polygons <- function(
 #'   boundary, which is the one returned as `boundary`: cells reach `expand`
 #'   beyond the study area, and a point up to `expand` outside it is indexed.
 #' @param clip Logical; clip to boundary.
-#' @param keep_duplicates Logical. Has no effect on the cells or the index:
-#'   coincident points are merged before a Voronoi diagram or a Delaunay
-#'   triangulation is built either way, and every one of them is indexed to
-#'   the cell they share.
+#' @param keep_duplicates Logical. With \code{FALSE} (the default), points
+#'   are merged before a Voronoi diagram or a Delaunay triangulation is built
+#'   when they round to one point in coordinates centred on the middle of
+#'   their bounding box, divided by its diagonal and rounded to 2^-30 of it,
+#'   so points within about a billionth of the extent of each other count as
+#'   coincident in any unit or origin. With \code{TRUE} only points at
+#'   exactly one location are merged. Every point is indexed to the cell
+#'   that holds it.
 #' @param crs Optional target CRS: anything [sf::st_crs()] accepts, including
 #'   an sf or sfc layer, whose CRS is used. A projected CRS is the working
 #'   CRS. A geographic one (EPSG:4326, say) is the CRS the result is returned
@@ -2274,10 +2481,16 @@ create_grid_polygons <- function(
 #'       carry `poly_id`, which holds the same values.}
 #'     \item{`index`}{Integer vector of `cell_id` values, one per row of
 #'       `points_sf`, and `NA` for a point that falls inside no cell, that is,
-#'       one outside the study area. Only a point within a thousandth of the
-#'       median cell width of a cell is snapped to it. That covers points
-#'       sitting exactly on a shared edge, and leaves points outside the study
-#'       area as `NA`. A summary built from `index` therefore counts only the
+#'       one outside the study area. A point within a margin of one part in
+#'       1e10 of the largest coordinate of the cells from a cell's edge is in
+#'       that cell, and a point in two or more cells (on a shared edge, or
+#'       within that margin of it) takes the smallest `cell_id` among them, so
+#'       a lattice point on a cell edge takes the same cell in any unit or
+#'       origin. A point outside every cell is snapped to the nearest cell
+#'       only when it is within a thousandth of the median cell width of it,
+#'       and a point the same distance from two cells, to one part in ten
+#'       million, takes the smaller `cell_id`. That leaves points outside the
+#'       study area as `NA`. A summary built from `index` therefore counts only the
 #'       points the tessellation actually covers. When any point is `NA`, a
 #'       warning of class `"spatialkit_unassigned"` gives the number
 #'       (`tryCatch(spatialkit_unassigned = )` catches it; the condition
@@ -2297,7 +2510,8 @@ create_grid_polygons <- function(
 #'     \item{`params`}{The parameters the tessellation was built with, plus
 #'       `snapped`, the record of that nearest-cell repair: a list with `n`,
 #'       `which` (row positions in `points_sf`) and `distance` (how far
-#'       outside every cell each sat, in CRS units), which for seeds lists
+#'       outside every cell each sat, in CRS units; a point within the margin
+#'       of an edge is in that cell and is not listed), which for seeds lists
 #'       only those whose `index` entry is the cell they were snapped to;
 #'       `n_outside`, the number
 #'       of points of `points_sf` that fall in no cell (the `NA`s of
@@ -2776,10 +2990,16 @@ build_tessellation <- function(
       # Delaunay triangulation.  The shift is the bbox midpoint, not the
       # mean: min and max do not depend on row order, so a permuted layer
       # hands qhull bit-identical coordinates and gets the same triangles
-      # and cell_ids, as before.  Rings below use the original coordinates,
-      # so the output coordinates are untouched.
-      ctr <- (apply(coords, 2L, min) + apply(coords, 2L, max)) / 2
-      tri_idx <- try(geometry::delaunayn(sweep(coords, 2L, ctr)), silent = TRUE)
+      # and cell_ids, as before.  The centred points are also divided by
+      # the diagonal of their bounding box and rounded to .KMEANS_STEP of
+      # it (.kmeans_frame()): the four corners of each square of a lattice
+      # lie on one circle, qhull splits the square by the last bits of the
+      # coordinates, and those bits move with the unit and the origin, so
+      # the same lattice in US feet or with the false origin moved by 0.1 m
+      # was split into other triangles, some of them flat.  In the frame the
+      # lattice is the same in every unit and origin.  Rings below use the
+      # original coordinates, so the output coordinates are untouched.
+      tri_idx <- try(geometry::delaunayn(.kmeans_frame(coords)$z), silent = TRUE)
       why_geos <- if (inherits(tri_idx, "try-error"))
         sprintf("geometry::delaunayn() failed (%s)",
                 trimws(conditionMessage(attr(tri_idx, "condition"))))
@@ -2812,10 +3032,10 @@ build_tessellation <- function(
         "co-circular) configurations may be resolved differently."), why_geos)
       # st_triangulate() accepts a MULTIPOINT and returns the true Delaunay
       # triangulation of it.  Triangulating the convex-hull POLYGON instead
-      # (as this used to) discards every interior point.
-      tri_sfc <- sf::st_triangulate(sf::st_union(sf::st_geometry(pts)))
-      tri_sfc <- sf::st_collection_extract(tri_sfc, "POLYGON", warn = FALSE)
-      tri_sfc <- sf::st_sfc(tri_sfc, crs = sf::st_crs(pts))
+      # (as this used to) discards every interior point.  GEOS, like qhull,
+      # is handed the points in the frame of .kmeans_frame(), and each
+      # triangle is drawn on the original coordinates of its corners.
+      tri_sfc <- .triangulate_in_frame(coords, sf::st_crs(pts))
       if (length(tri_sfc) == 0L)
         stop("build_tessellation(triangles): the Delaunay triangulation of ",
              "these points is empty (they are collinear to within rounding). ",

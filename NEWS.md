@@ -3937,6 +3937,96 @@ old behaviour where there is a way.
   `tot_withinss` scales with the square of the unit.  `?get_voronoi_seeds`
   states the rule.
 
+* **`build_tessellation()` let the unit and the origin of the coordinates
+  choose the cell of a lattice point on a cell edge, and of a point snapped
+  to two cells the same distance away.**  A point on the edge two cells
+  share went to the smaller `cell_id` only while the edge passed through
+  the point exactly; the last bits of the coordinates put it a hair inside
+  one cell or the other.  On a 40 x 30 lattice at 250 m with square cells
+  of 1000 m, 80 of 1200 rows were in another cell in UTM 15N in US feet than
+  in EPSG:26915 and 226 with the false origin moved by 0.1 m; with
+  hexagons, 156 with the origin moved.  A point within a margin of one part
+  in 1e10 of the largest coordinate of the cells from a cell's edge is now
+  in that cell, and a point in two or more cells takes the smallest
+  `cell_id`.  A point just outside every cell, snapped to the nearest cell,
+  went to whichever cell `sf::st_nearest_feature()` returned when two were
+  the same distance away: of 180 points beside the corners of boundary
+  cells, 4 to 27 went to another cell in US feet, international feet,
+  kilometres and with moved origins.  Among the cells as near to one part
+  in ten million it now goes to the smaller `cell_id`.  The index is the
+  same in every frame on both layers.  `params$snapped` no longer lists a
+  point within the margin of an edge, which is in that cell.  The same index
+  serves `create_voronoi_polygons()` and the check of a `cover`.
+  `?build_tessellation` (`index`) states the rule.
+
+* **`build_tessellation(method = "triangles")` split the squares of a
+  lattice by the last bits of the coordinates.**  The four corners of each
+  square lie on one circle, and qhull split the square by the rounding of
+  the coordinates it was handed, which moves with the unit and the origin.
+  A 37 x 25 lattice at 250 m gave 1728 triangles in EPSG:26915 and in UTM
+  15N in US feet, 860 of them other triangles in US feet, and 1827 with the
+  false origin moved by 0.1 m, 99 of them flat.  qhull, and GEOS where the
+  geometry package is not installed, are now handed the points centred on
+  the middle of their bounding box, divided by its diagonal and rounded to
+  2^-30 of it, and each triangle is drawn on the points' own coordinates.
+  The lattice gives the same 1728 triangles in every frame, none flat, but
+  where a point lies within its own rounding noise of the middle of such a
+  step.  A jittered lattice gives the triangles it gave.
+  `?build_tessellation` says so.
+
+* **`create_voronoi_polygons()` and `build_tessellation(method = "voronoi"
+  | "triangles")` merged near-coincident points by ten decimals of the
+  layer's unit, so the number of cells moved with the unit and the
+  origin.**  60 points with copies of 20 of them moved by 3e-8 m gave 80
+  cells in metres and 65 in kilometres; moved by 1e-9 m, 80, 62, 79 and 60
+  cells in metres, in US feet, with the false origin moved by 0.1 m and in
+  kilometres.  With `keep_duplicates = FALSE` points are now merged when
+  they round to one point in coordinates centred on the middle of their
+  bounding box, divided by its diagonal and rounded to 2^-30 of it, so
+  points within about a billionth of the extent of each other count as
+  coincident in any unit or origin: both sets of copies give 60 cells in
+  every frame.  Points that close but more than ten decimals of the unit
+  apart, which were kept, can now be merged: copies 1e-6 m apart on that
+  5 km layer gave 80 cells and give 64.  `?create_voronoi_polygons` and
+  `?build_tessellation` (`keep_duplicates`) said the argument had no effect,
+  which was false for points that close; they now say what each value
+  merges.
+
+* **`create_grid_polygons(cellsize = )` laid an extra row or column of
+  sliver cells over a boundary whose side is a whole number of cells, in
+  some units and origins.**  sf counts the cells per side as
+  `ceiling(width / cellsize)`, and rounding put a 9000 m side at
+  9.0000000000001741 cells of 1000 m with the false origin moved by 0.1 m.
+  The square grid had 60 cells there against 54 in EPSG:26915 and in UTM
+  15N in US feet, the smallest of 5e-8 m^2, and the hexagonal grid 79
+  against 76.  A side that exceeds a whole number of square cells by no
+  more than a margin of one part in 1e10 of the largest coordinate of the
+  boundary now gets that number, the side `target_cells` derives as well,
+  and with `clip = TRUE` a cell that meets the boundary only within that
+  margin of its edge is dropped.  The grids above have 54 and 76 cells in
+  every frame.  `build_tessellation(method = "square")` on a 37 x 25
+  lattice at 250 m in its own box gave 70 cells with the origin moved
+  against 54, and `approx_n_cells = 54` gave 63; both give 54 in every
+  frame, and so does `create_grid_polygons_cached()`.  A side more than
+  that margin over a whole number keeps its row or column of narrow cells,
+  however many cells it holds, as before.  `?create_grid_polygons`
+  (`cellsize`, `clip`) states the rule.
+
+* **`cell_values_at()` without `seeds` settled a tie between two scored
+  locations of one lattice column by their exact x, so the fill from the
+  nearest scored location moved with the origin.**  Of two locations of one
+  column the same distance from a location asked for, the one whose x was
+  lower in its last bits won, and a lattice moved to another false origin
+  no longer has one x per column.  On a 20 x 15 lattice at 250 m, 2 of 14
+  locations midway between two points of the first column took the upper
+  point with the false origin moved by 0.1 m, where EPSG:26915 and US feet
+  take the lower, and their `filled_from` and `value` moved with it.  The
+  scored locations are now in column order (x values within one part in
+  ten million of the diagonal of their bounding box counting as one), then
+  by y, so the tie goes to the lower point in every frame, as "Ties" in
+  `?cell_values_at` said of another unit or origin.  That section now
+  states the column rule.
+
 * **`summarize_by_cell()` read columns at extreme scales as having no
   spread.**  The test compared the spread inside the cells with the size of
   the values, so 1e15 plus a spread of 1 was called constant, and so were

@@ -110,7 +110,10 @@ it is in that CRS's degrees, and the grid is laid in degrees, as
 \code{\link[=create_grid_polygons]{create_grid_polygons()}} lays it; where s2 refuses a row of
 \code{boundary} or a cell even repaired, the call stops with an error of
 class \code{"spatialkit_cells_degenerate"} that says to pass a projected
-\code{crs} or to size the grid by \code{approx_n_cells}.}
+\code{crs} or to size the grid by \code{approx_n_cells}.  A side of the
+boundary's bounding box that exceeds a whole number of square cells by
+no more than a margin of one part in 1e10 of the largest coordinate of
+the boundary gets that number of cells (see \code{\link[=create_grid_polygons]{create_grid_polygons()}}).}
 
 \item{expand}{Buffer distance, in the working CRS's units, by which the
 Voronoi boundary is grown before the diagram is built. Applied by
@@ -122,10 +125,14 @@ beyond the study area, and a point up to \code{expand} outside it is indexed.}
 
 \item{clip}{Logical; clip to boundary.}
 
-\item{keep_duplicates}{Logical. Has no effect on the cells or the index:
-coincident points are merged before a Voronoi diagram or a Delaunay
-triangulation is built either way, and every one of them is indexed to
-the cell they share.}
+\item{keep_duplicates}{Logical. With \code{FALSE} (the default), points
+are merged before a Voronoi diagram or a Delaunay triangulation is built
+when they round to one point in coordinates centred on the middle of
+their bounding box, divided by its diagonal and rounded to 2^-30 of it,
+so points within about a billionth of the extent of each other count as
+coincident in any unit or origin. With \code{TRUE} only points at
+exactly one location are merged. Every point is indexed to the cell
+that holds it.}
 
 \item{crs}{Optional target CRS: anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, including
 an sf or sfc layer, whose CRS is used. A projected CRS is the working
@@ -193,10 +200,16 @@ a \code{cell_id} column; the \code{"hex"} and \code{"square"} methods additional
 carry \code{poly_id}, which holds the same values.}
 \item{\code{index}}{Integer vector of \code{cell_id} values, one per row of
 \code{points_sf}, and \code{NA} for a point that falls inside no cell, that is,
-one outside the study area. Only a point within a thousandth of the
-median cell width of a cell is snapped to it. That covers points
-sitting exactly on a shared edge, and leaves points outside the study
-area as \code{NA}. A summary built from \code{index} therefore counts only the
+one outside the study area. A point within a margin of one part in
+1e10 of the largest coordinate of the cells from a cell's edge is in
+that cell, and a point in two or more cells (on a shared edge, or
+within that margin of it) takes the smallest \code{cell_id} among them, so
+a lattice point on a cell edge takes the same cell in any unit or
+origin. A point outside every cell is snapped to the nearest cell
+only when it is within a thousandth of the median cell width of it,
+and a point the same distance from two cells, to one part in ten
+million, takes the smaller \code{cell_id}. That leaves points outside the
+study area as \code{NA}. A summary built from \code{index} therefore counts only the
 points the tessellation actually covers. When any point is \code{NA}, a
 warning of class \code{"spatialkit_unassigned"} gives the number
 (\code{tryCatch(spatialkit_unassigned = )} catches it; the condition
@@ -216,7 +229,8 @@ reprojected, and for \code{"voronoi"} grown by \code{expand}).}
 \item{\code{params}}{The parameters the tessellation was built with, plus
 \code{snapped}, the record of that nearest-cell repair: a list with \code{n},
 \code{which} (row positions in \code{points_sf}) and \code{distance} (how far
-outside every cell each sat, in CRS units), which for seeds lists
+outside every cell each sat, in CRS units; a point within the margin
+of an edge is in that cell and is not listed), which for seeds lists
 only those whose \code{index} entry is the cell they were snapped to;
 \code{n_outside}, the number
 of points of \code{points_sf} that fall in no cell (the \code{NA}s of
@@ -269,6 +283,12 @@ decision you make, and the data does not make it for you; hexagons avoid the
 axis-aligned artefacts of squares and have uniform neighbour distances.
 \code{"triangles"} returns the Delaunay triangulation, useful for
 interpolation and adjacency work; it is not meant as an aggregation unit.
+Points on one circle, such as the four corners of each square of a
+lattice, have more than one Delaunay triangulation; they are triangulated
+in coordinates centred on the middle of their bounding box, divided by its
+diagonal and rounded to 2^-30 of it, so they are split the same way in any
+unit or origin, but for a point that lies within its own rounding noise of
+the middle of such a step.
 \code{\link{determine_optimal_levels}()} suggests a cell count from the
 elbow of the WSS curve of the points' k-means clustering, and returns
 \code{NA}, which \code{approx_n_cells} refuses, when the curve has none.
