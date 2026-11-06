@@ -586,10 +586,13 @@
         })
       } else g <- .planar_centroid(g)
     }
+    # A projected row with a coordinate beyond .LONLAT_MOVE_MAX is emptied
+    # before the move to EPSG:4326 (.lonlat_of_placed()) and gives NA: at
+    # x = 1e20 in EPSG:3857 the move never came back from PROJ.
     cr     <- suppressWarnings(sf::st_crs(x))
     lonlat <- FALSE
     if (!is.na(cr)) {
-      g      <- suppressWarnings(sf::st_transform(g, 4326))
+      g      <- suppressWarnings(.lonlat_of_placed(g))
       lonlat <- TRUE
     }
     xy <- suppressWarnings(sf::st_coordinates(g))
@@ -597,6 +600,70 @@
     list(row_id = ids[take], x = as.numeric(xy[, 1L]), y = as.numeric(xy[, 2L]),
          lonlat = lonlat, kind = kind, points = all_points)
   }
+}
+
+
+# No projected CRS places a point of the Earth this far from its origin, in
+# its own unit: in metres it is about 250 times round the Earth, and Web
+# Mercator places the Earth within about 2.0e7 of x and 2.4e8 of y.  PROJ
+# 9.5.1 inverts Web Mercator in time proportional to x (1.6 s at 1e17, past
+# 20 s at 1e19, no return within a minute at 1e20), and sf gives no way to
+# interrupt it; a move of a coordinate of 1e10 returns at once.
+.LONLAT_MOVE_MAX <- 1e10
+
+#' The features of a set with a coordinate beyond \code{.LONLAT_MOVE_MAX}
+#'
+#' Read on the x and y of every vertex, as given: a coordinate that is not
+#' finite counts, a missing one (an empty point) does not.  The vertices are
+#' read only when the set's bounding box reaches beyond the bound or is not
+#' finite.
+#'
+#' @param g An sfc.
+#' @return A logical vector, one element per feature.
+#' @keywords internal
+#' @noRd
+.beyond_lonlat_move <- function(g) {
+  out <- logical(length(g))
+  if (!length(g)) return(out)
+  bb <- suppressWarnings(sf::st_bbox(g))
+  if (all(is.finite(bb)) && all(abs(bb) <= .LONLAT_MOVE_MAX)) return(out)
+  off <- function(v) any(!is.na(v) & abs(v) > .LONLAT_MOVE_MAX)
+  # A POINT is a vector, a LINESTRING or MULTIPOINT a matrix, and the other
+  # types (collections included) lists of those.
+  far <- function(s) {
+    if (is.list(s)) return(any(vapply(s, far, logical(1))))
+    if (is.matrix(s)) return(nrow(s) > 0L && off(s[, 1:2]))
+    length(s) >= 2L && off(s[1:2])
+  }
+  vapply(unclass(g), far, logical(1))
+}
+
+#' Move a geometry set to a CRS, emptying first the rows no CRS places
+#'
+#' For the moves of a caller's rows to a CRS in degrees: the row probe of
+#' \code{make_folds()}, the row fingerprint of \code{compare_models()}, the
+#' scored seeds moved to the CRS of the layer they are for, and every move
+#' of \code{.align_crs()} and \code{.transform_or_stamp()}.  When the set is
+#' in a projected CRS and \code{crs} is in degrees, its rows with a
+#' coordinate beyond \code{.LONLAT_MOVE_MAX} are emptied
+#' (\code{.empty_unlocated()}) before the move, read on the geometry as
+#' given: such a row is not on the Earth, and moved from Web Mercator to
+#' WGS 84 degrees it never came back from PROJ.  It comes out empty, with
+#' \code{NA} coordinates, as a row without a location does.  A set in
+#' degrees, a projected \code{crs}, or a set with no such row is moved as
+#' \code{sf::st_transform()} moves it.
+#'
+#' @param g An sf or sfc object with a CRS.
+#' @param crs The CRS to move it to, as \code{sf::st_transform()} takes it.
+#' @return \code{g} in \code{crs}.
+#' @keywords internal
+#' @noRd
+.lonlat_of_placed <- function(g, crs = 4326) {
+  if (isFALSE(sf::st_is_longlat(g)) && isTRUE(sf::st_is_longlat(sf::st_crs(crs)))) {
+    far <- which(.beyond_lonlat_move(sf::st_geometry(g)))
+    if (length(far)) g <- .empty_unlocated(g, rows = far)
+  }
+  sf::st_transform(g, crs)
 }
 
 

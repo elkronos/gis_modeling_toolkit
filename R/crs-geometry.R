@@ -997,7 +997,9 @@
 #' @return Numeric worst-case \code{|ratio / median(ratio) - 1|}, or
 #'   \code{NA} when it cannot be computed (no CRS, fewer than two probes
 #'   with an area, a probe whose geodesic area is unavailable, a probe
-#'   polygon \code{sf::st_is_valid()} rejects in a projected \code{crs}).  A probe
+#'   polygon \code{sf::st_is_valid()} rejects in a projected \code{crs}, a
+#'   probe with a coordinate beyond \code{.LONLAT_MOVE_MAX} in a projected
+#'   \code{crs}).  A probe
 #'   with two vertices that fall on one point in degrees is measured there
 #'   without the repeat; a probe s2 refuses even then makes the figure
 #'   \code{NA}.  With \code{one_by_grid}, a layer of one distinct polygon
@@ -1090,6 +1092,12 @@
     # invalid cells before it gets here.
     if (own && !isTRUE(sf::st_is_longlat(crs)) &&
         !all(sf::st_is_valid(probe) %in% TRUE)) return(NA_real_)
+    # A probe of a projected CRS with a coordinate beyond .LONLAT_MOVE_MAX is
+    # not on the Earth and has no geodesic area, so the figure is NA, as for
+    # a probe s2 refuses below.  Moved to EPSG:4326 from Web Mercator at
+    # x = 1e20, it never came back from PROJ.
+    if (!isTRUE(sf::st_is_longlat(crs)) && any(.beyond_lonlat_move(probe)))
+      return(NA_real_)
     # Densify before going to lon/lat: s2 reads each edge as a great circle,
     # and over a continental probe that is not the straight edge the planar
     # area was measured on -- an Equal Earth grid over a near-global extent
@@ -1985,7 +1993,10 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
 #'   transformed with its Z and M, and so is a layer whose only geometries
 #'   of another dimension than the first are empty and not points.  A layer
 #'   that is not
-#'   transformed is returned as it came.
+#'   transformed is returned as it came.  A row of a projected layer moved
+#'   to a CRS in degrees comes back empty when it has a coordinate beyond
+#'   1e10 in its CRS's own unit, further out than any projected CRS places
+#'   a point of the Earth.
 #' @family spatial data preparation
 #' @examples
 #' library(sf)
@@ -2016,10 +2027,13 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   # returned, in XY, with a warning: sf reads the layer in the dimension of
   # its first geometry, so its transform returns an XYZ ring among XY rows
   # as a ring of other points, or stops with "OGR error".
+  # A row of a projected layer with a coordinate beyond .LONLAT_MOVE_MAX comes
+  # out empty when the target is in degrees (.lonlat_of_placed()): moved from
+  # Web Mercator at x = 1e20 it never came back from PROJ.
   .safe_transform <- function(x, to, which_obj) {
     x <- .xy_if_mixed_warn(x, "harmonize_crs", which_obj)
     tryCatch(
-      sf::st_transform(x, to),
+      .lonlat_of_placed(x, to),
       error = function(e) {
         if (identical(on_transform_error, "set_crs")) {
           .warn_and_log(

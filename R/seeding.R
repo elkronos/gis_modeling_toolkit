@@ -1493,11 +1493,15 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   to <- sf::st_crs(like); from <- sf::st_crs(seeds)
   if (is.na(from)) return(seeds)
   if (is.na(to)) {
+    # A projected seed with a coordinate beyond .LONLAT_MOVE_MAX comes out
+    # empty (.lonlat_of_placed()): at x = 1e20 in EPSG:3857 the move never
+    # came back from PROJ.
     if (isTRUE(.looks_like_lonlat(like)$lonlat))
-      seeds <- sf::st_transform(seeds, 4326)
+      seeds <- .lonlat_of_placed(seeds)
     return(sf::st_set_crs(seeds, NA))
   }
-  if (from == to) seeds else sf::st_transform(seeds, to)
+  # The same for a `like` in degrees with its own CRS.
+  if (from == to) seeds else .lonlat_of_placed(seeds, to)
 }
 
 

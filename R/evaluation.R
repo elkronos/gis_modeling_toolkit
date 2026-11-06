@@ -1814,7 +1814,9 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' reliably carry \code{..row_id}, so the fingerprint is the row count, the
 #' sorted response and the sorted coordinates (in EPSG:4326 when the data
 #' has a CRS).  Sorting each margin separately keeps the comparison stable
-#' under the last-digit noise of a reprojection.
+#' under the last-digit noise of a reprojection.  A row of a projected CRS
+#' with a coordinate beyond \code{.LONLAT_MOVE_MAX} is not moved and gives
+#' \code{NA} (\code{.lonlat_of_placed()}).
 #'
 #' @param fit A \code{spatial_fit}.
 #' @return A list, or \code{NULL} when the fit's data cannot be read.
@@ -1828,7 +1830,10 @@ compare_models <- function(fits, newdata = NULL, ...) {
     if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
       g <- suppressWarnings(sf::st_centroid(g))
     lonlat <- !is.na(sf::st_crs(g))
-    if (lonlat) g <- suppressWarnings(sf::st_transform(g, 4326))
+    # A projected row with a coordinate beyond .LONLAT_MOVE_MAX is emptied
+    # before the move and gives NA, which matches NA: moved from Web
+    # Mercator at x = 1e20 it never came back from PROJ.
+    if (lonlat) g <- suppressWarnings(.lonlat_of_placed(g))
     xy <- sf::st_coordinates(g)
     if (!length(y) || nrow(xy) != length(y)) return(NULL)
     list(n = length(y), y = sort(y, na.last = TRUE),

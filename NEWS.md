@@ -2052,6 +2052,35 @@ old behaviour where there is a way.
   `make_folds()`'s `params$n_prediction_points`.  Layers whose rows all
   have a location give the same results as before.
 
+* **`make_folds()`, the checks of supplied folds and `compare_models()`
+  stalled on a projected row far beyond the Earth.**  The record of the
+  rows' locations that `make_folds()` keeps, and the record of a fit's rows
+  that `compare_models()` checks its AICc and LOOIC with, move the rows to
+  EPSG:4326, and PROJ moves a point out of Web Mercator in time that grows
+  with x: 1.6 s at x = 1e17, more than 20 s at 1e19, and no return within a
+  minute at 1e20.  Such a row is within 1e150 and has a location, so
+  `make_folds()` on every method and the functions that build folds with it,
+  `compare_models_cv()`, every `cv_*()` function, `fold_separation()`,
+  `kriging_adequacy()` and `area_of_applicability()` given folds, and
+  `compare_models()` with two or more AICc or LOOIC values did not return on
+  an EPSG:3857 layer with a row at x = 1e20.  A row of a projected layer
+  with a coordinate beyond 1e10 in the CRS's own unit, further out than any
+  projected CRS places a point of the Earth, is now left out of both
+  records, as an empty row is: the folds, the fits and the rows each
+  function keeps are unchanged.  The same move stalled
+  `ensure_projected(purpose = "area")` and `summarize_by_cell(area = TRUE)`
+  on polygons with such a vertex, which now find the area distortion
+  unmeasured, and `get_voronoi_seeds()` and `voronoi_seeds_kmeans()` given a
+  resolution profile and points in degrees, with or without a CRS, which now
+  return such a centre of the profile empty.  `harmonize_crs()`, and the
+  shared step by which the package's functions move one layer into the CRS
+  of another or of a `crs` argument, now give such a row back empty when the
+  target is in degrees: `get_voronoi_seeds()` with `method = "kmeans"` and a
+  boundary in degrees stalled on such a sample point, and drops it now with
+  its warning about empty points, as it drops an empty one.  Layers in
+  degrees, without a CRS, or whose rows all lie within 1e10 of the origin,
+  and moves into a projected CRS, give the same results as before.
+
 * **`area_of_applicability()` gave a location index to a row beyond
   1e150, and refused training data with one for a false reason.**  With
   location measured (`coords = "yes"`, or a fit whose predictions depend

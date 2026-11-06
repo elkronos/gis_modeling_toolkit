@@ -89,7 +89,10 @@
       caller, what, lbl)
     return(sf::st_set_crs(x, crs))
   }
-  sf::st_transform(x, crs)
+  # A row of a projected `x` with a coordinate beyond .LONLAT_MOVE_MAX comes
+  # out empty when `crs` is in degrees (.lonlat_of_placed()): moved from Web
+  # Mercator at x = 1e20 it never came back from PROJ.
+  .lonlat_of_placed(x, crs)
 }
 
 #' Check whether an sf/sfc object has a geographic (lon/lat) CRS
@@ -243,6 +246,9 @@
 
 #' Align the CRS of `a` to match `b` (transform if both defined & differ)
 #'
+#' A row of a projected `a` with a coordinate beyond `.LONLAT_MOVE_MAX` comes
+#' out empty when `b` is in degrees (`.lonlat_of_placed()`).
+#'
 #' @param a sf or sfc object to re-project.
 #' @param b sf or sfc reference whose CRS takes precedence.
 #' @return `a`, possibly transformed.
@@ -252,7 +258,7 @@
   if (is.null(a) || is.null(b)) return(a)
   if (is.na(sf::st_crs(a)) || is.na(sf::st_crs(b))) return(a)
   if (sf::st_crs(a) == sf::st_crs(b)) return(a)
-  sf::st_transform(a, sf::st_crs(b))
+  .lonlat_of_placed(a, sf::st_crs(b))
 }
 
 
