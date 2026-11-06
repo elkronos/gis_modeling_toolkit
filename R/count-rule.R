@@ -216,6 +216,81 @@
 }
 
 
+#' Which polygon each point lies in, a point on an edge given the lowest
+#'
+#' A point on the edge two polygons share lies in both, and
+#' \code{sf::st_intersects()} reports both when the edge passes through it
+#' exactly.  On a lattice the points sit on the edges of a grid laid over
+#' them, and a change of unit or a shift of the origin moves the last bits
+#' of the coordinates, so the same point lands a hair inside one polygon in
+#' one frame and inside the other in the next.  Here a point within
+#' \code{.edge_tol()} of a polygon is in it, and the lowest index among the
+#' polygons it is in is kept, so an edge point goes to the lower polygon in
+#' every frame.  Projected and CRS-less layers are joined with the smaller of
+#' the two layers buffered by the margin, the points or the polygons
+#' (\code{st_is_within_distance()} takes a distance for every pair of a
+#' projected layer, which is far slower, and buffering a million grid cells
+#' takes thirty times as long as buffering the points in them); a layer
+#' in degrees is joined with \code{st_is_within_distance()} while
+#' \code{sf::sf_use_s2()} is on, the margin taken as an arc of the sphere,
+#' and with \code{st_intersects()} (no margin) while it is off.
+#'
+#' @param x Points (sf or sfc).
+#' @param y Polygons (sf or sfc), in the CRS of \code{x}.
+#' @param bb Coordinates the margin is taken from (\code{.edge_tol()}); by
+#'   default the bounding boxes of both layers.
+#' @return Integer vector, for each point of \code{x} the lowest index of
+#'   \code{y} it lies in, \code{NA} for none; attribute \code{"hits"} holds
+#'   every index (an \code{sgbp}).
+#' @keywords internal
+#' @noRd
+.edge_join <- function(x, y, bb = c(sf::st_bbox(x), sf::st_bbox(y))) {
+  gy  <- sf::st_geometry(y)
+  tol <- .edge_tol(bb)
+  hits <- if (!(tol > 0)) {
+    sf::st_intersects(x, gy)
+  } else if (isTRUE(sf::st_is_longlat(gy))) {
+    if (sf::sf_use_s2())
+      sf::st_is_within_distance(x, gy, dist = tol * pi / 180 * 6371010)
+    else sf::st_intersects(x, gy)
+  } else if (length(sf::st_geometry(x)) < length(gy)) {
+    sf::st_intersects(sf::st_buffer(sf::st_geometry(x), tol), gy)
+  } else {
+    sf::st_intersects(x, sf::st_buffer(gy, tol))
+  }
+  id <- vapply(hits, function(ix) if (length(ix)) min(ix) else NA_integer_,
+               integer(1))
+  attr(id, "hits") <- hits
+  id
+}
+
+
+#' The lowest column among those nearest, row by row
+#'
+#' \code{which.min()} takes the first exact minimum, and two distances that
+#' tie in one unit differ in their last bits in another, so a point the same
+#' distance from two polygons went to either.  Distances within one part in
+#' \code{.TIE_TOL} of the least, plus \code{tol}, are a tie, and the lowest
+#' column among them is kept.
+#'
+#' @param dmat Numeric matrix of distances (rows: points, columns:
+#'   polygons).
+#' @param tol An absolute margin added to the relative one
+#'   (\code{.edge_tol()}).
+#' @return Integer vector, one column per row; \code{NA} for a row with no
+#'   distance.
+#' @keywords internal
+#' @noRd
+.lowest_nearest <- function(dmat, tol = 0) {
+  vapply(seq_len(nrow(dmat)), function(i) {
+    d <- dmat[i, ]
+    w <- which.min(d)
+    if (!length(w)) return(NA_integer_)
+    as.integer(which(!is.na(d) & d <= d[w] * (1 + .TIE_TOL) + tol)[1L])
+  }, integer(1))
+}
+
+
 #' Whether a level's cells beat one mean, for the profile's estimate
 #'
 #' The rule of \code{.no_structure()} on the numbers a profile with an

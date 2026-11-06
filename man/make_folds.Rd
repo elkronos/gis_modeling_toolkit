@@ -203,7 +203,8 @@ Passed to \code{estimate_sac_range()} for residual variogram estimation.}
 
 \item{boundary}{Optional polygonal sf/sfc for block_kfold.  The grid is
 clipped to it; a cell that the boundary only touches at a corner or
-along an edge is not a block.  A boundary without a CRS is brought into
+along an edge is not a block.  A point on the boundary, to the margin of
+the edge rule in Details, is inside it.  A boundary without a CRS is brought into
 the points' CRS: reprojected from EPSG:4326 when its coordinates look
 like lon/lat, otherwise stamped, with a warning either way.  The same
 goes for \code{prediction_points} and \code{blocks}.  A boundary that
@@ -216,7 +217,12 @@ distance within which the held-out point's neighbours are excluded from
 its training set.  Like \code{block_size} it is in the units of the CRS
 the folds are built in (\code{params$crs}), which for geographic
 (lon/lat) input is the metre CRS \code{\link{ensure_projected}()}
-chooses: 0.1 means 0.1 m, not 0.1 degrees.  A buffer that excludes no
+chooses: 0.1 means 0.1 m, not 0.1 degrees.  A neighbour at the buffer
+distance is excluded, and so is one over it by rounding: a squared
+distance within one part in ten million of the buffer's square (a
+distance about one part in twenty million over the buffer) counts as at
+it, so a lattice whose spacing divides the buffer gives the same folds in
+any unit or origin.  A buffer that excludes no
 neighbour from any fold makes the scheme plain leave-one-out, and is
 warned about.}
 
@@ -424,6 +430,17 @@ the setting and the grid it builds when that gives \code{k} folds, and
 otherwise how many folds it gives (or that it leaves a single block), the
 largest block size that still gives \code{k} folds, and
 \code{method = "nndm"} as the design that needs no block size.
+
+A point on the edge two grid cells share goes to the lower one, the cell
+with the lower index in the full grid (\code{params$blocks$source_row};
+the grid is numbered along each row from the bottom left, so the cell to
+the left or below).  A point is on an edge
+while it lies within one part in 1e10 of the largest coordinate of the
+points and the blocks from it (0.44 mm at a UTM northing of 4,400 km), so
+points on the grid lines of a lattice are blocked alike in any unit or
+origin.  A point in no cell of a clipped grid goes to the cell with the
+nearest centroid, and to the lower of two whose centroids are as near to
+one part in ten million or that margin.
 
 \strong{Fold methods.}
 \code{"random_kfold"} ignores geography: a held-out point keeps most of
@@ -649,11 +666,15 @@ A polygon layer passed as \code{blocks} is aligned to the points the way
 (reprojected if they look like lon/lat, otherwise stamped, warning either
 way), and the blocks are then brought into the CRS the folds are built in.
 A point inside more than one block is given the first (lowest row) that
-contains it, as for a point on the shared edge of two grid cells.  When the
+contains it, as for a point on the shared edge of two grid cells, and a
+point within the same margin of a block's edge (one part in 1e10 of the
+largest coordinate of the points and the blocks) counts as inside it.  When the
 blocks that caught such a point share area instead of an edge, the layer
 overlaps and is not a partition, and this is warned about.  A point
 inside no block is assigned to the nearest one, by distance to the polygon
-itself, and the count of such points is warned about, unless they sit
+itself; a point the same distance from two blocks, to one part in ten
+million or that margin, goes to the lower row.  The count of such points is warned
+about, unless they sit
 within a millionth of the extent of a block, which is an edge that
 reprojection or clipping moved by a rounding error.  Blocks that hold no
 point are dropped when \code{drop_empty_blocks = TRUE}, and \code{k} is

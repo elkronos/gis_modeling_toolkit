@@ -5008,6 +5008,17 @@ print.sac_range <- function(x, ...) {
 #' largest block size that still gives \code{k} folds, and
 #' \code{method = "nndm"} as the design that needs no block size.
 #'
+#' A point on the edge two grid cells share goes to the lower one, the cell
+#' with the lower index in the full grid (\code{params$blocks$source_row};
+#' the grid is numbered along each row from the bottom left, so the cell to
+#' the left or below).  A point is on an edge
+#' while it lies within one part in 1e10 of the largest coordinate of the
+#' points and the blocks from it (0.44 mm at a UTM northing of 4,400 km), so
+#' points on the grid lines of a lattice are blocked alike in any unit or
+#' origin.  A point in no cell of a clipped grid goes to the cell with the
+#' nearest centroid, and to the lower of two whose centroids are as near to
+#' one part in ten million or that margin.
+#'
 #' @param points_sf An sf object.  Any Z or M dimension is dropped before
 #'   folding: \code{sf::st_distance()} uses every coordinate dimension, so an
 #'   XYZ layer would otherwise have elevation folded into every buffer, block
@@ -5142,7 +5153,8 @@ print.sac_range <- function(x, ...) {
 #'   Passed to \code{estimate_sac_range()} for residual variogram estimation.
 #' @param boundary Optional polygonal sf/sfc for block_kfold.  The grid is
 #'   clipped to it; a cell that the boundary only touches at a corner or
-#'   along an edge is not a block.  A boundary without a CRS is brought into
+#'   along an edge is not a block.  A point on the boundary, to the margin of
+#'   the edge rule in Details, is inside it.  A boundary without a CRS is brought into
 #'   the points' CRS: reprojected from EPSG:4326 when its coordinates look
 #'   like lon/lat, otherwise stamped, with a warning either way.  The same
 #'   goes for \code{prediction_points} and \code{blocks}.  A boundary that
@@ -5154,7 +5166,12 @@ print.sac_range <- function(x, ...) {
 #'   its training set.  Like \code{block_size} it is in the units of the CRS
 #'   the folds are built in (\code{params$crs}), which for geographic
 #'   (lon/lat) input is the metre CRS \code{\link{ensure_projected}()}
-#'   chooses: 0.1 means 0.1 m, not 0.1 degrees.  A buffer that excludes no
+#'   chooses: 0.1 means 0.1 m, not 0.1 degrees.  A neighbour at the buffer
+#'   distance is excluded, and so is one over it by rounding: a squared
+#'   distance within one part in ten million of the buffer's square (a
+#'   distance about one part in twenty million over the buffer) counts as at
+#'   it, so a lattice whose spacing divides the buffer gives the same folds in
+#'   any unit or origin.  A buffer that excludes no
 #'   neighbour from any fold makes the scheme plain leave-one-out, and is
 #'   warned about.
 #' @param group_var Character(1) naming a column of \code{points_sf} that
@@ -5499,11 +5516,15 @@ print.sac_range <- function(x, ...) {
 #' (reprojected if they look like lon/lat, otherwise stamped, warning either
 #' way), and the blocks are then brought into the CRS the folds are built in.
 #' A point inside more than one block is given the first (lowest row) that
-#' contains it, as for a point on the shared edge of two grid cells.  When the
+#' contains it, as for a point on the shared edge of two grid cells, and a
+#' point within the same margin of a block's edge (one part in 1e10 of the
+#' largest coordinate of the points and the blocks) counts as inside it.  When the
 #' blocks that caught such a point share area instead of an edge, the layer
 #' overlaps and is not a partition, and this is warned about.  A point
 #' inside no block is assigned to the nearest one, by distance to the polygon
-#' itself, and the count of such points is warned about, unless they sit
+#' itself; a point the same distance from two blocks, to one part in ten
+#' million or that margin, goes to the lower row.  The count of such points is warned
+#' about, unless they sit
 #' within a millionth of the extent of a block, which is an edge that
 #' reprojection or clipping moved by a rounding error.  Blocks that hold no
 #' point are dropped when \code{drop_empty_blocks = TRUE}, and \code{k} is
@@ -5991,8 +6012,12 @@ make_folds <- function(points_sf, k,
       # rows are unioned as they arrived, and the union is repaired as before.
       b <- .safe_make_valid(.boundary_union(
         b, caller = "make_folds", task = "the union of the block region"))
-      mat <- sf::st_intersects(pts, b, sparse = FALSE)
-      inside_any <- apply(mat, 1L, any)
+      # A point on the boundary is inside it.  st_intersects() read a
+      # lattice point on the boundary as inside or outside by the last bits
+      # of its coordinates, so in another unit or origin such points were
+      # warned about and the region extended to the points' bounding box.
+      # A point within .edge_tol() of the boundary is inside (.edge_join()).
+      inside_any <- !is.na(.edge_join(pts, b))
       if (!any(inside_any))
         # No point inside the boundary at all is almost certainly two layers
         # in different places -- a CRS that could only be stamped -- and
@@ -6322,8 +6347,15 @@ make_folds <- function(points_sf, k,
       cell_idx <- seq_len(nrow(grid_sf))
       n_blocks <- nrow(grid_sf)
     }
-    hits <- sf::st_intersects(pts, grid_sf)
-    block_id <- vapply(hits, function(ix) if (length(ix)) ix[1] else NA_integer_, 1L)
+    # A point on the edge two blocks share is in both and goes to the lower
+    # one.  The first hit of st_intersects() gave it that block only when the
+    # edge passed through the point exactly; on a lattice the last bits of
+    # the coordinates put it a hair inside one block or the other, and a
+    # change of unit or of origin moved half the layer to other folds.  A
+    # point within .edge_tol() of a block is in it (.edge_join()).
+    block_id <- .edge_join(pts, grid_sf)
+    hits <- attr(block_id, "hits")
+    attr(block_id, "hits") <- NULL
     pts$..block_id <- block_id
 
     if (blocks_supplied) {
@@ -6360,13 +6392,19 @@ make_folds <- function(points_sf, k,
         # centroid is no guide).  Points within a millionth of the extent of
         # a block are on an edge that reprojection or clipping moved by a
         # rounding error, not outside the design; the rest are reported.
+        # A point beside a corner two blocks share is as far from both, and
+        # which.min() took whichever the last bits of GEOS's distances made
+        # the less.  Distances within the tie rule of the least are a tie,
+        # settled by the lower row (.lowest_nearest()).
         dmat <- as.matrix(sf::st_distance(sf::st_geometry(pts[na_idx, ]),
                                           sf::st_geometry(grid_sf)))
-        nearest <- vapply(seq_len(nrow(dmat)), function(i) {
+        dmat <- matrix(as.numeric(dmat), nrow = nrow(dmat))
+        nearest <- .lowest_nearest(dmat, .edge_tol(c(sf::st_bbox(pts),
+                                                     sf::st_bbox(grid_sf))))
+        d_min <- vapply(seq_len(nrow(dmat)), function(i) {
           w <- which.min(dmat[i, ])
-          if (length(w)) as.integer(w) else NA_integer_
-        }, integer(1))
-        d_min <- as.numeric(dmat[cbind(seq_along(nearest), nearest)])
+          if (length(w)) dmat[i, w] else NA_real_
+        }, numeric(1))
         tol <- 1e-6 * max(as.numeric(bb["xmax"] - bb["xmin"]),
                           as.numeric(bb["ymax"] - bb["ymin"]), 0)
         n_far <- sum(is.finite(d_min) & d_min > tol)
@@ -6396,19 +6434,16 @@ make_folds <- function(points_sf, k,
       cent <- suppressWarnings(sf::st_centroid(sf::st_geometry(grid_sf)))
       na_idx <- which(is.na(pts$..block_id))
       dmat <- as.matrix(sf::st_distance(sf::st_geometry(pts[na_idx, ]), cent))
+      dmat <- matrix(as.numeric(dmat), nrow = nrow(dmat))
       # vapply(), not apply(): a point whose distances are all NA (an empty
       # geometry that survived upstream, or a grid with no finite centroid)
       # makes which.min() return integer(0), and apply() then simplifies the
       # whole result to a list() -- which assigns back as "replacement has
       # length zero".  Keep the NA instead and let the B/k guards below react.
-      pts$..block_id[na_idx] <- vapply(
-        seq_len(nrow(dmat)),
-        function(i) {
-          w <- which.min(dmat[i, ])
-          if (length(w)) as.integer(w) else NA_integer_
-        },
-        integer(1)
-      )
+      # Centroids as far from a point to the tie rule go to the lower block,
+      # as for supplied blocks above.
+      pts$..block_id[na_idx] <- .lowest_nearest(
+        dmat, .edge_tol(c(sf::st_bbox(pts), sf::st_bbox(grid_sf))))
     }
     # The number of blocks that hold a point, which is what k is limited by.
     # This was the highest block id a point fell in: the same number once
@@ -6717,8 +6752,15 @@ make_folds <- function(points_sf, k,
         n, n_s, split_gb, n_s
       )
     }
+    # A neighbour at the buffer distance is excluded (st_is_within_distance()
+    # reads <=).  On a lattice whose spacing divides the buffer, the
+    # distances that equal it exactly in one unit are a hair over it in
+    # another, or with the origin moved, and those neighbours were kept.  A
+    # squared distance within .TIE_TOL of the buffer's square counts as at
+    # the buffer.
     nb <- sf::st_is_within_distance(sf::st_geometry(pts)[scored],
-                                     sf::st_geometry(pts), dist = buffer)
+                                     sf::st_geometry(pts),
+                                     dist = buffer * sqrt(1 + .TIE_TOL))
     splits <- vector("list", n_s)
     row_ids <- pts$..row_id
     for (i in seq_len(n_s)) {
@@ -8030,8 +8072,9 @@ make_folds <- function(points_sf, k,
 #' How many blocks of an nx by ny grid hold points
 #'
 #' Builds the grid as \code{make_folds()} does and assigns the points as it
-#' does (the first cell that contains each), so the count is the number of
-#' folds that grid can support.  \code{NA} for a grid too large to build.
+#' does (the lowest cell each lies in, an edge read with the margin of
+#' \code{.edge_join()}), so the count is the number of folds that grid can
+#' support.  \code{NA} for a grid too large to build.
 #'
 #' @param pts Projected points.
 #' @param reg The block region.
@@ -8044,8 +8087,7 @@ make_folds <- function(points_sf, k,
   if (!is.finite(n_cells) || n_cells > 1e5) return(NA_integer_)
   g <- tryCatch(.block_grid(reg, nx, ny), error = function(e) NULL)
   if (is.null(g)) return(NA_integer_)
-  hits <- sf::st_intersects(pts, g$grid_sf)
-  id <- vapply(hits, function(ix) if (length(ix)) ix[1] else NA_integer_, 1L)
+  id <- .edge_join(pts, g$grid_sf)
   length(unique(id[!is.na(id)]))
 }
 
@@ -8053,10 +8095,12 @@ make_folds <- function(points_sf, k,
 #' The same count from the coordinates alone, for searching
 #'
 #' Bins the points into the cells of the grid over \code{bb} by arithmetic.
-#' A point on a shared edge goes to the lower cell, as the first-cell rule of
-#' \code{make_folds()} sends it.  Rounding can still differ from the polygon
-#' test for a point within an ulp of an edge, so a size found this way is
-#' confirmed with \code{.block_occupied()} before it is quoted.
+#' A point on a shared edge goes to the lower cell, as \code{make_folds()}
+#' sends it, and so does a point within \code{.edge_tol(bb)} above an edge,
+#' the margin of \code{.edge_join()}: a quotient that far over a whole
+#' number of cells is read as that number.  Rounding can still differ from
+#' the polygon test for a point at the margin's limit, so a size found this
+#' way is confirmed with \code{.block_occupied()} before it is quoted.
 #'
 #' @param xy Coordinate matrix.
 #' @param bb The region's bbox.
@@ -8066,10 +8110,17 @@ make_folds <- function(points_sf, k,
 #' @noRd
 .block_occupied_fast <- function(xy, bb, nx, ny) {
   w <- as.numeric(bb["xmax"] - bb["xmin"]); h <- as.numeric(bb["ymax"] - bb["ymin"])
-  ix <- if (w > 0) pmin(nx, pmax(1, ceiling((xy[, 1L] - as.numeric(bb["xmin"])) / (w / nx))))
-        else rep(1, nrow(xy))
-  iy <- if (h > 0) pmin(ny, pmax(1, ceiling((xy[, 2L] - as.numeric(bb["ymin"])) / (h / ny))))
-        else rep(1, nrow(xy))
+  tol <- .edge_tol(bb)
+  # The cell of each coordinate; a point on a lattice line, or a hair above
+  # it by rounding, is in the cell below the line.
+  bin <- function(v, lo, span, n) {
+    q <- (v - lo) / (span / n)
+    f <- floor(q)
+    q <- ifelse(is.finite(q) & q - f <= tol / (span / n), f, q)
+    pmin(n, pmax(1, ceiling(q)))
+  }
+  ix <- if (w > 0) bin(xy[, 1L], as.numeric(bb["xmin"]), w, nx) else rep(1, nrow(xy))
+  iy <- if (h > 0) bin(xy[, 2L], as.numeric(bb["ymin"]), h, ny) else rep(1, nrow(xy))
   length(unique((iy - 1) * nx + ix))
 }
 

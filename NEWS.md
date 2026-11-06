@@ -4271,6 +4271,42 @@ old behaviour where there is a way.
   lattice takes longer: one call to gstat per tied cell and held-out
   location.
 
+* **`make_folds()` let the unit and the origin of the coordinates choose the
+  block of a lattice point on a block edge, and the neighbours of a
+  buffered split at the buffer distance.**  A point on the edge two blocks
+  share went to the first block `sf::st_intersects()` found it in, which was
+  the lower block only while the edge passed through the point exactly; the
+  last bits of the coordinates put it a hair inside one block or the other.
+  On a 37 x 25 lattice at 250 m, 3 x 2 blocks put 469 of 925 rows in
+  another fold with the false origin moved by 0.1 m, and 4 x 3 blocks 448 in
+  UTM 15N in US feet; the selection half of `select_on = "split"` on a 40 x
+  30 lattice moved by 786 rows, and with it the `rss` of
+  `resolution_profile(select_on = "split")`.  A point within a margin of
+  one part in 1e10 of the largest coordinate of the points and the blocks
+  from a block's edge is now in that block, and a point in two blocks goes
+  to the lower one (for the grid, the cell to its left or below; for
+  supplied `blocks`, the lower row, as `?make_folds` said), in every unit
+  and origin.  A point within the same margin of `boundary` is inside it:
+  lattice points on a `boundary` drawn through them were read as outside
+  in other units and origins (8 to 50 of 469 points of a lattice clipped to
+  a triangle), so the call warned about them and extended the block region
+  to the points' bounding box.  The block counts behind the leakage
+  advice read an edge point the same way, and `cv_block_size_sweep()` and
+  the cross-validation functions given these folds score on them.  A
+  point outside every supplied block, or outside the cells of a clipped
+  grid, as near two blocks to one part in ten million went to whichever
+  `which.min()` met first in the last bits of the distances (3 to 10 of 72
+  such points moved on probe layers in feet, kilometres and moved origins);
+  it now goes to the lower row, and the count of points outside the design
+  and its warning are unchanged.  `method = "buffered_loo"` excluded a
+  neighbour exactly at the buffer distance in one frame and kept it in
+  another: on a 20 x 15 lattice with `buffer` 500 m, 295 of 300 training
+  sets differed in US feet and 253 with the origin moved.  A squared
+  distance within one part in ten million of the buffer's square now counts
+  as at the buffer, and such neighbours are excluded in every frame, as they
+  were in metres.  Layers whose points sit off the block edges and the
+  buffer distance get the same folds as before.
+
 * **`kriging_adequacy()` kriged points XYZ throughout in three
   dimensions.**  `gstat::krige()` uses every coordinate dimension of its
   locations, while the variogram is fitted in x and y, so the heights moved
