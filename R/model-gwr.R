@@ -452,9 +452,10 @@
 #'
 #' A predictor whose centre is more than 1000 times its spread (a timestamp
 #' in seconds, a northing, 1e8 plus a spread of 1) is taken less its centre
-#' first, and so is a response whose raw values lose their spread to
-#' rounding (1e15 plus a spread of 1, stored to an eighth), or whose
-#' least-squares residuals on the predictors do.  The bandwidth search, the
+#' first.  So is a response whose centre is more than 1000 times its spread
+#' (1e8 plus a spread of 1), whose raw values lose their spread to rounding
+#' (1e15 plus a spread of 1, stored to an eighth), or whose least-squares
+#' residuals on the predictors do.  The bandwidth search, the
 #' local regressions, the global least-squares fit and the centred condition
 #' indices (\code{info$condition_index}, \code{cn_slopes}) then work on the
 #' spread and not on the rounding of the offset, and the centres are added
@@ -2178,7 +2179,10 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 #'   \item each predictor column through \code{.centre_columns()}, only where
 #'     its centre is more than \code{.PRED_CENTRE_RATIO} times its spread;
 #'   \item the response less \code{.regression_centre()}, 0 unless its raw
-#'     values lose their spread, and where that is 0 and the residuals of an
+#'     values lose their spread; where that is 0, less the centre of
+#'     \code{.spread_scaled()} where that centre is more than
+#'     \code{.PRED_CENTRE_RATIO} times its spread, the predictors' gate; and
+#'     where both leave it at 0 and the residuals of an
 #'     OLS fit of the raw values on the design show no spread (a standard
 #'     deviation of at most 1e-12 of the largest absolute value, as in
 #'     \code{estimate_sac_range()}), less \code{.residual_centre()}.
@@ -2209,6 +2213,19 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     }
   }
   yc <- .regression_centre(y, bounded = FALSE)
+  # A response whose centre is more than .PRED_CENTRE_RATIO times its
+  # spread (1e8 plus a spread of 1) keeps its spread, but the local solves'
+  # rounding grows with that ratio, as a predictor's does, and with the
+  # rows: a GWR at a global window on 6000 rows then misses the OLS
+  # residuals.  It is taken about the same centre.
+  if (yc == 0) {
+    fy <- y[is.finite(y)]
+    if (length(fy) >= 2L && max(abs(fy)) > 0) {
+      sy <- .spread_scaled(fy)
+      if (sy$spread > 0 && abs(sy$centre) > .PRED_CENTRE_RATIO * sy$spread)
+        yc <- sy$centre
+    }
+  }
   # A response whose raw values show their spread through a trend the
   # predictors explain (1e15 plus 1e5 times a predictor plus a spread of 1)
   # is regressed about its centre too where the raw values' OLS residuals

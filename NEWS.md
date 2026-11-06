@@ -3860,9 +3860,29 @@ old behaviour where there is a way.
   give the intercept at 0 and its standard error; with a predictor more
   than about 1e7 times its spread from 0, `predict(se.fit = TRUE)` on it
   stops with "singular matrix".  `fit$engine$centres` gives the centres.
-  Every other predictor and response is fitted as it was, to the last bit,
-  and a predictor that is constant, or a linear combination of the others,
-  is still left out of the global fit.
+  Every other predictor is fitted as it was, to the last bit (the next
+  entry gives the response), and a predictor that is constant, or a linear
+  combination of the others, is still left out of the global fit.
+
+* **A GWR at a global window on a response at 1e8 or 1e10 failed
+  `residual_morans_i()`'s check for OLS residuals.**  `fit_gwr_model()`
+  took a response about its centre only where its raw values, or its
+  least-squares residuals on the predictors, lose their spread to rounding,
+  so 1e8 plus a spread of 1 was regressed on its raw values.  The local
+  solve's residuals then carry the rounding of the offset, which grows with
+  the rows.  On 6000 rows with `bandwidth = 6000`, `adaptive = TRUE` and
+  `kernel = "boxcar"`, which is global OLS, the residuals missed the check
+  at 1e8 and 1e10, and `residual_morans_i()` with `null = "auto"` used
+  randomisation, with `exact = FALSE` and a z of 126.387931 where the same
+  values at 0 give the residual null and 126.391564, in silence.  A
+  response at -1e8, and a model of the intercept alone, failed the same
+  way.  `fit_gwr_model()`, `predict()` and `gwr_model_selection()` now also take
+  the response less its centre where that centre is more than 1000 times
+  its spread, the gate a predictor already has.  The global GWR then gives
+  the OLS residuals, the residual null and the z of the values at 0 at any
+  offset, and `residuals()` is the centred response less the centred
+  fitted values.  A response whose centre is within 1000 times its spread
+  is fitted as it was, to the last bit.
 
 * **`fit_gwr_model()` logged "predictor has near-zero variance; GWR may be
   unstable" for a predictor in small units.**  The test was a standard

@@ -194,7 +194,10 @@ test_that("residual_morans_i() reads the residuals of a response at 1e15 as thos
 
 test_that("a design and a response that show their spread are fitted as they are given", {
   L <- .go_layer()
-  for (d in list(L$mk(L$wq, L$zq), L$mk(100 + L$wq, 1e5 + L$zq))) {
+  # A response whose centre is within 1000 times its spread (1e3 plus a
+  # spread of 7.6); 1e5 plus the same spread is past that gate and is
+  # taken about its centre (test-fix-gwr-global-moran.R).
+  for (d in list(L$mk(L$wq, L$zq), L$mk(100 + L$wq, 1e3 + L$zq))) {
     df <- sf::st_drop_geometry(d)
     dsn <- .gwr_design(z ~ p, df)
     cen <- .gwr_centre(dsn$X, dsn$y)

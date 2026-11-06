@@ -156,9 +156,10 @@ predictor's origin or units: an indicator coded 0/1 and one coded
 
 A predictor whose centre is more than 1000 times its spread (a timestamp
 in seconds, a northing, 1e8 plus a spread of 1) is taken less its centre
-first, and so is a response whose raw values lose their spread to
-rounding (1e15 plus a spread of 1, stored to an eighth), or whose
-least-squares residuals on the predictors do.  The bandwidth search, the
+first.  So is a response whose centre is more than 1000 times its spread
+(1e8 plus a spread of 1), whose raw values lose their spread to rounding
+(1e15 plus a spread of 1, stored to an eighth), or whose least-squares
+residuals on the predictors do.  The bandwidth search, the
 local regressions, the global least-squares fit and the centred condition
 indices (\code{info$condition_index}, \code{cn_slopes}) then work on the
 spread and not on the rounding of the offset, and the centres are added
