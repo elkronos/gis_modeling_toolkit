@@ -34,12 +34,15 @@ with a warning of class \code{"spatialkit_zm_dropped"}:
 \code{\link[sf:st_transform]{sf::st_transform()}} reads a layer in the dimension of its first
 geometry and misplaces the others.  A layer in one dimension is
 transformed with its Z and M, and so is a layer whose only geometries
-of another dimension than the first are empty and not points.  A layer
-that is not
-transformed is returned as it came.  A row of a projected layer moved
-to a CRS in degrees comes back empty when it has a coordinate beyond
-1e10 in its CRS's own unit, further out than any projected CRS places
-a point of the Earth.
+of another dimension than the first are empty and not points.  A row
+of a transformed layer with a coordinate that is not finite or lies
+beyond 1e150 comes back empty, in its own geometry type: it has no
+location to move, and \code{\link[sf:st_transform]{sf::st_transform()}} would drop that vertex and
+return the rest of the feature, or put the coordinate at a finite
+place.  So does a row of a projected layer moved to a CRS in degrees
+with a coordinate beyond 1e10 in its CRS's own unit, further out than
+any projected CRS places a point of the Earth.  A layer that is not
+transformed is returned as it came.
 }
 \description{
 Aligns two sf objects to a common CRS.

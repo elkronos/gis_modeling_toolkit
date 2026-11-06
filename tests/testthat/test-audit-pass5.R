@@ -715,7 +715,7 @@ test_that("get_voronoi_seeds clusters in 2-D and drops unusable points", {
   sf::st_geometry(cloud) <- g
   expect_warning(get_voronoi_seeds(bnd, method = "kmeans", n = 2,
                                    sample_points = cloud),
-                 "non-finite coordinates")
+                 "without a location \\(an empty point")
 })
 
 

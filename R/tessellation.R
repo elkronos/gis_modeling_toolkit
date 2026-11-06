@@ -379,7 +379,11 @@
 #'     coordinates moved, and the cover is given the same reading.
 #'   \item When the generators are still in an unnamed planar space, so is
 #'     the cover, whatever CRS it carried.
-#'   \item When both have a CRS and they differ, the cover is transformed.  A
+#'   \item When both have a CRS and they differ, the cover is transformed,
+#'     with \code{.transform_keep_unlocated()}: a row with a coordinate that
+#'     is not finite or lies beyond 1e150, read as given, comes back empty,
+#'     never as the rest of the feature or at the finite place a move from
+#'     another projected CRS gives it.  A
 #'     polygon or hull gets vertices along its edges first (in its own
 #'     coordinates, a two-hundredth of its extent apart), because a straight
 #'     edge in one CRS is not straight in another: across the conterminous
@@ -436,7 +440,7 @@
                                             dfMaxLength = ext / 200), crs_g)
     }
   }
-  sf::st_transform(g, crs_now)
+  .transform_keep_unlocated(g, crs_now)
 }
 
 
@@ -803,6 +807,12 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   # XY copy this function does not return.
   points_sf <- .xy_if_mixed_or_m(points_sf)
   if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
+  # A point with a coordinate that is not finite or lies beyond 1e150 has no
+  # location.  It is read as given, before any move, and emptied
+  # (.empty_unlocated()), so it takes no part in the box below, as an empty
+  # point takes none: at Inf the buffer stopped with GEOS's message, and at
+  # 1e200 the target had an infinite area.
+  points_sf <- .empty_unlocated(points_sf)
   # .expand_distance() below TOLERATES a malformed `expand` by returning 0,
   # which turned `expand = c(0.05, 0.05)` into a silent no-op -- the returned
   # bbox was byte-identical to expand = 0, with no condition raised -- and a
@@ -975,17 +985,20 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   # INFO line in the temp log, and nothing on the result held the number.
   n_out <- sum(is.na(index))
   if (n_out > 0L && isTRUE(warn)) {
-    # A point with empty geometry is in no cell either, but for want of a
-    # location, not for lying outside the study area.
-    n_empty <- sum(is.na(index) & sf::st_is_empty(sf::st_geometry(pts)))
+    # A point without a location (an empty point, or a coordinate that is
+    # not finite or lies beyond 1e150) is in no cell either, but for want of
+    # a location, not for lying outside the study area.
+    n_empty <- sum(is.na(index) & !.located_rows(pts))
     .warn_classed("spatialkit_unassigned", paste0(
       "build_tessellation(): %d of %d point(s) (%.1f%%) fall in no cell and ",
       "are NA in `index`; `params$n_outside` holds the count. %s"),
       n_out, length(index), 100 * n_out / length(index),
       if (n_empty == n_out)
-        "They have empty geometry, so there is no location to index."
+        sprintf("They have no location (%s), so there is nothing to index.",
+                .UNLOCATED_WHAT)
       else paste0(
-        if (n_empty > 0L) sprintf("%d of them have empty geometry; the rest lie ", n_empty)
+        if (n_empty > 0L) sprintf("%d of them have no location (%s); the rest lie ",
+                                  n_empty, .UNLOCATED_WHAT)
         else "They lie ",
         "outside the ground the cells cover (the boundary, grown by `expand`). ",
         "Pass a boundary that holds them, or a larger `expand`, if they belong ",
@@ -1047,7 +1060,8 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' than any other seed, is built, and its `index` entry is that cell's
 #' `cell_id`, although the seed lies in no cell. A seed is `NA` only when
 #' every part of the study area is nearer another seed, so the clip removed
-#' its cell whole, or when its geometry is empty. The points are seeds when
+#' its cell whole, or when it has no location (its geometry is empty, or a
+#' coordinate is not finite or lies beyond 1e150). The points are seeds when
 #' a seeding function returned them ([get_voronoi_seeds()],
 #' [voronoi_seeds_kmeans()], [voronoi_seeds_random()], `rbind()` of such
 #' layers included), when they are the seeds of a [select_resolution()]
@@ -1097,7 +1111,9 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   fall outside every cell is returned as `params$cover_outside`, with a
 #'   warning of class `"spatialkit_unassigned"` when it is not 0 (a polygon
 #'   cover is not checked). A cover, given or attached, that mixes XY and XYZ
-#'   (or XYM) geometries, or that carries M, is read in x and y.
+#'   (or XYM) geometries, or that carries M, is read in x and y. A row of the
+#'   cover with a coordinate that is not finite or lies beyond 1e150, read
+#'   as given before any move, is read as an empty row.
 #' @param expand Numeric; absolute distance, in the working CRS's units, by
 #'   which the boundary (or the hull derived from the points) is grown before
 #'   the diagram is built. With `clip = TRUE` the cells are clipped to the
@@ -1165,7 +1181,8 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   \code{"spatialkit_unassigned"} gives their number.  For seeds (see
 #'   "Details") \code{index} holds the cell each seed generates, whether the
 #'   seed lies inside the boundary or not, and \code{NA} only for a seed whose
-#'   cell the clip removed whole or whose geometry is empty;
+#'   cell the clip removed whole or without a location (an empty geometry,
+#'   or a coordinate that is not finite or lies beyond 1e150);
 #'   \code{params$n_outside} counts those, the warning names them as seeds,
 #'   and \code{params$snapped} lists only the seeds whose entry is the cell
 #'   they were snapped to.  \code{boundary} is
@@ -1222,6 +1239,18 @@ create_voronoi_polygons <- function(
   points_sf <- .xy_if_mixed_or_m(points_sf)
   if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
   if (!is.null(cover)) cover <- .xy_if_mixed_or_m(cover)
+  # A point with a coordinate that is not finite or lies beyond 1e150 has no
+  # location.  It is read as given, before any move, and emptied
+  # (.empty_unlocated()), so it takes no part in the hull, the Voronoi
+  # diagram or the CRS chosen, and is NA in `index` and counted as an empty
+  # point is.  Kept, it stopped st_voronoi() or the hull's buffer with
+  # GEOS's message, and a northing of 1e200 in another CRS than the
+  # boundary's was moved to a finite place.
+  points_sf <- .empty_unlocated(points_sf)
+  # So is a row of the cover: at Inf or 1e200 one point set the whole cover
+  # aside ("gives no polygon"), and a polygon with such a vertex was moved
+  # into the working CRS as a smaller shape, or one far larger.
+  if (!is.null(cover)) cover <- .empty_unlocated(cover)
   if (nrow(points_sf) < 1) stop("create_voronoi_polygons(): `points_sf` has no rows.")
   .msg <- function(...) if (!quiet) message(...)
   # The ground the cells have to hold, when there is no boundary: the `cover`
@@ -1234,7 +1263,8 @@ create_voronoi_polygons <- function(
     cover_geom <- sf::st_geometry(cover)
     cover_from <- "cover"
   } else if (inherits(attr(points_sf, "cover", exact = TRUE), c("sf", "sfc"))) {
-    cover_geom <- .xy_if_mixed_or_m(sf::st_geometry(attr(points_sf, "cover", exact = TRUE)))
+    cover_geom <- .empty_unlocated(
+      .xy_if_mixed_or_m(sf::st_geometry(attr(points_sf, "cover", exact = TRUE))))
     cover_from <- "seeds' cover"
   }
   seed_like <- .looks_like_seeds(points_sf)
@@ -1484,15 +1514,17 @@ create_voronoi_polygons <- function(
                     distance = snapped$distance[keep])
     n_out <- sum(is.na(index))
     if (n_out > 0L) {
-      n_empty <- sum(is.na(index) & sf::st_is_empty(sf::st_geometry(pts)))
+      n_empty <- sum(is.na(index) & !.located_rows(pts))
       .warn_classed("spatialkit_unassigned", paste0(
         "build_tessellation(): %d of %d seed(s) (%.1f%%) have no cell and are NA ",
         "in `index`; `params$n_outside` holds the count. %s"),
         n_out, length(index), 100 * n_out / length(index),
         if (n_empty == n_out)
-          "They have empty geometry, so there is no location to index."
+          sprintf("They have no location (%s), so there is nothing to index.",
+                  .UNLOCATED_WHAT)
         else paste0(
-          if (n_empty > 0L) sprintf("%d of them have empty geometry; the rest lie ", n_empty)
+          if (n_empty > 0L) sprintf("%d of them have no location (%s); the rest lie ",
+                                    n_empty, .UNLOCATED_WHAT)
           else "They lie ",
           "outside the boundary (grown by `expand`), and every part of the study ",
           "area is nearer another seed, so the clip left nothing of their cells. ",
@@ -2186,7 +2218,9 @@ create_grid_polygons <- function(
 #'   fall outside every cell is returned as `params$cover_outside`, with a
 #'   warning of class `"spatialkit_unassigned"` when it is not 0. A cover,
 #'   given or attached, that mixes XY and XYZ (or XYM) geometries, or that
-#'   carries M, is read in x and y. See [create_voronoi_polygons()].
+#'   carries M, is read in x and y. A row of the cover with a coordinate
+#'   that is not finite or lies beyond 1e150, read as given before any move,
+#'   is read as an empty row. See [create_voronoi_polygons()].
 #' @param expand Buffer distance, in the working CRS's units, by which the
 #'   Voronoi boundary is grown before the diagram is built. Applied by
 #'   `method = "voronoi"` only; the `"hex"`, `"square"` and `"triangles"`
@@ -2253,8 +2287,9 @@ create_grid_polygons <- function(
 #'       seed generates, whether the seed lies inside the boundary or not: a
 #'       k-means seed outside a boundary that is not convex has its cell,
 #'       the part of the study area nearer it than any other seed. Only a
-#'       seed whose cell the clip removed whole, or whose geometry is empty,
-#'       is `NA`, and the warning then names seeds. See
+#'       seed whose cell the clip removed whole, or without a location (an
+#'       empty geometry, or a coordinate that is not finite or lies beyond
+#'       1e150), is `NA`, and the warning then names seeds. See
 #'       [create_voronoi_polygons()].}
 #'     \item{`boundary`}{The boundary used (possibly derived and/or
 #'       reprojected, and for `"voronoi"` grown by `expand`).}
@@ -2344,6 +2379,16 @@ build_tessellation <- function(
   points_sf <- .xy_if_mixed_or_m(points_sf)
   if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
   if (!is.null(cover)) cover <- .xy_if_mixed_or_m(cover)
+  # A point with a coordinate that is not finite or lies beyond 1e150 has no
+  # location.  It is read as given, before any move, and emptied
+  # (.empty_unlocated()), so every method reads it as an empty point: it
+  # takes no part in the cells and is NA in `index`, counted with the empty
+  # points.  A move into another CRS can put a northing of 1e200 at a
+  # finite place.  A row of the cover is read the same way: one point at
+  # Inf or 1e200 set the whole cover aside, and a polygon with such a vertex
+  # was moved as a smaller shape, or one far larger.
+  points_sf <- .empty_unlocated(points_sf)
+  if (!is.null(cover)) cover <- .empty_unlocated(cover)
   # A layer as `crs` means its CRS (as ensure_projected(target_crs =) reads
   # it); passed on as it was, it stopped with "the condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
@@ -2355,7 +2400,7 @@ build_tessellation <- function(
   cover_attr <- attr(points_sf, "cover", exact = TRUE)
   cover_geom <- if (!is.null(cover)) sf::st_geometry(cover)
                 else if (inherits(cover_attr, c("sf", "sfc")))
-                  .xy_if_mixed_or_m(sf::st_geometry(cover_attr))
+                  .empty_unlocated(.xy_if_mixed_or_m(sf::st_geometry(cover_attr)))
                 else NULL
 
   # The level-selection step's own answer is accepted here, so the count

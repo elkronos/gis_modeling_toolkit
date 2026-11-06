@@ -108,9 +108,11 @@ the dimension of its first geometry.}
 
 \item{sample_points}{Optional sf POINT cloud for k-means clustering. Only
 the first two coordinate columns are clustered, so a Z or M dimension does
-not join the distance calculation and dominate it; rows with empty or
-non-finite coordinates are dropped with a warning, so they never reach
-\code{stats::kmeans()}, which fails on them without naming a cause. A lon/lat
+not join the distance calculation and dominate it; rows without a
+location (an empty point, or a coordinate that is not finite or lies
+beyond 1e150, read as given before any move) are dropped with a warning,
+so they never reach \code{stats::kmeans()}, which fails on them without
+naming a cause. A lon/lat
 cloud, or one with no CRS whose coordinates look like lon/lat (the
 heuristic \code{\link[=ensure_projected]{ensure_projected()}} applies, with its warning), is projected
 before clustering. A cloud that mixes XY and XYZ (or XYM) points is read

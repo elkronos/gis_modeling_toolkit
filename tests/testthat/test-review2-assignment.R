@@ -169,7 +169,7 @@ test_that("an empty point no longer stops deff = 'variogram'", {
   sf::st_geometry(empty) <- g
   res <- .r2_warnings(summarize_by_cell(empty, "z", deff = "variogram",
                                         sac = .r2_sac(), estimate = "mean"))
-  expect_true(any(grepl("1 point\\(s\\) have empty or non-finite coordinates",
+  expect_true(any(grepl("1 point\\(s\\) have no location \\(an empty point",
                         res$warnings)))
   out <- res$value
   expect_true(all(out$deff_applied))

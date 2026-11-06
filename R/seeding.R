@@ -121,9 +121,11 @@
 #'   the dimension of its first geometry.
 #' @param sample_points Optional sf POINT cloud for k-means clustering. Only
 #'   the first two coordinate columns are clustered, so a Z or M dimension does
-#'   not join the distance calculation and dominate it; rows with empty or
-#'   non-finite coordinates are dropped with a warning, so they never reach
-#'   `stats::kmeans()`, which fails on them without naming a cause. A lon/lat
+#'   not join the distance calculation and dominate it; rows without a
+#'   location (an empty point, or a coordinate that is not finite or lies
+#'   beyond 1e150, read as given before any move) are dropped with a warning,
+#'   so they never reach `stats::kmeans()`, which fails on them without
+#'   naming a cause. A lon/lat
 #'   cloud, or one with no CRS whose coordinates look like lon/lat (the
 #'   heuristic [ensure_projected()] applies, with its warning), is projected
 #'   before clustering. A cloud that mixes XY and XYZ (or XYM) points is read
@@ -343,6 +345,13 @@ get_voronoi_seeds <- function(boundary = NULL,
   # is said.
   if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
   if (!is.null(sample_points)) sample_points <- .xy_if_mixed(sample_points)
+  # A sample point with a coordinate that is not finite or lies beyond 1e150
+  # has no location.  It is read as given, before any move, and emptied
+  # (.empty_unlocated()), so that it is dropped below as an empty point is:
+  # moved into the boundary's CRS, a northing of 1e200 in EPSG:32616 came
+  # back finite in EPSG:32617 and was clustered, and in the working CRS a
+  # coordinate of 1e200 left k-means with no partition.
+  if (!is.null(sample_points)) sample_points <- .empty_unlocated(sample_points)
 
   # A select_resolution() result or a resolution_profile() as `n` carries the
   # centres of the partition the profile scored at that count.  A k-means
@@ -498,12 +507,12 @@ get_voronoi_seeds <- function(boundary = NULL,
       # And only usable rows.  An EMPTY POINT survives as an all-NA row and
       # kmeans() dies with "NA/NaN/Inf in foreign function call (arg 1)", a
       # message naming nothing; voronoi_seeds_kmeans() drops such rows with a
-      # warning, so do the same here.
-      bad_xy <- !stats::complete.cases(xy) |
-                !is.finite(xy[, 1L]) | !is.finite(xy[, 2L])
+      # warning, so do the same here.  A coordinate beyond 1e150 has no
+      # location either (.values_at_xy()), read again after the projection.
+      bad_xy <- is.na(.values_at_xy(cloud_for_km)[, 1L])
       if (any(bad_xy)) {
-        .warn_and_log("get_voronoi_seeds(kmeans): dropping %d point(s) with empty or non-finite coordinates.",
-                      sum(bad_xy))
+        .warn_and_log("get_voronoi_seeds(kmeans): dropping %d point(s) without a location (%s).",
+                      sum(bad_xy), .UNLOCATED_WHAT)
         xy <- xy[!bad_xy, , drop = FALSE]
       }
       if (nrow(xy) < 2L)
@@ -700,9 +709,10 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' Lon/lat input is projected first so the k-means distances are metric and not
 #' degrees; so is input with no CRS whose coordinates look like lon/lat (the
 #' heuristic [ensure_projected()] applies, with its warning), and the seeds
-#' come back in the input's own coordinates. Rows with empty or non-finite
-#' coordinates are dropped with a warning, and `k` is clamped to the number of
-#' distinct positions.
+#' come back in the input's own coordinates. Rows without a location (an
+#' empty point, or a coordinate that is not finite or lies beyond 1e150, read
+#' as given before the projection) are dropped with a warning, and `k` is
+#' clamped to the number of distinct positions.
 #'
 #' A count given as a number gets a fresh partition, which is not the
 #' partition [resolution_profile()] or [determine_optimal_levels()] scored
@@ -930,6 +940,12 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
   # CRS-less layer gets the lon/lat heuristic ensure_projected() applies
   # everywhere else (with its warning); .is_longlat() is FALSE for a missing
   # CRS, so CRS-less degrees used to be clustered as if they were metres.
+  # A point with a coordinate that is not finite or lies beyond 1e150 has no
+  # location.  It is read as given, before the projection, and emptied
+  # (.empty_unlocated()), so that it takes no part in the lon/lat test or the
+  # choice of the CRS and is dropped below as an empty point is: a northing
+  # of 1e200 left k-means with no partition.
+  points_sf  <- .empty_unlocated(points_sf)
   crs_in     <- sf::st_crs(points_sf)
   pts_for_km <- points_sf
   pts_is_ll  <- .is_longlat(points_sf) ||
@@ -941,13 +957,14 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
   if (ncol(coords) >= 2L) coords <- coords[, 1:2, drop = FALSE]
   # st_coordinates() yields one all-NA row per EMPTY POINT rather than zero
   # rows, so a row-count check alone would let empty geometries through to
-  # kmeans(), which fails with "NA/NaN/Inf in foreign function call".
-  finite_rows <- stats::complete.cases(coords) &
-    apply(coords, 1L, function(r) all(is.finite(r)))
+  # kmeans(), which fails with "NA/NaN/Inf in foreign function call".  A
+  # coordinate beyond 1e150 has no location either (.values_at_xy()), read
+  # again after the projection.
+  finite_rows <- !is.na(.values_at_xy(pts_for_km)[, 1L])
   n_drop <- sum(!finite_rows)
   if (n_drop > 0L) {
-    .warn_and_log("voronoi_seeds_kmeans(): dropping %d point(s) with empty or non-finite coordinates.",
-              n_drop)
+    .warn_and_log("voronoi_seeds_kmeans(): dropping %d point(s) without a location (%s).",
+              n_drop, .UNLOCATED_WHAT)
     coords <- coords[finite_rows, , drop = FALSE]
   }
   n <- nrow(coords)
@@ -1516,6 +1533,10 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #' @keywords internal
 #' @noRd
 .scored_seeds_record <- function(cloud, seeds, nstart) {
+  # A cloud point without a location, read as given, is emptied before the
+  # move, which can put a northing of 1e200 at a finite place, and is left
+  # out below with the empty points.
+  cloud <- .empty_unlocated(cloud)
   scrs <- sf::st_crs(seeds); ccrs <- sf::st_crs(cloud)
   if (!is.na(scrs)) {
     if (is.na(ccrs))
@@ -1529,7 +1550,7 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   }
   xy <- sf::st_coordinates(cloud)
   xy <- if (ncol(xy) >= 2L) xy[, 1:2, drop = FALSE] else matrix(NA_real_, nrow(cloud), 2L)
-  ok <- stats::complete.cases(xy) & is.finite(xy[, 1L]) & is.finite(xy[, 2L])
+  ok <- !is.na(.values_at_xy(cloud)[, 1L])
   sxy <- sf::st_coordinates(seeds)[, 1:2, drop = FALSE]
   k   <- nrow(sxy)
   cl  <- integer(0); d2 <- numeric(0)

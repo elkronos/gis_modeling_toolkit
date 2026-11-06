@@ -643,7 +643,8 @@
 #' For the moves of a caller's rows to a CRS in degrees: the row probe of
 #' \code{make_folds()}, the row fingerprint of \code{compare_models()}, the
 #' scored seeds moved to the CRS of the layer they are for, and every move
-#' of \code{.align_crs()} and \code{.transform_or_stamp()}.  When the set is
+#' of \code{.transform_keep_unlocated()} (so of \code{.align_crs()},
+#' \code{.transform_or_stamp()} and \code{harmonize_crs()}).  When the set is
 #' in a projected CRS and \code{crs} is in degrees, its rows with a
 #' coordinate beyond \code{.LONLAT_MOVE_MAX} are emptied
 #' (\code{.empty_unlocated()}) before the move, read on the geometry as
@@ -659,7 +660,11 @@
 #' @keywords internal
 #' @noRd
 .lonlat_of_placed <- function(g, crs = 4326) {
-  if (isFALSE(sf::st_is_longlat(g)) && isTRUE(sf::st_is_longlat(sf::st_crs(crs)))) {
+  # Read on the CRS alone: sf::st_is_longlat() of a layer in degrees also
+  # reads its box, and warns on a row at a longitude of 1e200 that the
+  # caller's move empties.
+  if (isFALSE(sf::st_is_longlat(sf::st_crs(g))) &&
+      isTRUE(sf::st_is_longlat(sf::st_crs(crs)))) {
     far <- which(.beyond_lonlat_move(sf::st_geometry(g)))
     if (length(far)) g <- .empty_unlocated(g, rows = far)
   }

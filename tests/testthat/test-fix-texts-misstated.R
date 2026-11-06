@@ -360,28 +360,34 @@ test_that("features with empty geometry are said to have no location, not to fal
   expect_identical(conditionMessage(w[[1L]]), paste0(
     "assign_features_to_polygons(): 2 of 40 feature(s) (5.0%) fall inside no polygon and are ",
     "left out of the result; attr(, \"unassigned\")$which gives their rows in `features_sf`. ",
-    "They have empty geometry, so there is no location to assign; pass keep_unassigned = TRUE ",
-    "to keep them with an NA ID."))
+    "They have no location (an empty point, or a coordinate that is not finite or lies beyond ",
+    "1e150), so there is nothing to assign; pass keep_unassigned = TRUE to keep them with an ",
+    "NA ID."))
   # One empty point beside one outside the polygons: both counted, the advice for the rest.
   f <- .tm_pts()[1:40, ]
   sf::st_geometry(f)[1] <- sf::st_point()
   sf::st_geometry(f)[2] <- sf::st_point(c(0, 0))
   r <- .tm_catch(assign_features_to_polygons(f, units, polygon_id_col = "GEOID"))
   expect_match(conditionMessage(.tm_of(r, "spatialkit_unassigned")[[1L]]),
-               "rows in `features_sf`. 1 of them has empty geometry; for the rest, check that the polygons cover the features",
+               paste0("rows in `features_sf`. 1 of them has no location (an empty point, or a ",
+                      "coordinate that is not finite or lies beyond 1e150); for the rest, check ",
+                      "that the polygons cover the features"),
                fixed = TRUE)
   # Kept with an NA ID, the log line counts the empty ones too.
   lines <- capture_spatialkit_log(.tm_quiet(
     assign_features_to_polygons(f, units, polygon_id_col = "GEOID", keep_unassigned = TRUE)))
   expect_true(log_has(lines, paste0("2 of 40 feature\\(s\\) fall inside no polygon and are kept ",
-                                    "with an NA ID \\(1 of them has empty geometry\\)\\.")))
+                                    "with an NA ID \\(1 of them has no location: an empty ",
+                                    "point, or a coordinate that is not finite or lies beyond ",
+                                    "1e150\\)\\.")))
   # Every feature empty: no word on the CRS.
   g <- .tm_pts()[1:3, ]
   sf::st_geometry(g)[1:3] <- sf::st_point()
   r <- .tm_catch(assign_features_to_polygons(g, units, polygon_id_col = "GEOID"))
   expect_identical(conditionMessage(.tm_of(r, "spatialkit_unassigned")[[1L]]), paste0(
     "assign_features_to_polygons(): none of the 3 feature(s) fall inside any polygon. They have ",
-    "empty geometry, so there is no location to assign."))
+    "no location (an empty point, or a coordinate that is not finite or lies beyond 1e150), so ",
+    "there is nothing to assign."))
 })
 
 

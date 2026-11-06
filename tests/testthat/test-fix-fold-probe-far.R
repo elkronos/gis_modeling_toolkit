@@ -371,3 +371,39 @@ test_that("get_voronoi_seeds(method = \"kmeans\") drops a sample point beyond 1e
   expect_identical(attr(s, "kmeans")$rows, 2:60)
   expect_null(seen$refused)
 })
+
+test_that("the move that empties rows beyond 1e150 also empties a projected row beyond 1e10 moved into degrees", {
+  # .transform_keep_unlocated() is the move of harmonize_crs(), .align_crs(),
+  # .transform_or_stamp(), the builders' `cover`, the scored join of
+  # assign_features_to_polygons() and cell_values_at()'s free cells.
+  seen <- new.env()
+  local_mocked_bindings(st_transform = .fpf_guard(seen), .package = "sf")
+  d <- .fpf_layer(1e20)
+  g <- sf::st_geometry(d)
+  g[2] <- sf::st_sfc(sf::st_point(c(-9e6, 1e200)), crs = 3857)
+  d <- sf::st_set_geometry(d, g)
+  out <- .transform_keep_unlocated(d, 4326)
+  expect_true(all(sf::st_is_empty(out)[1:2]))
+  expect_identical(out[-(1:2), ], sf::st_transform(d[-(1:2), ], 4326))
+  expect_identical(.align_crs(d, sf::st_sfc(sf::st_point(c(-81, 41)), crs = 4326)), out)
+  # A polygon cover with one vertex at x = 1e20 in EPSG:3857, moved into
+  # the generators' EPSG:4326, comes back with that row empty, in its type.
+  sq <- function(x0) sf::st_polygon(list(rbind(c(x0, 5e6), c(x0 + 5e4, 5e6),
+    c(x0 + 5e4, 5.05e6), c(x0, 5.05e6), c(x0, 5e6))))
+  far <- sq(-9e6); far[[1]][3, 1] <- 1e20
+  cov <- sf::st_sfc(sq(-9.1e6), far, crs = 3857)
+  pts <- sf::st_sfc(sf::st_point(c(-81, 41)), sf::st_point(c(-80, 41.2)), crs = 4326)
+  cf <- .cover_follow(cov, pts, pts)
+  expect_identical(sf::st_is_empty(cf), c(FALSE, TRUE))
+  expect_s3_class(cf[[2L]], "POLYGON")
+  expect_null(seen$refused)
+})
+
+test_that("the shared move reads a layer in degrees with a longitude of 1e200 without sf's warning on its box", {
+  # .lonlat_of_placed() reads the layer's CRS alone; sf::st_is_longlat() of
+  # the layer warned "bounding box has potentially an invalid value range
+  # for longlat data" in ensure_projected() and cell_values_at().
+  ll <- sf::st_sfc(sf::st_point(c(-81, 41)), sf::st_point(c(1e200, 41)), crs = 4326)
+  expect_no_warning(m <- .transform_keep_unlocated(ll, 32617))
+  expect_identical(m, .empty_unlocated(sf::st_transform(ll[1], 32617)[c(1, 1)], rows = 2L))
+})

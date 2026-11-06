@@ -181,7 +181,9 @@ sizes nothing: when it is a point layer, the number of its points that
 fall outside every cell is returned as \code{params$cover_outside}, with a
 warning of class \code{"spatialkit_unassigned"} when it is not 0. A cover,
 given or attached, that mixes XY and XYZ (or XYM) geometries, or that
-carries M, is read in x and y. See \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}.}
+carries M, is read in x and y. A row of the cover with a coordinate
+that is not finite or lies beyond 1e150, read as given before any move,
+is read as an empty row. See \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}.}
 }
 \value{
 A list with components:
@@ -204,8 +206,9 @@ result, or points given with a \code{cover}), \code{index} holds the cell each
 seed generates, whether the seed lies inside the boundary or not: a
 k-means seed outside a boundary that is not convex has its cell,
 the part of the study area nearer it than any other seed. Only a
-seed whose cell the clip removed whole, or whose geometry is empty,
-is \code{NA}, and the warning then names seeds. See
+seed whose cell the clip removed whole, or without a location (an
+empty geometry, or a coordinate that is not finite or lies beyond
+1e150), is \code{NA}, and the warning then names seeds. See
 \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}.}
 \item{\code{boundary}}{The boundary used (possibly derived and/or
 reprojected, and for \code{"voronoi"} grown by \code{expand}).}

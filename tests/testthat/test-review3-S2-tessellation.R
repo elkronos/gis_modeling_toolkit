@@ -81,7 +81,7 @@ test_that("an empty point is indexed NA by the triangulation, not an abort", {
     # The NA is counted and warned about, and the warning says why: the
     # point has no location.
     expect_warning(tri <- build_tessellation(pts, b, method = "triangles", quiet = TRUE),
-                   "1 of 21 point\\(s\\) .* They have empty geometry",
+                   "1 of 21 point\\(s\\) .* They have no location \\(an empty point",
                    class = "spatialkit_unassigned")
     expect_identical(tri$params$n_outside, 1L)
     expect_gt(nrow(tri$cells), 0L)

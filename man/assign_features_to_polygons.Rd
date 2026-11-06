@@ -118,8 +118,10 @@ matching the message; the condition carries \code{n} and \code{total}). The usua
 causes are a polygon layer that stops short of the data (a coastline
 drawn at another scale, a tessellation of seeds built without a
 \code{boundary} or \code{cover}; see \code{\link[=build_tessellation]{build_tessellation()}}) and points outside
-the study area. A feature with empty geometry has no location to
-assign, and the warning says how many of them there are. With
+the study area. A feature with empty geometry, or with a coordinate
+that is not finite or lies beyond 1e150 (read as given, before any
+move into the polygons' CRS), has no location to assign: it matches no
+polygon, and the warning says how many of them there are. With
 \code{keep_unassigned = TRUE} they are kept with an
 \code{NA} ID and no warning is raised, unless every feature is unassigned.
 

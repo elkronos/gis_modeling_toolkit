@@ -217,7 +217,7 @@ test_that("voronoi_seeds_kmeans drops unusable points and reports having none", 
   expect_warning(lines <- capture_spatialkit_log(out <- voronoi_seeds_kmeans(mixed, k = 3,
                                                                              set_seed = 11)),
                  "dropping 1 point")
-  expect_true(log_has(lines, "dropping 1 point\\(s\\) with empty or non-finite"))
+  expect_true(log_has(lines, "dropping 1 point\\(s\\) without a location \\(an empty point"))
   expect_equal(nrow(out), 3L)
   expect_true(all(is.finite(sf::st_coordinates(out))))
   # Identical to clustering the clean layer: the empty row contributed nothing.

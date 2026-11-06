@@ -1947,11 +1947,20 @@ old behaviour where there is a way.
   rows the coordinates, it gets with them empty, without that warning.  A
   layer in which no row has a location gets Web Mercator (Equal Earth for
   `purpose = "area"`), and the log line says so, where it
-  quoted a centre at "lon = NaN, lat = NaN".  Moved from lon/lat, with or
-  without `target_crs`, the rows come back empty in their own geometry
-  type: a polygon or line with one such vertex lost that vertex in
+  quoted a centre at "lon = NaN, lat = NaN".  Moved to another CRS, the
+  rows come back empty in their own geometry type: by `ensure_projected()`
+  from lon/lat, with or without `target_crs`, and from a projected CRS with
+  `target_crs`; by `harmonize_crs()`; and wherever a function moves a
+  `boundary`, `cells_sf`, `polygons_sf` or `cover`, or the polygons of
+  `cell_values_at()`'s `values`, into the CRS of another layer.  A
+  polygon or line with one such vertex lost that vertex in
   `sf::st_transform()` and came back as a smaller finite shape, a
-  half-degree square near (-93, 45) as a triangle of about half its area.
+  half-degree square near (-93, 45) as a triangle of about half its area:
+  `create_grid_polygons()` laid 55 cells over that triangle with nothing
+  said, where it refuses the same row empty, and
+  `assign_features_to_polygons()` joined a point inside the triangle to the
+  square.  A vertex at a northing of 1e200 in EPSG:32616 came back at a
+  finite northing in EPSG:32615.
 
 * **One coordinate that is not finite or lies beyond 1e150 made a layer
   without a CRS read as planar.**  The lon/lat test of a layer without a
@@ -2077,9 +2086,53 @@ old behaviour where there is a way.
   of another or of a `crs` argument, now give such a row back empty when the
   target is in degrees: `get_voronoi_seeds()` with `method = "kmeans"` and a
   boundary in degrees stalled on such a sample point, and drops it now with
-  its warning about empty points, as it drops an empty one.  Layers in
-  degrees, without a CRS, or whose rows all lie within 1e10 of the origin,
-  and moves into a projected CRS, give the same results as before.
+  its warning about points without a location, as it drops an empty one.
+  Layers in degrees, without a CRS, or whose rows all lie within 1e10 of
+  the origin, and moves into a projected CRS, give the same results as
+  before.
+
+* **The seeding functions, the Voronoi cells, `clip_target_for()`,
+  `assign_features_to_polygons()`, the variogram design effect of
+  `summarize_by_cell()` and `kriging_adequacy()` read a point at `Inf` or
+  beyond 1e150 as a location, or read it after a move.**  With one of 300
+  sample points at a northing of 1e200, `voronoi_seeds_kmeans()` and
+  `get_voronoi_seeds(method = "kmeans")` stopped with "no start gave a
+  partition of the 300 point(s) into 15 cells"; the same point in
+  EPSG:32616 beside a boundary in EPSG:32617 was moved to a finite point and
+  clustered with nothing said.  `create_voronoi_polygons()` and
+  `build_tessellation(method = "voronoi")` with one of 30 seeds at x =
+  `Inf` or a northing of 1e200 stopped with GEOS's "Could not locate
+  vertex", "encountered NaN/Inf numbers" or "distance must be a finite
+  value", and with the seed in another CRS than the boundary's with "Points
+  of LinearRing do not form a closed linestring"; `clip_target_for()`
+  stopped the same way at `Inf` and returned a target of infinite area at
+  1e200.  One point of a `cover` at `Inf` or 1e200 set the whole cover
+  aside, with the warning that it gives no polygon, and the cells covered
+  5,334 km^2 where the same point empty gives 10,516 km^2; a polygon
+  `cover` in EPSG:32616 with a vertex at a northing of 1e200 was moved
+  into EPSG:32617 as a boundary of 68,562 km^2, where the same row empty
+  gives 8,983 km^2.  `assign_features_to_polygons()` joined a point at 1e200 in
+  EPSG:32616 to the polygon in EPSG:32617 where the move put it, and its
+  warning said that a row at `Inf` or 1e200 falls inside no polygon and
+  advised checking that the polygons cover the features.
+  `summarize_by_cell(deff = "variogram")` correlated a point at 1e200, as
+  given or moved into the variogram's CRS, with the others of its cell (a
+  standard error of 0.543 where the same row empty gives 0.664), and
+  `kriging_adequacy()` stopped in `gstat::krige()` on a point at `Inf` and
+  kriged from one at 1e200, as given or moved to a finite point (moved, its
+  folds held 399 points and 1).  The
+  bound is now read on the coordinates as given, before any move, and
+  again after it, and such a point is read as an empty point: dropped by
+  the seeders with their warning, `NA` in `index` and counted with the
+  empty seeds and points, left out of the clip target's box and of the
+  cover, matched to no
+  polygon, and left out of the correlation and of the kriging.  The
+  warnings and log lines count these points as points "without a location"
+  or with "no location (an empty point, or a coordinate that is not finite
+  or lies beyond 1e150)", where they said "with empty or non-finite
+  coordinates" or "empty geometry", and the refusal of `kriging_adequacy()`
+  counts the points with a finite response and a location.  Layers whose
+  rows all have a location give the same results as before.
 
 * **`area_of_applicability()` gave a location index to a row beyond
   1e150, and refused training data with one for a false reason.**  With

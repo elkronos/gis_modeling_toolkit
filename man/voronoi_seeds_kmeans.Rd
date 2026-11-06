@@ -141,9 +141,10 @@ name.
 Lon/lat input is projected first so the k-means distances are metric and not
 degrees; so is input with no CRS whose coordinates look like lon/lat (the
 heuristic \code{\link[=ensure_projected]{ensure_projected()}} applies, with its warning), and the seeds
-come back in the input's own coordinates. Rows with empty or non-finite
-coordinates are dropped with a warning, and \code{k} is clamped to the number of
-distinct positions.
+come back in the input's own coordinates. Rows without a location (an
+empty point, or a coordinate that is not finite or lies beyond 1e150, read
+as given before the projection) are dropped with a warning, and \code{k} is
+clamped to the number of distinct positions.
 
 A count given as a number gets a fresh partition, which is not the
 partition \code{\link[=resolution_profile]{resolution_profile()}} or \code{\link[=determine_optimal_levels]{determine_optimal_levels()}} scored

@@ -98,7 +98,9 @@ and \code{cover} is only checked against them: the number of its points that
 fall outside every cell is returned as \code{params$cover_outside}, with a
 warning of class \code{"spatialkit_unassigned"} when it is not 0 (a polygon
 cover is not checked). A cover, given or attached, that mixes XY and XYZ
-(or XYM) geometries, or that carries M, is read in x and y.}
+(or XYM) geometries, or that carries M, is read in x and y. A row of the
+cover with a coordinate that is not finite or lies beyond 1e150, read
+as given before any move, is read as an empty row.}
 }
 \value{
 A list with \code{cells}, \code{index}, \code{boundary},
@@ -111,7 +113,8 @@ the tessellation actually covers.  Such points are counted in
 \code{"spatialkit_unassigned"} gives their number.  For seeds (see
 "Details") \code{index} holds the cell each seed generates, whether the
 seed lies inside the boundary or not, and \code{NA} only for a seed whose
-cell the clip removed whole or whose geometry is empty;
+cell the clip removed whole or without a location (an empty geometry,
+or a coordinate that is not finite or lies beyond 1e150);
 \code{params$n_outside} counts those, the warning names them as seeds,
 and \code{params$snapped} lists only the seeds whose entry is the cell
 they were snapped to.  \code{boundary} is
@@ -183,7 +186,8 @@ generates. A k-means seed is a mean of observations and can lie outside a
 than any other seed, is built, and its \code{index} entry is that cell's
 \code{cell_id}, although the seed lies in no cell. A seed is \code{NA} only when
 every part of the study area is nearer another seed, so the clip removed
-its cell whole, or when its geometry is empty. The points are seeds when
+its cell whole, or when it has no location (its geometry is empty, or a
+coordinate is not finite or lies beyond 1e150). The points are seeds when
 a seeding function returned them (\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
 \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}}, \code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}, \code{rbind()} of such
 layers included), when they are the seeds of a \code{\link[=select_resolution]{select_resolution()}}

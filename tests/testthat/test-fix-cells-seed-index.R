@@ -347,7 +347,8 @@ test_that("a seed whose cell the clip removed is NA, and the warning names seeds
   expect_identical(re$value$params$n_outside, n_out)
   expect_match(conditionMessage(we[[1L]]), sprintf("%d of 12 seed(s) (", n_out), fixed = TRUE)
   expect_match(conditionMessage(we[[1L]]), paste0(
-    "holds the count. 1 of them have empty geometry; the rest lie outside the ",
+    "holds the count. 1 of them have no location (an empty point, or a coordinate ",
+    "that is not finite or lies beyond 1e150); the rest lie outside the ",
     "boundary (grown by `expand`), and every part of the study area is nearer ",
     "another seed"), fixed = TRUE)
   # The bare points as the seeds of cell_values_at(): each one outside the

@@ -431,6 +431,13 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # GEOS does not read M, and the repair stopped on them.  Neither layer is
   # returned, so nothing is said.
   pts <- .xy_if_mixed(assigned_points_sf)
+  # A row with a coordinate that is not finite or lies beyond 1e150 has no
+  # location.  It is read as given, before the reduction to points and any
+  # move, and emptied (.empty_unlocated()), as .pooled_xy() reads the pooled
+  # path's rows, so it is dropped below with the empty points.  Kept, a row
+  # at Inf stopped gstat::krige(), and a northing of 1e200, as given or
+  # moved to a finite place, was kriged from and fed the folds.
+  pts <- .empty_unlocated(pts)
   cells_in <- .xy_if_mixed_or_m(cells_sf)
   pts_na   <- is.na(sf::st_crs(pts))
   cells_na <- is.na(sf::st_crs(cells_in))
@@ -468,13 +475,15 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   cells <- .safe_make_valid(cells)
   # Numeric or logical by the check above, so nothing is coerced to NA here.
   z <- as.numeric(sf::st_drop_geometry(pts)[[response_var]])
-  ok <- is.finite(z) & !sf::st_is_empty(pts)
+  # The bound is read again after the move (.values_at_xy()).
+  ok <- is.finite(z) & !is.na(.values_at_xy(pts)[, 1L])
   if (sum(ok) < 10L)
-    stop("kriging_adequacy(): fewer than 10 points with a finite response; nothing ",
-         "to krige from.", call. = FALSE)
+    stop("kriging_adequacy(): fewer than 10 points with a finite response and a ",
+         "location; nothing to krige from.", call. = FALSE)
   if (any(!ok))
-    .log_warn("kriging_adequacy(): dropping %d point(s) with a missing response or empty geometry.",
-              sum(!ok))
+    .log_warn(paste0("kriging_adequacy(): dropping %d point(s) with a missing response ",
+                     "or without a location (%s)."),
+              sum(!ok), .UNLOCATED_WHAT)
   kp <- pts[ok, , drop = FALSE]
   # A response whose raw values lose their spread to rounding (1e15 plus a
   # spread of 1, which a double holds to an eighth) is taken about the centre

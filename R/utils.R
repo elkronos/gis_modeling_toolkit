@@ -77,7 +77,7 @@
                "CRS explicitly with sf::st_crs() to suppress this."),
         caller, what, ll$bb[["xmin"]], ll$bb[["xmax"]],
         ll$bb[["ymin"]], ll$bb[["ymax"]])
-      return(sf::st_transform(sf::st_set_crs(x, 4326), crs))
+      return(.transform_keep_unlocated(sf::st_set_crs(x, 4326), crs))
     }
     # Named by its label: most callers have no `crs` argument, so "the
     # supplied `crs`" sent the reader looking for one they had not passed.
@@ -89,10 +89,12 @@
       caller, what, lbl)
     return(sf::st_set_crs(x, crs))
   }
+  # A row with a coordinate that is not finite or lies beyond 1e150 comes
+  # back empty (.transform_keep_unlocated()), not as the rest of the feature.
   # A row of a projected `x` with a coordinate beyond .LONLAT_MOVE_MAX comes
-  # out empty when `crs` is in degrees (.lonlat_of_placed()): moved from Web
-  # Mercator at x = 1e20 it never came back from PROJ.
-  .lonlat_of_placed(x, crs)
+  # out empty when `crs` is in degrees (.lonlat_of_placed(), which it moves
+  # with): moved from Web Mercator at x = 1e20 it never came back from PROJ.
+  .transform_keep_unlocated(x, crs)
 }
 
 #' Check whether an sf/sfc object has a geographic (lon/lat) CRS
@@ -246,8 +248,10 @@
 
 #' Align the CRS of `a` to match `b` (transform if both defined & differ)
 #'
-#' A row of a projected `a` with a coordinate beyond `.LONLAT_MOVE_MAX` comes
-#' out empty when `b` is in degrees (`.lonlat_of_placed()`).
+#' A row of `a` with a coordinate that is not finite or lies beyond 1e150
+#' comes back empty, and so does a row of a projected `a` with a coordinate
+#' beyond `.LONLAT_MOVE_MAX` when `b` is in degrees
+#' (`.transform_keep_unlocated()`, `.lonlat_of_placed()`).
 #'
 #' @param a sf or sfc object to re-project.
 #' @param b sf or sfc reference whose CRS takes precedence.
@@ -258,7 +262,9 @@
   if (is.null(a) || is.null(b)) return(a)
   if (is.na(sf::st_crs(a)) || is.na(sf::st_crs(b))) return(a)
   if (sf::st_crs(a) == sf::st_crs(b)) return(a)
-  .lonlat_of_placed(a, sf::st_crs(b))
+  # A row with a coordinate that is not finite or lies beyond 1e150 comes
+  # back empty (.transform_keep_unlocated()), not as the rest of the feature.
+  .transform_keep_unlocated(a, sf::st_crs(b))
 }
 
 

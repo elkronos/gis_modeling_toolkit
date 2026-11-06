@@ -141,10 +141,11 @@ such vertex is read on its other vertices. The choice of a projection
 reads the rows that have a location: a row with one such coordinate
 takes no part in it, as an empty row would, and a layer in which no
 row has a location gets Web Mercator (Equal Earth for
-\code{purpose = "area"}). Moved from
-lon/lat, these rows come back empty, in their own geometry type;
-\code{\link[sf:st_transform]{sf::st_transform()}} would drop the vertex it cannot move and return
-the rest of the feature.}
+\code{purpose = "area"}). Moved to another CRS, these rows come back
+empty, in their own geometry type;
+\code{\link[sf:st_transform]{sf::st_transform()}} would drop the vertex it cannot move, or put a
+coordinate beyond 1e150 at a finite place, and return the rest of the
+feature.}
 }
 
 \code{target_crs} overrides all of this. Pass it whenever you need a specific,

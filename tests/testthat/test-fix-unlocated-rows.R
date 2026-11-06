@@ -828,3 +828,566 @@ test_that("cv_block_size_sweep() runs on a layer with a row at Inf or beyond 1e1
   for (at in list(c(Inf, 5e6), c(5e5, 1e200)))
     expect_equal(sweep(.ful_put(L, 32617, at)), ctl, label = paste(at, collapse = ", "))
 })
+
+# --- BUG-140, BUG-141, BUG-142, BUG-147, BUG-181: seeds, cells, joins, moves --
+# The seeders clustered a sample point at a northing of 1e200, or the place a
+# move into the boundary's CRS gave it; the Voronoi cells and the clip target
+# stopped with GEOS's message on a seed at Inf or 1e200, or built an infinite
+# target; assign_features_to_polygons() joined such a feature where the move
+# put it and blamed the polygons' cover for one at Inf; the variogram design
+# effect and kriging_adequacy() correlated and kriged it; and the readers
+# that move a layer (harmonize_crs(), ensure_projected(target_crs =) on a
+# projected layer, and the internal moves of a boundary or of cells)
+# returned a polygon with such a vertex as a smaller finite shape.  Such rows
+# are now read as given, before any move, and read as the same rows empty.
+
+.ful_box <- function(crs = 32617)
+  sf::st_sf(geometry = sf::st_as_sfc(sf::st_bbox(
+    c(xmin = 5e5, ymin = 5e6, xmax = 6e5, ymax = 5.1e6), crs = crs)))
+
+.ful_bad <- list(c(Inf, 5e6), c(5e5, 1e200), c(1e200, 5e6), c(-1e151, 5e6))
+
+# Each variant of row `i` of `layer` in `epsg` against the same row emptied:
+# value, warning messages and classes identical.
+.ful_same_as_emptied <- function(layer, epsg, fn, ats = .ful_bad, i = 1L) {
+  ctl <- .ful_run(fn(.ful_put(layer, epsg, NULL, i)))
+  for (at in ats) {
+    r <- .ful_run(fn(.ful_put(layer, epsg, at, i)))
+    lab <- paste0("EPSG:", epsg, " at (", paste(at, collapse = ", "), ")")
+    expect_identical(r$value, ctl$value, label = lab)
+    expect_identical(r$msgs, ctl$msgs, label = lab)
+    expect_identical(r$classes, ctl$classes, label = lab)
+  }
+  ctl
+}
+
+test_that("voronoi_seeds_kmeans() drops a point at Inf or beyond 1e150 as given, as the same point emptied", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer()
+  ctl <- .ful_same_as_emptied(L, 32617, function(d) voronoi_seeds_kmeans(d, k = 8))
+  expect_identical(nrow(ctl$value), 8L)
+  expect_identical(ctl$msgs, paste0("voronoi_seeds_kmeans(): dropping 1 point(s) ",
+                                    .ful_unloc, "."))
+  # In lon/lat, a latitude of 1e200 takes no part in the projection either.
+  .ful_same_as_emptied(L, 4326, function(d) voronoi_seeds_kmeans(d, k = 8),
+                       ats = list(c(-80, 1e200), c(Inf, 45)))
+})
+
+test_that("get_voronoi_seeds(kmeans) reads a sample point beyond 1e150 as given, before the move into the boundary's CRS", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer()
+  seeds <- function(d) get_voronoi_seeds(boundary = .ful_box(), method = "kmeans", n = 8,
+                                         sample_points = d, set_seed = 9)
+  for (epsg in c(32617, 32616)) {
+    ctl <- .ful_same_as_emptied(L, epsg, seeds)
+    expect_identical(nrow(ctl$value), 8L)
+    expect_identical(sf::st_crs(ctl$value), sf::st_crs(32617))
+    expect_identical(attr(ctl$value, "kmeans")$rows, 2:120)
+    expect_identical(ctl$msgs, paste0("get_voronoi_seeds(kmeans): dropping 1 point(s) ",
+                                      .ful_unloc, "."))
+  }
+})
+
+test_that("the record of scored seeds leaves a cloud point beyond 1e150 out, as the same point emptied", {
+  L <- .ful_layer()
+  seeds <- sf::st_as_sf(data.frame(x = c(5.2e5, 5.8e5), y = c(5.05e6, 5.05e6)),
+                        coords = c("x", "y"), crs = 32617)
+  for (epsg in c(32617, 32616)) {
+    ctl <- .scored_seeds_record(.ful_put(L, epsg, NULL), seeds, 3L)
+    expect_identical(ctl$rows, 2:120)
+    expect_true(is.finite(ctl$tot_withinss))
+    for (at in .ful_bad)
+      expect_identical(.scored_seeds_record(.ful_put(L, epsg, at), seeds, 3L), ctl,
+                       label = paste(epsg, paste(at, collapse = ", ")))
+  }
+})
+
+test_that("create_voronoi_polygons() and build_tessellation() index a seed beyond 1e150 NA, as the same seed emptied", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer()
+  S <- suppressWarnings(voronoi_seeds_kmeans(L, k = 12))
+  cv <- function(d) create_voronoi_polygons(d, boundary = .ful_box(), quiet = TRUE)
+  for (epsg in c(32617, 32616)) {
+    ctl <- .ful_same_as_emptied(S, epsg, cv)
+    expect_identical(nrow(ctl$value$cells), 11L)
+    expect_true(is.na(ctl$value$index[1L]))
+    expect_identical(ctl$classes, "spatialkit_unassigned")
+    expect_match(ctl$msgs, paste0("They have no location (an empty point, or a coordinate ",
+                                  "that is not finite or lies beyond 1e150), so there is ",
+                                  "nothing to index."), fixed = TRUE)
+  }
+  # No boundary: the cells are clipped to the hull of the other seeds.
+  ctl <- .ful_same_as_emptied(S, 32617, function(d)
+    build_tessellation(d, method = "voronoi", quiet = TRUE))
+  expect_identical(nrow(ctl$value$cells), 11L)
+})
+
+test_that("build_tessellation() counts an observation beyond 1e150 with the empty ones, under every method", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer()
+  for (m in c("hex", "square", "voronoi")) {
+    bt <- function(d) build_tessellation(d, boundary = .ful_box(), method = m,
+                                         approx_n_cells = if (m != "voronoi") 20,
+                                         quiet = TRUE)
+    ctl <- .ful_same_as_emptied(L, 32617, bt, ats = .ful_bad[1:2])
+    expect_true(is.na(ctl$value$index[1L]), label = m)
+    expect_match(ctl$msgs, "They have no location (an empty point", fixed = TRUE,
+                 label = m)
+  }
+})
+
+test_that("clip_target_for() leaves a point beyond 1e150 out of the box, as the same point emptied", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer()
+  for (epsg in c(32617, 32616)) {
+    ctl <- .ful_same_as_emptied(L, epsg, function(d) clip_target_for(d, expand = 0.05,
+                                                                     quiet = TRUE))
+    expect_true(is.finite(sum(as.numeric(sf::st_area(ctl$value)))))
+  }
+})
+
+test_that("assign_features_to_polygons() matches a feature beyond 1e150 to no polygon, whatever the move", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer()
+  cells <- suppressWarnings(build_tessellation(L, boundary = .ful_box(), method = "square",
+                                               approx_n_cells = 16, quiet = TRUE))$cells
+  asg <- function(d) assign_features_to_polygons(d, cells, polygon_id_col = "cell_id",
+                                                 quiet = TRUE)
+  ctl <- .ful_same_as_emptied(L, 32617, asg)
+  expect_identical(nrow(ctl$value), 119L)
+  expect_identical(attr(ctl$value, "unassigned")$which, 1L)
+  expect_match(ctl$msgs, paste0("They have no location (an empty point, or a coordinate ",
+                                "that is not finite or lies beyond 1e150), so there is ",
+                                "nothing to assign"), fixed = TRUE)
+  expect_no_match(ctl$msgs, "cover the features", fixed = TRUE)
+  # In EPSG:32616 beside cells in EPSG:32617: the move put a northing of 1e200
+  # at (87304, 5766268), and a polygon there took it.
+  big <- sf::st_sf(cell_id = 1:2, geometry = sf::st_sfc(
+    sf::st_polygon(list(rbind(c(4e5, 4.9e6), c(7e5, 4.9e6), c(7e5, 5.2e6), c(4e5, 5.2e6),
+                              c(4e5, 4.9e6)))),
+    sf::st_polygon(list(rbind(c(0, 5.6e6), c(2e5, 5.6e6), c(2e5, 5.9e6), c(0, 5.9e6),
+                              c(0, 5.6e6)))), crs = 32617))
+  # The rows come back with the geometry they were given.
+  ctl <- .ful_same_as_emptied(L, 32616, function(d) {
+    a <- assign_features_to_polygons(d, big, polygon_id_col = "cell_id",
+                                     keep_unassigned = TRUE, quiet = TRUE)
+    list(a = sf::st_drop_geometry(a), unassigned = attr(a, "unassigned"))
+  })
+  expect_true(is.na(ctl$value$a$cell_id[1L]))
+  expect_false(any(ctl$value$a$cell_id %in% 2L))
+  expect_identical(ctl$value$unassigned$which, 1L)
+  # A feature without a location beside one outside the polygons: counted
+  # apart, and the coverage advice kept for the other.
+  d <- .ful_put(.ful_put(L, 32617, c(5e5, 1e200)), 32617, c(9e5, 9e6), i = 2L)
+  r <- .ful_run(asg(d))
+  expect_match(r$msgs, paste0("1 of them has no location (an empty point, or a coordinate ",
+                              "that is not finite or lies beyond 1e150); for the rest, ",
+                              "check that the polygons cover"), fixed = TRUE)
+})
+
+test_that("assign_features_to_polygons() matches a polygon feature with a vertex beyond 1e150 to no polygon", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer(40L)
+  cells <- suppressWarnings(build_tessellation(sf::st_transform(L, 4326),
+                                               boundary = sf::st_transform(.ful_box(), 4326),
+                                               method = "square", approx_n_cells = 9,
+                                               quiet = TRUE))$cells
+  ctl <- .ful_run(assign_features_to_polygons(.ful_squares(L, empty = TRUE), cells,
+                                              polygon_id_col = "cell_id", quiet = TRUE))
+  expect_identical(attr(ctl$value, "unassigned")$which, 7L)
+  for (bad in list(c(1e200, 45), c(-80, 1e200), c(Inf, 45))) {
+    r <- .ful_run(assign_features_to_polygons(.ful_squares(L, bad = bad), cells,
+                                              polygon_id_col = "cell_id", quiet = TRUE))
+    lab <- paste(bad, collapse = ", ")
+    expect_identical(sf::st_drop_geometry(r$value), sf::st_drop_geometry(ctl$value), label = lab)
+    expect_identical(r$msgs, ctl$msgs, label = lab)
+  }
+})
+
+test_that("summarize_by_cell(deff = 'variogram') leaves a point beyond 1e150 out of the correlation, as the same point emptied", {
+  skip_if_not_installed("gstat")
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer(200L)
+  sac <- suppressWarnings(estimate_sac_range(L, "z", seed = 1))
+  tess <- suppressWarnings(build_tessellation(L, boundary = .ful_box(), method = "square",
+                                              approx_n_cells = 16, quiet = TRUE))
+  A <- assign_features_to_polygons(L, tess$cells, polygon_id_col = "cell_id", quiet = TRUE)
+  sm <- function(d) summarize_by_cell(d, "z", id_col = "cell_id", cells_sf = tess$cells,
+                                      deff = "variogram", sac = sac, estimate = "mean")
+  for (epsg in c(32617, 32616)) {
+    ctl <- .ful_same_as_emptied(A, epsg, sm)
+    expect_match(ctl$msgs, paste0("1 point(s) have no location (an empty point, or a ",
+                                  "coordinate that is not finite or lies beyond 1e150); ",
+                                  "their values are summarised"), fixed = TRUE, all = FALSE)
+  }
+  # The correlation statistics read the bound too.
+  cf <- function(h) exp(-h / 3e4)
+  xy <- sf::st_coordinates(A)[1:30, 1:2]
+  ref <- .cor_stats_from_coords(xy[-1, ], cf)
+  for (at in .ful_bad) {
+    xy1 <- xy; xy1[1, ] <- at
+    expect_identical(.cor_stats_from_coords(xy1, cf), ref, label = paste(at, collapse = ", "))
+  }
+})
+
+test_that("kriging_adequacy() leaves a point beyond 1e150 out before gstat and the folds, as the same point emptied", {
+  skip_if_not_installed("gstat")
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer(200L)
+  sac <- suppressWarnings(estimate_sac_range(L, "z", seed = 1))
+  tess <- suppressWarnings(build_tessellation(L, boundary = .ful_box(), method = "square",
+                                              approx_n_cells = 16, quiet = TRUE))
+  A <- assign_features_to_polygons(L, tess$cells, polygon_id_col = "cell_id", quiet = TRUE)
+  ka <- function(d) kriging_adequacy(d, "z", tess$cells, id_col = "cell_id", sac = sac,
+                                     k = 4, seed = 1)
+  for (epsg in c(32617, 32616)) {
+    ctl <- .ful_same_as_emptied(A, epsg, ka)
+    expect_identical(nrow(ctl$value), nrow(tess$cells))
+  }
+})
+
+# A half-degree square near (-93.5, 45.5) and, in row 2, another with vertex
+# 3 at `v` (an empty polygon for NULL), as polygons or lines.
+.ful_pair <- function(v, crs = 4326, line = FALSE, x0 = c(-93.2, -93.9),
+                      y0 = c(45.1, 45.3), d = 0.5) {
+  sq <- function(x, y) rbind(c(x, y), c(x + d, y), c(x + d, y + d), c(x, y + d), c(x, y))
+  b <- sq(x0[2], y0[2]); if (!is.null(v)) b[3L, ] <- v
+  g2 <- if (line) { if (is.null(v)) sf::st_linestring() else sf::st_linestring(b[1:4, ]) }
+        else if (is.null(v)) sf::st_polygon() else sf::st_polygon(list(b))
+  g1 <- if (line) sf::st_linestring(sq(x0[1], y0[1])[1:4, ])
+        else sf::st_polygon(list(sq(x0[1], y0[1])))
+  sf::st_sf(v = 1:2, geometry = sf::st_sfc(g1, g2, crs = crs))
+}
+
+test_that("the readers that move a layer return a polygon or line with a vertex beyond 1e150 empty", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  tgt <- sf::st_sf(geometry = sf::st_sfc(sf::st_point(c(5e5, 5e6)), crs = 32615))
+  readers <- list(
+    harmonize_b  = function(a) harmonize_crs(a, tgt, prefer = "b")$a,
+    harmonize_t  = function(a) harmonize_crs(a, tgt, target_crs = 32615)$a,
+    harmonize_a  = function(a) harmonize_crs(tgt, a, prefer = "a")$b,
+    stamp        = function(a) .transform_or_stamp(a, sf::st_crs(32615), "x", "p"),
+    align        = function(a) .align_crs(a, tgt),
+    ensure       = function(a) ensure_projected(a, target_crs = 32615))
+  cases <- list(
+    list(crs = 4326, bad = list(c(1e200, 45.8), c(-93.4, 1e200), c(-1e200, 45.8),
+                                c(Inf, 45.8))),
+    list(crs = NA, bad = list(c(1e200, 45.8), c(-93.4, 1e200), c(Inf, 45.8))),
+    list(crs = 32616, x0 = c(4e5, 3e5), y0 = c(5e6, 5e6), d = 4e4,
+         bad = list(c(1e200, 5.05e6), c(3.2e5, 1e200), c(Inf, 5.05e6))))
+  for (cs in cases) for (line in c(FALSE, TRUE)) {
+    mk <- function(v) {
+      a <- if (is.null(cs$x0)) .ful_pair(v, line = line)
+           else .ful_pair(v, crs = cs$crs, line = line, x0 = cs$x0, y0 = cs$y0, d = cs$d)
+      if (is.na(cs$crs)) sf::st_set_crs(a, NA) else a
+    }
+    for (nm in names(readers)) {
+      if (is.na(cs$crs) && nm %in% c("align", "ensure")) next
+      ctl <- .ful_run(readers[[nm]](mk(NULL)))
+      for (v in cs$bad) {
+        lab <- sprintf("%s, CRS %s, %s, vertex (%s)", nm, cs$crs,
+                       if (line) "line" else "polygon", paste(v, collapse = ", "))
+        r <- .ful_run(readers[[nm]](mk(v)))
+        expect_identical(r$value, ctl$value, label = lab)
+        # Without a CRS, the lon/lat test reads the other vertices of the
+        # row (BUG-31), so the box its warning quotes holds them.
+        expect_identical(gsub("\\(xmin=[^)]*\\)", "(box)", r$msgs),
+                         gsub("\\(xmin=[^)]*\\)", "(box)", ctl$msgs), label = lab)
+        expect_true(sf::st_is_empty(sf::st_geometry(r$value)[[2]]), label = lab)
+        expect_s3_class(sf::st_geometry(r$value)[[2]],
+                        if (line) "LINESTRING" else "POLYGON")
+      }
+    }
+  }
+  # A point row comes back an empty point.
+  p <- sf::st_sf(v = 1:2, geometry = sf::st_sfc(sf::st_point(c(4e5, 5e6)),
+                                                 sf::st_point(c(5e5, 1e200)), crs = 32616))
+  for (nm in c("harmonize_b", "stamp", "align", "ensure")) {
+    r <- readers[[nm]](p)
+    expect_true(sf::st_is_empty(sf::st_geometry(r)[[2]]), label = nm)
+    expect_s3_class(sf::st_geometry(r)[[2]], "POINT")
+  }
+  # A layer whose rows all have a location is moved as sf::st_transform()
+  # moves it.
+  a <- .ful_pair(c(-93.4, 45.8))
+  for (nm in setdiff(names(readers), "harmonize_a"))
+    expect_identical(readers[[nm]](a), sf::st_transform(a, 32615), label = nm)
+  b <- .ful_pair(c(3.2e5, 5.04e6), crs = 32616, x0 = c(4e5, 3e5), y0 = c(5e6, 5e6), d = 4e4)
+  expect_identical(ensure_projected(b, target_crs = 32615), sf::st_transform(b, 32615))
+  expect_identical(harmonize_crs(b, tgt, prefer = "b")$a, sf::st_transform(b, 32615))
+})
+
+test_that("a polygon layer with a vertex beyond 1e150 joins and grids as the same row emptied", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  pts <- sf::st_transform(sf::st_sf(id = 1:3, geometry = sf::st_sfc(
+    sf::st_point(c(-93.85, 45.35)), sf::st_point(c(-93.45, 45.75)),
+    sf::st_point(c(-93.0, 45.3)), crs = 4326)), 32615)
+  P0 <- .ful_pair(NULL); P0$poly_id <- c("A", "B")
+  ctl <- .ful_run(assign_features_to_polygons(pts, P0, keep_unassigned = TRUE, quiet = TRUE))
+  expect_identical(ctl$value$poly_id, c(NA, NA, "A"))
+  g0 <- tryCatch(create_grid_polygons(P0[2, ], cellsize = 5000, crs = 32615, quiet = TRUE),
+                 error = conditionMessage)
+  for (v in list(c(1e200, 45.8), c(-93.4, 1e200), c(Inf, 45.8))) {
+    P <- .ful_pair(v); P$poly_id <- c("A", "B")
+    lab <- paste(v, collapse = ", ")
+    r <- .ful_run(assign_features_to_polygons(pts, P, keep_unassigned = TRUE, quiet = TRUE))
+    expect_identical(r$value$poly_id, ctl$value$poly_id, label = lab)
+    expect_identical(r$msgs, ctl$msgs, label = lab)
+    g <- tryCatch(create_grid_polygons(P[2, ], cellsize = 5000, crs = 32615, quiet = TRUE),
+                  error = conditionMessage)
+    expect_identical(g, g0, label = lab)
+  }
+})
+
+# --- BUG-141, BUG-181: the builders' cover ----------------------------------
+# A point of a point `cover` at Inf or 1e200 set the whole cover aside
+# ("gives no polygon"), and a polygon cover with such a vertex was moved into
+# the working CRS as a smaller shape, or one far larger.
+
+test_that("the builders read a point of `cover` beyond 1e150 as given, as the same point emptied", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer()
+  S <- suppressWarnings(voronoi_seeds_kmeans(L, k = 10))
+  attr(S, "cover") <- NULL
+  carried <- function(d) { s <- S; attr(s, "cover") <- d; s }
+  for (epsg in c(32617, 32616)) {
+    ctl <- .ful_same_as_emptied(L, epsg, function(d)
+      build_tessellation(S, method = "voronoi", cover = d, quiet = TRUE))
+    expect_identical(ctl$value$params$boundary_source, "cover")
+    expect_identical(ctl$msgs, character(0))
+    ctl <- .ful_same_as_emptied(L, epsg, function(d)
+      create_voronoi_polygons(S, cover = d, quiet = TRUE))
+    expect_identical(ctl$value$params$boundary_source, "cover")
+    # The cover the seeds carry.
+    ctl <- .ful_same_as_emptied(L, epsg, function(d)
+      create_voronoi_polygons(carried(d), quiet = TRUE))
+    expect_identical(ctl$value$params$boundary_source, "seeds' cover")
+    ctl <- .ful_same_as_emptied(L, epsg, function(d)
+      build_tessellation(carried(d), method = "voronoi", quiet = TRUE))
+    expect_identical(ctl$value$params$boundary_source, "seeds' cover")
+    # With a boundary the cover is only checked against the cells.
+    for (m in c("voronoi", "hex")) {
+      ctl <- .ful_same_as_emptied(L, epsg, function(d)
+        build_tessellation(S, boundary = .ful_box(), method = m, cover = d,
+                           approx_n_cells = if (m != "voronoi") 20, quiet = TRUE))
+      expect_identical(ctl$value$params$cover_outside, 0L, label = m)
+    }
+  }
+})
+
+test_that("a polygon `cover` with a vertex beyond 1e150 is moved into the working CRS as the same row emptied", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer()
+  S <- suppressWarnings(voronoi_seeds_kmeans(L, k = 10))
+  attr(S, "cover") <- NULL
+  # The box, in EPSG:32616, in two halves; vertex 3 of the second at `v`.
+  b <- sf::st_coordinates(sf::st_transform(.ful_box(), 32616))[, 1:2]
+  m1 <- (b[1, ] + b[2, ]) / 2; m2 <- (b[3, ] + b[4, ]) / 2
+  h1 <- rbind(b[1, ], m1, m2, b[4, ], b[1, ])
+  h2 <- rbind(m1, b[2, ], b[3, ], m2, m1)
+  mk <- function(v) {
+    g2 <- if (is.null(v)) sf::st_polygon() else { q <- h2; q[3, ] <- v; sf::st_polygon(list(q)) }
+    sf::st_sf(geometry = sf::st_sfc(sf::st_polygon(list(unname(h1))), g2, crs = 32616))
+  }
+  builders <- list(
+    voronoi = function(cv) create_voronoi_polygons(S, cover = cv, quiet = TRUE),
+    build   = function(cv) build_tessellation(S, method = "voronoi", cover = cv, quiet = TRUE),
+    carried = function(cv) { s <- S; attr(s, "cover") <- sf::st_geometry(cv)
+                             create_voronoi_polygons(s, quiet = TRUE) })
+  for (nm in names(builders)) {
+    ctl <- .ful_run(builders[[nm]](mk(NULL)))
+    expect_identical(ctl$msgs, character(0), label = nm)
+    for (v in list(c(3.2e5, 1e200), c(1e200, 5.05e6), c(Inf, 5.05e6))) {
+      lab <- sprintf("%s, vertex (%s)", nm, paste(v, collapse = ", "))
+      r <- .ful_run(builders[[nm]](mk(v)))
+      expect_identical(r$value, ctl$value, label = lab)
+      expect_identical(r$msgs, ctl$msgs, label = lab)
+    }
+  }
+  # Moved alone, the cover comes back with the row empty, in its own type.
+  g <- .cover_follow(sf::st_geometry(mk(c(3.2e5, 1e200))), S, S)
+  expect_true(sf::st_is_empty(g[[2]]))
+  expect_s3_class(g[[2]], "POLYGON")
+  expect_identical(g[1], sf::st_transform(sf::st_geometry(mk(NULL))[1], 32617))
+})
+
+# --- BUG-142: polygon features in the variogram design effect ----------------
+
+test_that("summarize_by_cell(deff = 'variogram') reads a polygon feature with a vertex beyond 1e150 as the same row emptied", {
+  skip_if_not_installed("gstat")
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer(200L)
+  sac <- suppressWarnings(estimate_sac_range(L, "z", seed = 1))
+  tess <- suppressWarnings(build_tessellation(L, boundary = .ful_box(), method = "square",
+                                              approx_n_cells = 16, quiet = TRUE))
+  xy <- sf::st_coordinates(L)
+  sq <- function(x, y, d = 500)
+    sf::st_polygon(list(rbind(c(x, y), c(x + d, y), c(x + d, y + d), c(x, y + d), c(x, y))))
+  PL <- sf::st_sf(z = L$z, geometry = sf::st_sfc(
+    lapply(seq_len(nrow(xy)), function(i) sq(xy[i, 1], xy[i, 2])), crs = 32617))
+  A <- suppressWarnings(assign_features_to_polygons(PL, tess$cells, polygon_id_col = "cell_id",
+                                                    quiet = TRUE))
+  # Row 1 emptied (NULL), or vertex 3 put at `v` (an NA keeps that
+  # coordinate).  Reduced to a point before any move, the square with a
+  # vertex at (Inf, 5.05e6) gives a finite point inside it.
+  bad1 <- function(A, v) {
+    g <- sf::st_geometry(A)
+    if (is.null(v)) {
+      g[1] <- sf::st_sfc(sf::st_polygon(), crs = sf::st_crs(g))
+    } else {
+      b <- sf::st_coordinates(g[[1]])[, 1:2]
+      b[3, !is.na(v)] <- v[!is.na(v)]
+      g[1] <- sf::st_sfc(sf::st_polygon(list(unname(b))), crs = sf::st_crs(g))
+    }
+    sf::st_set_geometry(A, g)
+  }
+  sm <- function(d) summarize_by_cell(d, "z", id_col = "cell_id", cells_sf = tess$cells,
+                                      deff = "variogram", sac = sac, estimate = "mean")
+  for (epsg in c(32617, 32616)) {
+    Ae <- sf::st_transform(A, epsg)
+    ctl <- .ful_run(sm(bad1(Ae, NULL)))
+    expect_match(ctl$msgs, "1 point(s) have no location", fixed = TRUE, all = FALSE)
+    for (v in list(c(Inf, 5.05e6), c(Inf, NA), c(NA, 1e200), c(1e200, 5.05e6))) {
+      lab <- sprintf("EPSG:%s, vertex 3 at (%s)", epsg, paste(v, collapse = ", "))
+      r <- .ful_run(sm(bad1(Ae, v)))
+      expect_identical(r$value, ctl$value, label = lab)
+      expect_identical(r$msgs, ctl$msgs, label = lab)
+    }
+  }
+})
+
+# --- BUG-181: the other moves of a caller's polygons -------------------------
+
+test_that("assign_features_to_polygons() moves lon/lat cells into the scored record's CRS with a row beyond 1e150 empty", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  pts <- sf::st_transform(sf::st_sf(id = 1:3, geometry = sf::st_sfc(
+    sf::st_point(c(-93.85, 45.35)), sf::st_point(c(-93.45, 45.75)),
+    sf::st_point(c(-93.0, 45.3)), crs = 4326)), 32615)
+  # A record that says the cells are the ones a profile scored in EPSG:32615.
+  cen <- sf::st_coordinates(sf::st_transform(sf::st_sfc(
+    sf::st_point(c(-92.95, 45.35)), sf::st_point(c(-93.65, 45.55)), crs = 4326), 32615))[, 1:2]
+  rec <- structure(list(version = 1L, rule = "size", estimate = "mean", cells = 2L,
+                        scored = list(centres = unname(cen)), crs = sf::st_crs(32615),
+                        scored_cells = TRUE),
+                   class = "spatialkit_count_rule")
+  cells <- function(v) {
+    P <- .ful_pair(v); P$poly_id <- c("A", "B")
+    attr(P, "count_rule") <- rec
+    P
+  }
+  expect_true(.scored_crs(.count_rule_get(cells(NULL))) == sf::st_crs(32615))
+  asg <- function(v) .ful_run(assign_features_to_polygons(pts, cells(v), keep_unassigned = TRUE,
+                                                          quiet = TRUE))
+  ctl <- asg(NULL)
+  expect_identical(ctl$value$poly_id, c(NA, NA, "A"))
+  for (v in list(c(1e200, 45.8), c(-93.4, 1e200), c(Inf, 45.8))) {
+    lab <- paste(v, collapse = ", ")
+    r <- asg(v)
+    expect_identical(r$value$poly_id, ctl$value$poly_id, label = lab)
+    expect_identical(r$msgs, ctl$msgs, label = lab)
+  }
+})
+
+test_that("cell_values_at()'s free cells read a polygon with a vertex beyond 1e150 as the same row emptied", {
+  P0 <- .ful_pair(NULL); P0$cell_id <- 1:2
+  seed_xy <- sf::st_coordinates(sf::st_transform(
+    sf::st_sfc(sf::st_point(c(-93.85, 45.35)), crs = 4326), 32615))[, 1:2, drop = FALSE]
+  free <- function(P) .values_at_free_cells(NA_integer_, seed_xy, P, "cell_id",
+                                            sf::st_crs(32615), sf::NA_crs_)
+  ctl <- free(P0)
+  expect_identical(ctl$id, "1")
+  for (v in list(c(1e200, 45.8), c(-93.4, 1e200), c(Inf, 45.8))) {
+    P <- .ful_pair(v); P$cell_id <- 1:2
+    expect_identical(free(P), ctl, label = paste(v, collapse = ", "))
+  }
+})
+
+test_that("build_tessellation() on lon/lat points reads a latitude beyond 1e150 as given, under every method", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer()
+  bnd <- sf::st_transform(.ful_box(), 4326)
+  for (m in c("hex", "square", "voronoi")) {
+    ctl <- .ful_same_as_emptied(L, 4326, function(d)
+      build_tessellation(d, boundary = bnd, method = m,
+                         approx_n_cells = if (m != "voronoi") 20, quiet = TRUE),
+      ats = list(c(-80.5, 1e200), c(Inf, 45.3), c(1e200, 45.3)))
+    expect_true(is.na(ctl$value$index[1L]), label = m)
+  }
+})
+
+# --- The paths a reader's emptying does not reach ----------------------------
+
+test_that("get_voronoi_seeds(kmeans) without a boundary attaches the hull of the located sample points", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer()
+  seeds <- function(d) get_voronoi_seeds(method = "kmeans", n = 8, sample_points = d,
+                                         set_seed = 9)
+  for (epsg in c(32617, 32616)) {
+    ctl <- .ful_same_as_emptied(L, epsg, seeds)
+    expect_true(all(abs(sf::st_bbox(attr(ctl$value, "cover"))) < 1e7))
+  }
+})
+
+test_that("build_tessellation() says a point that has no place once projected has no location", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_put(.ful_layer(), 4326, c(-80.5, 95))
+  r <- .ful_run(build_tessellation(L, boundary = sf::st_transform(.ful_box(), 4326),
+                                   method = "hex", approx_n_cells = 20, quiet = TRUE))
+  expect_true(is.na(r$value$index[1L]))
+  expect_match(r$msgs, paste0("fall in no cell and are NA in `index`; `params$n_outside` ",
+                              "holds the count. They have no location"),
+               fixed = TRUE, all = FALSE)
+})
+
+test_that("assign_features_to_polygons() moves a feature beyond 1e150 into the scored record's CRS empty", {
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  # From EPSG:32616 a northing of 1e200 lands at a finite place in
+  # EPSG:32615; the lon/lat cells are drawn round that place.
+  bad <- c(3.2e5, 1e200)
+  land <- sf::st_transform(sf::st_sfc(sf::st_point(bad), crs = 32616), 32615)
+  expect_true(all(is.finite(sf::st_coordinates(land))))
+  ll <- sf::st_coordinates(sf::st_transform(land, 4326))[1, 1:2]
+  sq <- function(x, y, d = 0.2)
+    sf::st_polygon(list(rbind(c(x, y), c(x + d, y), c(x + d, y + d), c(x, y + d), c(x, y))))
+  cells <- sf::st_sf(poly_id = c("A", "B"), geometry = sf::st_sfc(
+    sq(ll[1] - 0.1, ll[2] - 0.1), sq(ll[1] + 0.1, ll[2] - 0.1), crs = 4326))
+  cen <- sf::st_coordinates(sf::st_transform(sf::st_centroid(sf::st_geometry(cells)),
+                                             32615))[, 1:2]
+  attr(cells, "count_rule") <- structure(
+    list(version = 1L, rule = "size", estimate = "mean", cells = 2L,
+         scored = list(centres = unname(cen)), crs = sf::st_crs(32615), scored_cells = TRUE),
+    class = "spatialkit_count_rule")
+  pts <- sf::st_transform(sf::st_sf(id = 1:3, geometry = sf::st_sfc(
+    sf::st_point(ll), sf::st_point(ll + c(0.05, 0)), sf::st_point(ll + c(0.15, 0)),
+    crs = 4326)), 32616)
+  asg <- function(at) .ful_run(assign_features_to_polygons(
+    .ful_put(pts, 32616, at), cells, keep_unassigned = TRUE, quiet = TRUE))
+  ctl <- asg(NULL)
+  expect_identical(ctl$value$poly_id, c(NA, "A", "B"))
+  r <- asg(bad)
+  expect_identical(sf::st_drop_geometry(r$value), sf::st_drop_geometry(ctl$value))
+  expect_identical(r$msgs, ctl$msgs)
+})
+
+test_that("kriging_adequacy() reads a multipoint with a member beyond 1e150 as the same row emptied", {
+  skip_if_not_installed("gstat")
+  old_q <- spatialkit_quiet(TRUE); on.exit(spatialkit_quiet(old_q), add = TRUE)
+  L <- .ful_layer(200L)
+  sac <- suppressWarnings(estimate_sac_range(L, "z", seed = 1))
+  tess <- suppressWarnings(build_tessellation(L, boundary = .ful_box(), method = "square",
+                                              approx_n_cells = 16, quiet = TRUE))
+  A <- assign_features_to_polygons(L, tess$cells, polygon_id_col = "cell_id", quiet = TRUE)
+  M <- sf::st_cast(A, "MULTIPOINT")
+  row1 <- function(g1) { g <- sf::st_geometry(M); g[1] <- sf::st_sfc(g1, crs = 32617)
+                         sf::st_set_geometry(M, g) }
+  ka <- function(d) kriging_adequacy(d, "z", tess$cells, id_col = "cell_id", sac = sac,
+                                     k = 4, seed = 1)
+  ctl <- .ful_run(ka(row1(sf::st_multipoint())))
+  p1 <- sf::st_coordinates(sf::st_geometry(A)[[1]])[1:2]
+  for (m in list(c(p1[1], 1e200), c(Inf, p1[2]), c(1e200, p1[2]))) {
+    lab <- paste(m, collapse = ", ")
+    r <- .ful_run(ka(row1(sf::st_multipoint(rbind(p1, m)))))
+    expect_identical(r$value, ctl$value, label = lab)
+    expect_identical(r$msgs, ctl$msgs, label = lab)
+  }
+})

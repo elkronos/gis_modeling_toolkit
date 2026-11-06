@@ -162,8 +162,10 @@
 #'   causes are a polygon layer that stops short of the data (a coastline
 #'   drawn at another scale, a tessellation of seeds built without a
 #'   `boundary` or `cover`; see [build_tessellation()]) and points outside
-#'   the study area. A feature with empty geometry has no location to
-#'   assign, and the warning says how many of them there are. With
+#'   the study area. A feature with empty geometry, or with a coordinate
+#'   that is not finite or lies beyond 1e150 (read as given, before any
+#'   move into the polygons' CRS), has no location to assign: it matches no
+#'   polygon, and the warning says how many of them there are. With
 #'   `keep_unassigned = TRUE` they are kept with an
 #'   `NA` ID and no warning is raised, unless every feature is unassigned.
 #'
@@ -311,6 +313,12 @@ assign_features_to_polygons <- function(
   features_flat <- length(features_dims) > 1L || any(features_dims %in% c("XYM", "XYZM"))
   features_xy <- if (features_flat) sf::st_zm(features_sf, drop = TRUE, what = "ZM")
                  else features_sf
+  # A feature with a coordinate that is not finite or lies beyond 1e150 has
+  # no location.  It is read as given, before any move, and the join's copy
+  # of it is emptied below, so it matches no polygon and is counted with the
+  # empty features: moved into the polygons' CRS, a northing of 1e200 in
+  # EPSG:32616 came back finite in EPSG:32617 and was joined there.
+  unlocated_f <- .unlocated_features(sf::st_geometry(features_xy))
   polygons_xy <- .xy_if_mixed_or_m(polygons_sf)
   hh <- harmonize_crs(features_xy, polygons_xy,
                       prefer = if (join_in_p) "b" else "a")
@@ -333,9 +341,12 @@ assign_features_to_polygons <- function(
       # of another dimension than the first are empty and not points, which
       # sf transforms right: the rows are moved with their Z and M, from
       # EPSG:4326 as harmonize_crs() took them.
-      f_geom <- sf::st_transform(sf::st_set_crs(sf::st_geometry(features_sf), 4326),
-                                 sf::st_crs(f))
+      f_geom <- .transform_keep_unlocated(
+        sf::st_set_crs(sf::st_geometry(features_sf), 4326), sf::st_crs(f))
   }
+  # The join's copy of a feature without a location is an empty geometry of
+  # its own type and dimension; the row returned keeps `f_geom`.
+  f <- .empty_unlocated(f, which(unlocated_f))
   # Cells in longitude and latitude whose record says a profile scored them
   # (the Voronoi cells of the scored centres that build_tessellation()
   # returns in a geographic `crs`) were drawn in the record's projected CRS,
@@ -349,11 +360,14 @@ assign_features_to_polygons <- function(
   # The polygons are moved from `polygons_xy`, not from `p`, which holds
   # them in the features' CRS when that is projected.  Projected cells are
   # joined in their own CRS whatever CRS their record names, and cells
-  # without a CRS have none to be moved from.
+  # without a CRS have none to be moved from.  A polygon with a vertex that
+  # is not finite or lies beyond 1e150, read as given, comes back empty
+  # (.transform_keep_unlocated()), as harmonize_crs() returns it: moved as
+  # it was, it came back as a smaller shape that took points.
   crs_s <- if (!join_in_p && !is.na(crs_p)) .scored_crs(count_rule) else NULL
   if (!is.null(crs_s)) {
     if (!isTRUE(sf::st_crs(f) == crs_s)) f <- sf::st_transform(f, crs_s)
-    p <- sf::st_transform(polygons_xy, crs_s)
+    p <- .transform_keep_unlocated(polygons_xy, crs_s)
   }
 
   id_candidates <- unique(c(polygon_id_col, "poly_id", "polygon_id", "id", "cell_id", "grid_id"))
@@ -705,10 +719,12 @@ assign_features_to_polygons <- function(
 
   n_unassigned <- length(unassigned_rows)
   n_features   <- nrow(joined)
-  # A feature with empty geometry is in no polygon too, but for want of a
-  # location, not because the polygons miss it: the texts say so, as
-  # build_tessellation() does, and keep their advice for the rest.
-  n_empty <- if (n_unassigned) sum(sf::st_is_empty(f_geom[unassigned_rows])) else 0L
+  # A feature without a location (an empty geometry, or a coordinate that is
+  # not finite or lies beyond 1e150, read as given) is in no polygon too, but
+  # for want of a location, not because the polygons miss it: the texts say
+  # so, as build_tessellation() does, and keep their advice for the rest.
+  no_loc  <- sf::st_is_empty(f_geom) | unlocated_f
+  n_empty <- if (n_unassigned) sum(no_loc[unassigned_rows]) else 0L
   # Zero matches is almost never what the caller meant, and it is silent: the
   # function returns an empty sf and every downstream step reports zero rows
   # without saying why.  The usual cause is a CRS mismatch that could only be
@@ -720,11 +736,12 @@ assign_features_to_polygons <- function(
                          "feature(s) fall inside any polygon. %s"),
                   n_features,
                   if (n_empty == n_features)
-                    "They have empty geometry, so there is no location to assign."
+                    sprintf("They have no location (%s), so there is nothing to assign.",
+                            .UNLOCATED_WHAT)
                   else paste0(
                     if (n_empty > 0L)
-                      sprintf("%d of them %s empty geometry; for the rest, check", n_empty,
-                              if (n_empty == 1L) "has" else "have")
+                      sprintf("%d of them %s no location (%s); for the rest, check", n_empty,
+                              if (n_empty == 1L) "has" else "have", .UNLOCATED_WHAT)
                     else "Check",
                     " that the two layers cover the same ground -- a CRS that had to ",
                     "be stamped rather than reprojected is the usual ",
@@ -743,13 +760,13 @@ assign_features_to_polygons <- function(
                          "rows in `features_sf`. %s"),
                   n_unassigned, n_features, 100 * n_unassigned / n_features,
                   if (n_empty == n_unassigned)
-                    paste0("They have empty geometry, so there is no location to ",
-                           "assign; pass keep_unassigned = TRUE to keep them with an ",
-                           "NA ID.")
+                    sprintf(paste0("They have no location (%s), so there is nothing ",
+                                   "to assign; pass keep_unassigned = TRUE to keep them ",
+                                   "with an NA ID."), .UNLOCATED_WHAT)
                   else paste0(
                     if (n_empty > 0L)
-                      sprintf("%d of them %s empty geometry; for the rest, check", n_empty,
-                              if (n_empty == 1L) "has" else "have")
+                      sprintf("%d of them %s no location (%s); for the rest, check", n_empty,
+                              if (n_empty == 1L) "has" else "have", .UNLOCATED_WHAT)
                     else "Check",
                     " that the polygons cover ",
                     "the features (cells built from seeds need a ",
@@ -759,8 +776,9 @@ assign_features_to_polygons <- function(
   else if (n_unassigned > 0L)
     .log_info("assign_features_to_polygons(): %d of %d feature(s) fall inside no polygon and are kept with an NA ID%s.",
               n_unassigned, n_features,
-              if (n_empty > 0L) sprintf(" (%d of them %s empty geometry)", n_empty,
-                                        if (n_empty == 1L) "has" else "have") else "")
+              if (n_empty > 0L) sprintf(" (%d of them %s no location: %s)", n_empty,
+                                        if (n_empty == 1L) "has" else "have",
+                                        .UNLOCATED_WHAT) else "")
 
   if (!keep_unassigned) {
     joined <- joined[!is.na(joined[[polygon_id_col]]), , drop = FALSE]
@@ -1762,7 +1780,8 @@ assign_features_to_polygons <- function(
 #' pairwise-distance distribution is the cell's, so the ratio transfers where
 #' the raw df would not.
 #'
-#' Rows with a non-finite coordinate (an empty point) have no location to
+#' Rows with a coordinate that is not finite or lies beyond
+#' \code{.POOL_XY_MAX} (an empty point among them) have no location to
 #' correlate, so they are left out: the statistics describe the located
 #' points.  An anisotropic model is evaluated through its \code{"cor_xy"}
 #' attribute (see \code{.vgm_correlation_fn()}).
@@ -1775,7 +1794,8 @@ assign_features_to_polygons <- function(
   # An empty point's NA coordinates put NA in R and stopped the df test
   # below with "missing value where TRUE/FALSE needed".
   if (!is.null(xy) && length(dim(xy)) == 2L && nrow(xy) > 0L) {
-    located <- is.finite(xy[, 1]) & is.finite(xy[, 2])
+    located <- is.finite(xy[, 1]) & is.finite(xy[, 2]) &
+      abs(xy[, 1]) <= .POOL_XY_MAX & abs(xy[, 2]) <= .POOL_XY_MAX
     if (!all(located)) xy <- xy[located, , drop = FALSE]
   }
   n_i <- nrow(xy)
@@ -3777,6 +3797,13 @@ summarize_by_cell <- function(assigned_points_sf,
       # polygon s2 cannot take a centroid of in degrees is refused in this
       # function's words, naming `assigned_points_sf` (.pointize_auto()).
       pts_for_deff <- .xy_if_mixed_or_m(assigned_points_sf)
+      # A row with a coordinate that is not finite or lies beyond 1e150 has
+      # no location.  It is read as given, before the reduction to points
+      # and the move, and emptied (.empty_unlocated()), as .pooled_xy()
+      # reads the pooled path's rows: moved into the variogram's CRS, a
+      # northing of 1e200 in EPSG:32616 came back finite and was correlated,
+      # and in that CRS it was correlated at 1e200, with nothing said.
+      pts_for_deff <- .empty_unlocated(pts_for_deff)
       if (!all(sf::st_geometry_type(pts_for_deff, by_geometry = TRUE) == "POINT"))
         pts_for_deff <- .xy_if_mixed(.pointize_auto(pts_for_deff, "summarize_by_cell",
                                                     "`assigned_points_sf`"))
@@ -3796,20 +3823,21 @@ summarize_by_cell <- function(assigned_points_sf,
       } else {
         ensure_projected(pts_for_deff)
       }
-      coords_mat <- sf::st_coordinates(pts_for_deff)[, 1:2, drop = FALSE]
-      # An empty point has no location to correlate.  It still counts towards
-      # its cell's values, and .cor_stats_from_coords() leaves it out of the
-      # correlation; it used to stop the call with "missing value where
-      # TRUE/FALSE needed", while deff = "kish" took the same layer.
-      unlocated <- !(is.finite(coords_mat[, 1]) & is.finite(coords_mat[, 2])) &
-        !is.na(df[[id_col]])
+      # The bound is read again after the move (.values_at_xy()): NA for an
+      # empty point and for a coordinate that is not finite or lies beyond
+      # 1e150.
+      coords_mat <- .values_at_xy(pts_for_deff)
+      # A point without a location has nothing to correlate.  It still counts
+      # towards its cell's values, and .cor_stats_from_coords() leaves it out
+      # of the correlation; it used to stop the call with "missing value
+      # where TRUE/FALSE needed", while deff = "kish" took the same layer.
+      unlocated <- is.na(coords_mat[, 1]) & !is.na(df[[id_col]])
       if (any(unlocated))
-        .warn_and_log(paste0("summarize_by_cell(): %d point(s) have empty or ",
-                             "non-finite coordinates; their values are ",
-                             "summarised, but the variogram design effect of ",
-                             "their cells is computed from the located points ",
-                             "only."),
-                      sum(unlocated))
+        .warn_and_log(paste0("summarize_by_cell(): %d point(s) have no location ",
+                             "(%s); their values are summarised, but the ",
+                             "variogram design effect of their cells is ",
+                             "computed from the located points only."),
+                      sum(unlocated), .UNLOCATED_WHAT)
 
       # Per-cell mean off-diagonal correlation, NOT a per-cell deff: the design
       # effect each column needs is 1 + (n_valid - 1) * rbar for ITS non-missing

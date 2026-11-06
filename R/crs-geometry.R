@@ -1628,7 +1628,7 @@
 }
 
 
-#' Move a layer out of lon/lat with its rows without a location left empty
+#' Move a layer to another CRS with its rows without a location left empty
 #'
 #' A row with a coordinate that is not finite or lies beyond
 #' \code{.POOL_XY_MAX} (\code{.unlocated_features()}) is read as given,
@@ -1636,16 +1636,28 @@
 #' (\code{.empty_unlocated()}).  Moved as it is, a polygon or line with one
 #' such vertex lost that vertex in \code{sf::st_transform()} and came back
 #' as a smaller finite shape: a square with a vertex at longitude 1e200 came
-#' back as a triangle.
+#' back as a triangle.  From a projected CRS such a vertex can also come
+#' back finite: a northing of 1e200 in EPSG:32616 lands at a finite point in
+#' EPSG:32617.  Every reader that moves a caller's layer moves it here:
+#' \code{ensure_projected()}, \code{harmonize_crs()},
+#' \code{.transform_or_stamp()}, \code{.align_crs()}, \code{.cover_follow()}
+#' (the builders' `cover`), the move of the polygons into a scored record's
+#' CRS in \code{assign_features_to_polygons()}, and
+#' \code{.values_at_free_cells()}.  The move itself is
+#' \code{.lonlat_of_placed()}: a row of a projected layer with a coordinate
+#' beyond \code{.LONLAT_MOVE_MAX} is emptied before a move to a CRS in
+#' degrees, which from Web Mercator at x = 1e20 never came back from PROJ.
+#' Any other layer whose rows all have a location is moved by
+#' \code{sf::st_transform()} alone.
 #'
-#' @param x An sf or sfc object in a geographic CRS.
+#' @param x An sf or sfc object with a CRS.
 #' @param crs The CRS to move it to.
 #' @return \code{x} in \code{crs}, with those rows empty.
 #' @keywords internal
 #' @noRd
 .transform_keep_unlocated <- function(x, crs) {
   rows <- which(.unlocated_features(sf::st_geometry(x)))
-  .empty_unlocated(sf::st_transform(x, crs), rows)
+  .empty_unlocated(.lonlat_of_placed(x, crs), rows)
 }
 
 #' Ensure an object has a projected CRS (with sensible defaults)
@@ -1716,10 +1728,11 @@
 #'     reads the rows that have a location: a row with one such coordinate
 #'     takes no part in it, as an empty row would, and a layer in which no
 #'     row has a location gets Web Mercator (Equal Earth for
-#'     `purpose = "area"`). Moved from
-#'     lon/lat, these rows come back empty, in their own geometry type;
-#'     [sf::st_transform()] would drop the vertex it cannot move and return
-#'     the rest of the feature.}
+#'     `purpose = "area"`). Moved to another CRS, these rows come back
+#'     empty, in their own geometry type;
+#'     [sf::st_transform()] would drop the vertex it cannot move, or put a
+#'     coordinate beyond 1e150 at a finite place, and return the rest of the
+#'     feature.}
 #' }
 #'
 #' `target_crs` overrides all of this. Pass it whenever you need a specific,
@@ -1863,7 +1876,7 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
     }
     if (!identical(xcrs, tcrs)) {
       x <- .xy_if_mixed_warn(x, "ensure_projected", "x")
-      x <- if (.is_longlat(x)) .transform_keep_unlocated(x, tcrs) else sf::st_transform(x, tcrs)
+      x <- .transform_keep_unlocated(x, tcrs)
     }
     return(x)
   }
@@ -1991,12 +2004,15 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
 #'   [sf::st_transform()] reads a layer in the dimension of its first
 #'   geometry and misplaces the others.  A layer in one dimension is
 #'   transformed with its Z and M, and so is a layer whose only geometries
-#'   of another dimension than the first are empty and not points.  A layer
-#'   that is not
-#'   transformed is returned as it came.  A row of a projected layer moved
-#'   to a CRS in degrees comes back empty when it has a coordinate beyond
-#'   1e10 in its CRS's own unit, further out than any projected CRS places
-#'   a point of the Earth.
+#'   of another dimension than the first are empty and not points.  A row
+#'   of a transformed layer with a coordinate that is not finite or lies
+#'   beyond 1e150 comes back empty, in its own geometry type: it has no
+#'   location to move, and [sf::st_transform()] would drop that vertex and
+#'   return the rest of the feature, or put the coordinate at a finite
+#'   place.  So does a row of a projected layer moved to a CRS in degrees
+#'   with a coordinate beyond 1e10 in its CRS's own unit, further out than
+#'   any projected CRS places a point of the Earth.  A layer that is not
+#'   transformed is returned as it came.
 #' @family spatial data preparation
 #' @examples
 #' library(sf)
@@ -2027,13 +2043,17 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   # returned, in XY, with a warning: sf reads the layer in the dimension of
   # its first geometry, so its transform returns an XYZ ring among XY rows
   # as a ring of other points, or stops with "OGR error".
-  # A row of a projected layer with a coordinate beyond .LONLAT_MOVE_MAX comes
-  # out empty when the target is in degrees (.lonlat_of_placed()): moved from
-  # Web Mercator at x = 1e20 it never came back from PROJ.
   .safe_transform <- function(x, to, which_obj) {
     x <- .xy_if_mixed_warn(x, "harmonize_crs", which_obj)
+    # A row with a coordinate that is not finite or lies beyond 1e150 comes
+    # back empty (.transform_keep_unlocated()): moved as it is, a polygon
+    # lost that vertex and came back as a smaller finite shape.  A row of a
+    # projected layer with a coordinate beyond .LONLAT_MOVE_MAX comes out
+    # empty when the target is in degrees (.lonlat_of_placed(), which that
+    # helper moves with): moved from Web Mercator at x = 1e20 it never came
+    # back from PROJ.
     tryCatch(
-      .lonlat_of_placed(x, to),
+      .transform_keep_unlocated(x, to),
       error = function(e) {
         if (identical(on_transform_error, "set_crs")) {
           .warn_and_log(

@@ -329,7 +329,10 @@
   } else if (is.na(sf::st_crs(g))) {
     g <- sf::st_set_crs(g, crs)
   } else if (!isTRUE(sf::st_crs(g) == crs)) {
-    g <- sf::st_transform(g, crs)
+    # A polygon with a vertex that is not finite or lies beyond 1e150, read
+    # as given, comes back empty and gives no free cell: moved as it was, it
+    # came back as a smaller shape.
+    g <- .transform_keep_unlocated(g, crs)
   }
   at <- sf::st_as_sf(data.frame(x = seed_xy[lost, 1L], y = seed_xy[lost, 2L]),
                      coords = c("x", "y"), crs = sf::st_crs(g))
