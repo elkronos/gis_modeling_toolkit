@@ -3820,6 +3820,43 @@ old behaviour where there is a way.
   randomisation variance, can differ in the last bit: R takes the fourth
   power with `pow()`, which does not commute with the division.
 
+* **The k-nearest-neighbour weights tied neighbour distances within 1e-9
+  map units on any layer.**  The weights behind `residual_morans_i()`,
+  `estimate_sac_range()`, the Moran tests of `determine_optimal_levels()`
+  and `resolution_profile()` and the range check of
+  `fit_bayesian_spatial_model()` take two distances as one when they differ
+  by less than 1e-9 of the coordinates' size, and that size was floored at
+  1 map unit.  A layer whose coordinates span less than about 1e-5 map
+  units therefore got other neighbours than the same layer in metres, more
+  of them as the unit shrank, up to every other point with equal weight:
+  on 120 points in a 5 km square scaled by 2^-50, Moran's I of the
+  residuals was -0.008 with p 1 where the layer in metres gives 0.277, and
+  `estimate_sac_range()` returned `NA` with "no spatial structure detected
+  at the nearest-neighbour scale" where it finds a range.  Ties are now
+  taken within 1e-9 of the coordinates' size in any unit, so the weights,
+  I, z, p and the range scale with the coordinates.  A layer whose
+  coordinates reach 1 map unit gets the weights it got.  `compare_models()`
+  had the same floor where it checks that fits with an information
+  criterion share their rows, on the coordinates of a layer with no CRS and
+  on the response: rows whose coordinates differ by less than 1e-9 units,
+  or responses that differ by less than 1e-10 (a response at 1e-12 and 1.5
+  times it), passed as the same, and the AICc or LOOIC column was kept.
+  The check that `folds` passed to a `cv_*()` function,
+  `area_of_applicability()`, `fold_separation()` or `kriging_adequacy()`
+  were built on the data had the same floor on a layer with no CRS: folds
+  built on other data whose rows sit less than 1e-9 units from this data's
+  rows were applied in silence.  Both checks now read the coordinates, and
+  `compare_models()` the response, at their own size.  The margin of one part in 1e10 of the
+  coordinates, by which `build_tessellation()` and `cell_values_at()` read
+  seeds as the centres a count record holds and
+  `assign_features_to_polygons()` reads a point as on the edge between
+  scored cells, had a floor of 1e-10 units: on a layer with no CRS whose
+  centres are 1000 units apart and whose seeds lie 10 units from them, all
+  scaled by 2^-40, the seeds were read as the centres, and the cells were
+  drawn around the centres in place of the seeds.  The margin is now one
+  part in 1e10 of the coordinates in any unit, as the help of
+  `assign_features_to_polygons()` says.
+
 * **`fit_gwr_model()` read a predictor or a response at a large offset on
   the rounding of the offset.**  The global least-squares fit the GWR is
   read against was `lm()` on the raw columns, which drops a predictor whose

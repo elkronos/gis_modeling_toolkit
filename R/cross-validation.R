@@ -725,8 +725,11 @@
                         "dataset; rebuild them with make_folds() on this one."),
                  caller), call. = FALSE)
   }
+  # Without a CRS the margin is 1e-9 of the coordinates' size, with no floor
+  # in map units: a floor of 1e-9 units passed folds built on other data on a
+  # layer whose coordinates span less than about 1e-9 units.
   tol <- if (isTRUE(probe$lonlat)) 1e-6
-         else max(1e-9 * max(abs(c(now$x, now$y)), na.rm = TRUE), 1e-9)
+         else 1e-9 * max(0, abs(c(now$x, now$y)), na.rm = TRUE)
   dx  <- abs(probe$x[ok] - now$x[m[ok]])
   dy  <- abs(probe$y[ok] - now$y[m[ok]])
   # An empty or non-finite geometry gives NaN on both sides, and NaN <= tol is

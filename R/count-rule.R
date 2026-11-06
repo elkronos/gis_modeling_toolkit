@@ -195,7 +195,10 @@
 #' Rounding grows with the size of the coordinates, so the margin is one
 #' part in 1e10 of the largest coordinate of the layer: 0.44 mm at a UTM
 #' northing of 4,400 km, far more than the rounding of the corners and far
-#' less than the spacing of gridded locations.  The cells
+#' less than the spacing of gridded locations.  It has no floor in the
+#' units of the CRS: a floor of 1e-10 units read seeds 10 units from the
+#' centres, on a layer whose cells are 1000 units apart, as the centres once
+#' the coordinates were scaled by 2^-40.  The cells
 #' \code{create_voronoi_polygons()} draws on seeds that are the centres are
 #' drawn around the centres as the record holds them
 #' (\code{.seeds_as_centres()}), so rounding the seeds took on through
@@ -203,12 +206,13 @@
 #'
 #' @param bb A bounding box (\code{sf::st_bbox()}), in the CRS the distance
 #'   is taken in.
-#' @return One positive number, in the units of that CRS.
+#' @return One number, in the units of that CRS: 0 when every coordinate is
+#'   0 or none is finite.
 #' @keywords internal
 #' @noRd
 .edge_tol <- function(bb) {
   m <- suppressWarnings(max(abs(as.numeric(bb)), na.rm = TRUE))
-  1e-10 * max(1, if (is.finite(m)) m else 1)
+  1e-10 * if (is.finite(m)) m else 0
 }
 
 

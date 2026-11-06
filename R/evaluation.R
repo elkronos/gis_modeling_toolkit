@@ -162,8 +162,13 @@
   # Floating-point ties.  Two distances that differ by less than the rounding
   # error of the coordinates themselves are one distance: coordinates near
   # 1e7 (state-plane feet) carry ~1e-9 of absolute noise, and a grid
-  # translated there must still tie the way it does at the origin.
-  cscale  <- max(1, max(abs(coords), na.rm = TRUE))
+  # translated there must still tie the way it does at the origin.  The
+  # tolerance is a part of the coordinates' size and has no floor in map
+  # units: a floor of 1 tied every distance difference under 1e-9 map units,
+  # so a layer whose coordinates span less than about 1e-5 units got other
+  # neighbours, up to every other point, than the same layer in metres.
+  # Coordinates all at 0 give 0, and their distances, all 0, still tie.
+  cscale  <- max(0, abs(coords), na.rm = TRUE)
   tol_abs <- 1e-9 * cscale
   # "within tolerance of dk" -- used both to extend the candidate set past the
   # k-th slot and to decide which candidates share it.
@@ -1808,17 +1813,22 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' @keywords internal
 #' @noRd
 .same_rowset <- function(a, b) {
+  # The tolerance is a part of the response's size, with no floor in its
+  # units: a floor of 1 read two responses below 1e-10 as one.
   .same_rowset_xy(a, b) &&
-    .rowset_close(a$y, b$y, 1e-10 * max(1, abs(a$y), na.rm = TRUE))
+    .rowset_close(a$y, b$y, 1e-10 * max(0, abs(a$y), na.rm = TRUE))
 }
 
 #' Do two \code{.fit_rowset()} fingerprints sit at the same locations?
+#'
+#' Within 1e-6 degrees when the data has a CRS (the fingerprint is then in
+#' EPSG:4326), otherwise within 1e-9 of the coordinates' size, in any unit.
 #' @keywords internal
 #' @noRd
 .same_rowset_xy <- function(a, b) {
   if (a$n != b$n || !identical(a$lonlat, b$lonlat)) return(FALSE)
   tol_xy <- if (a$lonlat) 1e-6
-            else 1e-9 * max(1, abs(c(a$x1, a$x2)), na.rm = TRUE)
+            else 1e-9 * max(0, abs(c(a$x1, a$x2)), na.rm = TRUE)
   .rowset_close(a$x1, b$x1, tol_xy) && .rowset_close(a$x2, b$x2, tol_xy)
 }
 
