@@ -592,19 +592,25 @@
 #' counting as one
 #'
 #' The first coordinates are sorted, and a step of more than \code{.TIE_TOL}
-#' times the diagonal of the points' bounding box starts a new column.  The
+#' times the extent \code{ex} starts a new column.  The extent is the
+#' diagonal of the points' bounding box unless the caller gives another:
+#' points that all lie within the last bits of each other have a box whose
+#' diagonal is itself last-bits small, and those bits would part them, so a
+#' caller whose points are read off a larger layer (the box centres of
+#' \code{.surface_nearest_shapes()}) gives the diagonal of that layer.  The
 #' columns are numbered from the lowest first coordinate.  Where no two first
 #' coordinates are that close, the column is the rank of the distinct first
 #' coordinate, and \code{order(col, y)} is \code{order(x, y)}.
 #'
 #' @param x,y Finite coordinates of the points.
+#' @param ex The extent the step is a part of: by default the diagonal of
+#'   the points' bounding box.
 #' @return Integer vector: the column of each point.
 #' @keywords internal
 #' @noRd
-.near_columns <- function(x, y) {
+.near_columns <- function(x, y, ex = sqrt(diff(range(x))^2 + diff(range(y))^2)) {
   n <- length(x)
   if (n < 2L) return(rep.int(1L, n))
-  ex  <- sqrt(diff(range(x))^2 + diff(range(y))^2)
   o   <- order(x)
   col <- integer(n)
   col[o] <- cumsum(c(TRUE, diff(x[o]) > .TIE_TOL * ex))

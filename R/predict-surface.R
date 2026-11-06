@@ -167,10 +167,15 @@
 #' layer's bounding box, \code{.edge_join()}'s) are a tie.  A point with one
 #' such feature takes it, as before.  Among several, the one whose
 #' bounding-box centre is in the lowest column (\code{.near_columns()} over
-#' the centres of the layer's features that have a location), then in the
-#' lowest row by the same rule read on y (\code{.near_columns(y, x)}), then
-#' in the lower row of the layer, is taken.  The features near a point are
-#' shortlisted by the square of half-side a hair above that reach around it
+#' the centres of the layer's features that have a location, with centre x
+#' values within \code{.TIE_TOL} of the diagonal of the layer's bounding box
+#' one column), then in the lowest row by the same rule read on y
+#' (\code{.near_columns(y, x)}), then in the lower row of the layer, is
+#' taken.  The extent is the layer's, not the centres' own: where every
+#' centre lies on one point (a polygon with a hole and the island that fills
+#' it) the centres' box is last-bits small, and the tie would go by those
+#' bits.  The features near a point are shortlisted by the square of
+#' half-side a hair above that reach around it
 #' (\code{st_intersects()} uses GEOS's index, where
 #' \code{st_is_within_distance()} takes a distance for every pair of a
 #' projected layer), then by the distance from the point to their bounding
@@ -210,10 +215,15 @@
                                numeric(4)), ncol = 4L, byrow = TRUE)
   # The rank of each feature by its box centre: column, then row by the
   # same rule on y, then row of the layer (order() keeps it among ties).
+  # The step is a part of the layer's diagonal: the centres' own box is
+  # last-bits small where every centre lies on one point (a polygon with a
+  # hole and the island that fills it).
   cx <- (bbm[live, 1L] + bbm[live, 3L]) / 2
   cy <- (bbm[live, 2L] + bbm[live, 4L]) / 2
+  bb <- as.numeric(sf::st_bbox(cg))
+  ex <- sqrt((bb[3L] - bb[1L])^2 + (bb[4L] - bb[2L])^2)
   rank <- rep(NA_integer_, length(cg))
-  rank[live[order(.near_columns(cx, cy), .near_columns(cy, cx))]] <-
+  rank[live[order(.near_columns(cx, cy, ex), .near_columns(cy, cx, ex))]] <-
     seq_along(live)
 
   pk <- rep(many, lengths(hits[many]))
@@ -323,9 +333,10 @@
 #'   least, plus one part in 1e10 of the largest coordinate of
 #'   \code{covariates}, count as the same) takes the one whose bounding-box
 #'   centre is lowest in x, then lowest in y, x values and y values within
-#'   one part in ten million of the diagonal of the centres' bounding box
-#'   counting as one, then the first in row order.  For a layer in degrees
-#'   the nearest feature is \code{sf::st_nearest_feature()}'s, which settles
+#'   one part in ten million of the diagonal of the bounding box of
+#'   \code{covariates} counting as one, then the first in row order.  For a
+#'   layer in degrees the nearest feature is
+#'   \code{sf::st_nearest_feature()}'s, which settles
 #'   such a tie in the order its search meets the features (GEOS, or s2 for
 #'   a layer in degrees while \code{sf::sf_use_s2()} is on).
 #' @param chunk_size Rows per prediction call. Default 5000.  A pure

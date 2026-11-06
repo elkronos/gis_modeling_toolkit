@@ -268,7 +268,8 @@ test_that("predict_surface() reads the y of the box centres by the column rule",
   # which after a move of the origin differs in its last bits in y only.  A
   # grid point on the hole's ring is at distance 0 from both and takes the
   # first of the two in row order in every frame.  A third cell 3 km away
-  # gives the centres' bounding box its extent.
+  # widens the layer; the BUG-212 test below takes the donut and island
+  # alone.
   ring  <- function(x0, y0, s) rbind(c(x0, y0), c(x0 + s, y0), c(x0 + s, y0 + s),
                                      c(x0, y0 + s), c(x0, y0))
   x0 <- 4.5e5; y0 <- 4.55e6
@@ -352,6 +353,107 @@ test_that("predict_surface() measures few pairs for grid points far from the lay
   expect_lt(measured, 10 * length(pts))
 })
 
+test_that("predict_surface() settles a tie the same way in every frame where all box centres coincide", {
+  # BUG-212: a layer of only a polygon with a hole and the island that fills
+  # it.  The two have one box centre, which after a move of the origin
+  # differs in its last bits in y, and the centres' own bounding box is
+  # last-bits small.  Read against that box, the bits parted the centres and
+  # a grid point on the hole's ring took the island with the origin moved
+  # and the polygon in metres and US feet.  Read against the layer's
+  # diagonal, the centres are one column and one row, and the tie goes to
+  # the first in row order in every frame.
+  ring  <- function(x0, y0, s) rbind(c(x0, y0), c(x0 + s, y0), c(x0 + s, y0 + s),
+                                     c(x0, y0 + s), c(x0, y0))
+  x0 <- 4.5e5; y0 <- 4.55e6
+  donut  <- sf::st_polygon(list(ring(x0, y0, 1000), ring(x0 + 250, y0 + 250, 500)[5:1, ]))
+  island <- .se_square(x0 + 250, y0 + 250, 500)
+  di <- .se_frames(sf::st_sf(w = c(1, 2), geometry = sf::st_sfc(donut, island,
+                                                                crs = .se_crs_m())))
+  # Left edge, top edge, bottom-left corner, right edge, bottom edge.
+  pd <- .se_frames(sf::st_as_sf(data.frame(x = x0 + c(250, 500, 250, 750, 600),
+                                           y = y0 + c(500, 750, 250, 400, 250)),
+                                coords = c("x", "y"), crs = .se_crs_m()))
+  train <- .se_frames(.se_train())
+  s <- r <- list()
+  for (f in names(di)) {
+    g <- sf::st_geometry(di[[f]])
+    p <- sf::st_geometry(pd[[f]])
+    expect_identical(.surface_nearest_shapes(p, g), rep(1L, 5L), info = f)
+    expect_identical(.surface_nearest_shapes(p, g[2:1]), rep(1L, 5L), info = f)
+    s[[f]] <- .se_surface(train[[f]], pd[[f]], di[[f]])
+    r[[f]] <- .se_surface(train[[f]], pd[[f]], di[[f]][2:1, ])
+    expect_identical(s[[f]]$w, rep(1, 5L), info = f)
+    expect_identical(r[[f]]$w, rep(2, 5L), info = f)
+  }
+  expect_identical(s$usft$.pred, s$m$.pred)
+  expect_identical(s$m01$.pred, s$m$.pred)
+  expect_identical(r$usft$.pred, r$m$.pred)
+  expect_identical(r$m01$.pred, r$m$.pred)
+})
+
+test_that("predict_surface() settles a tie the same way in every frame where coincident box centres part in x", {
+  # BUG-212: two lines crossing at their midpoints, and a ring of 32 sides
+  # with the disc that fills its hole.  Each pair has one box centre, which
+  # in US feet or with the origin moved differs in its last bits in x.  Read
+  # against the centres' own box, those bits made two columns and the grid
+  # point took the second feature in those frames.
+  x0 <- 4.5e5; y0 <- 4.55e6
+  circ <- function(r) {
+    a <- 2 * pi * (0:32) / 32
+    a[33] <- 0
+    cbind(x0 + 500 + r * cos(a), y0 + 500 + r * sin(a))
+  }
+  h <- sf::st_linestring(rbind(c(x0, y0 + 500), c(x0 + 1000, y0 + 500)))
+  v <- sf::st_linestring(rbind(c(x0 + 500, y0), c(x0 + 500, y0 + 1000)))
+  ann  <- sf::st_polygon(list(circ(500), circ(250)[33:1, ]))
+  disc <- sf::st_polygon(list(circ(250)))
+  # The crossing, and eight vertices of the hole's ring.
+  cases <- list(lines = list(g = sf::st_sfc(h, v, crs = .se_crs_m()),
+                             p = cbind(x0 + 500, y0 + 500)),
+                ring  = list(g = sf::st_sfc(ann, disc, crs = .se_crs_m()),
+                             p = circ(250)[seq(1, 29, by = 4), ]))
+  train <- .se_frames(.se_train())
+  for (k in names(cases)) {
+    n <- nrow(cases[[k]]$p)
+    L <- .se_frames(sf::st_sf(w = c(1, 2), geometry = cases[[k]]$g))
+    P <- .se_frames(sf::st_as_sf(data.frame(x = cases[[k]]$p[, 1], y = cases[[k]]$p[, 2]),
+                                 coords = c("x", "y"), crs = .se_crs_m()))
+    s <- r <- list()
+    for (f in names(L)) {
+      g <- sf::st_geometry(L[[f]])
+      p <- sf::st_geometry(P[[f]])
+      expect_identical(.surface_nearest_shapes(p, g), rep(1L, n), info = paste(k, f))
+      expect_identical(.surface_nearest_shapes(p, g[2:1]), rep(1L, n), info = paste(k, f))
+      s[[f]] <- .se_surface(train[[f]], P[[f]], L[[f]])
+      r[[f]] <- .se_surface(train[[f]], P[[f]], L[[f]][2:1, ])
+      expect_identical(s[[f]]$w, rep(1, n), info = paste(k, f))
+      expect_identical(r[[f]]$w, rep(2, n), info = paste(k, f))
+    }
+    expect_identical(s$usft$.pred, s$m$.pred, info = k)
+    expect_identical(s$m01$.pred, s$m$.pred, info = k)
+  }
+})
+
+test_that(".near_columns() reads its step against the extent it is given", {
+  # Two first coordinates 1.2e-10 apart, and the points' own box no larger:
+  # without an extent the step is more than one part in ten million of the
+  # box's diagonal, so two columns, as before.  Against the diagonal of a
+  # 1000 m box they are one column.
+  x <- c(1e6, 1e6 + 1.2e-10); y <- c(5e6, 5e6)
+  expect_identical(.near_columns(x, y), 1:2)
+  expect_identical(.near_columns(x, y, sqrt(2) * 1000), c(1L, 1L))
+  expect_identical(.near_columns(c(1e6, 1e6), y), c(1L, 1L))
+  # The default is the diagonal of the points' own bounding box.
+  xs <- withr::with_seed(3, c(stats::runif(40, 0, 1000), 500 + c(0, 1e-5, 2e-4)))
+  ys <- withr::with_seed(4, stats::runif(43, 0, 800))
+  ex <- sqrt(diff(range(xs))^2 + diff(range(ys))^2)
+  expect_identical(.near_columns(xs, ys), .near_columns(xs, ys, ex))
+  expect_identical(.near_columns(xs, ys)[41:43], c(1L, 1L, 2L) +
+                     .near_columns(xs, ys)[41] - 1L)
+  # A larger extent joins steps the points' own box keeps apart.
+  expect_identical(length(unique(.near_columns(xs, ys, 1e4)[41:43])), 1L)
+})
+
 test_that("?predict_surface states the tie rule for lines and polygons", {
   file <- test_path("..", "..", "man", "predict_surface.Rd")
   rd <- if (file.exists(file)) tools::parse_Rd(file)
@@ -362,8 +464,8 @@ test_that("?predict_surface states the tie rule for lines and polygons", {
     "polygons, or of one that mixes them with points"), fixed = TRUE)
   expect_match(page, paste0(
     "takes the one whose bounding-box centre is lowest in x, then lowest in y, x values ",
-    "and y values within one part in ten million of the diagonal of the centres' ",
-    "bounding box counting as one, then the first in row order. For a layer in degrees ",
+    "and y values within one part in ten million of the diagonal of the bounding box ",
+    "of covariates counting as one, then the first in row order. For a layer in degrees ",
     "the nearest feature is sf::st_nearest_feature()'s"), fixed = TRUE)
   expect_no_match(page, "For lines and polygons, and for points in degrees", fixed = TRUE)
 })

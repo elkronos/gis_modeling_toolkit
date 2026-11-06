@@ -3910,10 +3910,15 @@ old behaviour where there is a way.
   least, plus one part in 1e10 of the largest coordinate of `covariates`,
   are now a tie, and the tie goes to the feature whose bounding-box centre
   is lowest in x, then lowest in y (x values and y values within one part
-  in ten million of the diagonal of the centres' bounding box counting as
-  one), then first in row order: each of the 72 takes the cell to its left
-  in every frame and row order.  A grid point with one nearest feature
-  takes the row it took before.  Layers in degrees are searched as before.
+  in ten million of the diagonal of the bounding box of `covariates`
+  counting as one), then first in row order: each of the 72 takes the cell
+  to its left in every frame and row order.  Features whose box centres
+  all coincide (a polygon with a hole and the island that fills it, alone
+  in the layer, the polygon first) now take the tie the same way with
+  another origin, where a grid point on the hole's ring took the polygon in
+  metres and US feet and the island with the false origin moved by 0.1 m.
+  A grid point with one nearest feature takes the row it took before.
+  Layers in degrees are searched as before.
   `?predict_surface` (`covariates`) states the rule.  A point of a grid
   kept as given with a coordinate that is not finite or lies beyond 1e150
   now gets `NA` covariates, whatever the layer, where it took those of a

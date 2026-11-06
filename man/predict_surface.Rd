@@ -90,9 +90,10 @@ polygons share, say: distances within one part in ten million of the
 least, plus one part in 1e10 of the largest coordinate of
 \code{covariates}, count as the same) takes the one whose bounding-box
 centre is lowest in x, then lowest in y, x values and y values within
-one part in ten million of the diagonal of the centres' bounding box
-counting as one, then the first in row order.  For a layer in degrees
-the nearest feature is \code{sf::st_nearest_feature()}'s, which settles
+one part in ten million of the diagonal of the bounding box of
+\code{covariates} counting as one, then the first in row order.  For a
+layer in degrees the nearest feature is
+\code{sf::st_nearest_feature()}'s, which settles
 such a tie in the order its search meets the features (GEOS, or s2 for
 a layer in degrees while \code{sf::sf_use_s2()} is on).}
 
