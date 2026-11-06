@@ -4002,7 +4002,65 @@ old behaviour where there is a way.
   or a linear combination of the others, is still left out.  The test for
   an exact fit still reads the size of the terms of the predictors as
   given, so the residuals of a response computed from a northing are still
-  constant.  The REML detrending of `estimate_sac_range()` is not changed.
+  constant.  The REML detrending of `estimate_sac_range()` has its own
+  entry below.
+
+* **`estimate_sac_range(detrend = "reml")` fell back to OLS on a predictor
+  at a large offset, with the reason that the REML fit did not converge.**
+  `nlme::gls()` fails on a predictor such as 1e8 plus a spread of 1, and the
+  estimate warned that "the REML detrending on p did not converge",
+  detrended by OLS and returned `detrend_method` `"ols"` and the range and
+  nugget of the OLS residuals, where the same predictor at 0 gives the REML
+  ones: on 600 points with a predictor of unit spread, a range of 1429 and
+  a nugget of 0 at 1e8 and 1e15, against 1562 and 0.0214 at 0.  At 1e5 the
+  REML fit ran on the rounding of the offset and moved in the seventh
+  digit.  A predictor whose centre is more than 1000 times its spread is
+  now taken less its centre before the REML fit, as in the OLS detrending,
+  and the test for spatial structure and the test for an exact fit read
+  the same design, the latter with the centres added back, as there.  The
+  REML fit of a model with an intercept does not change under a shift of a
+  predictor, so the range and the nugget are now those of the predictor at
+  0, to rounding.  Every other predictor is fitted as it was, to the last
+  bit, and a fit that fails still falls back to OLS with the warning.
+
+* **`estimate_sac_range(detrend = "reml")` drew its subsample of a lattice
+  by the last bits of the coordinates.**  The REML fit runs on at most
+  `reml_max_n` locations and one row a location, drawn by position from
+  the rows in the exact order of their first coordinate.  After another
+  unit or origin the first coordinates of one column of a lattice differ in
+  their last bits, so the draw took other rows: on a 40 by 30 lattice at
+  250 m with `reml_max_n = 300` the nugget was 0.206 in EPSG:26915 and in
+  UTM 15N in US feet and 0.241 with the false origin moved by 0.1 m.  The
+  rows are now put in order as `resolution_profile()` puts them, first
+  coordinates within one part in ten million of the extent counting as one
+  column, so the draws take the same points in every unit and origin.
+  Layers on which no two first coordinates come that close get the order,
+  the subsample and the result they got before.
+
+* **`estimate_sac_range(detrend = "reml")` fell back to OLS on a response
+  at a large offset, with the reason that the REML fit did not converge.**
+  `nlme::gls()` fails on a response at 1e8 plus a spread of 2 as it does on
+  such a predictor: on 300 points the estimate warned, detrended by OLS and
+  returned a range of 1400 and a nugget of 0, where the same response at 0
+  gives the REML range of 1361 and a nugget of 0.0142, and at 1e7 the REML
+  range moved in the fifth digit.  A response whose centre is more than
+  1000 times its spread is now taken less its centre before the REML fit,
+  as a predictor is, and the centre is added back to the intercept that the
+  test for an exact fit reads.  Every other response is fitted as it was,
+  to the last bit.
+
+* **`estimate_sac_range()` drew its `n_max` subsample of a lattice by the
+  last bits of the coordinates.**  The subsample is drawn by position from
+  the rows in the order of their coordinates, and after another unit or
+  origin the first coordinates of one column of a lattice differ in their
+  last bits: on a 40 by 30 lattice at 250 m with `n_max = 300` the range
+  was 647 m in EPSG:26915 and in UTM 15N in US feet and 795 m with the
+  false origin moved by 0.1 m.  The rows are now put in order by columns
+  of the first coordinate, as in the REML fit above, so the help's
+  statement that the answer does not depend on the unit or the origin of
+  the coordinates holds for the subsample.  Layers on which no two first
+  coordinates come that close get the order, the subsample and the result
+  they got before.
 
 * **`kriging_adequacy()` kriged a response at a large offset on the
   rounding of the offset.**  At 1e15 plus a spread of 1 a double holds the

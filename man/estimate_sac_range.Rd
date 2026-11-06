@@ -339,9 +339,13 @@ values changes the answer by about as much.  Three things make it so.
 The rows are sorted by their coordinates as supplied, then by the
 response and the predictors, before anything else, so the projection
 chosen for lon/lat input, the \code{n_max} subsample and the pair sums
-do not depend on their order.  (Rows that share a location are therefore
-in the order of their values, and no step treats the first of them as
-special.)  The variogram is computed on the standardised variable, and a
+do not depend on their order.  First coordinates within 1e-7 of the
+diagonal of the points' bounding box count as one column, sorted by the
+second coordinate, so that a lattice, whose first coordinates in one
+column differ in their last bits after another unit or origin, gets the
+same order and the same subsample in each.  (Rows that share a location
+are therefore in the order of their values, and no step treats the first
+of them as special.)  The variogram is computed on the standardised variable, and a
 response is called constant only when its standard deviation is under
 1e-12 of its largest absolute value, which no change of unit alters, and
 the values centred on their median and scaled have a standard deviation

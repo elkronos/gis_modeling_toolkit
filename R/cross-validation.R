@@ -1835,8 +1835,16 @@
 #' 1.04 low and the nugget at 0.41 for a truth of 1).  It is not the mean of
 #' the visits either: the mean of \eqn{m} visits carries a \eqn{1/m} share of
 #' the variance between visits, and the nugget fitted to means is short by
-#' that factor.  The rows are put in a fixed order first (coordinates, then
-#' the other columns), so neither draw depends on the order they came in.
+#' that factor.  The rows are put in a fixed order first, so neither draw
+#' depends on the order they came in: by columns of the first coordinate
+#' (\code{.near_columns()}: sorted first coordinates whose steps are no more
+#' than \code{.TIE_TOL} times the diagonal of the points' bounding box are
+#' one column), then the second coordinate, the first, and the other
+#' columns.  After another unit or origin the first coordinates of one
+#' column of a lattice differ in their last bits, and an exact order by them
+#' put the rows in an order those bits set, so the subsample drew other rows.
+#' Where no two first coordinates are that close the order is that of the
+#' coordinates.
 #'
 #' The REML likelihood of a short range on a large layer has a valley between
 #' the optimum and the plateau where the fit is the same as with no
@@ -1855,7 +1863,9 @@
 #'
 #' @param mf A model frame (trend formula already applied, incomplete rows
 #'   excluded) with the projected coordinates in columns \code{.sac_x} and
-#'   \code{.sac_y}.
+#'   \code{.sac_y}, and its predictors and response at an offset taken about
+#'   their centres (\code{.centre_columns()}): \code{gls()} on a predictor
+#'   or a response at 1e8 plus a spread of 1 fails.
 #' @param fml The trend formula.
 #' @param extent A length scale of the layer, used to bound starting ranges.
 #' @return \code{NULL} when no fit converged, else a list with \code{beta}
@@ -1874,12 +1884,17 @@
 .reml_trend <- function(mf, fml, extent, max_n = 400L, seed = 123L) {
   if (!requireNamespace("nlme", quietly = TRUE)) return(NULL)
   d <- mf
-  # A fixed order of the rows: coordinates, then every other column.  Both
-  # draws below index rows, and gls() sums over them in order.
-  sort_cols <- c(".sac_x", ".sac_y", setdiff(names(d), c(".sac_x", ".sac_y")))
+  # A fixed order of the rows: by columns of the first coordinate
+  # (.near_columns()), then the second coordinate, the first, and every
+  # other column.  Both draws below index rows, and gls() sums over them in
+  # order.  An exact order by the first coordinate reads the last bits that
+  # move with the unit and the origin.
+  sort_cols <- setdiff(names(d), c(".sac_x", ".sac_y"))
   ord <- tryCatch(
-    do.call(order, c(unname(lapply(d[sort_cols], function(x)
-      if (is.numeric(x) || is.logical(x)) as.numeric(x) else as.character(x))),
+    do.call(order, c(
+      list(.near_columns(d$.sac_x, d$.sac_y), d$.sac_y, d$.sac_x),
+      unname(lapply(d[sort_cols], function(x)
+        if (is.numeric(x) || is.logical(x)) as.numeric(x) else as.character(x))),
       list(method = "radix"))),
     error = function(e) NULL)
   if (length(ord) == nrow(d)) d <- d[ord, , drop = FALSE]
@@ -2779,9 +2794,13 @@ sac_nugget <- function(x) {
 #' The rows are sorted by their coordinates as supplied, then by the
 #' response and the predictors, before anything else, so the projection
 #' chosen for lon/lat input, the \code{n_max} subsample and the pair sums
-#' do not depend on their order.  (Rows that share a location are therefore
-#' in the order of their values, and no step treats the first of them as
-#' special.)  The variogram is computed on the standardised variable, and a
+#' do not depend on their order.  First coordinates within 1e-7 of the
+#' diagonal of the points' bounding box count as one column, sorted by the
+#' second coordinate, so that a lattice, whose first coordinates in one
+#' column differ in their last bits after another unit or origin, gets the
+#' same order and the same subsample in each.  (Rows that share a location
+#' are therefore in the order of their values, and no step treats the first
+#' of them as special.)  The variogram is computed on the standardised variable, and a
 #' response is called constant only when its standard deviation is under
 #' 1e-12 of its largest absolute value, which no change of unit alters, and
 #' the values centred on their median and scaled have a standard deviation
@@ -3546,10 +3565,17 @@ estimate_sac_range <- function(points_sf, response_var,
 
   # Rows in a canonical order: the coordinates as supplied first, then the
   # response and the predictors to break ties between repeat visits to one
-  # location.  Three steps below read the rows in order.  The projection of a
-  # lon/lat layer is chosen by scoring candidates on rows taken at even
-  # spacing down the layer; the subsample indexes rows; and gstat sums the
-  # pairs of a bin in row order.  Unsorted, the same layer with its rows
+  # location.  The coordinates go by columns of the first coordinate
+  # (.near_columns()), then the second coordinate, then the first: after
+  # another unit or origin the first coordinates of one column of a lattice
+  # differ in their last bits, and an exact order by them put the rows in
+  # an order those bits set, so the n_max subsample drew other rows (a
+  # range of 647 m against 795 m on one lattice with the false origin moved
+  # by 0.1 m).  Where no two first coordinates are that close, the order is
+  # that of the coordinates.  Three steps below read the rows in order.  The
+  # projection of a lon/lat layer is chosen by scoring candidates on rows
+  # taken at even spacing down the layer; the subsample indexes rows; and
+  # gstat sums the pairs of a bin in row order.  Unsorted, the same layer with its rows
   # permuted got another subsample and a variogram that differed in its last
   # bits; sorted after the projection, a layer over a continental extent
   # still got an Albers CRS in one row order and a Lambert azimuthal one in
@@ -3559,7 +3585,8 @@ estimate_sac_range <- function(points_sf, response_var,
   xy_in <- sf::st_coordinates(points_sf)[, 1:2, drop = FALSE]
   df_in <- sf::st_drop_geometry(points_sf)
   ord <- do.call(order, c(
-    list(xy_in[, 1L], xy_in[, 2L], as.numeric(df_in[[response_var]])),
+    list(.near_columns(xy_in[, 1L], xy_in[, 2L]), xy_in[, 2L], xy_in[, 1L],
+         as.numeric(df_in[[response_var]])),
     if (has_pred) lapply(predictor_vars, function(v) {
       x <- df_in[[v]]
       if (is.numeric(x) || is.logical(x)) as.numeric(x) else as.character(x)
@@ -3696,6 +3723,25 @@ estimate_sac_range <- function(points_sf, response_var,
     if (identical(detrend, "reml")) {
       df$.sac_x <- xy[, 1L]; df$.sac_y <- xy[, 2L]
       mf <- df[, c(response_var, predictor_vars, ".sac_x", ".sac_y"), drop = FALSE]
+      # A predictor at an offset (1e8 plus a spread of 1), on which gls()
+      # fails, is taken about its centre (.centre_columns()), as in the OLS
+      # fit.  The fit does not change under a shift of a predictor; the
+      # design the tests below read is this one, and the centres go with it
+      # for the test of a constant (.rounding_design()).
+      P <- .centre_columns(mf[predictor_vars])
+      reml_centres <- attr(P, "centres")
+      attr(P, "centres") <- NULL
+      mf[predictor_vars] <- P
+      # The response at an offset too (1e8 plus a spread of 2), on which
+      # gls() fails as well, by the same bound.  The fit of a model with an
+      # intercept does not change under a shift of the response but for its
+      # intercept, to which the centre is added back below.  `y_centre`
+      # (above) takes a response off only where its raw values lose their
+      # spread, which lm() needs and gls() needs well before.
+      R <- .centre_columns(mf[response_var])
+      reml_y_centre <- if (is.null(attr(R, "centres"))) 0 else attr(R, "centres")[1L]
+      attr(R, "centres") <- NULL
+      mf[response_var] <- R
       extent <- max(diff(range(xy[, 1L])), diff(range(xy[, 2L])), 1)
       reml_fit <- .reml_trend(mf, fml, extent = extent, max_n = reml_max_n,
                               seed = seed)
@@ -3732,6 +3778,12 @@ estimate_sac_range <- function(points_sf, response_var,
           y <- as.numeric(mf[[response_var]] - X %*% b)
           X_design <- X
           b_design <- b
+          # The intercept of the response as the tests below read it, less
+          # `y_centre` only.
+          if (reml_y_centre != 0)
+            b_design[["(Intercept)"]] <- b_design[["(Intercept)"]] + reml_y_centre
+          if (!is.null(reml_centres))
+            c_design <- c(0, reml_centres)[attr(X, "assign") + 1L]
           detrended <- TRUE
           detrend_method <- "reml"
           .log_info(paste0("estimate_sac_range(): REML detrending on %s fitted ",
