@@ -51,7 +51,10 @@ In mode \code{"auto"} a MULTILINESTRING gets the midpoint of its longest part.
 When several parts share the greatest length (to one part in ten
 million, measured in the projection used), their midpoints are taken
 and the one lowest in x, then in y, is kept, so the point does not depend
-on the order in which the feature lists its parts.
+on the order in which the feature lists its parts.  x values within one
+part in ten million of the diagonal of the midpoints' bounding box count
+as one, so y decides between midpoints whose x differ only in their last
+bits, and the point does not move with the origin of the coordinates.
 
 A layer whose geometries do not all have the same dimensions (XY beside
 XYZ or XYM, as \code{rbind()} of an XY and an XYZ layer gives) is read in x

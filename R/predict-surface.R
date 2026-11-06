@@ -102,6 +102,49 @@
 }
 
 
+#' The covariate row nearest each grid point
+#'
+#' A grid point between covariate points of a lattice (the grid of
+#' \code{predict_surface()} laid over the training points, say) is the same
+#' distance from several of them.  \code{sf::st_nearest_feature()} gave it
+#' whichever one GEOS met first, and the distances differ in their last bits
+#' once the unit or the origin of the coordinates changes, so the surface
+#' took another covariate row in another frame.  For point covariates the
+#' search is that of \code{cell_values_at()} (\code{.values_at_nearest()}):
+#' squared distances within \code{.TIE_TOL} (one part in ten million) of the
+#' least are a tie, and the tie goes to the point in the lowest column
+#' (\code{.near_columns()}: first coordinates within \code{.TIE_TOL} of the
+#' diagonal of the points' box are one column), then the lowest y, then the
+#' lower row.  Lines and polygons, and points in degrees, are searched by
+#' \code{sf::st_nearest_feature()} as before.
+#'
+#' @param pts The grid's points, an sfc in the CRS of \code{covariates}.
+#' @param covariates The covariate layer.
+#' @return Integer vector, one row of \code{covariates} per point; \code{NA}
+#'   for a point without a location and where no covariate row has one.
+#' @keywords internal
+#' @noRd
+.surface_nearest_rows <- function(pts, covariates) {
+  cg <- sf::st_geometry(covariates)
+  if (!all(sf::st_geometry_type(cg, by_geometry = TRUE) == "POINT") ||
+      isTRUE(sf::st_is_longlat(cg)))
+    return(sf::st_nearest_feature(pts, cg))
+  out  <- rep(NA_integer_, length(pts))
+  cxy  <- .values_at_xy(sf::st_sf(geometry = cg))
+  gxy  <- .values_at_xy(sf::st_sf(geometry = pts))
+  live <- which(!is.na(cxy[, 1L]))
+  q    <- which(!is.na(gxy[, 1L]))
+  if (!length(live) || !length(q)) return(out)
+  cx <- cxy[live, 1L]; cy <- cxy[live, 2L]
+  # By column, then y, then row: order() keeps the row order among ties.
+  o <- order(.near_columns(cx, cy), cy)
+  j <- .values_at_nearest(gxy[q, 1L], gxy[q, 2L], cx[o], cy[o],
+                          use_fnn = .has_backend("FNN"))
+  out[q] <- live[o[j]]
+  out
+}
+
+
 #' Predict a fitted spatial model onto a regular grid
 #'
 #' Builds a prediction surface over the extent of the training data (or over a
@@ -171,7 +214,18 @@
 #'   CRS.  Read in x and y: a layer whose geometries mix XY with XYZ or XYM,
 #'   or carry M, is read without its Z and M, with no warning.  A row
 #'   without a location (an empty geometry, or a coordinate that is not
-#'   finite or lies beyond 1e150) is never the nearest feature.
+#'   finite or lies beyond 1e150) is never the nearest feature.  A grid
+#'   point the same distance from several points of \code{covariates}
+#'   (squared distances within one part in ten million of the least) takes
+#'   the one lowest in x, x values within one part in ten million of the
+#'   diagonal of the points' bounding box counting as one, then the one
+#'   lowest in y, then the first in row order, so a grid laid between the
+#'   points of a lattice takes the same covariates in another unit or with
+#'   another origin, and with or without the \pkg{FNN} package.  For lines
+#'   and polygons, and for points in degrees, the nearest feature is
+#'   \code{sf::st_nearest_feature()}'s, which settles such a tie in the
+#'   order its search meets the features (GEOS, or s2 for a layer in
+#'   degrees while \code{sf::sf_use_s2()} is on).
 #' @param chunk_size Rows per prediction call. Default 5000.  A pure
 #'   performance knob: rows do not interact, and for a \code{bayesian_fit} the
 #'   GP boundary is held at its fitted value whatever the chunk holds; see
@@ -416,7 +470,7 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
       .empty_unlocated(.xy_if_mixed_or_m(covariates)), train,
       "predict_surface", "covariates")
     covariates <- .align_to_fit(covariates, "covariates")
-    nn  <- sf::st_nearest_feature(grid_xy(), covariates)
+    nn  <- .surface_nearest_rows(grid_xy(), covariates)
     cdf <- sf::st_drop_geometry(covariates)[nn, missing_preds, drop = FALSE]
     for (cn in missing_preds) grid[[cn]] <- cdf[[cn]]
   }

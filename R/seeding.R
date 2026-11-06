@@ -203,9 +203,12 @@
 #'   `iter` and `nstart`. For the scored centres of a selection or profile
 #'   (see `n`) it describes `sample_points` assigned to them, each point to
 #'   its nearest seed, with `iter` `NA` and `nstart` the profile's restarts,
-#'   and is absent when no `sample_points` were given. Under `partition =
-#'   "density"` `withinss` and `tot_withinss` count every point once, about
-#'   its cell's mean. A run this call makes with `partition = "density"` or
+#'   and is absent when no `sample_points` were given. A point the same
+#'   distance from two seeds (squared distances within one part in ten
+#'   million) goes to the lower `seed_id`, the rule the profile scores its
+#'   cells by, so the record is the same in another unit or with another
+#'   origin. Under `partition = "density"` `withinss` and `tot_withinss`
+#'   count every point once, about its cell's mean. A run this call makes with `partition = "density"` or
 #'   `init = "kmeans++"` also records `converged`, whether the kept start
 #'   stopped before `kmeans_iter`, and under `partition = "density"`
 #'   `objective`, the weighted sum the seeds minimise; scored centres have
@@ -1527,8 +1530,9 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #' The \code{attr(, "kmeans")} record of \code{get_voronoi_seeds()} for seeds
 #' taken from a resolution profile: each usable cloud point is assigned to its
 #' nearest seed in the profile's projected CRS (the seed whose Voronoi cell
-#' holds it), with the sizes and within-cell sums of squares that assignment
-#' gives.  \code{iter} is \code{NA}: no k-means ran here.
+#' holds it), by the profile's rule (\code{.nearest_centre()}, a tie to the
+#' lower \code{seed_id}), with the sizes and within-cell sums of squares that
+#' assignment gives.  \code{iter} is \code{NA}: no k-means ran here.
 #'
 #' @keywords internal
 #' @noRd
@@ -1554,8 +1558,18 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   sxy <- sf::st_coordinates(seeds)[, 1:2, drop = FALSE]
   k   <- nrow(sxy)
   cl  <- integer(0); d2 <- numeric(0)
+  # The seed of each point by the profile's rule (.nearest_centre()), with
+  # the seeds numbered by seed_id: squared distances within .TIE_TOL of the
+  # least are a tie, and a tie goes to the lower-numbered seed.
+  # sf::st_nearest_feature() settled a point the same distance from two
+  # seeds by the last bits of its distances, which move with the unit and
+  # the origin, and not always as the profile scored it.  A seed without a
+  # location is never the nearest.
+  live <- which(is.finite(sxy[, 1L]) & is.finite(sxy[, 2L]))
+  if (!length(live)) ok[] <- FALSE
   if (any(ok)) {
-    cl <- as.integer(sf::st_nearest_feature(cloud[ok, ], seeds))
+    cl <- live[.nearest_centre(xy[ok, 1L], xy[ok, 2L], sxy[live, 1L], sxy[live, 2L],
+                               use_fnn = .has_backend("FNN"))]
     d2 <- rowSums((xy[ok, , drop = FALSE] - sxy[cl, , drop = FALSE])^2)
   }
   # Seeds of the density kind are weighted means, which do not sit at the

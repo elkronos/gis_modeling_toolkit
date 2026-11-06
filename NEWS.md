@@ -2846,8 +2846,12 @@ old behaviour where there is a way.
   parts were also told apart by the last bits of their lengths, so the
   point moved with a shift of the origin.  Among parts of equal greatest
   length, to one part in ten million, the midpoint lowest in x, then in y,
-  is now taken; a feature with one longest part gets its midpoint as
-  before.
+  is now taken, x values within one part in ten million of the diagonal of
+  the midpoints' bounding box counting as one: two congruent parts whose
+  midpoints have one x, reached from other coordinates, differ in their
+  last bits once the origin moves, and y now decides between them, so the
+  point is the same at every origin.  A feature with one longest part gets
+  its midpoint as before.
   `?coerce_to_points` states the rule.
 
 * **`summarize_by_cell(deff = "variogram")`, `kriging_adequacy()` and
@@ -3767,6 +3771,42 @@ old behaviour where there is a way.
   kilometres and in US feet.  Locations closer than 1e-8 of the layer's
   unit (1e-10 for the seeds) could count as one and now count as distinct,
   so such a layer can get a higher ceiling and more seeds than before.
+
+* **`predict_surface()` took a grid point's covariates from whichever of
+  several equally near points of `covariates` GEOS met first, so the
+  surface moved with the unit and the origin of the coordinates.**  A grid
+  laid between the points of a lattice is the same distance from four of
+  them, and `sf::st_nearest_feature()` settled the tie by the last bits of
+  the distances.  On a 20 by 15 lattice at 250 m, with the grid at the
+  midpoints, 147 of 266 grid points took another covariate row in UTM 15N
+  in US feet than in EPSG:26915, and 189 with the false origin moved by
+  0.1 m; `.pred` moved by up to 0.03.  For point covariates, squared
+  distances within one part in ten million of the least are now a tie, and
+  the tie goes to the point lowest in x (x values within one part in ten
+  million of the diagonal of the points' bounding box counting as one),
+  then lowest in y, then first in row order.  The grid above takes the same
+  covariates in all three frames, with or without the FNN package.  A grid
+  point that ties with no other point takes the row it took before.  A
+  point of a grid kept as given with a coordinate that is not finite or
+  lies beyond 1e150 now gets `NA` covariates, where it took those of a row
+  GEOS gave it; its `.pred` is `NA` as before.  Lines, polygons and
+  points in degrees are searched as before.  `?predict_surface`
+  (`covariates`) states the rule.
+
+* **The `attr(, "kmeans")` record of `get_voronoi_seeds()` for the scored
+  centres of a profile or selection gave a point the same distance from two
+  seeds to whichever `sf::st_nearest_feature()` returned, so `cluster`,
+  `size` and `withinss` moved with the unit and the origin, and could
+  differ from the cells the profile scored.**  On a 40 by 30 lattice at
+  250 m with the 267 centres of `resolution_profile(seed = 1)`, `cluster`
+  differed from the one in EPSG:26915 in 5 rows in UTM 15N in US feet and
+  in 2 with the false origin moved by 0.1 m, and in each frame 1 to 4 rows
+  were not in the cell the profile scored them in.  Each point now goes to
+  its nearest seed by the profile's rule: squared distances within one part
+  in ten million of the least are a tie, and a tie goes to the lower
+  `seed_id`.  The record then holds the profile's cells in every frame, and
+  `tot_withinss` scales with the square of the unit.  `?get_voronoi_seeds`
+  states the rule.
 
 * **`summarize_by_cell()` read columns at extreme scales as having no
   spread.**  The test compared the spread inside the cells with the size of

@@ -2401,7 +2401,10 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' When several parts share the greatest length (to one part in ten
 #' million, measured in the projection used), their midpoints are taken
 #' and the one lowest in x, then in y, is kept, so the point does not depend
-#' on the order in which the feature lists its parts.
+#' on the order in which the feature lists its parts.  x values within one
+#' part in ten million of the diagonal of the midpoints' bounding box count
+#' as one, so y decides between midpoints whose x differ only in their last
+#' bits, and the point does not move with the origin of the coordinates.
 #'
 #' A layer whose geometries do not all have the same dimensions (XY beside
 #' XYZ or XYM, as `rbind()` of an XY and an XYZ layer gives) is read in x
@@ -2736,15 +2739,20 @@ coerce_to_points <- function(
           # in the feature's part order, so the same geometry with its parts
           # listed the other way round got another point.  Lengths within
           # .TIE_TOL of the greatest are equal: congruent parts differ in
-          # their last bits after a shift of the origin.
+          # their last bits after a shift of the origin.  So do midpoints of
+          # one x reached from other coordinates, and x values within
+          # .TIE_TOL of the diagonal of the midpoints' box are one column
+          # (.near_columns()), so y decides between them.
           k    <- if (length(k)) which(lens >= lens[k] * (1 - .TIE_TOL)) else k
           mp   <- sf::st_line_sample(parts[k], sample = 0.5)
           mp   <- sf::st_cast(mp, "POINT")
           mp   <- .back_to_input_crs(mp, g_mls_proj, crs)
           if (length(mp) > 1L) {
-            # x, then y, then Z or M where the parts carry them.
+            # The column of x, then y, then Z or M where the parts carry
+            # them, then x.
             xy <- unname(as.data.frame(sf::st_coordinates(mp)))
-            mp <- mp[do.call(order, xy)[1L]]
+            mp <- mp[do.call(order, c(list(.near_columns(xy[[1L]], xy[[2L]])),
+                                      xy[-1L], xy[1L]))[1L]]
           }
           out[[idx_mls[j]]] <- mp[[1]]
         }

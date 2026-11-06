@@ -76,7 +76,18 @@ the fit's CRS as \code{grid} is, with the same warning when it has no
 CRS.  Read in x and y: a layer whose geometries mix XY with XYZ or XYM,
 or carry M, is read without its Z and M, with no warning.  A row
 without a location (an empty geometry, or a coordinate that is not
-finite or lies beyond 1e150) is never the nearest feature.}
+finite or lies beyond 1e150) is never the nearest feature.  A grid
+point the same distance from several points of \code{covariates}
+(squared distances within one part in ten million of the least) takes
+the one lowest in x, x values within one part in ten million of the
+diagonal of the points' bounding box counting as one, then the one
+lowest in y, then the first in row order, so a grid laid between the
+points of a lattice takes the same covariates in another unit or with
+another origin, and with or without the \pkg{FNN} package.  For lines
+and polygons, and for points in degrees, the nearest feature is
+\code{sf::st_nearest_feature()}'s, which settles such a tie in the
+order its search meets the features (GEOS, or s2 for a layer in
+degrees while \code{sf::sf_use_s2()} is on).}
 
 \item{chunk_size}{Rows per prediction call. Default 5000.  A pure
 performance knob: rows do not interact, and for a \code{bayesian_fit} the

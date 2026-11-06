@@ -195,8 +195,12 @@ with unusable coordinates are dropped first), \code{size} (points per seed),
 \code{iter} and \code{nstart}. For the scored centres of a selection or profile
 (see \code{n}) it describes \code{sample_points} assigned to them, each point to
 its nearest seed, with \code{iter} \code{NA} and \code{nstart} the profile's restarts,
-and is absent when no \code{sample_points} were given. Under \code{partition = "density"} \code{withinss} and \code{tot_withinss} count every point once, about
-its cell's mean. A run this call makes with \code{partition = "density"} or
+and is absent when no \code{sample_points} were given. A point the same
+distance from two seeds (squared distances within one part in ten
+million) goes to the lower \code{seed_id}, the rule the profile scores its
+cells by, so the record is the same in another unit or with another
+origin. Under \code{partition = "density"} \code{withinss} and \code{tot_withinss}
+count every point once, about its cell's mean. A run this call makes with \code{partition = "density"} or
 \code{init = "kmeans++"} also records \code{converged}, whether the kept start
 stopped before \code{kmeans_iter}, and under \code{partition = "density"}
 \code{objective}, the weighted sum the seeds minimise; scored centres have
