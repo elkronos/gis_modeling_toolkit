@@ -299,12 +299,34 @@
   # the same information and the same standardised values, but only the first
   # survived -- and the second's absence flipped an obvious extrapolation
   # (DI 25.9, outside the AOA) into a point comfortably inside it (DI 0.03).
-  # The manual says "predictors with zero variance are dropped"; scale the test
-  # by the column's own magnitude so that is what it means.
+  # The bound below compares the standard deviation with the column's largest
+  # absolute value, that is with its distance from 0, not with its spread: it
+  # keeps every column whose spread is more than 1.5e-8 of its size, and
+  # nothing more.
   mag  <- apply(abs(X_train), 2L, function(z) max(z, na.rm = TRUE))
   mag[!is.finite(mag) | mag <= 0] <- 1
   keep <- is.finite(ctr) & is.finite(scl) & scl > tol * mag
   names(keep) <- colnames(X_train)
+  # A column the bound drops is read a second time, as the fits read a
+  # column: dropped only when .constant_column() finds it constant, its values
+  # differing by no more than their rounding.  A predictor at an offset (a
+  # timestamp at 1.7e9, a value at 1e8 with sd 1) has spread there, and its
+  # centre and standard deviation are taken on .spread_scaled(), which
+  # holds them where the raw squares would overflow or vanish.  Columns the
+  # bound keeps are untouched.
+  num   <- if (is.null(indicator)) rep(TRUE, ncol(X_train)) else !indicator
+  again <- which(!keep & num)
+  for (j in again) {
+    x  <- X_train[, j]
+    if (!all(is.finite(x)) || .constant_column(x)) next
+    sx <- .spread_scaled(x)
+    cj <- sx$centre + sx$scale * mean(sx$y)
+    sj <- sx$scale * stats::sd(sx$y)
+    if (!(is.finite(cj) && is.finite(sj) && sj > 0)) next
+    ctr[j]  <- cj
+    scl[j]  <- sj
+    keep[j] <- TRUE
+  }
   if (!is.null(indicator) && any(indicator)) {
     for (v in unique(col_var[indicator])) {
       cols <- which(indicator & col_var == v)
@@ -1242,12 +1264,16 @@
 #' categorical predictors out and computes the index on the others; a level
 #' the training data never has then goes unseen.
 #'
-#' Predictors whose variance is negligible \emph{relative
-#' to their own magnitude} (the test is
-#' \code{sd < sqrt(.Machine$double.eps) * max(abs(x))}, so the same variable in
-#' metres and in gigametres is treated identically) are dropped from the
-#' distance. A prediction point taking a value there outside the training
-#' range (with the same relative tolerance) is extrapolation along a direction
+#' Predictors whose training values do not vary beyond their rounding are
+#' dropped from the distance. A predictor is kept when
+#' \code{sd > sqrt(.Machine$double.eps) * max(abs(x))}, and otherwise when its
+#' standard deviation is more than 3 units in the last place of
+#' \code{max(abs(x))}. The same variable in metres and in gigametres is
+#' treated identically, and a predictor at an offset (a timestamp in seconds)
+#' is kept as it is at 0. A prediction point taking a value there outside the
+#' training range by more than 3 units in the last place of
+#' \code{max(abs(x))} (of 1 for a column of zeros) is extrapolation along a
+#' direction
 #' the training data never varied in: its scaled distance along it is
 #' infinite, so it gets \code{DI = Inf}, is outside the AOA, and a warning
 #' gives the count. A point missing that value is judged on the other
@@ -1940,16 +1966,24 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   # training region put 37 of 40 urban rows inside the AOA, while ONE urban
   # training row would have kept the predictor and put 1 inside.  Along that
   # direction the scaled distance is (x - c) / 0, infinite, so that is the DI.
-  # "Different" means outside the training range by more than the relative
-  # tolerance .aoa_scaling() drops the predictor with; a missing value cannot
-  # be compared and leaves the row to the other predictors.
+  # "Different" means outside the training range by more than the rounding of
+  # the column's values, .POOL_ULPS units in the last place of the larger of
+  # |lo| and |hi|, the rounding .aoa_scaling() drops the column within: a
+  # constant timestamp at 1.7e9 is stored to 2.4e-7, and a row 25 seconds
+  # away is a different value.  A column of zeros is given the rounding of a
+  # value of 1, so a land-cover dummy that is 0 throughout reads 1e-17 as 0.
+  # Below about 1e-292 .ulp_of() underflows to 0; the rounding of a value
+  # there is the smallest positive double, 2^-1074.
+  # A missing value cannot be compared and leaves the row to the other
+  # predictors.
   if (length(dropped_cols) > 0L) {
     Xd_tr <- X_tr_full[, dropped_cols, drop = FALSE]
     lo    <- apply(Xd_tr, 2L, min)
     hi    <- apply(Xd_tr, 2L, max)
-    mag   <- pmax(abs(lo), abs(hi))
-    mag[!is.finite(mag) | mag <= 0] <- 1
-    slack <- .Machine$double.eps^0.5 * mag
+    slack <- vapply(seq_along(lo), function(j) {
+      if (!(max(abs(lo[j]), abs(hi[j])) > 0)) return(.POOL_ULPS * .Machine$double.eps)
+      .POOL_ULPS * max(.ulp_of(c(lo[j], hi[j])), 2^-1074)
+    }, numeric(1))
     Xd_nw <- X_nw_full[, dropped_cols, drop = FALSE]
     off   <- sweep(Xd_nw, 2L, lo - slack, "<") | sweep(Xd_nw, 2L, hi + slack, ">")
     off[is.na(off)] <- FALSE

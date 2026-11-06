@@ -349,12 +349,16 @@ and a warning gives the count. \code{categorical = "drop"} leaves the
 categorical predictors out and computes the index on the others; a level
 the training data never has then goes unseen.
 
-Predictors whose variance is negligible \emph{relative
-to their own magnitude} (the test is
-\code{sd < sqrt(.Machine$double.eps) * max(abs(x))}, so the same variable in
-metres and in gigametres is treated identically) are dropped from the
-distance. A prediction point taking a value there outside the training
-range (with the same relative tolerance) is extrapolation along a direction
+Predictors whose training values do not vary beyond their rounding are
+dropped from the distance. A predictor is kept when
+\code{sd > sqrt(.Machine$double.eps) * max(abs(x))}, and otherwise when its
+standard deviation is more than 3 units in the last place of
+\code{max(abs(x))}. The same variable in metres and in gigametres is
+treated identically, and a predictor at an offset (a timestamp in seconds)
+is kept as it is at 0. A prediction point taking a value there outside the
+training range by more than 3 units in the last place of
+\code{max(abs(x))} (of 1 for a column of zeros) is extrapolation along a
+direction
 the training data never varied in: its scaled distance along it is
 infinite, so it gets \code{DI = Inf}, is outside the AOA, and a warning
 gives the count. A point missing that value is judged on the other

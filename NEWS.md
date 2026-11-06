@@ -2023,6 +2023,32 @@ old behaviour where there is a way.
   "missing predictor values" for a row with an infinite predictor or no
   location.
 
+* **`area_of_applicability()` dropped a predictor at a large offset as
+  having no variance.**  Its test kept a predictor only where the standard
+  deviation was more than 1.5e-8 of the largest absolute value, which reads
+  the column's distance from 0, not its spread.  A predictor with standard
+  deviation 1 at 1e8, or a timestamp in seconds, was dropped with the log
+  line "dropping predictor(s) with no variance in the training data", the
+  index was computed on the other predictors, and new rows were read on
+  that predictor through the slack of a dropped column instead: at 1e8,
+  rows more than 1.5 beyond the training range got `DI = Inf`, the others
+  were judged on the other predictors alone, and the threshold fell from
+  0.306 to 0.048; at 1.7e9, 19 of 20 rows 4 standard deviations out were
+  inside the AOA, and at 1e15, 20 of 20 rows 6 out.  A predictor the test drops is now
+  kept where its values differ by more than their rounding (3 units in the
+  last place of the largest absolute value), with its training mean and
+  standard deviation in `scaling`, so `dropped_vars`, `DI`, the threshold
+  and `AOA` are those of the same predictor at 0.  The same reading keeps
+  a predictor in units whose squares vanish or overflow (standard deviation
+  1e-170 or 1e200), which was dropped too.  A predictor still
+  dropped reads a new row as a different value when it lies outside the
+  training range by more than 3 units in the last place of the training
+  values, where the slack was 1.5e-8 of their size: 25 for a constant
+  timestamp at 1.7e9, so a row 25 seconds away was not extrapolation.  For
+  a predictor that is 0 throughout, the slack is 3 units in the last place
+  of 1 (6.7e-16) where it was 1.5e-8.  Predictors the first test keeps
+  give what they gave.
+
 * **`gp_lengthscale_bounds()` read every row of `coords_xy`.**  A row of
   `NA` stopped it with base R's "missing values and NaN's not allowed if
   'na.rm' is FALSE", and a row at `Inf` or 1e200 made the upper bound
