@@ -256,7 +256,9 @@ test_that(".reml_trend() orders a lattice's rows by columns, and other layers as
   xy <- sf::st_coordinates(J$m)
   full <- rows_of(J$m, 1000L)
   o <- order(xy[, 1], xy[, 2])
-  expect_identical(full$z, J$m$z[o])
+  # gls() reads the response in the frame of its range (test-fix-reml-frame.R),
+  # a map that keeps the order of the values.
+  expect_identical(full$z, as.numeric(.kmeans_frame(matrix(J$m$z[o], ncol = 1L))$z))
 })
 
 # The lattice of the item's reproduction: 250 m spacing in EPSG:26915, a

@@ -4139,6 +4139,35 @@ old behaviour where there is a way.
   coordinates come that close get the order, the subsample and the result
   they got before.
 
+* **`estimate_sac_range(detrend = "reml")` gave REML in one unit or origin
+  and fell back to OLS in another where the REML range is not
+  identified.**  On 100 to 150 points of a lattice the REML range can run
+  to 1e8 m and more with a nugget proportion near 1e-6.  The likelihood is
+  flat there, and whether `nlme::gls()` returned a fit or failed on the
+  same rows was set by the last bits of the coordinates it was handed as
+  supplied.  On a 20 by 15 lattice at 250 m with `reml_max_n = 100`,
+  EPSG:26915 gave `detrend_method` `"reml"` and a nugget of 0.217, and UTM
+  15N in US feet and the false origin moved by 0.1 m gave `"ols"`, a nugget
+  of 0.154 and the warning that the REML detrending did not converge.  On a
+  24 by 18 lattice with `reml_max_n = 120` it was the other way round.  The
+  REML fit now reads the coordinates of the rows it uses centred on the
+  middle of their bounding box, divided by its diagonal and rounded to
+  2^-30 of it (about a billionth), as the partition hands them to
+  `stats::kmeans()`, and its range is multiplied back into the layer's
+  unit.  The response and each numeric predictor, whose unit and last bits
+  set the outcome the same way (the response times 1000, or changed by two
+  units in the last place, gave `"reml"` where the response as given gave
+  `"ols"`), are read in the
+  same frame of their range, and the coefficients, the variance and the
+  log-likelihoods are taken back to their units.  The extent that bounds
+  the starting ranges no longer has a floor of 1 in the layer's unit, which
+  on a layer under 1 km across in km set other starts than in metres.
+  `gls()` then gets the same input in every unit and origin, and every
+  configuration tried gives one `detrend_method`, one warning and one
+  nugget in each.  The range is `NA` on both lattices, before and after.
+  On a 40 by 30 lattice whose REML range is identified, and on the same
+  lattice jittered, the range changed in the sixth digit or less.
+
 * **`kriging_adequacy()` kriged a response at a large offset on the
   rounding of the offset.**  At 1e15 plus a spread of 1 a double holds the
   values to an eighth, and the replicate means, the kriged and plain cell

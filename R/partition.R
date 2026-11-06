@@ -341,9 +341,10 @@
 #'
 #' @param xy Numeric matrix of finite coordinates, in the caller's unit.
 #' @return A list: \code{z} (the matrix in the frame, with the dimnames of
-#'   \code{xy}) and \code{to} (the function that maps a matrix of points in
+#'   \code{xy}), \code{to} (the function that maps a matrix of points in
 #'   the caller's coordinates, such as starting centres, to the frame,
-#'   rounded).
+#'   rounded), \code{mid} (the middle of the bounding box) and \code{scale}
+#'   (its diagonal, 1 for one location), in the caller's unit.
 #' @keywords internal
 #' @noRd
 .kmeans_frame <- function(xy) {
@@ -370,7 +371,7 @@
   nd <- tabulate(gz[!duplicated(kx)], nbins = max(gz))
   merged <- nd[gz] > 1L
   if (any(merged)) z[merged, ] <- scaled(xy[merged, , drop = FALSE])
-  list(z = z, to = to)
+  list(z = z, to = to, mid = mid, scale = d)
 }
 
 

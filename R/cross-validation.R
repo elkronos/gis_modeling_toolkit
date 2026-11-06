@@ -1861,24 +1861,51 @@
 #' with the largest log-likelihood is kept.  A fit is not discarded for a
 #' nugget near 0 or near 1: the likelihood decides.
 #'
+#' The sort and both draws read the coordinates as given.  The fit then
+#' reads the coordinates of the rows it uses in the frame of
+#' \code{.kmeans_frame()}: centred on the middle of their bounding box,
+#' divided by its diagonal and rounded to \code{.KMEANS_STEP}
+#' (\eqn{2^{-30}}) of it.  The distances, the grid of starting ranges, the
+#' extent-based starts and every \code{gls()} call are in that frame.
+#' Where the REML range is not identified (on 100 to 150 points of a
+#' lattice it runs to 1e8 m and more, with a nugget proportion near 1e-6)
+#' the likelihood is flat, and whether \code{gls()} returned a fit or failed
+#' on the same rows was set by the last bits of the coordinates, which move
+#' with the unit and the origin.
+#' In the frame it gets the same coordinates in each, but for a location
+#' within its own rounding noise of the middle of a step, about a billionth
+#' of the diagonal.  The last bits of the response and of the predictors set
+#' it too, and they move with their units, so the response and each numeric
+#' predictor that is a term of its own are read in the same frame of their
+#' range on those rows (\code{.reml_value_frame()}).  The range and
+#' \code{pair_floor} are returned in the caller's unit, and the
+#' coefficients, the variance and the log-likelihoods in the units of the
+#' response and the predictors; the nugget proportion depends on none of
+#' them.
+#'
 #' @param mf A model frame (trend formula already applied, incomplete rows
 #'   excluded) with the projected coordinates in columns \code{.sac_x} and
-#'   \code{.sac_y}, and its predictors and response at an offset taken about
-#'   their centres (\code{.centre_columns()}): \code{gls()} on a predictor
-#'   or a response at 1e8 plus a spread of 1 fails.
+#'   \code{.sac_y}, in the caller's unit and origin, and its predictors and
+#'   response at an offset taken about their centres
+#'   (\code{.centre_columns()}): \code{gls()} on a predictor or a response
+#'   at 1e8 plus a spread of 1 fails.
 #' @param fml The trend formula.
-#' @param extent A length scale of the layer, used to bound starting ranges.
+#' @param extent A length scale of the layer in the caller's unit, used to
+#'   bound starting ranges; it is divided by the diagonal and rounded to
+#'   \code{.KMEANS_STEP}, as the coordinates are.  One that is not finite
+#'   or not positive is read as the diagonal.
 #' @return \code{NULL} when no fit converged, else a list with \code{beta}
 #'   (named trend coefficients), \code{range} (the exponential range
-#'   parameter), \code{nugget_prop}, \code{sigma2}, \code{n_used},
-#'   \code{subsampled}, \code{n_colocated} (the rows left out because another
-#'   row of their location was drawn), \code{pair_floor} (the 30th-shortest
-#'   distance between the rows the fit used, after the draw of one row a
-#'   location and the subsample: the distance a range has to reach for 30
-#'   pairs of those points to lie inside it), \code{logLik} (the REML
-#'   log-likelihood of the fit kept), \code{logLik_null} (that of the same
-#'   trend with independent errors, \code{NA} when it could not be fitted)
-#'   and \code{n_fits} (how many starts were fitted).
+#'   parameter, in the caller's unit), \code{nugget_prop}, \code{sigma2},
+#'   \code{n_used}, \code{subsampled}, \code{n_colocated} (the rows left out
+#'   because another row of their location was drawn), \code{pair_floor}
+#'   (the 30th-shortest distance, in the caller's unit, between the rows the
+#'   fit used, after the draw of one row a location and the subsample: the
+#'   distance a range has to reach for 30 pairs of those points to lie inside
+#'   it), \code{logLik} (the REML log-likelihood of the fit kept),
+#'   \code{logLik_null} (that of the same trend with independent errors,
+#'   \code{NA} when it could not be fitted) and \code{n_fits} (how many
+#'   starts were fitted).
 #' @keywords internal
 #' @noRd
 .reml_trend <- function(mf, fml, extent, max_n = 400L, seed = 123L) {
@@ -1927,6 +1954,28 @@
   }
   n <- nrow(d)
   if (n < 30L) return(NULL)
+  # The fit reads the coordinates of these rows in the frame of
+  # .kmeans_frame(): centred on the middle of their bounding box, divided by
+  # its diagonal `dg` and rounded to .KMEANS_STEP.  Where the REML range is
+  # not identified the likelihood is flat, and whether gls() returns a fit
+  # there was set by the last bits of the coordinates, which move with the
+  # unit and the origin.  In this frame gls() gets the same coordinates in
+  # each.  The distances, the starting ranges and the extent are in
+  # diagonals, and the range and `pair_floor` go back multiplied by `dg`.
+  # An extent that is not positive is read as the diagonal.
+  kf <- .kmeans_frame(cbind(d$.sac_x, d$.sac_y))
+  dg <- kf$scale
+  d$.sac_x <- kf$z[, 1L]; d$.sac_y <- kf$z[, 2L]
+  if (!is.finite(extent) || extent <= 0) extent <- dg
+  extent <- round(extent / dg / .KMEANS_STEP) * .KMEANS_STEP
+  # The last bits of the response and the predictors set it as well, and
+  # those move with their units.  So the response and each numeric
+  # predictor that is a term of its own are read in the same frame of their
+  # range (centred on its middle, divided by it, rounded to .KMEANS_STEP),
+  # and the coefficients, the variance and the log-likelihoods are taken
+  # back below.  This needs an intercept, which reformulate() always gives.
+  vals <- .reml_value_frame(d, fml)
+  d <- vals$d
   # The REML range is fitted to these point pairs, not to a binned variogram,
   # so the shortest range it can identify is set by how many of them are
   # close: 30 pairs is the usual minimum per lag (Journel and Huijbregts).
@@ -2026,12 +2075,92 @@
   ll_null <- tryCatch(
     suppressWarnings(as.numeric(stats::logLik(nlme::gls(fml, data = d, method = "REML")))),
     error = function(e) NA_real_)
-  list(beta = best$beta, range = best$range, nugget_prop = best$nugget_prop,
-       sigma2 = best$sigma2, n_used = n, subsampled = subsampled,
+  # Back in the caller's units: a response divided by s_y and predictors
+  # divided by s_j multiply sigma2 by s_y^2, and the REML log-likelihood is
+  # that of the frame less (n - p) log(s_y) and the sum of log(s_j).
+  ll_shift <- (n - length(best$beta)) * log(vals$s_y) + sum(log(vals$s_x))
+  list(beta = vals$beta_back(best$beta), range = best$range * dg,
+       nugget_prop = best$nugget_prop,
+       sigma2 = best$sigma2 * vals$s_y^2, n_used = n, subsampled = subsampled,
        n_colocated = as.integer(n_colocated),
-       pair_floor = pair_floor, logLik = best$logLik,
-       logLik_null = if (length(ll_null) == 1L && is.finite(ll_null)) ll_null else NA_real_,
+       pair_floor = pair_floor * dg, logLik = best$logLik - ll_shift,
+       logLik_null = if (length(ll_null) == 1L && is.finite(ll_null)) ll_null - ll_shift
+                     else NA_real_,
        n_fits = n_fits)
+}
+
+
+#' The response and the numeric predictors of a REML fit in the frame of
+#' their range
+#'
+#' Each is centred on the middle of its range on the rows of the fit,
+#' divided by the range and rounded to \code{.KMEANS_STEP}
+#' (\code{.kmeans_frame()} on one column), so that \code{gls()} gets the
+#' same values whatever their unit and their last bits.  A predictor is
+#' read so only when it is numeric, finite on every row and a term of its
+#' own (one column of the design); others are left as they are.  Nothing
+#' is changed in a formula without an intercept or with a response that is
+#' not a numeric column of \code{d}.
+#'
+#' @param d The rows of the fit.
+#' @param fml The trend formula.
+#' @return A list: \code{d} (the rows with those columns replaced),
+#'   \code{s_y} (the scale of the response, 1 when it is left as it is),
+#'   \code{s_x} (the scales of the predictors read so) and
+#'   \code{beta_back} (a function of the coefficients of the fit in the
+#'   frame that returns those in the caller's units).
+#' @keywords internal
+#' @noRd
+.reml_value_frame <- function(d, fml) {
+  none <- list(d = d, s_y = 1, s_x = numeric(0), beta_back = function(b) b)
+  tt <- try(stats::terms(fml), silent = TRUE)
+  if (inherits(tt, "try-error") || !identical(attr(tt, "intercept"), 1L) ||
+      !identical(attr(tt, "response"), 1L)) return(none)
+  vars <- as.list(attr(tt, "variables"))[-1L]
+  is_col <- vapply(vars, function(e) is.name(e) && as.character(e) %in% names(d), TRUE)
+  if (!is_col[1L]) return(none)
+  nm <- vapply(vars, function(e) if (is.name(e)) as.character(e) else "", "")
+  usable <- function(v) is.numeric(v) && !is.matrix(v) && all(is.finite(v))
+  if (!usable(d[[nm[1L]]])) return(none)
+  X0 <- try(stats::model.matrix(fml, d), silent = TRUE)
+  if (inherits(X0, "try-error")) return(none)
+  asg <- attr(X0, "assign")
+  fac <- attr(tt, "factors")
+  # A predictor whose term is itself alone and gives one column.
+  scaled <- list()
+  for (k in seq_along(vars)[-1L]) {
+    if (!is_col[k] || !usable(d[[nm[k]]])) next
+    tk <- which(fac[k, ] > 0)
+    if (length(tk) != 1L || sum(fac[, tk] > 0) != 1L) next
+    col <- which(asg == tk)
+    if (length(col) != 1L) next
+    scaled[[nm[k]]] <- colnames(X0)[col]
+  }
+  one <- function(v) {
+    f <- .kmeans_frame(matrix(as.numeric(v), ncol = 1L))
+    list(z = as.numeric(f$z), mid = f$mid, scale = f$scale)
+  }
+  fy <- one(d[[nm[1L]]])
+  d[[nm[1L]]] <- fy$z
+  mid_x <- s_x <- numeric(0)
+  for (v in names(scaled)) {
+    fx <- one(d[[v]])
+    d[[v]] <- fx$z
+    mid_x[[v]] <- fx$mid; s_x[[v]] <- fx$scale
+  }
+  int <- colnames(X0)[asg == 0L]
+  # y = mid_y + s_y (b0 + sum b_j (x_j - mid_j) / s_j + sum b_k f_k).
+  beta_back <- function(b) {
+    out <- b * fy$scale
+    for (v in names(scaled)) {
+      cn <- scaled[[v]]
+      out[[cn]] <- fy$scale * b[[cn]] / s_x[[v]]
+    }
+    out[[int]] <- fy$mid + fy$scale * b[[int]] -
+      sum(vapply(names(scaled), function(v) out[[scaled[[v]]]] * mid_x[[v]], 0))
+    out
+  }
+  list(d = d, s_y = fy$scale, s_x = unname(s_x), beta_back = beta_back)
 }
 
 
@@ -2823,7 +2952,19 @@ sac_nugget <- function(x) {
 #' kept at or above zero; and the range is found by a search over a
 #' logarithmic grid from a quarter of the first lag to four cutoffs, refined
 #' in one dimension.  There is no start value, no iteration limit and no
-#' fit that fails to converge.
+#' fit that fails to converge.  With \code{detrend = "reml"} there is a
+#' fourth: the REML fit reads the coordinates of the rows it uses centred on
+#' the middle of their bounding box, divided by its diagonal and rounded to
+#' \eqn{2^{-30}} of it, and the response and each numeric predictor centred
+#' on the middle of their range on those rows, divided by it and rounded
+#' the same way; its range, coefficients and variance are taken back to
+#' the layer's units.  Where the REML range is not identified the
+#' likelihood is flat, and whether the fit converged or fell back to OLS
+#' was set by the last bits of the coordinates, the response and the
+#' predictors; in that frame it does not depend on their units or origins.
+#' A value within its own rounding noise of the middle of a step, about a
+#' billionth of the diagonal or the range, can still fall on either side of
+#' it.
 #'
 #' Only the exponential family is fitted.  On fields smoother than
 #' exponential that makes the range long, and blocks sized from it come out
@@ -3742,7 +3883,10 @@ estimate_sac_range <- function(points_sf, response_var,
       reml_y_centre <- if (is.null(attr(R, "centres"))) 0 else attr(R, "centres")[1L]
       attr(R, "centres") <- NULL
       mf[response_var] <- R
-      extent <- max(diff(range(xy[, 1L])), diff(range(xy[, 2L])), 1)
+      # In the caller's unit, with no floor: a floor of 1 in that unit set
+      # the starting ranges of a layer under 1 km across in km, and not in
+      # metres.  At least 30 locations reach here, so it is positive.
+      extent <- max(diff(range(xy[, 1L])), diff(range(xy[, 2L])))
       reml_fit <- .reml_trend(mf, fml, extent = extent, max_n = reml_max_n,
                               seed = seed)
       if (is.null(reml_fit)) {

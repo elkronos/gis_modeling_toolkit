@@ -368,7 +368,19 @@ trial range the nugget and the partial sill are solved exactly, with both
 kept at or above zero; and the range is found by a search over a
 logarithmic grid from a quarter of the first lag to four cutoffs, refined
 in one dimension.  There is no start value, no iteration limit and no
-fit that fails to converge.
+fit that fails to converge.  With \code{detrend = "reml"} there is a
+fourth: the REML fit reads the coordinates of the rows it uses centred on
+the middle of their bounding box, divided by its diagonal and rounded to
+\eqn{2^{-30}} of it, and the response and each numeric predictor centred
+on the middle of their range on those rows, divided by it and rounded
+the same way; its range, coefficients and variance are taken back to
+the layer's units.  Where the REML range is not identified the
+likelihood is flat, and whether the fit converged or fell back to OLS
+was set by the last bits of the coordinates, the response and the
+predictors; in that frame it does not depend on their units or origins.
+A value within its own rounding noise of the middle of a step, about a
+billionth of the diagonal or the range, can still fall on either side of
+it.
 
 Only the exponential family is fitted.  On fields smoother than
 exponential that makes the range long, and blocks sized from it come out
