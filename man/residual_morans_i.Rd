@@ -204,7 +204,9 @@ none differs from the OLS residuals by more than 1e-7 of the response's
 standard deviation, or where the differences are no more than the
 rounding a regression of the raw columns leaves: a root mean square of
 \eqn{10\epsilon} (\eqn{\epsilon} = \code{.Machine$double.eps}) times
-that of the fit's terms, the response's offset among them.  They also
+that of the fit's terms, among them the offset the fit regressed the
+response at (for a GWR that took the response about its centre, the
+offset left after that centre).  They also
 pass where none differs by more than 1e-7 of the response's standard
 deviation from the residuals \code{lm()} gives on the raw columns, where
 the raw design keeps the rank of the centred one: that rounding grows

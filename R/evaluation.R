@@ -456,9 +456,12 @@
 #' rounding of a regression on the size of its terms: a root mean square of
 #' \code{.FIT_EPS} \code{.Machine$double.eps} times that of the terms, as
 #' \code{.residuals_rounding()} takes it, the terms being those of the
-#' predictors as given and of the response's offset.  A backend that
-#' regressed the raw response at an offset returns residuals that carry that
-#' rounding.  The rounding of \code{lm()} grows with the rows, so the
+#' predictors as given and of the offset the fit regressed the response at.
+#' A backend that regressed the raw response at an offset returns residuals
+#' that carry that rounding.  A GWR that took the response about its centre
+#' returns the residuals of the centred response, which do not
+#' (\code{.morans_fit_centre()}): its offset is the response's centre less
+#' that centre.  The rounding of \code{lm()} grows with the rows, so the
 #' residuals also pass where they lie within 1e-7 of the response's standard
 #' deviation of the OLS residuals of the raw columns (\code{qr.resid()}, the
 #' arithmetic of \code{lm.fit()}), where the raw design has the rank of the
@@ -513,12 +516,15 @@
   # on, so it gives the same answer in any unit.  The rounding a regression
   # of the raw response leaves is bounded on the size of its terms: the
   # predictors as given (.rounding_design()) and the intercept with the
-  # response's centre put back.
+  # response's offset put back: the offset the fit regressed the response
+  # at, which is the response's centre less any centre the fit took off it
+  # and whose residuals it returns about that centre (.morans_fit_centre()).
   dif <- resid / resp$s - e_ols
   rd  <- .rounding_design(cf$X, b, cf$centres)
   br  <- as.numeric(rd$b)
   br[!is.finite(br)] <- 0
-  br[1L] <- br[1L] + resp$yc
+  fc  <- .morans_fit_centre(fit)
+  br[1L] <- br[1L] + if (fc == 0) resp$yc else resp$yc - fc / resp$s
   size <- drop(abs(rd$X) %*% abs(br))
   tol <- 1e-7 * .cell_sd(resp$ys)
   is_ols <- max(abs(dif)) <= tol ||
@@ -539,6 +545,30 @@
     }
   }
   list(X = cf$X, is_ols = isTRUE(is_ols), b = b, centres = cf$centres)
+}
+
+
+#' The centre a fit regressed its response about
+#'
+#' \code{fit_gwr_model()} takes a response at a large offset about a centre
+#' (\code{engine$centres$response}) and \code{residuals.gwr_fit()} returns
+#' the residuals of the centred response, which carry no rounding of that
+#' centre.  The rounding \code{.morans_ols_design()} allows such residuals
+#' is that of a regression at the offset left after the centre.
+#'
+#' @param fit A \code{spatial_fit}.
+#' @return The centre, in the response's units, for a \code{gwr_fit} that
+#'   records a finite non-zero one and keeps the residuals about it (the
+#'   case in which \code{residuals.gwr_fit()} returns them); 0 for any other
+#'   fit.
+#' @keywords internal
+#' @noRd
+.morans_fit_centre <- function(fit) {
+  if (!inherits(fit, "gwr_fit")) return(0)
+  fc <- tryCatch(fit$engine$centres$response, error = function(e) NULL)
+  if (!(is.numeric(fc) && length(fc) == 1L && is.finite(fc) && fc != 0)) return(0)
+  r <- tryCatch(fit$engine$SDF@data$residual, error = function(e) NULL)
+  if (is.numeric(r) && length(r) == nrow(fit$data_sf)) fc else 0
 }
 
 
@@ -711,7 +741,9 @@
 #' standard deviation, or where the differences are no more than the
 #' rounding a regression of the raw columns leaves: a root mean square of
 #' \eqn{10\epsilon} (\eqn{\epsilon} = \code{.Machine$double.eps}) times
-#' that of the fit's terms, the response's offset among them.  They also
+#' that of the fit's terms, among them the offset the fit regressed the
+#' response at (for a GWR that took the response about its centre, the
+#' offset left after that centre).  They also
 #' pass where none differs by more than 1e-7 of the response's standard
 #' deviation from the residuals \code{lm()} gives on the raw columns, where
 #' the raw design keeps the rank of the centred one: that rounding grows

@@ -3834,7 +3834,12 @@ old behaviour where there is a way.
   fit whose columns show their spread, with residuals above the bound, gives
   the numbers it gave, except that the kurtosis, and through it the
   randomisation variance, can differ in the last bit: R takes the fourth
-  power with `pow()`, which does not commute with the division.
+  power with `pow()`, which does not commute with the division.  The
+  rounding bound reads the offset the fit regressed the response at, so a
+  GWR that `fit_gwr_model()` took about the response's centre, at a
+  working bandwidth with the response at 1e15, is no longer read as OLS:
+  it took the residual null with `exact` `TRUE` where offset 0 gives the
+  randomisation null.
 
 * **The k-nearest-neighbour weights tied neighbour distances within 1e-9
   map units on any layer.**  The weights behind `residual_morans_i()`,
