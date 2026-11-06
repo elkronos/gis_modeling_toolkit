@@ -488,7 +488,18 @@ more removals in all on clustered layouts), erring towards held-out
 distances longer than the target.
 And ties in \eqn{G_j^*} are broken by the points' coordinates, not by
 their row index as in CAST, so the folds do not depend on the order of the
-rows.
+rows.  On gridded samples many distances tie, and the last bits of the
+coordinates, which move with the unit and the origin, would settle those
+ties.  So distances within one part in ten million of each other count as
+equal, when the held-out distances are counted, compared with the target
+and \code{phi}, and put in order; equal ones are taken by the column of
+the point (first coordinates within that part of the extent of the points
+count as one), then its second coordinate, counted the same way, then its
+row.  Each point's neighbours are put in order by the same rule, the
+package's tie rule, so of neighbours that are equally far away the same
+one is excluded first.  The folds are then the same in another unit or
+with another origin as long as no coordinate moves by more than about a
+two-hundred-millionth of the distance between neighbouring locations.
 
 Where neither limit binds, the realised distribution of
 \emph{nearest-neighbour distances} is then never shorter than the target:
@@ -543,7 +554,8 @@ more whenever \eqn{nm/(n+m) \le 9}: for nine folds or fewer whatever the
 number of prediction points, and for up to eighteen folds with as many
 prediction points.  There the same warning is raised in one case only,
 complete separation: every prediction point nearer to the data than any
-sample is to its nearest other sample (a deficit of exactly 1), provided
+sample is to its nearest other sample, by more than one part in ten
+million (a deficit of exactly 1), provided
 the two sets are large enough for that ordering to mean something, which
 is taken as \code{choose(n + m, n) >= 1000} ways of interleaving them (17
 prediction points for 3 folds, 7 for 6 folds, 4 for 12 folds).
@@ -585,7 +597,16 @@ longer affordable, k-means first reduces the samples to 4,000 groups
 (Lloyd's algorithm from random sample locations, at most ten passes) and
 Ward's method is continued from those groups; a count above 4,000 is a
 k-means run of its own.  \code{params$clustering} says which
-(\code{"ward"} or \code{"kmeans+ward"}).  Clusters are merged by the packing
+(\code{"ward"} or \code{"kmeans+ward"}).  Both read the coordinates
+centred on the middle of their bounding box, divided by its diagonal and
+rounded to \eqn{2^{-30}} of it (about a billionth), as the
+\code{"kmeans"} partition hands them to \code{stats::kmeans()}: on a
+lattice many merges and many assignments tie exactly, and the last bits of
+the coordinates, which move with the unit and the origin, would settle
+them.  A point as near two k-means centres to one part in ten million
+goes to the lower-numbered one.  The clusters are then the same in another
+unit or with another origin, but for a location within its own rounding
+noise of the middle of a step.  Clusters are merged by the packing
 \code{"block_kfold"} uses for its blocks, largest first and each to the
 fold with the fewest points so far (see \strong{Fold balance}).
 \code{CAST::knndm()} merges clusters by a rule of its own, which this was
@@ -593,7 +614,9 @@ fold with the fewest points so far (see \strong{Fold balance}).
 
 Each candidate is scored by the Wasserstein distance \eqn{W} between its
 held-out distances (each point's distance to the nearest point of another
-fold) and the target distances, and the smallest \eqn{W} is returned.  A
+fold) and the target distances, in the unit of the layer, and the
+smallest \eqn{W} is returned; of the candidates within one part in ten
+million of the smallest, the earliest in \code{params$candidates}.  A
 candidate is set aside without being scored when its largest fold leaves
 less than \code{min_train} of the rows for training or holds more than
 \code{balance_tol} times the points of its smallest; the random partition

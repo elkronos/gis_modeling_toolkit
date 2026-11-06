@@ -323,3 +323,253 @@ test_that(".edge_join() gives the same cells whichever layer it buffers", {
                      lapply(attr(all, "hits"), as.integer)[sub])
   }
 })
+
+
+# NNDM and kNNDM under the package's tie rule (BUG-102, BUG-103): the 20 x 15
+# lattice above predicted onto a 30 x 25 lattice at 400 m that starts 3 km
+# outside it, in metres, in UTM 15N US feet and with the false origin moved.
+.ft_pred <- function() {
+  g <- expand.grid(i = 0:29, j = 0:24)
+  sf::st_as_sf(data.frame(x = 4.5e5 - 3000 + g$i * 400, y = 4.55e6 - 3000 + g$j * 400),
+               coords = c("x", "y"), crs = .ft_crs_m())
+}
+.ft_train_sets <- function(r)
+  vapply(r$folds, function(s) paste(sort(s$train), collapse = ","), "")
+.ft_same_partition <- function(a, b) {
+  t <- table(a, b)
+  all(rowSums(t > 0) == 1) && all(colSums(t > 0) == 1)
+}
+
+test_that("nndm builds the same folds on a lattice in every frame", {
+  skip_on_cran()
+  F <- .ft_frames(.ft_lattice(20, 15)); P <- .ft_frames(.ft_pred())
+  res <- lapply(names(F), function(f) .ft_quiet(make_folds(
+    F[[f]], method = "nndm", prediction_points = P[[f]])))
+  names(res) <- names(F)
+  # Before, 195 (US feet) and 234 (origin moved) of the 300 training sets
+  # differed from those in metres: 60670, 61078 and 60845 training rows.
+  for (f in c("usft", "m01")) {
+    expect_identical(.ft_train_sets(res[[f]]), .ft_train_sets(res$m), info = f)
+    expect_identical(res[[f]]$params$n_removed_total, res$m$params$n_removed_total, info = f)
+    expect_identical(res[[f]]$params$n_at_min_train, res$m$params$n_at_min_train, info = f)
+    expect_equal(res[[f]]$params$realised_distances, .ft_len(F[[f]], res$m$params$realised_distances),
+                 tolerance = 1e-9, info = f)
+    expect_equal(res[[f]]$params$wasserstein, .ft_len(F[[f]], res$m$params$wasserstein),
+                 tolerance = 1e-9, info = f)
+  }
+  expect_identical(sum(lengths(lapply(res$m$folds, `[[`, "train"))), 60670L)
+})
+
+test_that("nndm on a jittered lattice is unchanged in every frame", {
+  skip_on_cran()
+  F <- .ft_frames(.ft_lattice(20, 15, jitter = 60)); P <- .ft_frames(.ft_pred())
+  res <- lapply(names(F), function(f) .ft_quiet(make_folds(
+    F[[f]], method = "nndm", prediction_points = P[[f]])))
+  for (r in res) expect_identical(sum(lengths(lapply(r$folds, `[[`, "train"))), 61090L)
+  expect_identical(.ft_train_sets(res[[2]]), .ft_train_sets(res[[1]]))
+  expect_identical(.ft_train_sets(res[[3]]), .ft_train_sets(res[[1]]))
+})
+
+test_that("nndm takes equidistant neighbours by the package's tie rule, with or without FNN", {
+  F <- .ft_frames(.ft_lattice(12, 9))
+  for (f in names(F)) {
+    xy  <- sf::st_coordinates(F[[f]])
+    key <- .nndm_tie_key(xy)
+    a <- .nndm_neighbours(xy, 40L, key, use_fnn = TRUE)
+    b <- .nndm_neighbours(xy, 40L, key, use_fnn = FALSE)
+    expect_identical(a$idx, b$idx, info = f)
+    expect_identical(a$d, b$d, info = f)
+    # The package's own search, .knn_pick_rows() under .knn_exact_rows().
+    expect_identical(a$idx, .knn_exact_rows(xy[, 1L], xy[, 2L], seq_len(nrow(xy)), 40L,
+                                            tol = .TIE_TOL, num = key), info = f)
+    if (f == "m") idx_m <- a$idx else expect_identical(a$idx, idx_m, info = f)
+  }
+  # The four nearest neighbours of an inner point go in the order of the
+  # column, then the second coordinate: left, below, above, right.
+  lat <- .ft_lattice(12, 9)
+  xy  <- sf::st_coordinates(.ft_frames(lat)$m01)
+  at  <- which(lat$i == 5 & lat$j == 4)
+  nb  <- .nndm_neighbours(xy, 4L, .nndm_tie_key(xy))$idx[at, ]
+  expect_identical(cbind(lat$i[nb], lat$j[nb]), cbind(c(4L, 5L, 5L, 6L), c(4L, 3L, 5L, 4L)))
+  # A co-located twin is the first neighbour on either path.
+  xy2 <- rbind(c(0, 0), c(0, 0), c(1, 0), c(0, 1), c(2, 2), c(3, 1))
+  for (fnn in c(TRUE, FALSE)) {
+    nb2 <- .nndm_neighbours(xy2, 3L, .nndm_tie_key(xy2), use_fnn = fnn)
+    expect_identical(nb2$idx[1:2, 1L], c(2L, 1L))
+    expect_identical(nb2$d[1:2, 1L], c(0, 0))
+  }
+})
+
+test_that("nndm's tie key orders by column and row, last bits counting as equal", {
+  xy <- rbind(c(1 + 1e-12, 1e-13), c(1, 1), c(0, 2), c(1 - 1e-12, 0), c(0, 1))
+  # Column 1 holds rows 3 and 5 (x = 0), column 2 rows 1, 2 and 4; rows 1
+  # and 4 tie on both coordinates and go by row, though row 4 has the lower
+  # x and the lower y.
+  expect_identical(.nndm_tie_key(xy), c(3L, 5L, 2L, 4L, 1L))
+})
+
+test_that("the ECDF deficit counts distances within the tie rule as one", {
+  # Before: 1, from the step between 250 - 1e-10 and 250 + 1e-10.
+  expect_identical(.ecdf_deficit(250 + 1e-10, 250 - 1e-10), 0)
+  expect_identical(.ecdf_deficit(250 - 1e-10, 250 + 1e-10), 0)
+  expect_identical(.ecdf_deficit(c(100, 300), c(200, 250)), 0.5)
+  # Prediction points 250 or 500 m apart beside the lattice, so prediction
+  # distances and held-out distances share lengths.  Before, with the same
+  # nndm folds in the three frames, nndm's max_ecdf_excess was 0.42, 0.42
+  # and 0.413 and its max_ecdf_deficit 0, 0 and 0.003 (250 m).
+  F <- .ft_frames(.ft_lattice(20, 15))
+  for (off in c(250, 500)) {
+    g <- expand.grid(i = 1:20, j = 0:14)
+    P <- .ft_frames(sf::st_as_sf(data.frame(x = 4.5e5 + 19 * 250 + g$i * off,
+                                            y = 4.55e6 + g$j * 250),
+                                 coords = c("x", "y"), crs = .ft_crs_m()))
+    for (meth in c("nndm", "knndm")) {
+      res <- lapply(names(F), function(f) .ft_quiet(make_folds(
+        F[[f]], k = 5, method = meth, seed = 1, prediction_points = P[[f]])))
+      for (nm in c("max_ecdf_excess", "max_ecdf_deficit", "loo_ecdf_deficit"))
+        for (r in res[-1])
+          expect_identical(r$params[[nm]], res[[1]]$params[[nm]], info = paste(meth, off, nm))
+    }
+  }
+})
+
+test_that("knndm builds the same folds and W on a lattice in every frame", {
+  skip_on_cran()
+  F <- .ft_frames(.ft_lattice(20, 15)); P <- .ft_frames(.ft_pred())
+  res <- lapply(names(F), function(f) .ft_quiet(make_folds(
+    F[[f]], k = 5, method = "knndm", seed = 1, prediction_points = P[[f]])))
+  names(res) <- names(F)
+  # Before, 170 (US feet) and 290 (origin moved) of the 300 rows were in
+  # another fold, and W was 1191.21, 1223.84 and 1288.05 m.
+  for (f in c("usft", "m01")) {
+    expect_identical(res[[f]]$assignment$fold, res$m$assignment$fold, info = f)
+    expect_identical(res[[f]]$params$chosen, res$m$params$chosen, info = f)
+    expect_equal(res[[f]]$params$wasserstein, .ft_len(F[[f]], res$m$params$wasserstein),
+                 tolerance = 1e-9, info = f)
+    expect_equal(res[[f]]$params$candidates$W, .ft_len(F[[f]], res$m$params$candidates$W),
+                 tolerance = 1e-9, info = f)
+  }
+})
+
+test_that("knndm on a jittered lattice is unchanged in every frame", {
+  skip_on_cran()
+  F <- .ft_frames(.ft_lattice(20, 15, jitter = 60)); P <- .ft_frames(.ft_pred())
+  res <- lapply(names(F), function(f) .ft_quiet(make_folds(
+    F[[f]], k = 5, method = "knndm", seed = 1, prediction_points = P[[f]])))
+  names(res) <- names(F)
+  for (f in names(F)) {
+    expect_equal(res[[f]]$params$wasserstein / .ft_len(F[[f]], 1), 1223.40, tolerance = 1e-5,
+                 info = f)
+    expect_identical(res[[f]]$assignment$fold, res$m$assignment$fold, info = f)
+  }
+})
+
+test_that("knndm's k-means and its kmeans+ward path give the same clusters in every frame", {
+  skip_on_cran()
+  F <- .ft_frames(.ft_lattice(40, 30))
+  cl <- lapply(F, function(l) {
+    z <- .kmeans_frame(unname(sf::st_coordinates(l)))$z
+    lapply(c(TRUE, FALSE), function(fnn) withr::with_seed(7, .knndm_kmeans(
+      z, z[!duplicated(z), ], 150L, use_fnn = fnn)))
+  })
+  for (f in names(F)) {
+    # With and without FNN: the same nearest centre, ties to the lower one.
+    expect_identical(cl[[f]][[1]], cl[[f]][[2]], info = f)
+    expect_identical(cl[[f]][[1]], cl$m[[1]], info = f)
+  }
+  # Ward's method continued from k-means groups.  The target is the
+  # distance from a coarser lattice of prediction points.
+  pr <- sf::st_coordinates(.ft_frames(.ft_pred())$m)
+  res <- lapply(F, function(l) {
+    xy <- unname(sf::st_coordinates(l))
+    gt <- FNN::get.knnx(xy, if (isTRUE(sf::st_crs(l) == .ft_crs_m())) pr
+                            else sf::st_coordinates(sf::st_transform(
+                              .ft_pred(), sf::st_crs(l))), k = 1)$nn.dist[, 1]
+    withr::with_seed(3, .knndm_folds(xy, gt, 5L, ward_max = 300L))
+  })
+  for (f in names(F)) {
+    expect_identical(res[[f]]$clustering, "kmeans+ward")
+    expect_identical(res[[f]]$fold, res$m$fold, info = f)
+    expect_identical(res[[f]]$chosen, res$m$chosen, info = f)
+  }
+})
+
+test_that("nndm compares held-out distances with phi under the tie rule", {
+  skip_on_cran()
+  # phi at a length of the lattice: held-out distances of 500 m or of the
+  # diagonal are at phi but for their last bits.  Before, with phi = 500 m,
+  # 239 of the 300 training sets in US feet differed from those in metres,
+  # and n_removed_total was 2675, 1812 and 2675.
+  F <- .ft_frames(.ft_lattice(20, 15)); P <- .ft_frames(.ft_pred())
+  for (phi_m in c(500, 250 * sqrt(2))) {
+    res <- lapply(names(F), function(f) .ft_quiet(make_folds(
+      F[[f]], method = "nndm", prediction_points = P[[f]], phi = .ft_len(F[[f]], phi_m))))
+    names(res) <- names(F)
+    for (f in c("usft", "m01")) {
+      expect_identical(.ft_train_sets(res[[f]]), .ft_train_sets(res$m), info = paste(phi_m, f))
+      expect_identical(res[[f]]$params$n_removed_total, res$m$params$n_removed_total,
+                       info = paste(phi_m, f))
+    }
+    expect_equal(res$m$params$n_removed_total, if (phi_m == 500) 2675 else 1812,
+                 info = phi_m)
+  }
+})
+
+test_that("knndm keeps the earlier of candidates with the same W in every frame", {
+  skip_on_cran()
+  # An 8 x 8 lattice predicted onto a 12 x 12 lattice at 250 / 3 m from the
+  # same corner: many candidates share a W.  Before, 45 of the 64 rows in US
+  # feet and with the origin moved were in another fold than in metres, with
+  # 38, 63 and 63 clusters.
+  g <- expand.grid(i = 0:11, j = 0:11)
+  P <- .ft_frames(sf::st_as_sf(data.frame(x = 4.5e5 + g$i * 250 / 3, y = 4.55e6 + g$j * 250 / 3),
+                               coords = c("x", "y"), crs = .ft_crs_m()))
+  F <- .ft_frames(.ft_lattice(8, 8))
+  res <- lapply(names(F), function(f) .ft_quiet(make_folds(
+    F[[f]], k = 4, method = "knndm", seed = 1, prediction_points = P[[f]])))
+  names(res) <- names(F)
+  W <- res$m$params$candidates$W
+  expect_true(any(duplicated(signif(W[is.finite(W)], 12))))
+  for (f in c("usft", "m01")) {
+    expect_identical(res[[f]]$assignment$fold, res$m$assignment$fold, info = f)
+    expect_identical(res[[f]]$params$n_clusters, res$m$params$n_clusters, info = f)
+    expect_identical(res[[f]]$params$chosen, res$m$params$chosen, info = f)
+  }
+})
+
+test_that("knndm takes the earliest candidate within the tie rule of the least W", {
+  # W values 1, 1 - 0.6e-7 and 1 - 1.2e-7 in turn: the second and third are
+  # within one part in ten million of each other and of the least, so the
+  # second is returned.  Replacing the best only when lower by more than the
+  # tolerance took the third.
+  w <- c(1, 1 - 0.6e-7, 1 - 1.2e-7)
+  i <- 0L
+  local_mocked_bindings(.fold_sep_compare = function(a, b, ...) {
+    i <<- i + 1L
+    list(w1 = if (i <= length(w)) w[i] else 2)
+  })
+  xy <- as.matrix(expand.grid(x = 0:5, y = 0:5)) * 250
+  res <- withr::with_seed(1, .knndm_folds(xy, rep(300, 20), 2L, use_fnn = FALSE))
+  sc  <- which(is.finite(res$candidates$W))
+  expect_gte(length(sc), 3L)
+  expect_identical(res$candidates$W[sc[1:3]], w)
+  expect_identical(res$chosen, sc[2])
+  # An exact tie goes to the earlier candidate, the random partition first.
+  w <- c(1, 1, 1 - 0.6e-7); i <- 0L
+  res <- withr::with_seed(1, .knndm_folds(xy, rep(300, 20), 2L, use_fnn = FALSE))
+  expect_identical(res$chosen, 1L)
+  expect_identical(res$fold, withr::with_seed(1, .random_fold_labels(36L, 2L)))
+})
+
+test_that("nndm's complete separation counts distances within the tie rule as equal", {
+  # The largest prediction distance and the least leave-one-out distance
+  # differ in their last bits only.  Before, separated was TRUE in one order
+  # and FALSE in the other, so it moved with the frame.
+  a <- .nndm_reach(c(250 + 1e-10, 300, 400), c(100, 250 - 1e-10))
+  b <- .nndm_reach(c(250 - 1e-10, 300, 400), c(100, 250 + 1e-10))
+  expect_false(a$separated)
+  expect_false(b$separated)
+  expect_identical(a$deficit, b$deficit)
+  expect_true(.nndm_reach(c(251, 300, 400), c(100, 250))$separated)
+  expect_identical(.nndm_reach(c(251, 300, 400), c(100, 250))$deficit, 1)
+})

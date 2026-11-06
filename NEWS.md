@@ -4345,6 +4345,49 @@ old behaviour where there is a way.
   were in metres.  Layers whose points sit off the block edges and the
   buffer distance get the same folds as before.
 
+* **`make_folds(method = "nndm")` and `method = "knndm"` let the unit and the
+  origin of the coordinates choose the folds of a lattice.**  On gridded
+  samples many neighbour distances tie.  NNDM took each point's neighbours
+  in the order FNN's kd-tree or `order()` gave equidistant ones, broke ties
+  between held-out distances by the exact order of the coordinates, and
+  counted, compared with the target and inserted its distances exactly, so
+  the last bits of the coordinates settled each tie.  On a 20 x 15 lattice
+  at 250 m predicted onto a 30 x 25 lattice at 400 m, 195 of the 300
+  training sets in UTM 15N in US feet differed from those in EPSG:26915,
+  and 234 with the false origin moved by 0.1 m.  kNNDM handed Ward's method
+  and its k-means the coordinates as given and assigned each point to the
+  centre FNN or `sf::st_nearest_feature()` returned, so on the same layers
+  with `k = 5` 170 and 290 of the 300 rows were in another fold, and the
+  `wasserstein` reported was 1191.21, 1223.84 and 1288.05 m.  NNDM now
+  orders each point's neighbours by the package's tie rule (squared
+  distances within one part in ten million count as equal, a tie goes to
+  the lower column, then the lower second coordinate, then the lower row),
+  and treats distances within that part of each other as equal in its
+  sweep and in its comparisons with the target and with `phi`.  kNNDM's
+  Ward clustering and k-means read the coordinates centred on the middle of
+  their bounding box, divided by its diagonal and rounded to 2^-30 of it,
+  as the `"kmeans"` partition does; a point as near two centres to one part
+  in ten million goes to the lower-numbered one, with or without FNN; and
+  of the candidates whose W is within that part of the least, the earliest
+  is returned.  The held-out distances and W are in the layer's unit as
+  before.  `params$max_ecdf_excess`, `params$max_ecdf_deficit` and
+  `params$loo_ecdf_deficit` count distances within the same part as equal
+  too: with prediction points beside a lattice, prediction and held-out
+  distances share lengths, and the step between them changed these figures
+  from frame to frame (with the same NNDM folds in all three,
+  `max_ecdf_excess` 0.42, 0.42 and 0.413 and `max_ecdf_deficit` 0, 0 and
+  0.003).  `params$target_separated`, and the out-of-reach warning it can
+  raise on small samples, take a prediction distance within that part of
+  a leave-one-out distance as not shorter.  The folds and these figures are
+  now the same in every frame.
+  They need not be the ones any frame gave before: in metres 62 of the 300
+  NNDM training sets exclude other neighbours at the same distance, with
+  60670 training rows in all as before, and kNNDM can return another
+  candidate.  Layers on which no two distances lie within one part in ten
+  million of each other, such as that lattice jittered by up to 60 m, get
+  the same folds as before.  On scattered points such pairs occur by
+  chance: on 800 uniform points 2 of the 800 NNDM training sets changed.
+
 * **`kriging_adequacy()` kriged points XYZ throughout in three
   dimensions.**  `gstat::krige()` uses every coordinate dimension of its
   locations, while the variogram is fitted in x and y, so the heights moved

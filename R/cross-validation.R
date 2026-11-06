@@ -5270,7 +5270,18 @@ print.sac_range <- function(x, ...) {
 #' distances longer than the target.
 #' And ties in \eqn{G_j^*} are broken by the points' coordinates, not by
 #' their row index as in CAST, so the folds do not depend on the order of the
-#' rows.
+#' rows.  On gridded samples many distances tie, and the last bits of the
+#' coordinates, which move with the unit and the origin, would settle those
+#' ties.  So distances within one part in ten million of each other count as
+#' equal, when the held-out distances are counted, compared with the target
+#' and \code{phi}, and put in order; equal ones are taken by the column of
+#' the point (first coordinates within that part of the extent of the points
+#' count as one), then its second coordinate, counted the same way, then its
+#' row.  Each point's neighbours are put in order by the same rule, the
+#' package's tie rule, so of neighbours that are equally far away the same
+#' one is excluded first.  The folds are then the same in another unit or
+#' with another origin as long as no coordinate moves by more than about a
+#' two-hundred-millionth of the distance between neighbouring locations.
 #'
 #' Where neither limit binds, the realised distribution of
 #' \emph{nearest-neighbour distances} is then never shorter than the target:
@@ -5325,7 +5336,8 @@ print.sac_range <- function(x, ...) {
 #' number of prediction points, and for up to eighteen folds with as many
 #' prediction points.  There the same warning is raised in one case only,
 #' complete separation: every prediction point nearer to the data than any
-#' sample is to its nearest other sample (a deficit of exactly 1), provided
+#' sample is to its nearest other sample, by more than one part in ten
+#' million (a deficit of exactly 1), provided
 #' the two sets are large enough for that ordering to mean something, which
 #' is taken as \code{choose(n + m, n) >= 1000} ways of interleaving them (17
 #' prediction points for 3 folds, 7 for 6 folds, 4 for 12 folds).
@@ -5367,7 +5379,16 @@ print.sac_range <- function(x, ...) {
 #' (Lloyd's algorithm from random sample locations, at most ten passes) and
 #' Ward's method is continued from those groups; a count above 4,000 is a
 #' k-means run of its own.  \code{params$clustering} says which
-#' (\code{"ward"} or \code{"kmeans+ward"}).  Clusters are merged by the packing
+#' (\code{"ward"} or \code{"kmeans+ward"}).  Both read the coordinates
+#' centred on the middle of their bounding box, divided by its diagonal and
+#' rounded to \eqn{2^{-30}} of it (about a billionth), as the
+#' \code{"kmeans"} partition hands them to \code{stats::kmeans()}: on a
+#' lattice many merges and many assignments tie exactly, and the last bits of
+#' the coordinates, which move with the unit and the origin, would settle
+#' them.  A point as near two k-means centres to one part in ten million
+#' goes to the lower-numbered one.  The clusters are then the same in another
+#' unit or with another origin, but for a location within its own rounding
+#' noise of the middle of a step.  Clusters are merged by the packing
 #' \code{"block_kfold"} uses for its blocks, largest first and each to the
 #' fold with the fewest points so far (see \strong{Fold balance}).
 #' \code{CAST::knndm()} merges clusters by a rule of its own, which this was
@@ -5375,7 +5396,9 @@ print.sac_range <- function(x, ...) {
 #'
 #' Each candidate is scored by the Wasserstein distance \eqn{W} between its
 #' held-out distances (each point's distance to the nearest point of another
-#' fold) and the target distances, and the smallest \eqn{W} is returned.  A
+#' fold) and the target distances, in the unit of the layer, and the
+#' smallest \eqn{W} is returned; of the candidates within one part in ten
+#' million of the smallest, the earliest in \code{params$candidates}.  A
 #' candidate is set aside without being scored when its largest fold leaves
 #' less than \code{min_train} of the rows for training or holds more than
 #' \code{balance_tol} times the points of its smallest; the random partition
@@ -6928,66 +6951,37 @@ make_folds <- function(points_sf, k,
     # paper's procedure.
     k_need <- as.integer(min(n - 1L, ceiling(n - 1L - rmin) + 1L))
     k_need <- max(1L, k_need)
-    if (requireNamespace("FNN", quietly = TRUE)) {
-      kn <- FNN::get.knn(xy, k = min(k_need + 1L, n - 1L))
-      nn_d <- kn$nn.dist; nn_i <- kn$nn.index
-      # Release get.knn()'s own copy now.  While it is referenced, the
-      # repair below and the column subset after it work on duplicates, and
-      # the originals -- two n x n/2 tables, a few hundred MB at the 5000
-      # cap -- stayed alive beside them through the sweep and the splits.
-      kn <- NULL
-      # get.knn() means to exclude the query point, but an exact tie defeats
-      # it: with co-located points it returns the query's OWN index in place
-      # of one of its duplicates (verified: rbind(c(0,0), c(0,0), ...) gives
-      # row 1 the neighbour list 1, 3, 4, ... -- row 2, its twin, is absent).
-      # Simply dropping the self entry and padding with Inf left the twin
-      # missing from the list altogether, so the sweep could never exclude it:
-      # the fold holding out a repeated measurement trained on its
-      # exact-location twin (leakage) while params$realised_distances reported
-      # a large buffer for a fold that had none.  The displaced entry is
-      # always a co-located point at distance 0, so put one back.
-      key <- paste(xy[, 1L], xy[, 2L], sep = "\r")
-      colocated <- if (anyDuplicated(key)) split(seq_len(n), key) else NULL
-      for (i in seq_len(n)) {
-        self <- which(nn_i[i, ] == i)
-        if (!length(self)) next
-        twins <- if (is.null(colocated)) integer(0)
-                 else setdiff(colocated[[key[i]]], c(i, nn_i[i, -self]))
-        for (s in seq_along(self)) {
-          if (s <= length(twins)) {
-            # Distance in that slot is already 0, which is correct for a twin.
-            nn_i[i, self[s]] <- twins[s]
-          } else {
-            # No duplicate to restore (a self entry with no twin should not
-            # happen, but do not let it become a phantom neighbour).
-            nn_d[i, self[s]] <- Inf
-            nn_i[i, self[s]] <- NA_integer_
-          }
-        }
-        # Keep each row sorted by distance, as the sweep assumes.
-        o <- order(nn_d[i, ])
-        nn_d[i, ] <- nn_d[i, o]; nn_i[i, ] <- nn_i[i, o]
-      }
-      if (ncol(nn_d) < k_need) {
-        pad  <- k_need - ncol(nn_d)
-        nn_d <- cbind(nn_d, matrix(Inf, n, pad))
-        nn_i <- cbind(nn_i, matrix(NA_integer_, n, pad))
-      }
-      nn_d <- nn_d[, seq_len(k_need), drop = FALSE]
-      nn_i <- nn_i[, seq_len(k_need), drop = FALSE]
-    } else {
-      nn_d <- matrix(Inf, n, k_need); nn_i <- matrix(NA_integer_, n, k_need)
-      for (i in seq_len(n)) {
-        d <- sqrt((xy[, 1] - xy[i, 1])^2 + (xy[, 2] - xy[i, 2])^2)
-        d[i] <- Inf
-        o <- order(d)[seq_len(k_need)]
-        nn_d[i, ] <- d[o]; nn_i[i, ] <- o
-      }
-    }
+    # Ties -- every mutual-nearest-neighbour pair, all of a regular grid --
+    # are broken by a key that depends on the GEOMETRY, not on the row
+    # order, so identical data give identical folds: the point's column
+    # (.near_columns(): first coordinates that differ in their last bits are
+    # one column), then its second coordinate counted the same way, then the
+    # lower row.  CAST breaks them by row index (which.min), so shuffling the
+    # rows of one layer gave 6-18 different folds out of 300 and moved 72 of
+    # 100 points on a 10 x 10 grid.  The exact coordinate order this key
+    # replaces moved with the unit and the origin.
+    tie_key <- .nndm_tie_key(xy)
+    # Each point's neighbours, nearest first, by the package's tie rule:
+    # squared distances within .TIE_TOL of each other are a tie, taken in
+    # the order of tie_key.  get.knn() left the order of equidistant
+    # neighbours to its kd-tree and the base-R path to order(), so which
+    # of a lattice point's four nearest neighbours went first moved with the
+    # unit and the origin.  A co-located twin is at distance 0 and is one
+    # of its twin's neighbours on either path.
+    nb   <- .nndm_neighbours(xy, k_need, tie_key)
+    nn_d <- nb$d; nn_i <- nb$idx
+    nb   <- NULL
 
     g_sorted <- sort(g_target)
     n_g      <- length(g_sorted)
-    G_target <- function(r) findInterval(r, g_sorted) / n_g   # right-continuous ECDF
+    # The right-continuous ECDF, prediction distances within .TIE_TOL of r
+    # counting as equal to it: on a lattice predicted onto a lattice a
+    # prediction distance and a held-out distance can be one length, which
+    # the last bits put on either side of the other.
+    G_target <- function(r) findInterval(r * (1 + .TIE_TOL), g_sorted) / n_g
+    # phi read the same way: by default it is the largest prediction
+    # distance, which can be a held-out distance too.
+    phi_tol <- phi * (1 + .TIE_TOL)
 
     removed <- integer(n)
     at_floor <- logical(n)
@@ -6995,32 +6989,39 @@ make_folds <- function(points_sf, k,
     # Plain leave-one-out's distances, kept for scale: the Wasserstein
     # distance of the folds to the target is reported beside this one's.
     loo_d   <- Gjstar
-    # Ties in Gjstar -- every mutual-nearest-neighbour pair, all of a regular
-    # grid -- are broken by a key that depends on the GEOMETRY, not on the
-    # row order: the point's rank in (x, y) lexicographic order.  CAST breaks
-    # them by row index (which.min), so shuffling the rows of one layer gave
-    # 6-18 different folds out of 300 and moved 72 of 100 points on a 10 x 10
-    # grid.  Identical data must give identical folds.
-    tie_key <- order(order(xy[, 1L], xy[, 2L]))
-    o  <- order(Gjstar, tie_key); sv <- Gjstar[o]; si <- o
+    # In the sweep, distances within .TIE_TOL of each other are one
+    # distance: each run of sorted distances whose steps are no more than
+    # that is given its least value (sv), and the points of a run are in
+    # the order of tie_key.  The count, the comparison with the target and
+    # the insertion below then read a lattice's equal distances as equal
+    # whatever their last bits.  The distances themselves stay in nn_d.
+    o  <- order(Gjstar)
+    gs <- Gjstar[o]
+    run <- c(TRUE, gs[-1L] > gs[-n] * (1 + .TIE_TOL))
+    sv0 <- numeric(n); sv0[o] <- gs[run][cumsum(run)]
+    o  <- order(sv0, tie_key); sv <- sv0[o]; si <- o
+    sv0 <- NULL
     k  <- 1L
     n_iter <- 0L
     while (k <= n) {
       r   <- sv[k]
       j   <- si[k]
       cnt <- findInterval(r, sv)                    # realised count <= r
-      over <- is.finite(r) && (cnt / n) > G_target(r) + 1e-12 && r <= phi
+      over <- is.finite(r) && (cnt / n) > G_target(r) + 1e-12 && r <= phi_tol
       violates <- over && (n - 1L - removed[j]) > rmin &&
                   removed[j] + 1L < ncol(nn_d)
       if (violates) {
         removed[j] <- removed[j] + 1L
         newv <- nn_d[j, removed[j] + 1L]
         sv <- sv[-k]; si <- si[-k]
-        # Insert after every smaller value and, among equal values, after
-        # those belonging to points with a smaller tie_key, so that on
-        # clustered data (where pushed points pile up at the same
-        # cluster-to-cluster distance) the SAME points get pushed whatever
-        # the row order.
+        # A distance within .TIE_TOL of one already in the sweep is that
+        # distance.  Insert after every smaller value and, among equal
+        # values, after those belonging to points with a smaller tie_key, so
+        # that on clustered data (where pushed points pile up at the same
+        # cluster-to-cluster distance) and on a lattice the SAME points get
+        # pushed whatever the row order, the unit and the origin.
+        hi <- findInterval(newv * (1 + .TIE_TOL), sv)
+        if (hi > 0L && sv[hi] * (1 + .TIE_TOL) >= newv) newv <- sv[hi]
         pos <- findInterval(newv, sv)
         while (pos > 0L && sv[pos] == newv && tie_key[si[pos]] > tie_key[j])
           pos <- pos - 1L
@@ -7035,7 +7036,9 @@ make_folds <- function(points_sf, k,
         k <- k + 1L
       }
     }
-    Gjstar[si] <- sv
+    # Each point's distance to its nearest remaining training point, as
+    # measured (sv holds the runs' least values).
+    Gjstar <- nn_d[cbind(seq_len(n), removed + 1L)]
     nn_d <- NULL                     # only the neighbour ids are needed now
 
     # The matching above runs over every point, with or without `max_test`:
@@ -7071,9 +7074,9 @@ make_folds <- function(points_sf, k,
     # below phi; beyond phi no matching is attempted by design, so an excess
     # there is not the floor's doing.
     n_at_floor <- sum(at_floor)
-    excess_phi <- if (any(fin & realised <= phi)) {
+    excess_phi <- if (any(fin & realised <= phi_tol)) {
       rs <- sort(realised[fin])
-      rp <- rs[rs <= phi]
+      rp <- rs[rs <= phi_tol]
       max(findInterval(rp, rs) / length(rs) - G_target(rp))
     } else NA_real_
     # The message states the statistic that fired it.  It used to lead with
@@ -7545,7 +7548,12 @@ make_folds <- function(points_sf, k,
 #' \code{max(G(r) - F(r))} over every distance \code{r} in either set, with
 #' \code{G} the ECDF of the target and \code{F} that of \code{d}: the share of
 #' prediction points within some distance of the data that \code{d} does not
-#' reproduce.  Swapping the two arguments gives the excess.
+#' reproduce.  Swapping the two arguments gives the excess.  Both ECDFs
+#' count the distances within \code{.TIE_TOL} above \code{r} as at
+#' \code{r}: on a lattice predicted onto a lattice a target distance and a
+#' held-out distance can be one length, which the last bits of the
+#' coordinates put on either side of the other, so the step between them
+#' came and went with the unit and the origin.
 #'
 #' @param d Distances; non-finite values are dropped.
 #' @param g_sorted The target distances, sorted.
@@ -7556,7 +7564,7 @@ make_folds <- function(points_sf, k,
 .ecdf_deficit <- function(d, g_sorted) {
   d <- sort(d[is.finite(d)])
   if (!length(d)) return(NA_real_)
-  at <- sort(unique(c(d, g_sorted)))
+  at <- sort(unique(c(d, g_sorted))) * (1 + .TIE_TOL)
   max(findInterval(at, g_sorted) / length(g_sorted) -
         findInterval(at, d) / length(d))
 }
@@ -7585,8 +7593,8 @@ make_folds <- function(points_sf, k,
 #' back without a word however near the prediction points were (12 samples,
 #' prediction points 5 m from each: target median 5, realised 1097, no
 #' warning).  The one case that needs no tolerance is complete separation:
-#' every prediction distance shorter than every leave-one-out distance, a
-#' deficit of exactly 1.  It is reported when the two sets are large enough
+#' every prediction distance shorter than every leave-one-out distance by
+#' more than \code{.TIE_TOL} of it, a deficit of exactly 1.  It is reported when the two sets are large enough
 #' for that ordering to mean something, taken as
 #' \code{choose(n + m, n) >= 1000} ways of interleaving them (17 prediction
 #' points for 3 samples, 7 for 6, 4 for 12).  The count is a floor on the
@@ -7618,11 +7626,153 @@ make_folds <- function(points_sf, k,
   tolerance <- 3 * sqrt(1 / n + 1 / n_g)
   past_tol  <- is.finite(deficit) && deficit > tolerance
   loo_fin   <- loo_d[is.finite(loo_d)]
-  separated <- length(loo_fin) > 0L && max(g_target) < min(loo_fin)
+  # Distances within .TIE_TOL of each other count as equal, as in
+  # .ecdf_deficit(), so the ordering does not rest on their last bits.
+  separated <- length(loo_fin) > 0L &&
+    max(g_target) * (1 + .TIE_TOL) < min(loo_fin)
   sep_counts <- separated && lchoose(n + n_g, n) >= log(1000)
   list(deficit = deficit, tolerance = tolerance, past_tol = past_tol,
        loo_fin = loo_fin, separated = separated,
        out_of_reach = past_tol || sep_counts)
+}
+
+
+#' The order in which make_folds(method = "nndm") takes tied points
+#'
+#' The rank of each point by its column (\code{.near_columns()}: sorted
+#' first coordinates whose steps are no more than \code{.TIE_TOL} times the
+#' diagonal of the points' bounding box are one column), then by its second
+#' coordinate counted the same way, then by its row.  Where no two first or
+#' second coordinates are that close it is the rank in \code{order(x, y)};
+#' on a lattice whose coordinates differ in their last bits after another
+#' unit or origin it is the same in every frame.
+#'
+#' @param xy Two-column matrix of finite coordinates.
+#' @return Integer vector: the rank of each row, \code{1..nrow(xy)}.
+#' @keywords internal
+#' @noRd
+.nndm_tie_key <- function(xy) {
+  x <- xy[, 1L]; y <- xy[, 2L]
+  o <- order(.near_columns(x, y), .near_columns(y, x), seq_along(x))
+  key <- integer(length(x)); key[o] <- seq_along(x)
+  key
+}
+
+
+#' Each row's candidates in order, by the package's tie rule
+#'
+#' Sorted by squared distance, a squared distance no more than
+#' \code{.TIE_TOL} above the one before it in its row is a tie with it, and
+#' the candidates of a tie are in the order of \code{key}.  Where no two
+#' squared distances of a row are that close this is the order of the
+#' squared distances.
+#'
+#' @param d2 Matrix of squared distances, a row per point searched for.
+#' @param cand Integer matrix of the shape of \code{d2}: the candidates.
+#' @param key Integer rank of every point (\code{.nndm_tie_key()}).
+#' @return A list of three matrices of the shape of \code{d2}, each row in
+#'   the new order: \code{d2}, \code{cand} and \code{run} (the number of
+#'   each candidate's tie, increasing along a row).
+#' @keywords internal
+#' @noRd
+.nndm_sort_rows <- function(d2, cand, key) {
+  nr <- nrow(d2); q <- ncol(d2); m <- nr * q
+  r  <- rep.int(seq_len(nr), q)
+  o  <- order(r, d2)
+  ds <- d2[o]
+  run <- cumsum(c(TRUE, r[o][-1L] != r[o][-m] | ds[-1L] > ds[-m] * (1 + .TIE_TOL)))
+  # The runs are numbered along the rows in turn, so ordering by run keeps
+  # the rows apart.
+  o2  <- order(run, key[cand[o]])
+  o   <- o[o2]
+  list(d2   = matrix(d2[o],   nr, q, byrow = TRUE),
+       cand = matrix(cand[o], nr, q, byrow = TRUE),
+       run  = matrix(run[o2], nr, q, byrow = TRUE))
+}
+
+
+#' Each point's k nearest other points, nearest first, for NNDM
+#'
+#' The neighbours \code{make_folds(method = "nndm")} excludes, in the order
+#' it excludes them.  The squared distances are computed in R, and points
+#' as far away to within \code{.TIE_TOL} are taken in the order of
+#' \code{key} (\code{.nndm_sort_rows()}), the package's tie rule.  With
+#' \pkg{FNN} a kd-tree shortlists \code{k} and a few more neighbours, and a
+#' shortlist is kept when its furthest member is further than the tie that
+#' holds the \code{k}-th by more than \code{.TIE_TOL} and one part in a
+#' thousand million, so every point the rule could take is on it; a point
+#' whose shortlist ends inside that tie gets a longer one, up to all the
+#' other points.  Without \pkg{FNN} every other point is a candidate.  The
+#' two paths give the same answer.  The rows are searched in blocks, so the
+#' matrices stay near two million entries.
+#'
+#' \code{.knn_pick_rows()} takes \code{k} passes over each row's
+#' candidates, which at the \code{k} of about \code{n / 2} that NNDM needs
+#' is too slow; a single sort of each row does the work instead.  The two
+#' differ in one case: a tie here chains steps of up to \code{.TIE_TOL},
+#' where \code{.knn_pick_rows()} counts from the least distance left, so
+#' three or more squared distances in a row, each within \code{.TIE_TOL}
+#' of the one before but not of the first, are one tie here and not there.
+#'
+#' @param xy Two-column matrix of finite coordinates.
+#' @param k Number of neighbours, below \code{nrow(xy)}.
+#' @param key Integer rank of every point (\code{.nndm_tie_key()}).
+#' @param use_fnn Whether to use \pkg{FNN}.
+#' @return A list: \code{idx} (an \code{nrow(xy) x k} matrix of row numbers,
+#'   nearest first) and \code{d} (the distances, in the same places).
+#' @keywords internal
+#' @noRd
+.nndm_neighbours <- function(xy, k, key,
+                             use_fnn = requireNamespace("FNN", quietly = TRUE)) {
+  n <- nrow(xy); x <- xy[, 1L]; y <- xy[, 2L]
+  idx <- matrix(0L, n, k); d2k <- matrix(0, n, k)
+  todo <- seq_len(n)
+  q <- if (isTRUE(use_fnn)) min(n - 1L, k + 8L) else n - 1L
+  while (length(todo)) {
+    full <- q >= n - 1L
+    width <- if (full) n else q
+    per  <- max(1L, as.integer(2e6 %/% width))
+    left <- integer(0)
+    for (from in seq.int(1L, length(todo), by = per)) {
+      r  <- todo[from:min(from + per - 1L, length(todo))]
+      nr <- length(r)
+      if (full) {
+        # Every point; the point itself is put last.
+        cand <- matrix(rep(seq_len(n), each = nr), nr, n)
+      } else {
+        # The point itself comes back as one of its own neighbours, and with
+        # more than q + 1 points at one location it may not: then the
+        # furthest is dropped.
+        nn <- matrix(FNN::get.knnx(xy, xy[r, , drop = FALSE], k = q + 1L)$nn.index,
+                     nr, q + 1L)
+        self <- nn == r
+        none <- which(rowSums(self) != 1L)
+        if (length(none)) { self[none, ] <- FALSE; self[none, q + 1L] <- TRUE }
+        cand <- matrix(t(nn)[!t(self)], nr, q, byrow = TRUE)
+      }
+      d2 <- matrix((x[cand] - x[r])^2 + (y[cand] - y[r])^2, nr, width)
+      if (full) d2[cbind(seq_len(nr), r)] <- Inf
+      s <- .nndm_sort_rows(d2, cand, key)
+      done <- rep.int(TRUE, nr)
+      if (!full) {
+        # The furthest of the tie that holds the k-th, against the furthest
+        # candidate.
+        M <- s$d2; M[s$run != s$run[, k]] <- -Inf
+        rr <- seq_len(nr)
+        tie_end <- M[cbind(rr, max.col(M, ties.method = "first"))]
+        far     <- s$d2[cbind(rr, max.col(s$d2, ties.method = "first"))]
+        done    <- far > tie_end * (1 + .TIE_TOL + 1e-9)
+      }
+      if (any(done)) {
+        idx[r[done], ] <- s$cand[done, seq_len(k), drop = FALSE]
+        d2k[r[done], ] <- s$d2[done, seq_len(k), drop = FALSE]
+      }
+      left <- c(left, r[!done])
+    }
+    todo <- left
+    q <- min(n - 1L, k + 2L * (q - k))
+  }
+  list(idx = idx, d = sqrt(d2k))
 }
 
 
@@ -7817,15 +7967,21 @@ make_folds <- function(points_sf, k,
 #' Used to reduce a large sample to groups Ward's method can start from, and
 #' for cluster counts above the number of those groups.  Lloyd's algorithm from \code{q} distinct sample locations drawn at random,
 #' stopped after \code{iter_max} passes or when no point changes cluster.
-#' The nearest-centre step is an indexed search, so a pass costs about
-#' \code{n log q}, where \code{stats::kmeans()} compares every point with
-#' every centre (\code{n q}; at 20,000 points and 2,000 centres, 0.8 s
-#' against 0.09 s for ten passes).  The clusters are candidates to be scored
+#' The nearest-centre step is \code{.nearest_centre()}: squared distances
+#' within \code{.TIE_TOL} of the least are a tie, which goes to the
+#' lower-numbered centre, with or without \pkg{FNN}.  With \pkg{FNN} it is
+#' an indexed search, so a pass costs about \code{n log q}, where
+#' \code{stats::kmeans()} compares every point with every centre
+#' (\code{n q}; at 20,000 points and 2,000 centres, 0.8 s against 0.09 s
+#' for ten passes).  \code{.knndm_folds()} hands it the coordinates in the
+#' frame of \code{.kmeans_frame()}, so a point the same distance from two
+#' centres goes to the same one in every unit and origin.  The clusters are candidates to be scored
 #' by their distance to the target, so a run that has not converged costs
 #' nothing but a slightly different candidate.  A centre that attracts no
 #' point is dropped, so fewer than \code{q} clusters can come back.
 #'
-#' @param xy Two-column coordinate matrix.
+#' @param xy Two-column coordinate matrix: the frame of
+#'   \code{.kmeans_frame()}.
 #' @param xy_u Its distinct rows.
 #' @param q Number of clusters asked for, at most \code{nrow(xy_u)}.
 #' @param use_fnn Whether to use \pkg{FNN}.
@@ -7837,7 +7993,7 @@ make_folds <- function(points_sf, k,
   cen <- xy_u[sample.int(nrow(xy_u), q), , drop = FALSE]
   cl <- integer(0)
   for (it in seq_len(iter_max)) {
-    new <- .nn_xy(xy, cen, use_fnn)$index
+    new <- .nearest_centre(xy[, 1L], xy[, 2L], cen[, 1L], cen[, 2L], use_fnn)
     new <- match(new, sort(unique(new)))
     if (identical(new, cl)) break
     cl <- new
@@ -7886,7 +8042,8 @@ make_folds <- function(points_sf, k,
 #' candidate is scored by the Wasserstein distance \eqn{W} between its
 #' held-out distances (each point's distance to the nearest point of another
 #' fold) and the target distances, and the smallest \eqn{W} wins; a tie goes
-#' to the earlier candidate, the random partition first.
+#' to the earlier candidate, the random partition first, and two \eqn{W}
+#' within \code{.TIE_TOL} of each other are a tie.
 #'
 #' A cluster candidate is admissible when its largest fold leaves at least
 #' \code{min_train} of the rows for training (or holds no more than an equal
@@ -7909,6 +8066,15 @@ make_folds <- function(points_sf, k,
 #' above the groups.  A random partition stood at 0.58 to 0.62 throughout.
 #' With and without \pkg{FNN} the folds were identical in all six draws at
 #' 8,000 and 30,000 points.
+#'
+#' Ward's method and the k-means are handed the coordinates in the frame of
+#' \code{.kmeans_frame()}: centred on the middle of their bounding box,
+#' divided by its diagonal and rounded to \code{.KMEANS_STEP} of it.  On a
+#' lattice many merges and many assignments tie exactly, and the last bits
+#' of the coordinates, which move with the unit and the origin, settled
+#' them; in the frame the coordinates are the same in every unit and origin
+#' but for a location within its own rounding noise of the middle of a step.
+#' The held-out distances and \eqn{W} are in the unit of \code{xy}.
 #'
 #' @param xy Two-column coordinate matrix of the samples.
 #' @param g_target Finite prediction-to-data distances.
@@ -7950,8 +8116,14 @@ make_folds <- function(points_sf, k,
   w_random <- w_of(d_best)
   cand <- list(one("random", NA_integer_, tabulate(lab_best, nbins = k), TRUE,
                    w_random))
-  w_best <- if (is.finite(w_random)) w_random else Inf
-  best <- 1L
+  # The candidates whose W is within .TIE_TOL of the least so far, with
+  # their folds: the earliest of those left at the end is returned, as
+  # .nearest_exact() takes a centre.  Replacing the best only when lower by
+  # more than the tolerance, in one pass, keeps a later candidate of a chain
+  # of near values where this takes an earlier one.
+  w_min <- if (is.finite(w_random)) w_random else Inf
+  keep  <- if (is.finite(w_random))
+    list(list(at = 1L, w = w_random, lab = lab_best, d = d_best)) else list()
 
   distinct <- !duplicated(xy)
   qs <- .knndm_cluster_counts(k, sum(distinct), n_ladder)
@@ -7959,23 +8131,28 @@ make_folds <- function(points_sf, k,
   if (length(qs)) {
     use_ward <- n <= ward_max
     clustering <- if (use_ward) "ward" else "kmeans+ward"
+    # The clustering reads the coordinates in the frame of .kmeans_frame(),
+    # which does not move with the unit or the origin: on a lattice Ward's
+    # merges and the k-means assignments tie exactly, and the last bits of
+    # the coordinates as given settled them.
+    z <- .kmeans_frame(xy)$z
     if (use_ward) {
-      tree <- stats::hclust(stats::dist(xy), method = "ward.D2")
+      tree <- stats::hclust(stats::dist(z), method = "ward.D2")
       groups <- NULL; n_groups <- n
     } else {
       # Too many points for the n by n distance matrix: k-means reduces them
       # to at most `ward_max` groups and Ward's method carries on from those.
-      xy_u   <- xy[distinct, , drop = FALSE]
-      groups <- .knndm_kmeans(xy, xy_u, min(ward_max, nrow(xy_u) - 1L), use_fnn)
+      z_u    <- z[distinct, , drop = FALSE]
+      groups <- .knndm_kmeans(z, z_u, min(ward_max, nrow(z_u) - 1L), use_fnn)
       n_groups <- max(groups)
-      tree <- if (n_groups >= 2L) .ward_from_groups(xy, groups) else NULL
+      tree <- if (n_groups >= 2L) .ward_from_groups(z, groups) else NULL
     }
     for (q in qs) {
       cl <- if (use_ward) stats::cutree(tree, k = q)
             else if (!is.null(tree) && q <= n_groups)
               stats::cutree(tree, k = q)[groups]
             # More clusters than groups: k-means at that count.
-            else .knndm_kmeans(xy, xy_u, q, use_fnn)
+            else .knndm_kmeans(z, z_u, q, use_fnn)
       sizes <- tabulate(cl)
       if (length(sizes) < k) {
         cand[[length(cand) + 1L]] <- one("clusters", length(sizes), integer(0),
@@ -7990,14 +8167,26 @@ make_folds <- function(points_sf, k,
         lab <- pk$fold_of[cl]
         d   <- .knndm_heldout_dist(xy, lab, k, use_fnn)
         w_q <- w_of(d)
-        if (is.finite(w_q) && w_q < w_best) {
-          w_best <- w_q; lab_best <- lab; d_best <- d
-          best <- length(cand) + 1L
+        # A W within .TIE_TOL of the least is a tie, which the earliest
+        # candidate keeps: the same W in another unit differs in its last
+        # bits.
+        if (is.finite(w_q)) {
+          w_min <- min(w_min, w_q)
+          lim   <- w_min * (1 + .TIE_TOL)
+          keep  <- Filter(function(e) e$w <= lim, keep)
+          if (w_q <= lim)
+            keep[[length(keep) + 1L]] <- list(at = length(cand) + 1L, w = w_q,
+                                               lab = lab, d = d)
         }
       }
       cand[[length(cand) + 1L]] <- one("clusters", length(sizes), pk$loads, ok,
                                        w_q)
     }
+  }
+  # With no finite W the random partition is returned.
+  best <- 1L
+  if (length(keep)) {
+    best <- keep[[1L]]$at; lab_best <- keep[[1L]]$lab; d_best <- keep[[1L]]$d
   }
   list(fold = lab_best, realised = d_best, chosen = best,
        candidates = do.call(rbind, cand), w_random = w_random,
