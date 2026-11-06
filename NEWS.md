@@ -2001,6 +2001,29 @@ old behaviour where there is a way.
   it.  Layers whose parallels lie in that range get the CRS and the
   `crs_choice` they got.
 
+* **`ensure_projected()`'s warning on a lon/lat layer across a pole, or
+  one whose longitudes are given outside -180 to 180, gave an offset from
+  the UTM zone's central meridian beyond 180 degrees.**  The zone comes
+  from the centre on the sphere, whose longitude can lie far outside the
+  box when the layer runs across a pole or its longitudes are given
+  outside -180 to 180, and the offset was the difference of the box's ends
+  from the meridian, not wrapped.  For two lines from (-10, 70) to
+  (170, 70) and from (-10, 75) to (170, 75) the warning said the extent
+  "reaches 257.0 deg from the central meridian of UTM zone 16", and for
+  points at longitudes 170, 185 and 200 it said "reaches 377.0 deg from
+  the central meridian of UTM zone 1".  The offset is now the largest
+  distance on the circle from the meridian to a longitude of the box,
+  which is 180.0 and 17.0 there, and the 5-degree test that sends a layer
+  to the comparison of candidates reads the same figure.  That test
+  changes its answer only for a layer whose longitudes are given outside
+  -180 to 180 and lie within 5 degrees of the zone's central meridian:
+  points at longitudes 181 and 183, 2 degrees from the central meridian
+  of UTM zone 1, were said to reach 360.0 degrees from it and got an
+  Albers CRS, and now keep UTM zone 1, as a layer at -179 and -177 does;
+  points at -181 and -183 now keep UTM zone 60 in the same way, as a
+  layer at 179 and 177 does.  Other layers get the CRS and the
+  `crs_choice` they got.
+
 * **A row of a lon/lat layer with a coordinate that is not finite or lies
   beyond 1e150 shaped the projection chosen for the other rows.**
   `ensure_projected()` read the extent, the longitudes of the antimeridian

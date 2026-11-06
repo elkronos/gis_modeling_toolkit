@@ -148,6 +148,31 @@
            abs(lat1) <= 90 && abs(lat2) <= 90)
 }
 
+#' The largest offset of a longitude box from a meridian
+#'
+#' The largest distance in longitude, on the circle, from \code{cm} to any
+#' longitude between \code{lon_min} and \code{lon_max}: 180 when the meridian
+#' opposite \code{cm} lies in the box, otherwise the larger of the two ends'
+#' offsets, each wrapped to 0 to 180.  The zone of the CRS chooser comes from
+#' the centre on the sphere, which for a layer across a pole, or one whose
+#' longitudes are given outside -180 to 180, can lie far outside the box, and
+#' the unwrapped difference of the box's ends then came out above 180.
+#'
+#' @param lon_min,lon_max The box's ends in degrees, \code{lon_min <= lon_max}.
+#' @param cm The meridian in degrees.
+#' @return A number from 0 to 180, or a non-finite number when the box or
+#'   \code{cm} is not finite.
+#' @keywords internal
+#' @noRd
+.lon_offset_from <- function(lon_min, lon_max, cm) {
+  wrap <- function(x) { d <- abs(x - cm) %% 360; pmin(d, 360 - d) }
+  off <- max(wrap(lon_min), wrap(lon_max))
+  if (!is.finite(off)) return(off)
+  # The meridian opposite cm lies in the box when, measured eastwards from
+  # lon_min, it comes no later than lon_max.
+  if ((cm + 180 - lon_min) %% 360 <= lon_max - lon_min) 180 else off
+}
+
 #' Pick a sensible local projected CRS for an sf/sfc object
 #'
 #' Chooses an appropriate projected coordinate reference system for spatial
@@ -435,7 +460,8 @@
   # dependency on that coercion in the log messages below.
   cand_zone <- as.integer(max(1, min(60, floor((lon + 180) / 6) + 1)))
   cand_cm   <- 6 * cand_zone - 183           # central meridian of that zone
-  lon_off   <- max(abs(lon_min - cand_cm), abs(lon_max - cand_cm))
+  # The largest offset of the box from that meridian, on the circle.
+  lon_off   <- .lon_offset_from(lon_min, lon_max, cand_cm)
 
   utm_epsg <- if (!is.na(lat) && lat < 0) 32700 + cand_zone else 32600 + cand_zone
 
