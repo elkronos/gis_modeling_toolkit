@@ -285,11 +285,29 @@
   df      <- sp_dat@data
   coords  <- sp::coordinates(sp_dat)
   y       <- as.numeric(df[[response_var]])
+  # A candidate or the response at a large offset is taken about its centre,
+  # as fit_gwr_model() takes it (.gwr_centre()), on the model with every
+  # candidate: each candidate's centre is its own, and every model is
+  # scored on the one response.  Every other column is used as it is.
+  cen <- .gwr_centre(cbind(Intercept = 1,
+                           as.matrix(df[, candidate_vars, drop = FALSE])), y)
+  y   <- cen$y
+  xc  <- cen$x_centres
+  if (!is.null(xc))
+    for (j in which(xc[-1L] != 0))
+      df[[candidate_vars[j]]] <- df[[candidate_vars[j]]] - xc[j + 1L]
   # The design of one model: the intercept and its predictors' columns.  The
   # candidates are numeric (gwr_model_selection() refuses anything else), so
-  # this is the model matrix.
-  design <- function(vars)
-    cbind(Intercept = 1, as.matrix(df[, vars, drop = FALSE]))
+  # this is the model matrix.  Where candidates were taken about centres,
+  # the design carries them, as fit_gwr_model()'s does, so the local solve
+  # is the same; the scores read only fitted values, which the intercept's
+  # origin does not change.
+  design <- function(vars) {
+    X <- cbind(Intercept = 1, as.matrix(df[, vars, drop = FALSE]))
+    if (!is.null(xc))
+      attr(X, "centres") <- c(0, xc[-1L][match(vars, candidate_vars)])
+    X
+  }
 
   # --- Bandwidth ------------------------------------------------------------
   # One bandwidth is used for every candidate model: that is what makes the

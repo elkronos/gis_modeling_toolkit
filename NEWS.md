@@ -3785,6 +3785,59 @@ old behaviour where there is a way.
   randomisation variance, can differ in the last bit: R takes the fourth
   power with `pow()`, which does not commute with the division.
 
+* **`fit_gwr_model()` read a predictor or a response at a large offset on
+  the rounding of the offset.**  The global least-squares fit the GWR is
+  read against was `lm()` on the raw columns, which drops a predictor whose
+  spread is under about 1e-7 of its size (1e8 plus a spread of 1, a
+  timestamp in seconds) as collinear with the intercept, in silence.  On
+  300 points with a predictor of unit spread, `info$global_ols` and
+  `summary()`'s line "Global least squares on the same rows" gave an AICc
+  of 881.32 at offset 0 and 1364.41, that of the intercept alone, from
+  1e8.  The local regressions divided a predictor by its standard
+  deviation before they centred it, so from about 1e10 the slopes, fitted
+  values and AICc moved with the predictor's origin: at 1e15 the slopes by
+  2 percent and the AICc from 489.16 to 496.03.  A response at 1e15 plus a
+  spread of 1 was regressed on its raw values, which a double holds to an
+  eighth: the residual sum of squares was 111.4 where the same values at 0
+  give 73.6, the bandwidth search chose 71 neighbours where it chose 41,
+  and `gwr_model_selection()`'s table and the residuals `residuals()` and
+  `residual_morans_i()` read were those of the same rounding.  The
+  collinearity survey centred a predictor at 1e15 about its rounded mean,
+  so `info$condition_index` and the slope index `cn_slopes` of
+  `info$local_collinearity` moved with its origin (a maximum `cn_slopes` of
+  2.05 where the same values at 0 give 2.15).  A predictor whose centre
+  is more than 1000 times its spread is now taken less its centre before
+  the bandwidth search, the local regressions, the global fit and the
+  collinearity survey, and so is a response whose raw values, or whose
+  least-squares residuals on the predictors, lose their spread to
+  rounding, as `estimate_sac_range()` takes it.  The centres are added
+  back only to the fitted values, the local intercepts, the intercept and
+  fitted values of `fit$engine$lm` and `predict()`'s values, and
+  `predict()` takes a new row's predictors about the training centres.
+  Residuals, slopes and their standard errors, AICc, the bandwidth chosen,
+  the global fit, the condition indices of the slopes and the selection
+  table are now those of the same values at 0, to rounding; fitted values
+  and predictions of a response at 1e15 are in its units, to the eighth a
+  double holds there, and `residuals()` is the centred response less the
+  centred fitted values.  `fit$engine$lm` is solved on the centred columns
+  and returned as the fit at the data's origin, with the QR factor of the
+  raw columns, so `summary()`, `vcov()`, `confint()` and `predict()` on it
+  give the intercept at 0 and its standard error; with a predictor more
+  than about 1e7 times its spread from 0, `predict(se.fit = TRUE)` on it
+  stops with "singular matrix".  `fit$engine$centres` gives the centres.
+  Every other predictor and response is fitted as it was, to the last bit,
+  and a predictor that is constant, or a linear combination of the others,
+  is still left out of the global fit.
+
+* **`fit_gwr_model()` logged "predictor has near-zero variance; GWR may be
+  unstable" for a predictor in small units.**  The test was a standard
+  deviation under 100 times `.Machine$double.eps`, so a predictor of unit
+  spread multiplied by 2^-46 had the note and the same predictor at 2^-40
+  did not, though the fit is the same at every scale.  Where the standard
+  deviation is under that floor, the column is now read again on its own
+  scale, and the note is logged only for a column without spread beyond
+  the rounding of its values.
+
 * **The print of a profile of one level read "1 levels" and "WSS rises at 0
   step(s)".**  Every default profile has one level.  The print now reads "1
   level", and leaves out the count of steps the WSS curve rises at when

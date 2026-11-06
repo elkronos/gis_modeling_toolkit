@@ -16,7 +16,12 @@ Numeric vector of length \code{object$n}.
 }
 \description{
 Observed response minus \code{\link{fitted.gwr_fit}}, so these are
-\strong{in-sample} residuals.
+\strong{in-sample} residuals.  Where \code{\link{fit_gwr_model}()} took
+the response about its centre (a response whose raw values lose their
+spread, such as 1e15 plus a spread of 1; see \strong{The local solve}
+there), both are taken about that centre, so the residuals keep the
+spread a double rounds away from the response and the fitted values at
+that size.
 }
 \seealso{
 Other methods on a fitted model:

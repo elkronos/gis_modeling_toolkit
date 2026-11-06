@@ -2045,7 +2045,12 @@ clear_fitted_cache <- function(object) {
 #' In-sample residuals from a GWR fit
 #'
 #' Observed response minus \code{\link{fitted.gwr_fit}}, so these are
-#' \strong{in-sample} residuals.
+#' \strong{in-sample} residuals.  Where \code{\link{fit_gwr_model}()} took
+#' the response about its centre (a response whose raw values lose their
+#' spread, such as 1e15 plus a spread of 1; see \strong{The local solve}
+#' there), both are taken about that centre, so the residuals keep the
+#' spread a double rounds away from the response and the fitted values at
+#' that size.
 #'
 #' @param object A \code{gwr_fit}.
 #' @param ... Ignored.
@@ -2054,6 +2059,14 @@ clear_fitted_cache <- function(object) {
 #' @export
 residuals.gwr_fit <- function(object, ...) {
   y_obs <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
+  # The residuals of the centred response, which fit_gwr_model() keeps in
+  # the engine's table; the raw values less the fitted values would read
+  # the rounding of both at the response's size.
+  yc <- tryCatch(object$engine$centres$response, error = function(e) NULL)
+  if (is.numeric(yc) && length(yc) == 1L && isTRUE(yc != 0)) {
+    r <- tryCatch(object$engine$SDF@data$residual, error = function(e) NULL)
+    if (is.numeric(r) && length(r) == length(y_obs)) return(as.numeric(r))
+  }
   y_obs - fitted(object)
 }
 

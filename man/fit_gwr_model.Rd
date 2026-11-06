@@ -118,7 +118,21 @@ when a bandwidth was supplied).
 standard errors \code{<term>_SE}, the t values \code{<term>_TV} and
 \code{Local_R2}), \code{GW.diagnostic}, \code{GW.arguments} and
 \code{lm} (the global least-squares fit).  It is a plain list, not a
-\code{gwrm} object.
+\code{gwrm} object.  Where a predictor or the response was taken less
+its centre (see \strong{The local solve}), \code{lm} is solved on the
+centred columns and returned as the fit at the data's origin: its
+coefficients, fitted values, \code{qr} and \code{effects} are those of
+the raw columns, so \code{summary()}, \code{vcov()}, \code{confint()}
+and \code{predict()} on it give the intercept at the data's 0 and its
+standard error, and the slopes and residuals are those of the centred
+fit.  With a predictor more than about 1e7 times its spread from 0,
+\code{predict(se.fit = TRUE)} on it stops with "singular matrix":
+\code{qr.solve()} reads the triangular factor at the data's origin as
+singular.  \code{predict()} on the fit itself has no such limit.
+\code{centres} holds what was taken off: \code{predictors}, the centre
+of each column of the design (\code{Intercept} first, 0 for a column
+used as it is), \code{NULL} where none was, and \code{response}, 0
+where none was.
 }
 \description{
 Fits a Gaussian GWR on an sf dataset with an adaptive or a fixed
@@ -139,6 +153,22 @@ weight, and each predictor is divided by its standard deviation over the
 whole data and centred in the window, so nothing below depends on a
 predictor's origin or units: an indicator coded 0/1 and one coded
 288.7/289.3 give the same fit.
+
+A predictor whose centre is more than 1000 times its spread (a timestamp
+in seconds, a northing, 1e8 plus a spread of 1) is taken less its centre
+first, and so is a response whose raw values lose their spread to
+rounding (1e15 plus a spread of 1, stored to an eighth), or whose
+least-squares residuals on the predictors do.  The bandwidth search, the
+local regressions, the global least-squares fit and the centred condition
+indices (\code{info$condition_index}, \code{cn_slopes}) then work on the
+spread and not on the rounding of the offset, and the centres are added
+back only to what is returned in the data's units: the fitted values, the
+local intercepts, the intercept and fitted values of \code{$engine$lm},
+and \code{predict()}'s values, which take a new row's predictors about the
+same centres.  Residuals, slopes and their standard errors, AICc and the
+bandwidth are those of the same values at 0, to rounding; the fitted
+values and predictions of a response at 1e15 are held to the eighth a
+double holds there.  Every other predictor and response is used as it is.
 
 One tolerance, \code{1e-7}, decides what a window can estimate:
 \itemize{
