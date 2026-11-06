@@ -3343,6 +3343,18 @@ old behaviour where there is a way.
   grid, to pass a projected `crs` or to size the grid by `target_cells` or
   `n`).
 
+* **`create_grid_polygons_cached()` handed a grid returned in degrees to a
+  session with the other `sf::sf_use_s2()` setting.**  A grid with a
+  geographic `crs` and a `cellsize` is laid in degrees and clipped by s2
+  with s2 on and by GEOS with s2 off, and `ensure_stable_poly_id()` repairs
+  the cells of any grid returned in degrees with s2's rebuild or with
+  GEOS's, so the two settings give two grids.
+  The cache key did not hold the setting, so a call got the grid of
+  whichever setting filled the cache first.  The key of a grid returned in
+  degrees now holds the setting, and each setting gets its own entry; every
+  other key is unchanged, so a grid laid and returned in a projected CRS is
+  still found in a cache filled before this change.
+
 * **Cells built on seeds placed from lon/lat points could leave observations
   near the edge of a wide layer in no cell.**  The seeding functions attach
   the convex hull of the points they cluster as the seeds' cover, and

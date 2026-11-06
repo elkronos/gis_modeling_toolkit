@@ -49,6 +49,16 @@ values on the wrong polygons.
 Builds a grid via \code{create_grid_polygons()} and memoizes the result
 so repeated calls with the same inputs return instantly.
 }
+\details{
+A grid returned in degrees (a geographic \code{crs} passed through \code{...}) is
+cached once per \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} setting: a grid laid in degrees is
+clipped by s2 with the setting on and by GEOS with it off, and
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}} repairs cells in degrees with s2 or with GEOS,
+so the grid differs between the two settings. A call is handed the grid
+of the session's setting. A grid laid and returned in a
+projected CRS is clipped and repaired by GEOS under either setting and is
+cached once.
+}
 \examples{
 library(sf)
 bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(

@@ -498,11 +498,15 @@ ensure_stable_poly_id <- function(polygons_sf,
 #'   that outlives a package upgrade (one persisted by a user, say) cannot
 #'   hand a grid built by an older \code{create_grid_polygons()} to a newer
 #'   one.  An argument only so that tests can vary it.
+#' @param s2_engine \code{NULL}, or the session's \code{sf::sf_use_s2()}
+#'   setting for a grid returned in degrees, whose cells follow it (see
+#'   create_grid_polygons_cached()).  Hashed only when not \code{NULL}, so
+#'   every other key is the one it was before the argument existed.
 #' @return A length-1 character vector.
 #' @keywords internal
 #' @noRd
 .cache_key <- function(boundary, type, target_cells, ...,
-                       version = .spatialkit_version()) {
+                       version = .spatialkit_version(), s2_engine = NULL) {
   # The CRS's full WKT, not its `input` name.  A layer read from a file with
   # a custom CRS reports a generic name such as "unknown", so two different
   # site-centred CRSs with the same local boundary coordinates shared a key,
@@ -543,10 +547,25 @@ ensure_stable_poly_id <- function(polygons_sf,
   # The "spatialkit_grid::" prefix marks the entry as ours, so
   # clear_grid_cache() can tell its own bindings from anything else living in
   # the environment it is handed.
-  paste0("spatialkit_grid::", type, "::",
-         digest::digest(list(geom_hash = geom_hash, crs = crs_token,
-                             target_cells = target_cells, args = dots,
-                             version = as.character(version))))
+  payload <- list(geom_hash = geom_hash, crs = crs_token,
+                  target_cells = target_cells, args = dots,
+                  version = as.character(version))
+  if (!is.null(s2_engine)) payload$s2 <- isTRUE(s2_engine)
+  paste0("spatialkit_grid::", type, "::", digest::digest(payload))
+}
+
+# Whether create_grid_polygons() returns its grid in degrees for these
+# arguments: a geographic `crs`, read as create_grid_polygons() reads it
+# (by name, partial name or position, and a layer as its CRS), or a boundary
+# that is still in degrees.  `crs` is taken from a copy of
+# create_grid_polygons() whose body returns it, so the arguments are matched
+# to the builder's own formals.  Arguments the builder refuses give FALSE
+# here; the builder then stops on them as it does uncached.
+.grid_returned_in_degrees <- function(boundary, ...) {
+  crs_of <- create_grid_polygons
+  body(crs_of) <- quote(crs)
+  crs <- tryCatch(crs_of(boundary, ...), error = function(e) NULL)
+  .is_geographic_crs(crs) || .is_longlat(boundary)
 }
 
 # The installed version string; a separate function so that the key can be
@@ -600,6 +619,15 @@ ensure_stable_poly_id <- function(polygons_sf,
 #'
 #' Builds a grid via \code{create_grid_polygons()} and memoizes the result
 #' so repeated calls with the same inputs return instantly.
+#'
+#' A grid returned in degrees (a geographic `crs` passed through `...`) is
+#' cached once per [sf::sf_use_s2()] setting: a grid laid in degrees is
+#' clipped by s2 with the setting on and by GEOS with it off, and
+#' [ensure_stable_poly_id()] repairs cells in degrees with s2 or with GEOS,
+#' so the grid differs between the two settings. A call is handed the grid
+#' of the session's setting. A grid laid and returned in a
+#' projected CRS is clipped and repaired by GEOS under either setting and is
+#' cached once.
 #'
 #' @param boundary An sf or sfc polygonal object. One that mixes XY and XYZ
 #'   (or XYM) geometries, or whose geometries carry M (XYM or XYZM), is read
@@ -671,7 +699,19 @@ create_grid_polygons_cached <- function(boundary,
   # in the CRS an uncached one would be (see .project_for_grid()).
   bnd <- .project_for_grid(bnd, "create_grid_polygons_cached")
 
-  key <- .cache_key(bnd, type, target_cells, ...)
+  # A grid returned in degrees (a geographic `crs` in `...`) follows the
+  # session's sf::sf_use_s2(): laid in degrees it is clipped by s2 with s2 on
+  # and by GEOS with s2 off, and ensure_stable_poly_id() below repairs its
+  # cells with s2's rebuild or with GEOS's.  The two settings give two grids,
+  # and a key without the setting handed back the grid of whichever setting
+  # filled the cache first.  The setting goes into the key
+  # of such a grid only; every other key is as it was, so a grid laid and
+  # returned in a projected CRS (which does not depend on the setting) is
+  # still found.
+  s2_engine <- if (.grid_returned_in_degrees(bnd, target_cells = target_cells,
+                                             type = type, ...))
+    isTRUE(sf::sf_use_s2()) else NULL
+  key <- .cache_key(bnd, type, target_cells, ..., s2_engine = s2_engine)
 
   if (exists(key, envir = cache_env, inherits = FALSE))
     return(get(key, envir = cache_env, inherits = FALSE))
