@@ -42,11 +42,21 @@ of its own.}
 \item{keep_unassigned}{Logical; retain features that fall inside no
 polygon, carrying \code{NA} in the ID column. Default FALSE, which drops
 them with a warning of class \code{"spatialkit_unassigned"} that gives
-their number.}
+their number. Features that \code{tie_break} gives no polygon (see
+there) are kept or dropped with them.}
 
 \item{predicate}{Binary spatial predicate function. Default sf::st_intersects.
 Not used when \code{largest} applies: sf then assigns polygon features by
-overlap area and never calls the predicate.}
+overlap area and never calls the predicate. With \code{sf::st_intersects}
+a POINT or MULTIPOINT feature with a point within a margin of a
+polygon is in it: one part in 1e10
+of the largest coordinate of the polygons, 0.44 mm at a UTM northing of
+4,400 km (in longitude and latitude, that many degrees of arc on the
+sphere while \code{sf::sf_use_s2()} is on, and no margin while it is
+off). A point on the edge two polygons share is then in both in any
+unit and origin of the coordinates, and \code{tie_break} decides it,
+where the last bits of its coordinates put it inside one polygon or the
+other.}
 
 \item{largest}{Logical; when \code{features_sf} is itself polygonal, keep
 the polygon with the largest overlap. Default TRUE. Ignored for point and
@@ -56,8 +66,10 @@ and is unassigned, in any CRS; with \code{largest = FALSE} the default
 \code{st_intersects} counts touching, so such a feature is assigned.
 A feature that overlaps two or more polygons by exactly the same area
 (to 9 significant digits; a square split evenly across a cell edge) is
-given to one of them by \code{tie_break} and counted in \code{"ties"},
-so the choice does not depend on the order of the polygon rows.
+counted in \code{"ties"} and given to the one \code{tie_break} names,
+so the choice does not depend on the order of the polygon rows; where
+\code{"smallest_area"} names none, the feature is given no polygon (see
+\code{tie_break}).
 Invalid geometries (usually a self-intersecting ring),
 whose overlap is undefined, are repaired with \code{sf::st_make_valid()}
 for the join, with a warning, and returned as they arrived. If the
@@ -78,7 +90,21 @@ polygons (with \code{largest}, that overlap several polygons equally):
 \code{"smallest_area"} (default) keeps the polygon with the
 smallest area and, among polygons of equal area (a point on the shared
 edge of two grid cells), the one whose bounding-box centre is lowest,
-then leftmost, so the choice does not depend on the order of the rows.
+then leftmost, then the one whose vertices' mean is lowest, then
+leftmost (the two triangles of a split square share a bounding box),
+so the choice does not depend on the order of the rows. Areas are
+compared to 9 significant digits, and centres and means within one part
+in 1e10 of the largest coordinate of the polygons (with any
+\code{predicate}, and in longitude and latitude whatever
+\code{sf::sf_use_s2()} says), so the choice does not depend on the unit
+or the origin of the coordinates either. Where polygons equal on every
+key are left (one polygon under two IDs, or a square and a rhombus of
+its area about its centre), the rule names no polygon: the feature is
+given none, \code{NA} in the ID column, counted in \code{"ties"} and
+listed in its \code{unresolved}, and a warning of class
+\code{"spatialkit_ties_unresolved"} gives how many such features there
+are (the condition carries \code{n} and \code{total}); it is kept or
+dropped as \code{keep_unassigned} says.
 Areas in longitude and latitude are measured on the sphere with s2,
 whatever \code{sf::sf_use_s2()} says. A polygon among those compared
 whose geometry is invalid (a ring whose edges cross, whose lobes GEOS
@@ -86,7 +112,8 @@ measures as cancelling) is measured on a copy repaired with
 \code{sf::st_make_valid()}, with a warning, and returned as it arrived;
 in degrees, one s2 refuses even repaired (a bowtie) stops the call with
 the error of class \code{"spatialkit_cells_degenerate"} (see Details).
-\code{"first"} keeps the first match (original order-dependent
+\code{"first"} keeps the first match, the polygon that comes first
+in the rows of \code{polygons_sf} (original order-dependent
 behavior). On cells built from the centres a profile scored, a point on
 the edge between two of them is placed by the profile's rule whichever
 is given (see Value).}
@@ -97,7 +124,8 @@ naming a fallback ID column). It does not silence R warnings. Default
 }
 \value{
 An sf object with \code{polygon_id_col} attached, one row per input
-feature (fewer if \code{keep_unassigned = FALSE} dropped unmatched ones), in
+feature (fewer if \code{keep_unassigned = FALSE} dropped unmatched ones, and
+features \code{tie_break} gives no polygon), in
 the CRS \code{features_sf} arrived in. A column of \code{features_sf} already
 called \code{polygon_id_col} is dropped before the spatial join (with a
 warning), so re-assigning an already-assigned layer replaces the old IDs
@@ -131,8 +159,10 @@ polygon (with \code{largest}, overlapped several by exactly the same area)
 and had the \code{tie_break} rule decide for them (on cells built from the
 centres a profile scored, the profile's rule then places the points
 among them, as the last paragraph says): a list with \code{n},
-\code{which} (their row positions in \code{features_sf}), \code{rule} and \code{n_rows}
-(the number of rows returned, which the record was made for). A large
+\code{which} (their row positions in \code{features_sf}), \code{rule}, \code{n_rows}
+(the number of rows returned, which the record was made for) and, when
+the rule gave some of them no polygon (see \code{tie_break}), \code{unresolved},
+the row positions of those among \code{which}. A large
 \code{n} means the polygon layer overlaps, and per-cell counts built from the
 result depend on the rule. The record describes the rows this call
 returned and does not survive subsetting: \code{joined[i, ]}, like

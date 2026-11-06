@@ -169,15 +169,15 @@ test_that("on lattices at spacings of 1, 30, 250 and 1000 every row is in the ce
   }
   expect_length(moved$density, 16L)
   expect_length(moved$kmeans, 16L)
-  # Which rows lie on an edge rests on exact ties, which another GEOS or
-  # another arithmetic can settle the other way, so the counts are held only
-  # on the platform the frozen fixture was recorded on.  There the polygons
-  # alone would place rows of 15 of the 16 lattices in another cell than the
-  # profile's under the density kind, and none under k-means, so on those 15
-  # the profile's rule decides the rows on an edge.
+  # Which rows the polygons alone settle the other way rests on GEOS, so the
+  # counts are held only on the platform the frozen fixture was recorded on.
+  # There the polygons alone would place rows of every lattice in another
+  # cell than the profile's under the density kind, and none under k-means,
+  # so the profile's rule decides the rows on an edge.  A point within the
+  # margin of an edge is on it in every unit, so the four spacings of one
+  # lattice, scaled copies of each other, give one count.
   if (.gt_same_platform()) {
-    expect_identical(moved$density, c(0L, 1L, 2L, 2L, 5L, 3L, 7L, 6L,
-                                      2L, 4L, 3L, 4L, 3L, 3L, 5L, 4L))
+    expect_identical(moved$density, rep(c(1L, 8L, 5L, 5L), each = 4L))
     expect_identical(moved$kmeans, rep(0L, 16L))
   }
 })
@@ -682,11 +682,12 @@ test_that("rows the polygons alone place beside the record are reported, and the
   }
   # Which ties the polygons settle the other way rests on GEOS, so the counts
   # are held only on the platform the frozen fixture was recorded on.  There
-  # the polygons put 3 rows of the 30 m lattice and 4 of the 1000 m one in
-  # the other cell, the first match of sf::st_join() 3 and 4, and every
-  # warning has `what = "loo"`.
+  # the polygons put 8 rows of the 30 m lattice and 5 of the 1000 m one in
+  # the other cell (a point within the margin of an edge is on it, and the
+  # smallest-area rule settles it), the first match of sf::st_join() 3 and
+  # 4, and every warning has `what = "loo"`.
   if (.gt_same_platform()) {
-    expect_identical(unname(n_elsewhere), c(3L, 3L, 3L, 4L, 4L, 4L))
+    expect_identical(unname(n_elsewhere), c(8L, 8L, 3L, 5L, 5L, 4L))
     expect_identical(unname(what), rep("loo", 6L))
   }
 })
@@ -871,7 +872,7 @@ test_that("cells whose record says they are not the scored cells keep the polygo
                                                  quiet = TRUE))
   }
   # The rule changed something on this lattice, so the record is what decided.
-  if (.gt_same_platform()) expect_identical(sum(old != .gt_cell_of(P$asg, pts)), 3L)
+  if (.gt_same_platform()) expect_identical(sum(old != .gt_cell_of(P$asg, pts)), 8L)
 })
 
 
@@ -936,11 +937,20 @@ test_that("a point rounding put a hair inside a cell is on its edge; one a littl
   expect_equal(tol, 1e-10 * (5e6 + 20))
   # Centres moved right by 2e-5: the edge between their cells lies 2e-5 east
   # of the squares' edge, so a point 1e-5 east of it is nearer the left centre
-  # and inside the right square, within the margin of its edge.
+  # and inside the right square, within the margin of its edge.  The polygons
+  # alone read it as on the edge too, and give it the left square, the lower
+  # then leftmost of the two.
   near <- .gt_points(10 + 1e-5, 5)
   moved <- .gt_middles(); moved[, 1L] <- moved[, 1L] + 2e-5
-  expect_identical(.gt_assign(near, sq)$cell_id, 2L)
+  expect_identical(.gt_assign(near, sq)$cell_id, 1L)
   expect_identical(.gt_assign(near, .count_rule_put(sq, .gt_record(moved)))$cell_id, 1L)
+  # Centres moved left by 2e-5, and a point 1e-5 west of the squares' edge,
+  # inside the left square: the polygons give the left square, the record
+  # the right one, the cell of the nearer centre.
+  west <- .gt_points(10 - 1e-5, 5)
+  moved <- .gt_middles(); moved[, 1L] <- moved[, 1L] - 2e-5
+  expect_identical(.gt_assign(west, sq)$cell_id, 1L)
+  expect_identical(.gt_assign(west, .count_rule_put(sq, .gt_record(moved)))$cell_id, 2L)
   # Moved 2e-2, with a point 1e-2 east of the edge: nearer the left centre
   # too, and more than ten times the margin inside the right square, so it is
   # not on the edge, and the polygon that holds it decides.
@@ -1143,14 +1153,15 @@ test_that("only points on cells with the scored centres in a CRS the join can me
   expect_identical(from_ll, .nearest_exact(xy[, 1L], xy[, 2L], mids[, 1L], mids[, 2L]))
   expect_identical(from_ll, .nearest_exact(xy0[, 1L], xy0[, 2L], mids[, 1L], mids[, 2L]))
   expect_identical(from_ll, c(1L, 1L, 1L, 2L, 1L, 4L))
-  # On the sphere s2 and `tie_break` place these six points by rules of
-  # their own, and for the centres numbered from the upper right they give
-  # the profile's cells, so only the centres numbered from the lower left
-  # tell the two apart.  What s2 does rests on its build, so that is held on
-  # the fixture's platform.
+  # On the sphere the four points on an edge lie within the margin of each
+  # square they touch, and `tie_break` settles them by the squares' areas
+  # there, where the upper two are smaller by about two parts in 1e8: the
+  # point between the lower squares goes to the left one, the profile's
+  # centre 2 gives it the right one.  What s2 measures rests on its build,
+  # so that is held on the fixture's platform.
   if (.gt_same_platform() && sf::sf_use_s2()) {
     expect_identical(c(4L, 3L, 2L, 1L)[nearest], profile)
-    expect_identical(.gt_assign(ll(pts), ll(sq))$cell_id, profile)
+    expect_identical(.gt_assign(ll(pts), ll(sq))$cell_id, c(1L, 3L, 4L, 4L, 1L, 4L))
   }
   # Two squares of 0.01 degree drawn in degrees on either side of the meridian
   # 80 W, five points on it, and a record in EPSG:32617 whose centres stand
@@ -1178,9 +1189,10 @@ test_that("only points on cells with the scored centres in a CRS the join can me
     expect_identical(.gt_assign(on_meridian, .count_rule_put(cells_ll, .gt_record(
       centres_ll, crs = sf::st_crs(4326))))$cell_id, sphere)
   }
-  # There the sphere puts the points in both squares, so neither centre's
-  # cell is its answer.
-  if (.gt_same_platform() && sf::sf_use_s2()) expect_identical(sphere, c(1L, 1L, 2L, 1L, 1L))
+  # There every point on the meridian lies within the margin of both
+  # squares, which are equal in area to 9 digits and in the height of their
+  # centres, so each goes to the western square.
+  if (.gt_same_platform() && sf::sf_use_s2()) expect_identical(sphere, rep(1L, 5L))
 })
 
 test_that("cells in a projected CRS are joined in it, whatever projected CRS their record names", {

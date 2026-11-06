@@ -4478,6 +4478,38 @@ old behaviour where there is a way.
   the same folds as before.  On scattered points such pairs occur by
   chance: on 800 uniform points 2 of the 800 NNDM training sets changed.
 
+* **`assign_features_to_polygons()` let the unit and the origin of the
+  coordinates choose the cell of a point on a shared edge, and the row
+  order of `polygons_sf` choose between polygons its tie-break could not
+  tell apart.**  A point on the edge two polygons share was in both only
+  while the edge passed through it exactly; the last bits of its
+  coordinates put it a hair inside one or the other, and the bounding-box
+  centres the smallest-area rule compares were compared exactly, so their
+  last bits settled the rest.  On a 37 x 25 lattice at 250 m and a 10 x 7
+  grid of square cells over it, 25 of 925 rows went to another cell in UTM
+  15N in US feet and 11 with the false origin moved by 0.1 m.  With the
+  default `predicate`, a POINT or MULTIPOINT feature is now in every
+  polygon one of its points lies within a margin of (one part in 1e10 of
+  the largest coordinate of the polygons; in longitude and latitude only
+  while `sf::sf_use_s2()` is on), the centres are compared within the same
+  margin whatever the predicate and `sf::sf_use_s2()`, and every row goes
+  to the same cell in every frame, under `tie_break = "smallest_area"` and
+  `"first"`.
+  Polygons of one area and one bounding-box centre went to the first in
+  the rows of `polygons_sf`, where `?assign_features_to_polygons` said the
+  choice does not depend on their order: the two triangles of a split
+  square, a square and a rhombus of its area about its centre, one polygon
+  under two IDs, in the join by `predicate` and in the largest-overlap
+  join.  The rule now compares the mean of the polygons' vertices next,
+  lowest, then leftmost, which tells the triangles apart, and a feature
+  whose polygons are equal on every key is given none: its ID is `NA`, it
+  is counted in `attr(, "ties")` and listed in its new `unresolved`, it is
+  kept or dropped as `keep_unassigned` says, and a warning of class
+  `spatialkit_ties_unresolved` gives how many such features there are.
+  `tie_break = "first"` keeps the first polygon in row order.  Points off
+  the edges, and features whose candidates differ in area or centre, are
+  assigned as before.
+
 * **`kriging_adequacy()` kriged points XYZ throughout in three
   dimensions.**  `gstat::krige()` uses every coordinate dimension of its
   locations, while the variogram is fitted in x and y, so the heights moved

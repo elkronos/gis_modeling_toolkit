@@ -92,10 +92,20 @@
 #' @param keep_unassigned Logical; retain features that fall inside no
 #'   polygon, carrying \code{NA} in the ID column. Default FALSE, which drops
 #'   them with a warning of class \code{"spatialkit_unassigned"} that gives
-#'   their number.
+#'   their number. Features that \code{tie_break} gives no polygon (see
+#'   there) are kept or dropped with them.
 #' @param predicate Binary spatial predicate function. Default sf::st_intersects.
 #'   Not used when \code{largest} applies: sf then assigns polygon features by
-#'   overlap area and never calls the predicate.
+#'   overlap area and never calls the predicate. With \code{sf::st_intersects}
+#'   a POINT or MULTIPOINT feature with a point within a margin of a
+#'   polygon is in it: one part in 1e10
+#'   of the largest coordinate of the polygons, 0.44 mm at a UTM northing of
+#'   4,400 km (in longitude and latitude, that many degrees of arc on the
+#'   sphere while \code{sf::sf_use_s2()} is on, and no margin while it is
+#'   off). A point on the edge two polygons share is then in both in any
+#'   unit and origin of the coordinates, and \code{tie_break} decides it,
+#'   where the last bits of its coordinates put it inside one polygon or the
+#'   other.
 #' @param largest Logical; when \code{features_sf} is itself polygonal, keep
 #'   the polygon with the largest overlap. Default TRUE. Ignored for point and
 #'   line features. A feature that only touches the polygon layer (shares an
@@ -104,8 +114,10 @@
 #'   \code{st_intersects} counts touching, so such a feature is assigned.
 #'   A feature that overlaps two or more polygons by exactly the same area
 #'   (to 9 significant digits; a square split evenly across a cell edge) is
-#'   given to one of them by \code{tie_break} and counted in \code{"ties"},
-#'   so the choice does not depend on the order of the polygon rows.
+#'   counted in \code{"ties"} and given to the one \code{tie_break} names,
+#'   so the choice does not depend on the order of the polygon rows; where
+#'   \code{"smallest_area"} names none, the feature is given no polygon (see
+#'   \code{tie_break}).
 #'   Invalid geometries (usually a self-intersecting ring),
 #'   whose overlap is undefined, are repaired with \code{sf::st_make_valid()}
 #'   for the join, with a warning, and returned as they arrived. If the
@@ -125,7 +137,21 @@
 #'   \code{"smallest_area"} (default) keeps the polygon with the
 #'   smallest area and, among polygons of equal area (a point on the shared
 #'   edge of two grid cells), the one whose bounding-box centre is lowest,
-#'   then leftmost, so the choice does not depend on the order of the rows.
+#'   then leftmost, then the one whose vertices' mean is lowest, then
+#'   leftmost (the two triangles of a split square share a bounding box),
+#'   so the choice does not depend on the order of the rows. Areas are
+#'   compared to 9 significant digits, and centres and means within one part
+#'   in 1e10 of the largest coordinate of the polygons (with any
+#'   \code{predicate}, and in longitude and latitude whatever
+#'   \code{sf::sf_use_s2()} says), so the choice does not depend on the unit
+#'   or the origin of the coordinates either. Where polygons equal on every
+#'   key are left (one polygon under two IDs, or a square and a rhombus of
+#'   its area about its centre), the rule names no polygon: the feature is
+#'   given none, \code{NA} in the ID column, counted in \code{"ties"} and
+#'   listed in its \code{unresolved}, and a warning of class
+#'   \code{"spatialkit_ties_unresolved"} gives how many such features there
+#'   are (the condition carries \code{n} and \code{total}); it is kept or
+#'   dropped as \code{keep_unassigned} says.
 #'   Areas in longitude and latitude are measured on the sphere with s2,
 #'   whatever \code{sf::sf_use_s2()} says. A polygon among those compared
 #'   whose geometry is invalid (a ring whose edges cross, whose lobes GEOS
@@ -133,7 +159,8 @@
 #'   \code{sf::st_make_valid()}, with a warning, and returned as it arrived;
 #'   in degrees, one s2 refuses even repaired (a bowtie) stops the call with
 #'   the error of class \code{"spatialkit_cells_degenerate"} (see Details).
-#'   \code{"first"} keeps the first match (original order-dependent
+#'   \code{"first"} keeps the first match, the polygon that comes first
+#'   in the rows of \code{polygons_sf} (original order-dependent
 #'   behavior). On cells built from the centres a profile scored, a point on
 #'   the edge between two of them is placed by the profile's rule whichever
 #'   is given (see Value).
@@ -141,7 +168,8 @@
 #'   naming a fallback ID column). It does not silence R warnings. Default
 #'   \code{FALSE}.
 #' @return An sf object with `polygon_id_col` attached, one row per input
-#'   feature (fewer if `keep_unassigned = FALSE` dropped unmatched ones), in
+#'   feature (fewer if `keep_unassigned = FALSE` dropped unmatched ones, and
+#'   features `tie_break` gives no polygon), in
 #'   the CRS `features_sf` arrived in. A column of `features_sf` already
 #'   called `polygon_id_col` is dropped before the spatial join (with a
 #'   warning), so re-assigning an already-assigned layer replaces the old IDs
@@ -175,8 +203,10 @@
 #'   and had the `tie_break` rule decide for them (on cells built from the
 #'   centres a profile scored, the profile's rule then places the points
 #'   among them, as the last paragraph says): a list with `n`,
-#'   `which` (their row positions in `features_sf`), `rule` and `n_rows`
-#'   (the number of rows returned, which the record was made for). A large
+#'   `which` (their row positions in `features_sf`), `rule`, `n_rows`
+#'   (the number of rows returned, which the record was made for) and, when
+#'   the rule gave some of them no polygon (see `tie_break`), `unresolved`,
+#'   the row positions of those among `which`. A large
 #'   `n` means the polygon layer overlaps, and per-cell counts built from the
 #'   result depend on the rule. The record describes the rows this call
 #'   returned and does not survive subsetting: `joined[i, ]`, like
@@ -480,6 +510,12 @@ assign_features_to_polygons <- function(
   # polygons it refused as they arrived (.stop_join_degenerate()).
   f_in <- f
   p_in <- p_sel
+  # The margin within which a point lies on a polygon's edge, and within
+  # which the tie-break's bounding-box centres and vertex means count as
+  # equal: one part in 1e10 of the largest coordinate of the polygons
+  # (.edge_tol()), the margin of the edge rule of cells a profile scored.
+  bb_p    <- sf::st_bbox(p_sel)
+  tie_tol <- .edge_tol(bb_p)
   if (use_largest) s2_if_sphere({
     # sf measures the overlap with st_intersection(), which GEOS cannot do on
     # an invalid ring: one bow-tie parcel threw a TopologyException, and a
@@ -514,6 +550,9 @@ assign_features_to_polygons <- function(
 
   join_args <- list(x = f, y = p_sel, join = predicate, left = TRUE)
   largest_ties <- integer(0)
+  # Features the smallest-area rule leaves between polygons it cannot tell
+  # apart, by their row in `features_sf`: given no polygon.
+  unresolved_rows <- integer(0)
   if (use_largest) {
     # With `largest = TRUE` sf never calls `predicate` (it intersects the
     # layers and keeps the biggest piece), so no predicate can reject it: an
@@ -596,10 +635,12 @@ assign_features_to_polygons <- function(
     # overlapping two or more cells are measured again, and an exact tie
     # (areas equal to 9 significant digits, as for the cell areas below) is
     # decided by `tie_break` among the equally largest cells.
-    lt <- s2_if_sphere(.largest_overlap_ties(f, p_sel, joined, join_id, tie_break))
+    lt <- s2_if_sphere(.largest_overlap_ties(f, p_sel, joined, join_id, tie_break,
+                                             tie_tol))
     if (length(lt$rows)) {
       joined[[join_id]][lt$rows] <- lt$ids
       largest_ties <- joined[["..pre_join_row_id"]][lt$rows]
+      unresolved_rows <- largest_ties[is.na(lt$ids)]
       .log_info(paste0("assign_features_to_polygons(): %d of %d polygon ",
                        "feature(s) overlap two or more polygons by exactly the ",
                        "same area; the '%s' rule chose one for each."),
@@ -615,6 +656,16 @@ assign_features_to_polygons <- function(
     # their record or their CRS.  Such a refusal, and every other refusal
     # of a polygon of either layer by s2, now stops with the cause and the
     # remedy; every other error passes as it was raised.
+    # A point on the edge two polygons share lies in both, and the default
+    # predicate found both only while the edge passed through it exactly: a
+    # change of unit or a shift of the origin moves the last bits of the
+    # coordinates, which put a lattice point a hair inside one cell or the
+    # other (25 of 925 points of a 37 x 25 lattice changed cell in US feet,
+    # 11 with the false origin moved by 0.1 m).  With sf::st_intersects() a
+    # point within `tie_tol` of a polygon is in it, so an edge point is a tie
+    # in every frame and `tie_break` decides it (.intersects_margin()).
+    if (identical(predicate, sf::st_intersects))
+      join_args$join <- function(x, y, ...) .intersects_margin(x, y, bb_p)
     joined <- withCallingHandlers(
       do.call(sf::st_join, join_args),
       error = function(e)
@@ -677,21 +728,31 @@ assign_features_to_polygons <- function(
     # to cells 1, 4, 7, or to 2, 5, 8 with the rows reversed.  The candidate
     # whose bounding-box centre is lowest, then leftmost, wins instead.  On
     # a create_grid_polygons() grid, which is numbered from the lower left a
-    # row at a time, that is the cell the row order picked.
+    # row at a time, that is the cell the row order picked.  The centres are
+    # compared within `tie_tol`: in another unit or origin the centres of a
+    # row of cells differ in their last bits, which chose the cell of an edge
+    # point.  Candidates that share a bounding box (the two triangles of a
+    # split square) are told apart by the mean of their vertices, lowest,
+    # then leftmost; candidates equal on every key (one polygon under two
+    # IDs, a square and a rhombus that share its centre) went to the first
+    # in the row order of `polygons_sf`, and are now given no polygon
+    # (.tie_rule_rows()).
     ctr     <- vapply(p_tie, function(g) {
       bb <- sf::st_bbox(g)
       c((bb[["xmin"]] + bb[["xmax"]]) / 2, (bb[["ymin"]] + bb[["ymax"]]) / 2)
     }, numeric(2))
-    ctr_x <- stats::setNames(ctr[1, ], tie_ids)
-    ctr_y <- stats::setNames(ctr[2, ], tie_ids)
-    ids_j <- as.character(joined[[polygon_id_col]])
-    key_y <- unname(ctr_y[ids_j]); key_y[!is.finite(key_y)] <- Inf
-    key_x <- unname(ctr_x[ids_j]); key_x[!is.finite(key_x)] <- Inf
-
-    # Within each group of duplicates, keep the row with smallest area
-    joined <- joined[order(joined[["..pre_join_row_id"]], joined[["..poly_area"]],
-                           key_y, key_x), , drop = FALSE]
-    joined <- joined[!duplicated(joined[["..pre_join_row_id"]]), , drop = FALSE]
+    vm    <- .vertex_means(p_tie)
+    at_j  <- match(as.character(joined[[polygon_id_col]]), tie_ids)
+    key   <- cbind(joined[["..poly_area"]], ctr[2, at_j], ctr[1, at_j],
+                   vm[at_j, 2L], vm[at_j, 1L])
+    grp   <- joined[["..pre_join_row_id"]]
+    keep  <- .tie_rule_rows(key, grp, tie_tol)
+    joined <- joined[keep, , drop = FALSE]
+    many  <- duplicated(joined[["..pre_join_row_id"]])
+    open  <- unique(joined[["..pre_join_row_id"]][many])
+    joined <- joined[!many, , drop = FALSE]
+    joined[[polygon_id_col]][joined[["..pre_join_row_id"]] %in% open] <- NA
+    unresolved_rows <- c(unresolved_rows, open)
     joined[["..poly_area"]] <- NULL
   } else {
     joined <- joined[!duplicated(joined[["..pre_join_row_id"]]), , drop = FALSE]
@@ -713,9 +774,23 @@ assign_features_to_polygons <- function(
     }
   }
   # Which features matched no polygon, by their row in `features_sf`, read
-  # before the row key goes.
-  unassigned_rows <- sort(joined[["..pre_join_row_id"]][is.na(joined[[polygon_id_col]])])
+  # before the row key goes.  A feature the tie-break left between polygons
+  # it cannot tell apart matched some, and is reported with the ties.
+  unresolved_rows <- sort(unique(unresolved_rows))
+  unassigned_rows <- sort(setdiff(
+    joined[["..pre_join_row_id"]][is.na(joined[[polygon_id_col]])], unresolved_rows))
   joined[["..pre_join_row_id"]] <- NULL
+  if (length(unresolved_rows))
+    .warn_classed("spatialkit_ties_unresolved",
+                  paste0("assign_features_to_polygons(): %d of %d feature(s) match two or ",
+                         "more polygons that the smallest-area rule of `tie_break` cannot ",
+                         "tell apart (equal in area, in bounding-box centre and in the mean ",
+                         "of their vertices, such as one polygon under two IDs), so they ",
+                         "are given no polygon and %s; attr(, \"ties\")$unresolved gives ",
+                         "their rows in `features_sf`."),
+                  length(unresolved_rows), nrow(joined),
+                  if (keep_unassigned) "kept with an NA ID" else "left out of the result",
+                  data = list(n = length(unresolved_rows), total = nrow(joined)))
 
   n_unassigned <- length(unassigned_rows)
   n_features   <- nrow(joined)
@@ -788,9 +863,12 @@ assign_features_to_polygons <- function(
   # survive a subset that renumbers or removes them.
   tie_rows <- sort(unique(c(tie_rows, largest_ties)))
   joined <- .set_row_record(joined, "ties",
-                            list(n = length(tie_rows),
-                                 which = as.integer(tie_rows),
-                                 rule = tie_break))
+                            c(list(n = length(tie_rows),
+                                   which = as.integer(tie_rows),
+                                   rule = tie_break),
+                              # Only when the rule gave some feature no polygon.
+                              if (length(unresolved_rows))
+                                list(unresolved = as.integer(unresolved_rows))))
   # The features no polygon holds, beside the ties: the count used to exist
   # only in a log line.  Stamped the same way, and removed by a subset with
   # the other records named in .row_record_attrs (R/utils.R).
@@ -1239,10 +1317,12 @@ assign_features_to_polygons <- function(
 # again; where the largest overlap is shared (areas equal to 9 significant
 # digits) the polygon is picked among the equally largest by `tie_break`:
 # "smallest_area" takes the smallest polygon, then the one whose bounding-box
-# centre is lowest, then leftmost, as for the predicate join; "first" takes
-# the first by polygon row.  Returns the rows of `joined` that had a tie and
-# the ID each gets.
-.largest_overlap_ties <- function(f, p_sel, joined, join_id, tie_break) {
+# centre is lowest, then leftmost, then the one whose vertices' mean is
+# lowest, then leftmost, centres and means within `tol` equal, as for the
+# predicate join (.tie_rule_rows()), and gives NA where polygons equal on
+# every key are left; "first" takes the first by polygon row.  Returns the
+# rows of `joined` that had a tie and the ID each gets (NA for none).
+.largest_overlap_ties <- function(f, p_sel, joined, join_id, tie_break, tol = 0) {
   none <- list(rows = integer(0), ids = NULL)
   rows <- which(!is.na(joined[[join_id]]))
   if (!length(rows)) return(none)
@@ -1271,12 +1351,92 @@ assign_features_to_polygons <- function(
         bb <- sf::st_bbox(g)
         c((bb[["xmin"]] + bb[["xmax"]]) / 2, (bb[["ymin"]] + bb[["ymax"]]) / 2)
       }, numeric(2))
-      tied[order(ga, ctr[2, ], ctr[1, ])[1L]]
+      vm <- .vertex_means(gp[tied])
+      won <- tied[.tie_rule_rows(cbind(ga, ctr[2, ], ctr[1, ], vm[, 2L], vm[, 1L]),
+                                 rep(1L, length(tied)), tol)]
+      if (length(won) == 1L) won else NA_integer_
     }
     out_rows <- c(out_rows, rows[multi[idx[s[1L], 1L]]])
     out_ids  <- c(out_ids, p_sel[[join_id]][pick])
   }
   list(rows = out_rows, ids = out_ids)
+}
+
+
+#' The candidates the smallest-area rule keeps
+#'
+#' Each feature's candidates are a group of rows of \code{key}: the area of
+#' the polygon (rounded to 9 significant digits by the caller), the
+#' bounding-box centre's y and x, and the mean of the vertices' y and x
+#' (\code{.vertex_means()}).  The candidates of least area are kept; then,
+#' key by key, those within \code{tol} of the least among them.  A key that
+#' is not finite counts as \code{Inf}.  A group left with more than one row
+#' holds polygons the rule cannot tell apart: copies of one polygon, or
+#' polygons that share an area, a bounding-box centre and a vertex mean (a
+#' square and a rhombus about its centre).
+#'
+#' @param key Numeric matrix, one row per candidate, the five keys in order.
+#' @param grp The feature of each row.
+#' @param tol The margin for the centres and the means (\code{.edge_tol()}).
+#' @return Logical vector, one per row: whether the rule keeps it.
+#' @keywords internal
+#' @noRd
+.tie_rule_rows <- function(key, grp, tol = 0) {
+  keep <- rep(TRUE, nrow(key))
+  for (j in seq_len(ncol(key))) {
+    k <- key[, j]
+    k[!is.finite(k)] <- Inf
+    lo <- stats::ave(ifelse(keep, k, Inf), grp, FUN = min)
+    keep <- keep & if (j == 1L) k == lo else k <= lo + tol
+  }
+  keep
+}
+
+
+#' The mean of the vertices of polygons, as \code{.polygon_sort_keys()} takes it
+#'
+#' @param g An sfc.
+#' @return A matrix, one row per geometry: the mean x and the mean y of its
+#'   vertices, each ring's closing vertex left out; \code{Inf} for a
+#'   geometry that is empty or not a POLYGON or MULTIPOLYGON.
+#' @keywords internal
+#' @noRd
+.vertex_means <- function(g) {
+  out <- matrix(Inf, length(g), 2L)
+  ok  <- as.character(sf::st_geometry_type(g, by_geometry = TRUE)) %in%
+    c("POLYGON", "MULTIPOLYGON") & !sf::st_is_empty(g)
+  if (any(ok)) out[ok, ] <- .polygon_sort_keys(g[ok])[, c("mx", "my"), drop = FALSE]
+  out
+}
+
+
+#' The default predicate of the join, with a point on an edge in both polygons
+#'
+#' \code{sf::st_intersects()}, and for each point feature (POINT or
+#' MULTIPOINT) also the polygons it lies within \code{.edge_tol(bb)} of
+#' (\code{.edge_join()}; a MULTIPOINT is within the margin of a polygon when
+#' one of its points is), so a point on the edge two polygons share is in
+#' both whichever side of it rounding puts the point.  Other geometries are
+#' joined by \code{sf::st_intersects()} alone.
+#'
+#' @param x The features (sf).
+#' @param y The polygons (sf), in the CRS of \code{x}.
+#' @param bb The bounding box the margin is taken from: the polygons'.
+#' @return A list, one integer vector of polygon rows per feature, as
+#'   \code{sf::st_join()} takes from its \code{join}.
+#' @keywords internal
+#' @noRd
+.intersects_margin <- function(x, y, bb) {
+  hits <- unclass(sf::st_intersects(x, y))
+  gx   <- sf::st_geometry(x)
+  pt   <- which(as.character(sf::st_geometry_type(gx, by_geometry = TRUE)) %in%
+                  c("POINT", "MULTIPOINT") & !sf::st_is_empty(gx))
+  if (length(pt)) {
+    near <- attr(.edge_join(gx[pt], y, bb), "hits")
+    hits[pt] <- lapply(seq_along(pt), function(k)
+      sort(unique(c(hits[[pt[k]]], as.integer(near[[k]])))))
+  }
+  lapply(hits, as.integer)
 }
 
 
