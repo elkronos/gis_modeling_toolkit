@@ -59,7 +59,10 @@
 #'     scale with the model).  It is at least 0: the
 #'     kriging neighbourhood always holds the cell's own points, the plain
 #'     mean is one unbiased combination of them, and kriging is the best
-#'     such combination.  It is what the variogram expects, not what
+#'     such combination.  The exception is a cell with rows at a location
+#'     whose rows name more than one cell: that location is no cell's own
+#'     (see "The kriging neighbourhood"), and the neighbourhood need not
+#'     hold it.  It is what the variogram expects, not what
 #'     happened: read it beside \code{attr(, "cv")$zscore_var}, which says
 #'     whether the variogram's variances are the right size.  \code{NA}
 #'     where \code{plain_var} is.  \code{kr_var} is not compared with
@@ -170,18 +173,44 @@
 #'
 #' @section The kriging neighbourhood:
 #' \pkg{gstat} kriges a cell from the \code{nmax} locations nearest its
-#' centre.  A cell holding more locations than that would be estimated from
+#' centre.  On gridded locations several of them are often the same distance
+#' away, and which of those the last bits of the coordinates make nearer
+#' moves with the unit and the origin.  So the \code{nmax} are chosen by the
+#' package's tie rule: squared distances within one part in ten million of
+#' each other count as equal, and a tie goes to the location of lower first
+#' coordinate, then lower second, coordinates within that part of the
+#' distance counting as equal.  Where the \code{nmax}-th nearest location
+#' ties with the next, the cell is kriged from the locations the rule
+#' picks; elsewhere the \code{nmax} nearest are one set and \pkg{gstat}'s
+#' own search finds it.  Each held-out location of the cross-validation is
+#' kriged from its \code{nmax} nearest training locations the same way.
+#' The kriged figures, and the cross-validation statistic on the same folds,
+#' are then the same in another unit or with another origin, to rounding,
+#' as long as no coordinate moves by more than about a two-hundred-millionth
+#' of the distance between neighbouring locations.  The
+#' rows are put in order by their coordinates, then their cell ID, then
+#' their response before any of this, so the result does not depend on the
+#' order of the rows either.
+#'
+#' A cell holding more locations than \code{nmax} would be estimated from
 #' its middle alone, which describes the middle rather than the cell (in one
 #' simulated case a cell of 1,500 points came out 0.43 off at
 #' \code{nmax = 50}, against 0.07 from all of them and 0.02 for its plain
 #' mean).  So wherever the \code{nmax} locations nearest a cell's centre
-#' leave out any of the cell's own locations, the cell is kriged from all of
-#' its own locations plus the \code{nmax} nearest outside it;
+#' leave out any of the cell's own locations (more than \code{nmax}
+#' locations are as near as its furthest own one, under the same tolerance),
+#' the cell is kriged from all of its own locations plus the \code{nmax}
+#' nearest outside it, chosen by the same rule;
 #' \code{kr_n_used} says how many locations each cell was kriged from.  The
 #' cost of a kriging system grows with the cube of its size (about 1 s at
 #' 2,000 locations and 17 s at 5,000), so a cell that would need more than
 #' \code{max_neighbours} is left out with a warning, its \code{kr_} columns
-#' \code{NA}.
+#' \code{NA}.  A cell's own locations are those whose rows name it.  A
+#' location whose rows name more than one cell (rows at one place carrying
+#' different IDs) is no cell's own, with a warning that gives the count of
+#' such locations: it is kriged from as any other location, and each of its
+#' rows still counts in \code{n}, \code{mean}, \code{se} and
+#' \code{plain_var} of the cell it names.
 #'
 #' \pkg{gstat} also discretises each cell into 500 points on a regular grid
 #' laid over the cell's whole bounding box, keeping those inside, so the
@@ -235,10 +264,11 @@
 #' \code{NA} with a warning, and \code{print()} says how many.
 #'
 #' @param assigned_points_sf Points with a cell identifier column, as
-#'   \code{\link{assign_features_to_polygons}()} returns.  A layer whose
-#'   points, or the points taken from its multipoints, do not all have the
-#'   same dimensions (some with a Z or M coordinate) is read without its Z
-#'   and M, since sf reads a layer in the dimension of its first geometry.
+#'   \code{\link{assign_features_to_polygons}()} returns.  Any Z or M
+#'   dimension is dropped, on every layer, because \code{gstat::krige()}
+#'   uses every coordinate dimension of its locations and the variogram is
+#'   fitted in x and y (\code{\link{estimate_sac_range}()} drops Z and M
+#'   too): the points are kriged in x and y.
 #'   Multipoints whose geometries carry M (XYM or XYZM) are reduced to
 #'   points in x and y, since GEOS does not read M.
 #' @param response_var The response column: numeric or logical. A logical
@@ -423,14 +453,18 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # anything is moved: the points were assigned to these cells, so they share
   # a coordinate space.  .align_crs() leaves a CRS-less layer as it is, and
   # gstat::krige() then failed on the mismatch with an internal assertion.
-  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y
-  # (.xy_if_mixed()) before it is moved, pointized or repaired: sf reads such
-  # a layer in the dimension of its first geometry, so the moves stopped with
-  # "OGR error" and GEOS with its own message on the cells.  Cells whose
-  # geometries carry M are read in x and y as well (.xy_if_mixed_or_m()):
-  # GEOS does not read M, and the repair stopped on them.  Neither layer is
-  # returned, so nothing is said.
-  pts <- .xy_if_mixed(assigned_points_sf)
+  # The points are read in x and y, whatever their dimensions, before they
+  # are moved, pointized or repaired.  gstat::krige() uses every coordinate
+  # dimension of its locations, and the variogram is fitted in x and y on
+  # every path (estimate_sac_range() drops Z and M), so points XYZ throughout
+  # were kriged in three dimensions with a planar model: heights of 0 to
+  # 1000 m moved kr_var by 13 percent on average.  A layer that mixes XY and
+  # XYZ (or XYM) geometries also stopped the moves with "OGR error", since sf
+  # reads such a layer in the dimension of its first geometry.  Cells that
+  # mix dimensions, or whose geometries carry M, are read in x and y as well
+  # (.xy_if_mixed_or_m()): GEOS does not read M, and the repair stopped on
+  # them.  Neither layer is returned, so nothing is said.
+  pts <- sf::st_zm(assigned_points_sf, drop = TRUE, what = "ZM")
   # A row with a coordinate that is not finite or lies beyond 1e150 has no
   # location.  It is read as given, before the reduction to points and any
   # move, and emptied (.empty_unlocated()), as .pooled_xy() reads the pooled
@@ -485,6 +519,21 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
                      "or without a location (%s)."),
               sum(!ok), .UNLOCATED_WHAT)
   kp <- pts[ok, , drop = FALSE]
+  zk <- z[ok]
+  # The rows in an order the caller's does not set (.canonical_order()): by
+  # coordinates, then cell ID, then response.  The locations below are
+  # numbered, handed to gstat and searched for neighbours in this order, so
+  # a location tied with another at the edge of a kriging neighbourhood, the
+  # replicate means and every sum over the rows come out the same for the
+  # layer in any row order.  As given, the order settled those ties: on a
+  # 30 x 30 lattice the rows reversed moved kr_pred in 5 of 9 cells.  Each
+  # row keeps its position among the kept rows as given (`ord`), so a
+  # location is still held out under the fold of its first row there, and a
+  # vector of fold labels is still read by position.
+  ord <- .canonical_order(sf::st_coordinates(kp)[, 1L], sf::st_coordinates(kp)[, 2L],
+                          .id_as_character(sf::st_drop_geometry(kp)[[id_pts]]), zk)
+  kp <- kp[ord, , drop = FALSE]
+  zk <- zk[ord]
   # A response whose raw values lose their spread to rounding (1e15 plus a
   # spread of 1, which a double holds to an eighth) is taken about the centre
   # estimate_sac_range() regresses it about (.regression_centre()), or the
@@ -494,8 +543,8 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # values unchanged.  Kriging with a constant mean and a plain mean do not
   # change under a shift, so the centre is added back to `mean` and `kr_pred`
   # alone.  It is 0 for every other response, which is computed as before.
-  z_centre <- .regression_centre(z[ok], bounded = FALSE)
-  kp$..z <- z[ok] - z_centre
+  z_centre <- .regression_centre(zk, bounded = FALSE)
+  kp$..z <- zk - z_centre
 
   # --- the variogram model ---
   sac_supplied <- !is.null(sac)
@@ -587,6 +636,10 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   loc <- match(key, unique(key))
   first <- !duplicated(loc)
   kk <- kp[first, , drop = FALSE]
+  # For each location, in the order of kk, its first row in the layer as
+  # given: the row whose fold the location is held out under.
+  by_given <- order(loc, ord)
+  fold_row <- by_given[!duplicated(loc[by_given])]
   vk <- vm
   w <- NULL
   err_var <- rep(0, nrow(kk))    # already in vk's nugget when w is NULL
@@ -690,7 +743,25 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # all of them plus the nmax nearest outside it; elsewhere gstat's own
   # neighbourhood is used unchanged.
   cap <- max(as.integer(max_neighbours), as.integer(nmax))
-  loc_cell <- match(ids_pts[first], ids_cells)
+  # The cell whose own locations each location is among: the one its rows
+  # name.  A location whose rows name more than one cell has no identified
+  # cell and is no cell's own.  It used to be given the cell of its first
+  # row, so the cell that holds it changed with the row order of the layer.
+  # It stays among the data every cell is kriged from, and each of its rows
+  # still counts in the plain mean of the cell it names.
+  id_at <- unique(data.frame(loc = loc, id = ids_pts)[!is.na(ids_pts), , drop = FALSE])
+  n_ids <- tabulate(id_at$loc, nbins = nrow(kk))
+  loc_cell <- rep(NA_integer_, nrow(kk))
+  one_id <- id_at[n_ids[id_at$loc] == 1L, , drop = FALSE]
+  loc_cell[one_id$loc] <- match(one_id$id, ids_cells)
+  if (any(n_ids > 1L))
+    .warn_and_log(paste0("kriging_adequacy(): %d location(s) carry rows with more than ",
+                         "one cell ID; each is given no cell. It is kriged from as any ",
+                         "other location, but no cell's neighbourhood is enlarged to hold ",
+                         "it, and each of its rows still counts in the n, mean, se and ",
+                         "plain_var of the cell it names, whose kr_gain can then fall ",
+                         "below 0."),
+                  sum(n_ids > 1L))
   nb <- .cell_neighbourhoods(cells, kk, loc_cell, as.integer(nmax), cap, skip = sliver)
   if (any(nb$enlarged))
     .log_info(paste0("kriging_adequacy(): %d cell(s) hold locations the nmax = %d ",
@@ -716,13 +787,18 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
         stop("kriging_adequacy(): gstat::krige() failed: ", conditionMessage(e),
              call. = FALSE))
   kr_pred <- kr_var <- rep(NA_real_, nrow(cells))
-  batch <- !sliver & !nb$enlarged & !nb$too_big
+  # A cell whose nmax nearest locations are one set goes to gstat's own nmax
+  # search in one call, which finds that set.  An enlarged cell, and one
+  # whose nmax-th nearest location ties with the next, is kriged on its own
+  # from the locations .cell_neighbourhoods() chose by the package's tie rule.
+  alone <- nb$enlarged | nb$tied
+  batch <- !sliver & !alone & !nb$too_big
   if (any(batch)) {
     bk <- .krige_cells(kk, cells[batch, , drop = FALSE], w, as.integer(nmax))
     kr_pred[batch] <- suppressWarnings(as.numeric(bk$var1.pred))
     kr_var[batch]  <- suppressWarnings(as.numeric(bk$var1.var))
   }
-  for (ci in which(nb$enlarged)) {
+  for (ci in which(alone)) {
     s <- nb$sel[[ci]]
     bk <- .krige_cells(kk[s, , drop = FALSE], cells[ci, , drop = FALSE], w[s], Inf)
     kr_pred[ci] <- suppressWarnings(as.numeric(bk$var1.pred))
@@ -731,7 +807,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   kr_var[is.finite(kr_var) & kr_var < 0] <- 0
   # gstat answers a system it cannot solve with NA and, at debug.level 0,
   # nothing else.
-  kriged <- batch | nb$enlarged
+  kriged <- batch | alone
   n_na <- sum(kriged & (!is.finite(kr_pred) | !is.finite(kr_var)))
   if (n_na)
     .warn_and_log(paste0("kriging_adequacy(): gstat::krige() returned no estimate for %d ",
@@ -832,7 +908,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # reduced to fold labels, as they were, both ran as plain leave-one-out
   # (a 250 m buffer: variance 1.02 and RMSE 0.757, identical to 1:n, against
   # 0.873 and 0.944 with the buffer kept).
-  splits <- .location_splits(folds, kp, first)
+  splits <- .location_splits(folds, kp, fold_row, ord)
   held <- sort(unique(unlist(lapply(splits, `[[`, "test"), use.names = FALSE)))
   cv <- list(zscore_var = NA_real_, zscore_mean = NA_real_, rmse = NA_real_,
              n_pred = 0L, k = length(splits), method = method)
@@ -841,15 +917,40 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
     # The folds are run here rather than by gstat::krige.cv(), which subsets
     # the data per fold but not `weights`.  With the nugget zeroed in vk, a
     # held-out location's own error variance goes back into its variance.
+    # A held-out location whose nmax nearest training locations are one set
+    # is kriged in its split's one call, by gstat's own nmax search; one whose
+    # nmax-th nearest ties with the next is kriged on its own from the nmax
+    # the package's tie rule picks (.tie_pick()), as the cells are.
     kcv <- tryCatch({
       pred <- pvar <- rep(NA_real_, nrow(kk))
+      kdf <- data.frame(x = xy_loc[, 1L], y = xy_loc[, 2L], ..z = kk$..z)
       for (s in splits) {
         if (!length(s$train)) next
-        kf <- gstat::krige(..z ~ 1, locations = kk[s$train, , drop = FALSE],
-                           newdata = kk[s$test, , drop = FALSE], model = vk,
-                           weights = w[s$train], nmax = as.integer(nmax), debug.level = 0)
-        pred[s$test] <- suppressWarnings(as.numeric(kf$var1.pred))
-        pvar[s$test] <- suppressWarnings(as.numeric(kf$var1.var)) + err_var[s$test]
+        tr <- sort(s$train); te <- s$test
+        xt <- xy_loc[tr, 1L]; yt <- xy_loc[tr, 2L]
+        own_set <- lapply(te, function(i) {
+          p <- .tie_pick((xt - xy_loc[i, 1L])^2 + (yt - xy_loc[i, 2L])^2,
+                         as.integer(nmax), xt, yt)
+          if (p$tied) tr[p$sel] else NULL
+        })
+        one <- vapply(own_set, is.null, logical(1))
+        if (any(one)) {
+          kf <- gstat::krige(..z ~ 1, locations = kk[tr, , drop = FALSE],
+                             newdata = kk[te[one], , drop = FALSE], model = vk,
+                             weights = w[tr], nmax = as.integer(nmax), debug.level = 0)
+          pred[te[one]] <- suppressWarnings(as.numeric(kf$var1.pred))
+          pvar[te[one]] <- suppressWarnings(as.numeric(kf$var1.var)) + err_var[te[one]]
+        }
+        # On the plain coordinates, which gstat kriges as it kriges the
+        # points and in a third of the time a call on them takes.
+        for (i in which(!one)) {
+          si <- own_set[[i]]
+          kf <- gstat::krige(..z ~ 1, locations = ~ x + y, data = kdf[si, , drop = FALSE],
+                             newdata = kdf[te[i], c("x", "y"), drop = FALSE], model = vk,
+                             weights = w[si], nmax = Inf, debug.level = 0)
+          pred[te[i]] <- suppressWarnings(as.numeric(kf$var1.pred))
+          pvar[te[i]] <- suppressWarnings(as.numeric(kf$var1.var)) + err_var[te[i]]
+        }
       }
       data.frame(residual = kk$..z[held] - pred[held],
                  zscore = suppressWarnings((kk$..z[held] - pred[held]) / sqrt(pvar[held])))
@@ -912,58 +1013,142 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
 #'
 #' gstat takes the `nmax` locations nearest a block's centre (the polygon's
 #' label point, sp::coordinates(), which is what predict.gstat() hands it).
-#' A cell whose own locations all fall among those keeps that neighbourhood
-#' and is kriged in the one batch call.  One that holds a location the
-#' neighbourhood leaves out is marked `enlarged` and gets `sel`: all of its
-#' own locations plus the `nmax` nearest outside it; `too_big` when that
-#' exceeds `cap`.  `n_used` is the neighbourhood size per cell, NA for a cell
-#' left out; `size` the system an enlarged or too-big cell needs.
+#' A cell whose own locations all fall among those, and whose `nmax`
+#' nearest are one set, keeps that neighbourhood and is kriged in the one
+#' batch call.  One whose `nmax`-th nearest location ties with the next
+#' (squared distances within `.TIE_TOL`, as on a lattice) is marked `tied`
+#' and gets `sel`: the `nmax` the package's tie rule picks (.tie_pick()),
+#' where gstat's own search would let the last bits of the coordinates
+#' choose.  One that holds a location the neighbourhood leaves out (more
+#' than `nmax` locations within `.TIE_TOL` of the distance of its furthest
+#' own location) is marked `enlarged` and gets `sel`: all of its own
+#' locations plus the `nmax` nearest outside it, by the same rule;
+#' `too_big` when that exceeds `cap`.  `n_used` is the neighbourhood size
+#' per cell, NA for a cell left out; `size` the system an enlarged or
+#' too-big cell needs.
+#'
+#' @param kk The distinct locations, in the order of .canonical_order(), so
+#'   that the rule's last step, the lower number, does not depend on the
+#'   row order of the layer.
 #' @keywords internal
 #' @noRd
 .cell_neighbourhoods <- function(cells, kk, loc_cell, nmax, cap, skip) {
   nc <- nrow(cells); nl <- nrow(kk)
   n_used <- ifelse(skip, NA_integer_, min(nmax, nl))
-  enlarged <- too_big <- rep(FALSE, nc)
+  enlarged <- too_big <- tied <- rep(FALSE, nc)
   size <- rep(NA_integer_, nc)
   sel <- vector("list", nc)
   own_of <- split(seq_len(nl), factor(loc_cell, levels = seq_len(nc)))
-  todo <- which(!skip & lengths(own_of) > 0L)
-  if (!length(todo)) return(list(n_used = n_used, enlarged = enlarged,
+  todo <- which(!skip)
+  if (!length(todo)) return(list(n_used = n_used, enlarged = enlarged, tied = tied,
                                  too_big = too_big, size = size, sel = sel))
   cen <- sp::coordinates(sf::as_Spatial(sf::st_set_crs(
     sf::st_geometry(cells)[todo], sf::NA_crs_)))
   xy <- sf::st_coordinates(kk)[, 1:2, drop = FALSE]
   for (j in seq_along(todo)) {
     ci <- todo[j]; own <- own_of[[ci]]
-    d <- sqrt((xy[, 1] - cen[j, 1])^2 + (xy[, 2] - cen[j, 2])^2)
-    # gstat's nmax nearest already hold every location of the cell.
-    if (sum(d <= max(d[own])) <= nmax) next
+    d2 <- (xy[, 1] - cen[j, 1])^2 + (xy[, 2] - cen[j, 2])^2
+    # The nmax nearest hold every location of the cell, counted with the
+    # tolerance of the tie rule, so that a cell is enlarged or not in any
+    # unit and with any origin.
+    if (!length(own) || sum(d2 <= max(d2[own]) * (1 + .TIE_TOL)) <= nmax) {
+      p <- .tie_pick(d2, nmax, xy[, 1], xy[, 2])
+      if (p$tied) { tied[ci] <- TRUE; sel[[ci]] <- p$sel }
+      next
+    }
     n_out <- min(nmax, nl - length(own))
     size[ci] <- length(own) + n_out
     if (size[ci] > cap) {
       too_big[ci] <- TRUE; n_used[ci] <- NA_integer_
       next
     }
-    d[own] <- Inf
-    sel[[ci]] <- c(own, order(d)[seq_len(n_out)])
+    d2[own] <- Inf
+    sel[[ci]] <- sort(c(own, .tie_pick(d2, n_out, xy[, 1], xy[, 2])$sel))
     enlarged[ci] <- TRUE; n_used[ci] <- size[ci]
   }
-  list(n_used = n_used, enlarged = enlarged, too_big = too_big, size = size, sel = sel)
+  list(n_used = n_used, enlarged = enlarged, tied = tied, too_big = too_big,
+       size = size, sel = sel)
+}
+
+
+#' The k locations nearest a point, by the package's tie rule
+#'
+#' Squared distances within \code{.TIE_TOL} (one part in ten million) of
+#' each other are a tie, settled as \code{.knn_pick_rows()} settles it: the
+#' lower first coordinate, then the lower second, coordinates within that
+#' part of the distance counting as equal, then the lower number.  On a
+#' lattice many locations are the same distance from a cell's centre or a
+#' held-out point, and which of them rounding makes nearer moves with the
+#' unit and the origin of the coordinates; under this rule it does not.
+#' Where the (k + 1)-th nearest is further than the k-th by more than
+#' \code{.TIE_TOL} and one part in a thousand million, the k nearest are one
+#' set, which the rule picks and gstat's own \code{nmax} search finds too.
+#'
+#' @param d2 Squared distances from the point to every candidate, \code{Inf}
+#'   for one left out.
+#' @param k Number of locations wanted.
+#' @param x,y The candidates' coordinates, in the order of
+#'   \code{.canonical_order()}.
+#' @return A list: \code{tied}, \code{TRUE} when the k-th nearest ties with
+#'   the next, and \code{sel}, the k picked, in increasing order (every
+#'   candidate when there are no more than k).
+#' @keywords internal
+#' @noRd
+.tie_pick <- function(d2, k, x, y) {
+  fin <- which(d2 < Inf)
+  if (k >= length(fin)) return(list(tied = FALSE, sel = fin))
+  s <- sort(d2, partial = c(k, k + 1L))
+  if (s[k + 1L] > s[k] * (1 + .TIE_TOL + 1e-9))
+    return(list(tied = FALSE, sel = which(d2 <= s[k])))
+  # No pick of the rule is further than the k-th nearest by more than the
+  # tolerance (.knn_exact_rows()), so it is made among those.
+  cand <- which(d2 <= s[k] * (1 + .TIE_TOL))
+  pick <- .knn_pick_rows(matrix(d2[cand], 1L), matrix(cand, 1L), k, .TIE_TOL, x, y)
+  list(tied = TRUE, sel = sort(cand[pick]))
+}
+
+
+#' Rows in an order the order given does not set
+#'
+#' The package's coordinate order, for any step that numbers, searches or
+#' subsamples rows: by the column of \code{.near_columns()} (first
+#' coordinates within \code{.TIE_TOL} of the extent counting as one), then
+#' by the row the same rule gives the second coordinates, then by each
+#' further key in turn, and last by the position given, which decides only
+#' among rows equal on every key.  Coordinates that differ in their last
+#' bits, as a lattice's do after a change of unit or origin, take the same
+#' place.  The keys are compared by \code{order(method = "radix")}, so text
+#' sorts byte by byte, whatever the locale; \code{NA} comes last.
+#'
+#' @param x,y Finite coordinates of the rows.
+#' @param ... Further keys, each a vector with one entry per row (a cell ID
+#'   as text, a response), in the order they are compared.
+#' @return The permutation that puts the rows in that order.
+#' @keywords internal
+#' @noRd
+.canonical_order <- function(x, y, ...) {
+  n <- length(x)
+  if (n < 2L) return(seq_len(n))
+  do.call(order, c(list(.near_columns(x, y), .near_columns(y, x)), list(...),
+                   list(seq_len(n), na.last = TRUE, method = "radix")))
 }
 
 
 #' Cross-validation splits in locations, from any fold shape the package accepts
 #'
-#' Row indices into `kk` (one row per distinct location, `first` marking the
-#' first row of each location in `pts`).  A make_folds() result keeps its own
-#' train sets, which for buffered_loo and nndm are not the complement of the
-#' test set; fold labels become k-fold splits.  A location is held out under
-#' its first row and never trains the split it is held out in.  Splits with
-#' nothing held out are dropped.
+#' Row indices into `kk` (one row per distinct location; `rows` gives, for
+#' each in the order of `kk`, the row of `pts` that is its first in the layer
+#' as given).  A make_folds() result keeps its own train sets, which for
+#' buffered_loo and nndm are not the complement of the test set; fold
+#' labels become k-fold splits.  A location is held out under that row and
+#' never trains the split it is held out in.  Splits with nothing held out
+#' are dropped.
+#' @param given For each row of `pts`, its position among the rows as given,
+#'   by which a vector of fold labels is read.
 #' @keywords internal
 #' @noRd
-.location_splits <- function(folds, pts, first) {
-  rid <- pts$..row_id[first]
+.location_splits <- function(folds, pts, rows, given = seq_len(nrow(pts))) {
+  rid <- pts$..row_id[rows]
   is_split <- function(s) is.list(s) && !is.null(s$train) && !is.null(s$test)
   sp <- if (is.list(folds) && is.list(folds$folds) && length(folds$folds) &&
             all(vapply(folds$folds, is_split, logical(1)))) {
@@ -972,7 +1157,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
       list(train = setdiff(which(rid %in% s$train), te), test = te)
     })
   } else {
-    lab <- .fold_labels_for(folds, pts)[first]
+    lab <- .fold_labels_for(folds, pts, given)[rows]
     ok <- which(is.finite(lab))
     lapply(unique(lab[ok]), function(f)
       list(train = ok[lab[ok] != f], test = ok[lab[ok] == f]))
@@ -1065,9 +1250,12 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
 
 
 #' Fold labels for a layer, from any of the fold shapes the package accepts
+#'
+#' @param given For each row of `pts`, its position among the rows as given:
+#'   a vector of labels has one per row in that order.
 #' @keywords internal
 #' @noRd
-.fold_labels_for <- function(folds, pts) {
+.fold_labels_for <- function(folds, pts, given = seq_len(nrow(pts))) {
   n <- nrow(pts)
   if (is.list(folds) && !is.null(folds$assignment)) {
     a <- folds$assignment
@@ -1075,7 +1263,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
       return(a$fold[match(pts$..row_id, a$row_id)])
     return(a$fold[match(seq_len(n), a$row_id)])
   }
-  if (is.atomic(folds) && length(folds) == n) return(as.integer(as.factor(folds)))
+  if (is.atomic(folds) && length(folds) == n) return(as.integer(as.factor(folds))[given])
   stop("kriging_adequacy(): `folds` must be a make_folds() result on the same ",
        "layer, or a vector of fold labels with one entry per row.", call. = FALSE)
 }

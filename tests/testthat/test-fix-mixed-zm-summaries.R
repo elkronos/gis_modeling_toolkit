@@ -190,12 +190,11 @@ test_that("a layer XYZ throughout whose multipoints or polygons give XY points i
   expect_identical(got, ref)
 })
 
-test_that("kriging_adequacy() hands points XYZ throughout to gstat with their Z, as before", {
-  # gstat::krige() kriges these points in three dimensions with a variogram
-  # fitted in x and y, so the heights move the result.  That is a defect of
-  # its own, outside the mixed layers: until it is fixed the points keep
-  # their Z on the way to gstat, as they did, and the result is not the XY
-  # one.  The fix of that defect turns this test round.
+test_that("kriging_adequacy() kriges points XYZ throughout in x and y, as their XY copy", {
+  # gstat::krige() kriged these points in three dimensions with a variogram
+  # fitted in x and y, so the heights moved the result.  The points are now
+  # read in x and y on every layer, Z and M dropped, as the variogram is
+  # fitted, so the result is the XY one, warnings included.
   L <- .zs_layer()
   h <- local({
     withr::local_seed(11, .rng_kind = "Mersenne-Twister",
@@ -208,10 +207,9 @@ test_that("kriging_adequacy() hands points XYZ throughout to gstat with their Z,
   expect_identical(unique(.geom_dims(ptsz)), "XYZ")
   got <- .zs_krige(ptsz, L$cells, L$sac)
   ref <- .zs_krige(L$asg, L$cells, L$sac)
-  ok <- is.finite(ref$value$kr_var)
-  expect_true(any(ok))
-  expect_false(isTRUE(all.equal(got$value$kr_var[ok], ref$value$kr_var[ok],
-                                tolerance = 1e-3)))
+  expect_true(any(is.finite(ref$value$kr_var)))
+  expect_false("spatialkit_zm_dropped" %in% got$classes)
+  expect_identical(got, ref)
 })
 
 test_that("?kriging_adequacy and ?summarize_by_cell say mixed layers are read in x and y", {
@@ -225,9 +223,10 @@ test_that("?kriging_adequacy and ?summarize_by_cell say mixed layers are read in
     gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
   }
   txt <- page("kriging_adequacy.Rd")
-  expect_match(txt, paste0("A layer whose points, or the points taken from its multipoints, do ",
-                           "not all have the same dimensions (some with a Z or M coordinate) is ",
-                           "read without its Z and M"), fixed = TRUE)
+  # The points of every layer, mixed or not, are read in x and y.
+  expect_match(txt, paste0("Any Z or M dimension is dropped, on every layer, because ",
+                           "gstat::krige() uses every coordinate dimension of its locations and ",
+                           "the variogram is fitted in x and y"), fixed = TRUE)
   expect_match(txt, paste0("Cells that do not all have the same dimensions are read in x and ",
                            "y, without their Z and M."), fixed = TRUE)
   txt <- page("summarize_by_cell.Rd")

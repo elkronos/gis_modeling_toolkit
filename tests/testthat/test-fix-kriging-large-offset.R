@@ -111,7 +111,13 @@ test_that("a response whose raw values show their spread is not centred", {
     a <- suppressWarnings(assign_features_to_polygons(p, cells))
     expect_identical(.regression_centre(a$zz, bounded = FALSE), 0, info = inf)
     d <- sf::st_drop_geometry(suppressWarnings(kriging_adequacy(a, "zz", cells)))
-    expect_identical(d$mean, as.numeric(tapply(a$zz, factor(a$poly_id, levels = cells$poly_id),
+    # The plain mean of the raw values, summed in the order the function puts
+    # the rows in (coordinates, cell ID, response), which does not depend on
+    # the order given.
+    xy <- sf::st_coordinates(a)
+    o <- .canonical_order(xy[, 1], xy[, 2], .id_as_character(a$poly_id), a$zz)
+    expect_identical(d$mean, as.numeric(tapply(a$zz[o], factor(a$poly_id[o],
+                                                               levels = cells$poly_id),
                                                mean)), info = inf)
     shift_var <- d$plain_var - d$kr_var
     expect_identical(d$kr_shift,

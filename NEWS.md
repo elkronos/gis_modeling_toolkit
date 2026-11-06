@@ -4155,6 +4155,40 @@ old behaviour where there is a way.
   to the precision a double holds them to there.  Every response whose raw
   values show their spread gives the numbers it gave.
 
+* **`kriging_adequacy()` let the unit, the origin and the row order of the
+  points choose a lattice's kriging neighbourhoods.**  On gridded locations
+  several locations are often the same distance from a cell's centre or a
+  held-out point, and `gstat::krige()` took its `nmax` among them by the
+  last bits of the coordinates and by the order of the rows.  On a 32 x 24
+  lattice at 250 m, the same points and cells in US feet or with the false
+  origin moved by 0.1 m moved `kr_pred` in about half of 48 cells, by up to
+  0.03, and `kr_shift` by up to 1; on a 30 x 30 lattice the rows reversed
+  moved `kr_pred` in 5 of 9 cells and the cross-validation statistic in its
+  fourth digit.  The `nmax` are now chosen by the package's tie rule, as its
+  other neighbour searches choose them: squared distances within one part in
+  ten million count as equal, and a tie goes to the lower first coordinate,
+  then the lower second.  A cell or held-out location whose `nmax`-th
+  nearest ties with the next is kriged on its own from the locations the
+  rule picks; the test for a cell whose own locations reach beyond its
+  `nmax` nearest counts with the same tolerance, and the locations added
+  outside it are chosen the same way.  The rows are put in order by
+  coordinates, cell ID and response before anything is computed, and a
+  location is still held out under the fold of its first row as given.  A
+  location whose rows name more than one cell was given the cell of its
+  first row; it is now no cell's own, with a warning that gives the count of
+  such locations, and each of its rows still counts in the cell it names.
+  Layers with no tied distances give the same figures, to rounding.  A
+  lattice takes longer: one call to gstat per tied cell and held-out
+  location.
+
+* **`kriging_adequacy()` kriged points XYZ throughout in three
+  dimensions.**  `gstat::krige()` uses every coordinate dimension of its
+  locations, while the variogram is fitted in x and y, so the heights moved
+  every column: on 400 points with heights of 0 to 1000 m, `kr_var` by 13
+  percent on average.  The points are now read in x and y on every layer,
+  as `estimate_sac_range()` reads them, and a layer XYZ or XYM throughout
+  gives the result of its XY copy.
+
 * **`residual_morans_i()` read its response, design and residuals at their
   origin and unit.**  It rebuilt the design and regressed the response on
   the raw columns to test whether the residuals are OLS residuals, and gave
