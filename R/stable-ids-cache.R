@@ -26,7 +26,13 @@
 #' @param method One of "centroid", "surface_point", "bbox_center".
 #' @param make_valid Logical; apply st_make_valid() first. Default TRUE.
 #'   The copy the sort key is measured on is repaired as well, after it has
-#'   been transformed (see Details); with \code{FALSE} neither is. The rows
+#'   been transformed (see Details); with \code{FALSE} neither is. On a layer
+#'   in longitude and latitude with \code{sf::sf_use_s2()} on, the repair is
+#'   s2's rebuild, which can move the corners of a polygon it rebuilds and
+#'   return a POLYGON as a MULTIPOLYGON, so only the rows s2 or GEOS does
+#'   not call valid are rebuilt, and the other rows are returned as they
+#'   arrived. A projected layer, or one in degrees
+#'   with s2 off, is repaired by GEOS. The rows
 #'   returned are the repaired polygons, made in x and y whenever
 #'   \code{polygons_sf} carries Z or M: polygons that mix XY and XYZ (or XYM)
 #'   geometries, and polygons that all carry Z or M, are repaired in XY and
@@ -163,7 +169,10 @@ ensure_stable_poly_id <- function(polygons_sf,
                       length(zm), length(dims), data = list(rows = zm))
       polygons_sf <- sf::st_zm(polygons_sf, drop = TRUE, what = "ZM")
     }
-    polygons_sf <- .safe_make_valid(polygons_sf)
+    # In degrees with s2 on, only the rows s2 or GEOS calls invalid are
+    # rebuilt; the rebuild moved the corners of every valid row
+    # (.make_valid_rows()).
+    polygons_sf <- .make_valid_rows(polygons_sf)
   }
   key_sf <- .xy_if_mixed(polygons_sf)
 
@@ -290,6 +299,44 @@ ensure_stable_poly_id <- function(polygons_sf,
   out <- polygons_sf[ord, , drop = FALSE]
   out[[id_col]] <- seq_len(nrow(out))
   out
+}
+
+
+#' Repair the rows ensure_stable_poly_id() returns
+#'
+#' In longitude and latitude with \code{sf::sf_use_s2()} on,
+#' \code{.safe_make_valid()} is s2's rebuild, which rewrites every row it is
+#' given: valid rows came back with their corners moved by up to 7e-8
+#' degrees and a POLYGON as a MULTIPOLYGON, where GEOS's repair (s2 off, or a
+#' projected layer) leaves the corners in place.  There only the rows s2 or
+#' GEOS does not call valid are rebuilt, and the others are returned as they
+#' arrived, as \code{.boundary_mend()} does.  GEOS's check reads the bare
+#' coordinates on the plane: s2 reads rings without their orientation and
+#' calls valid a hole outside its shell, a part inside another part and a
+#' ring of collinear points, which GEOS calls invalid and s2's rebuild
+#' mends.  Everywhere else every row is
+#' repaired by GEOS, as before.  create_voronoi_polygons() repairs its
+#' clipped cells with this as well, to find each cell
+#' ensure_stable_poly_id() returns among them.
+#'
+#' @param x An sf or sfc object.
+#' @return \code{x}, of the same class, with the rows repaired.
+#' @keywords internal
+#' @noRd
+.make_valid_rows <- function(x) {
+  g <- sf::st_geometry(x)
+  if (!length(g) || !.is_longlat(g) || !isTRUE(sf::sf_use_s2()))
+    return(.safe_make_valid(x))
+  ok <- tryCatch(suppressWarnings(sf::st_is_valid(g)),
+                 error = function(e) rep(NA, length(g)))
+  ok_geos <- tryCatch(suppressWarnings(sf::st_is_valid(sf::st_set_crs(g, NA))),
+                      error = function(e) rep(NA, length(g)))
+  bad <- which(!(ok %in% TRUE) | !(ok_geos %in% TRUE))
+  if (!length(bad)) return(x)
+  g[bad] <- .safe_make_valid(g[bad])
+  if (!inherits(x, "sf")) return(g)
+  sf::st_geometry(x) <- g
+  x
 }
 
 
@@ -623,7 +670,8 @@ ensure_stable_poly_id <- function(polygons_sf,
 #' A grid returned in degrees (a geographic `crs` passed through `...`) is
 #' cached once per [sf::sf_use_s2()] setting: a grid laid in degrees is
 #' clipped by s2 with the setting on and by GEOS with it off, and
-#' [ensure_stable_poly_id()] repairs cells in degrees with s2 or with GEOS,
+#' [ensure_stable_poly_id()] rebuilds the cells s2 or GEOS calls invalid
+#' with s2's rebuild with the setting on and repairs every cell with GEOS with it off,
 #' so the grid differs between the two settings. A call is handed the grid
 #' of the session's setting. A grid laid and returned in a
 #' projected CRS is clipped and repaired by GEOS under either setting and is
@@ -701,8 +749,9 @@ create_grid_polygons_cached <- function(boundary,
 
   # A grid returned in degrees (a geographic `crs` in `...`) follows the
   # session's sf::sf_use_s2(): laid in degrees it is clipped by s2 with s2 on
-  # and by GEOS with s2 off, and ensure_stable_poly_id() below repairs its
-  # cells with s2's rebuild or with GEOS's.  The two settings give two grids,
+  # and by GEOS with s2 off, and ensure_stable_poly_id() below rebuilds the
+  # cells s2 or GEOS calls invalid with s2's rebuild with s2 on and repairs
+  # every cell with GEOS's with s2 off.  The two settings give two grids,
   # and a key without the setting handed back the grid of whichever setting
   # filled the cache first.  The setting goes into the key
   # of such a grid only; every other key is as it was, so a grid laid and

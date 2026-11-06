@@ -3400,14 +3400,26 @@ old behaviour where there is a way.
 * **`create_grid_polygons_cached()` handed a grid returned in degrees to a
   session with the other `sf::sf_use_s2()` setting.**  A grid with a
   geographic `crs` and a `cellsize` is laid in degrees and clipped by s2
-  with s2 on and by GEOS with s2 off, and `ensure_stable_poly_id()` repairs
-  the cells of any grid returned in degrees with s2's rebuild or with
-  GEOS's, so the two settings give two grids.
+  with s2 on and by GEOS with s2 off, and `ensure_stable_poly_id()`
+  rebuilds the cells of a grid returned in degrees that s2 or GEOS calls
+  invalid with s2's rebuild with s2 on and repairs every cell with GEOS's
+  with s2 off, so the two settings give two grids.
   The cache key did not hold the setting, so a call got the grid of
   whichever setting filled the cache first.  The key of a grid returned in
   degrees now holds the setting, and each setting gets its own entry; every
   other key is unchanged, so a grid laid and returned in a projected CRS is
   still found in a cache filled before this change.
+
+* **`ensure_stable_poly_id()` moved the corners of valid polygons in
+  degrees with s2 on.**  With `make_valid = TRUE` (the default), on a layer
+  in longitude and latitude with `sf::sf_use_s2()` on, every row went
+  through s2's rebuild, valid or not: valid rows came back with their
+  corners moved by up to 7e-8 degrees and a POLYGON as a MULTIPOLYGON,
+  where with s2 off or in a projected CRS no corner moved.  The rows
+  reached the user through `create_grid_polygons_cached()` with a
+  geographic `crs`.  Only the rows s2 or GEOS calls invalid are rebuilt
+  now, and the other rows are returned as they arrived.  The IDs are
+  unchanged.
 
 * **Cells built on seeds placed from lon/lat points could leave observations
   near the edge of a wide layer in no cell.**  The seeding functions attach

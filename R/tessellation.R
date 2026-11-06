@@ -1442,13 +1442,15 @@ create_voronoi_polygons <- function(
     cells$cell_id <- integer(0)
   }
   if (tagged && nrow(cells) > 0L) {
-    # ensure_stable_poly_id() repairs the cells with st_make_valid() and puts
+    # ensure_stable_poly_id() repairs the cells (.make_valid_rows()) and puts
     # them in order, so each cell it returns is the repaired copy of one
-    # clipped cell, which says which cell before the clip it is.  `made`
-    # then holds the cell_id of each cell before the clip, and NA where the
-    # clip left nothing of it.
+    # clipped cell, which says which cell before the clip it is.  The same
+    # repair here finds each of them.  The cells are in a projected CRS here
+    # (lon/lat seeds are projected above), so both repairs are GEOS's.
+    # `made` then holds the cell_id of each cell before the clip, and NA
+    # where the clip left nothing of it.
     key  <- function(g) sf::st_as_binary(g, hex = TRUE)
-    rows <- match(key(sf::st_geometry(cells)), key(.safe_make_valid(clipped)))
+    rows <- match(key(sf::st_geometry(cells)), key(.make_valid_rows(clipped)))
     hit  <- !is.na(rows)
     made[from[rows[hit]]] <- cells$cell_id[hit]
   }

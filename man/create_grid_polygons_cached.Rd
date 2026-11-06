@@ -53,7 +53,8 @@ so repeated calls with the same inputs return instantly.
 A grid returned in degrees (a geographic \code{crs} passed through \code{...}) is
 cached once per \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} setting: a grid laid in degrees is
 clipped by s2 with the setting on and by GEOS with it off, and
-\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}} repairs cells in degrees with s2 or with GEOS,
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}} rebuilds the cells s2 or GEOS calls invalid
+with s2's rebuild with the setting on and repairs every cell with GEOS with it off,
 so the grid differs between the two settings. A call is handed the grid
 of the session's setting. A grid laid and returned in a
 projected CRS is clipped and repaired by GEOS under either setting and is

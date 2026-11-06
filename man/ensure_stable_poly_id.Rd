@@ -24,7 +24,13 @@ and M, since sf reads a layer in the dimension of its first geometry
 
 \item{make_valid}{Logical; apply st_make_valid() first. Default TRUE.
 The copy the sort key is measured on is repaired as well, after it has
-been transformed (see Details); with \code{FALSE} neither is. The rows
+been transformed (see Details); with \code{FALSE} neither is. On a layer
+in longitude and latitude with \code{sf::sf_use_s2()} on, the repair is
+s2's rebuild, which can move the corners of a polygon it rebuilds and
+return a POLYGON as a MULTIPOLYGON, so only the rows s2 or GEOS does
+not call valid are rebuilt, and the other rows are returned as they
+arrived. A projected layer, or one in degrees
+with s2 off, is repaired by GEOS. The rows
 returned are the repaired polygons, made in x and y whenever
 \code{polygons_sf} carries Z or M: polygons that mix XY and XYZ (or XYM)
 geometries, and polygons that all carry Z or M, are repaired in XY and
