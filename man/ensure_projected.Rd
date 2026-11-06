@@ -157,7 +157,10 @@ CRS cannot place, and a warning of class \code{spatialkit_rows_unplaced}
 names such rows (\code{rows} on the condition). With the projection chosen
 here that happens only at a coordinate no CRS places, such as a
 latitude beyond 90; with a \code{target_crs}, wherever that CRS cannot
-place the layer.}
+place the layer. The choice of a projection does not read a row with
+a vertex at a latitude beyond 90 either: it is made on the other
+rows, and a layer each row of which is empty, has no location or has
+such a vertex gets Web Mercator (Equal Earth for \code{purpose = "area"}).}
 }
 
 \code{target_crs} overrides all of this. Pass it whenever you need a specific,

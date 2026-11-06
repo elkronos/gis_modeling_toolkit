@@ -162,7 +162,9 @@
 #'
 #' Rows with a coordinate that is not finite or lies beyond
 #' \code{.POOL_XY_MAX} take no part in the choice: it is made on the layer
-#' with those rows emptied (\code{.empty_unlocated()}).
+#' with those rows emptied (\code{.empty_unlocated()}).  So do rows with a
+#' vertex at a latitude beyond 90 (\code{.beyond_pole_features()}), read on
+#' the copy in WGS84.
 #'
 #' On the comparison path and the \code{purpose = "area"} path a candidate
 #' is used only if it places every located vertex of the layer
@@ -232,6 +234,15 @@
   }
   if (is.na(sf::st_crs(x_ll)) || !.is_longlat(x_ll))
     return(list(crs = global_crs(), candidates = NULL))
+  # A row with a vertex at a latitude beyond 90 has no place on the Earth,
+  # and no CRS places it: it takes no part in the choice either, the whole
+  # row, as a row with a coordinate beyond 1e150.  Read, one station at
+  # (-96, 95) among 39 over the conterminous United States moved the centre
+  # and the Albers parallels (41.2 and 84.2 in place of 32.9 and 43.0), and
+  # a swapped row at (40, -96) put the box 139 degrees from the zone's
+  # central meridian.  Tested in degrees on the WGS84 copy; the layer
+  # returned to the caller is not changed.
+  x_ll <- .empty_unlocated(x_ll, which(.beyond_pole_features(sf::st_geometry(x_ll))))
   # No row has a location: nothing places a projection.  Read on, the centre
   # came out as NaN and the log line below quoted "lon = NaN, lat = NaN".
   # Empty parts are dropped first: sf::st_is_empty() calls a feature empty
@@ -239,8 +250,8 @@
   if (all(sf::st_is_empty(.drop_empty_parts(sf::st_geometry(x_ll))))) {
     .log_warn(paste0(
       ".pick_local_projected_crs(): no row has a location (each geometry is ",
-      "empty, or has a coordinate that is not finite or lies beyond 1e150); ",
-      "falling back to %s."),
+      "empty, or has a coordinate that is not finite or lies beyond 1e150, ",
+      "or a latitude beyond 90); falling back to %s."),
       if (purpose == "area") "Equal Earth" else "EPSG:3857")
     return(list(crs = global_crs(), candidates = NULL))
   }
@@ -997,6 +1008,35 @@
   s <- xy[o, , drop = FALSE]
   unname(s[c(TRUE, s[-1L, 1L] != s[-nrow(s), 1L] | s[-1L, 2L] != s[-nrow(s), 2L]), ,
            drop = FALSE])
+}
+
+
+#' Which features have a vertex at a latitude beyond 90
+#'
+#' Such a vertex has no place on the Earth, and no CRS places it.  Read on
+#' the second coordinate of each vertex, in degrees; a coordinate that is
+#' not finite does not count here (\code{.unlocated_features()} reads it).
+#'
+#' @param g An sfc in longitude and latitude, in degrees.
+#' @return A logical vector, one element per feature.
+#' @keywords internal
+#' @noRd
+.beyond_pole_features <- function(g) {
+  n   <- length(g)
+  out <- logical(n)
+  if (!n) return(out)
+  bb <- sf::st_bbox(g)
+  if (all(is.finite(bb[c("ymin", "ymax")])) &&
+      bb[["ymin"]] >= -90 && bb[["ymax"]] <= 90) return(out)
+  far <- function(y) any(is.finite(y) & abs(y) > 90)
+  # A POINT is a vector, a LINESTRING or MULTIPOINT a matrix, and the other
+  # types (collections included) lists of those.
+  bad <- function(s) {
+    if (is.list(s)) return(any(vapply(s, bad, logical(1))))
+    if (is.matrix(s)) return(nrow(s) > 0L && far(s[, 2L]))
+    length(s) >= 2L && far(s[2L])
+  }
+  vapply(unclass(g), bad, logical(1))
 }
 
 
@@ -1977,7 +2017,10 @@
 #'     names such rows (`rows` on the condition). With the projection chosen
 #'     here that happens only at a coordinate no CRS places, such as a
 #'     latitude beyond 90; with a `target_crs`, wherever that CRS cannot
-#'     place the layer.}
+#'     place the layer. The choice of a projection does not read a row with
+#'     a vertex at a latitude beyond 90 either: it is made on the other
+#'     rows, and a layer each row of which is empty, has no location or has
+#'     such a vertex gets Web Mercator (Equal Earth for `purpose = "area"`).}
 #' }
 #'
 #' `target_crs` overrides all of this. Pass it whenever you need a specific,

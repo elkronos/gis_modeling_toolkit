@@ -1967,6 +1967,22 @@ old behaviour where there is a way.
   on `LINESTRING (0 0, 180 0)` with `purpose = "area"`, the Lambert
   azimuthal CRS, which is still used.
 
+* **A row of a lon/lat layer with a vertex at a latitude beyond 90 shaped
+  the projection `ensure_projected()` chose for the other rows.**  No CRS
+  places such a row, but the choice read it in the extent, the longitudes
+  of the antimeridian test and the centre.  39 stations over the
+  conterminous United States get an Albers CRS (standard parallels 32.9
+  and 43.0); with a 40th row at (-96, 95) they got a Lambert azimuthal CRS
+  centred on (-96.7, 40.7), and the Albers candidate's parallels moved to
+  41.2 and 84.2.  A row at (-100, -95), or a swapped row at (40, -96), did
+  the same.  Such a row now takes no part in the choice, the whole row, as
+  a row with a coordinate beyond 1e150: the stations get the CRS and the
+  `crs_choice` they get alone.  The row is still moved, comes back empty or
+  without the vertices the CRS cannot place, and the
+  `spatialkit_rows_unplaced` warning names it.  A layer each row of which
+  has such a vertex gets the global fallback, and the log line says so.
+  Layers with no latitude beyond 90 get the CRS they got.
+
 * **A row of a lon/lat layer with a coordinate that is not finite or lies
   beyond 1e150 shaped the projection chosen for the other rows.**
   `ensure_projected()` read the extent, the longitudes of the antimeridian

@@ -196,9 +196,10 @@ test_that("the located vertices are the distinct ones, and one that shares a coo
 
 test_that("a row at a latitude beyond 90 does not send the other rows to the global fallback", {
   # No CRS places such a row, the global fallback included, so it takes no
-  # part in the test of placement: the stations keep a Lambert azimuthal CRS
-  # (0.88%) and do not get Web Mercator or Equal Earth.  The row comes back
-  # empty, and the warning names it.
+  # part in the test of placement: the stations do not get Web Mercator or
+  # Equal Earth.  Nor does it take part in the choice (BUG-205): the
+  # stations get the CRS they get alone.  The row comes back empty, and the
+  # warning names it.
   set.seed(1)
   st39 <- sf::st_as_sf(data.frame(x = stats::runif(39, -120, -75), y = stats::runif(39, 30, 47)),
                        coords = c("x", "y"), crs = 4326)
@@ -210,7 +211,8 @@ test_that("a row at a latitude beyond 90 does not send the other rows to the glo
       tag <- sprintf("(%g, %g), %s", bad[1L], bad[2L], p)
       tr <- .cpr_quiet(.pick_local_projected_crs(x, purpose = p))
       expect_false(is.null(tr$candidates), info = tag)
-      expect_true(grepl("+proj=laea", tr$crs$input, fixed = TRUE), info = tag)
+      expect_identical(tr$crs, .cpr_quiet(.pick_local_projected_crs(st39, purpose = p))$crs,
+                       info = tag)
       expect_true(all(is.finite(tr$candidates$distance_error)), info = tag)
       if (p == "distance")
         expect_identical(tr$candidates$distance_error[1L], zone$distance_error[1L], info = tag)
