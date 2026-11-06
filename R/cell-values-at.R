@@ -882,8 +882,15 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
 
   by_seeds <- !is.null(seeds)
   if (!by_seeds) {
+    # A polygon counts when it has a location, as a seed does below: a
+    # `values` whose polygons are all empty (POLYGON EMPTY, or MULTIPOLYGON
+    # of empty parts) placed no location in a cell, and every location was
+    # filled from its nearest scored row with nothing said.  Some empty
+    # polygons are cells without a place, and a location in no polygon is
+    # filled as it is beside them.
     polygons <- inherits(values, "sf") && nrow(values) > 0L &&
-      all(sf::st_geometry_type(values, by_geometry = TRUE) %in% c("POLYGON", "MULTIPOLYGON"))
+      all(sf::st_geometry_type(values, by_geometry = TRUE) %in% c("POLYGON", "MULTIPOLYGON")) &&
+      any(.located_rows(.drop_empty_parts(values)))
     if (!polygons)
       stop(sprintf(paste0("cell_values_at(): `values` carries no cell polygons, so a ",
                           "location cannot be placed in a cell. Build `values` with ",

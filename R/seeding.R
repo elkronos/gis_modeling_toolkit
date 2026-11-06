@@ -115,11 +115,16 @@
 #'   whichever kind and settings the profile was built with. Pass the
 #'   count as a number (`n = sel$best`) for a fresh k-means instead.
 #' @param seeds sf POINT object of user-provided seeds (method = "provided").
+#'   Methods `"kmeans"` and `"random"` do not read it, and ignore it with a
+#'   warning; so does a call that passes `seed =`, which R matches to
+#'   `seeds` (the seed of the random stream is `set_seed`).
 #'   Seeds in another CRS than `boundary` are returned in the boundary's CRS;
 #'   seeds that mix XY and XYZ (or XYM) points are then returned in XY, with a
 #'   warning of class `"spatialkit_zm_dropped"`, since sf reads a layer in
 #'   the dimension of its first geometry.
-#' @param sample_points Optional sf POINT cloud for k-means clustering. Only
+#' @param sample_points Optional sf POINT cloud for k-means clustering.
+#'   Method `"random"` places its seeds in `boundary` and does not read it;
+#'   it is ignored there with a warning. Only
 #'   the first two coordinate columns are clustered, so a Z or M dimension does
 #'   not join the distance calculation and dominate it; rows without a
 #'   location (an empty point, or a coordinate that is not finite or lies
@@ -338,6 +343,26 @@ get_voronoi_seeds <- function(boundary = NULL,
     }
   }
   if (!is.null(sample_points)) .assert_sf(sample_points, "POINT", "sample_points")
+  # An argument the call passes and the method does not read is reported, as
+  # `partition`, `init`, `n` and the density settings are above and below:
+  # `seeds` under method = "kmeans" or "random", and `sample_points` under
+  # method = "random", were set aside with nothing said.  `seed = 1` matches
+  # `seeds` by its prefix (the seed argument is `set_seed`), so such a call
+  # drew from the session's stream in silence.  A call the method refuses
+  # below is told that, not this: a random seeding without a boundary, and a
+  # k-means seeding with neither a boundary nor `sample_points` nor scored
+  # centres as `n`.
+  refused_below <- is.null(boundary) &&
+    (identical(method, "random") ||
+       (identical(method, "kmeans") && is.null(sample_points) && is.null(n_res$seeds)))
+  if (!identical(method, "provided") && !refused_below) {
+    if (!is.null(seeds))
+      .warn_and_log(paste0("get_voronoi_seeds(): `seeds` is read by method = \"provided\" ",
+                           "only; method = \"%s\" ignores it."), method)
+    if (identical(method, "random") && !is.null(sample_points))
+      .warn_and_log(paste0("get_voronoi_seeds(): `sample_points` is not read by method = ",
+                           "\"random\", which places its seeds in `boundary`; it is ignored."))
+  }
   # A layer that mixes XY and XYZ (or XYM) geometries is read in XY
   # (.xy_if_mixed()), before any union, transform or read of its
   # coordinates: sf reads a layer in the dimension of its first geometry, so

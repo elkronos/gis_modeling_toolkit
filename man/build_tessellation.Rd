@@ -208,7 +208,10 @@ a lattice point on a cell edge takes the same cell in any unit or
 origin. A point outside every cell is snapped to the nearest cell
 only when it is within a thousandth of the median cell width of it,
 and a point the same distance from two cells, to one part in ten
-million, takes the smaller \code{cell_id}. That leaves points outside the
+million, takes the smaller \code{cell_id}. For cells in degrees the
+distances of the snap are taken on the sphere, in metres, whatever
+\code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} says, and the width is taken as an arc of the
+sphere, as the margin is. That leaves points outside the
 study area as \code{NA}. A summary built from \code{index} therefore counts only the
 points the tessellation actually covers. When any point is \code{NA}, a
 warning of class \code{"spatialkit_unassigned"} gives the number
@@ -229,7 +232,8 @@ reprojected, and for \code{"voronoi"} grown by \code{expand}).}
 \item{\code{params}}{The parameters the tessellation was built with, plus
 \code{snapped}, the record of that nearest-cell repair: a list with \code{n},
 \code{which} (row positions in \code{points_sf}) and \code{distance} (how far
-outside every cell each sat, in CRS units; a point within the margin
+outside every cell each sat, in CRS units, and in metres for cells
+in degrees; a point within the margin
 of an edge is in that cell and is not listed), which for seeds lists
 only those whose \code{index} entry is the cell they were snapped to;
 \code{n_outside}, the number

@@ -1213,7 +1213,11 @@
 #'     (\code{"no response in the selection half"}), \code{n} (0, the rows
 #'     of the selection half scored), \code{selection} (the rows of the
 #'     selection half), \code{n_response} (the rows of the layer with a
-#'     response) and \code{column}.}
+#'     response) and \code{column}.  Raised too, with or without the split,
+#'     when rows of the layer have a response and none of them every
+#'     predictor: then \code{reason} is \code{"no row with a response and
+#'     every predictor"}, \code{n_response} the rows with a finite
+#'     response, and \code{selection} \code{NA} without the split.}
 #'   \item{\code{spatialkit_pool_unavailable}}{\code{resolution_profile()}
 #'     with an \code{estimate}: the values of the response lie beyond what
 #'     the arithmetic of the estimate holds, values so large, or so close to
@@ -1570,8 +1574,10 @@
 #'   support ceiling counts; \code{NA} without a
 #'   \code{response_var}), \code{n_scored} (the rows of the subsample the
 #'   response criteria read; \code{NA} without a \code{response_var}),
-#'   \code{levels_given} (whether \code{levels} set the ladder) and
-#'   \code{predictors} (whether \code{predictor_vars} were given)),
+#'   \code{levels_given} (whether \code{levels} set the ladder),
+#'   \code{predictors} (whether \code{predictor_vars} were given) and, where
+#'   rows have a response and none of them every predictor,
+#'   \code{n_response_only} (the rows with a finite response)),
 #'   \code{variogram} (a list with \code{nugget}, \code{psill}, \code{range}
 #'   (\code{NA} when rejected), \code{model} and \code{detrended} (whether
 #'   the sac says it is a variogram of residuals; \code{NA} when it does not
@@ -2093,6 +2099,13 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   n_all  <- nrow(xy)
   n_resp <- if (has_resp) sum(resp_ok) else n_all
   n_support <- if (has_resp && n_resp > 0L) n_resp else n_all
+  # The rows with a finite response, whatever the predictors hold.  Where
+  # the predictors leave none of them complete, the layer has a response and
+  # nothing is scored, which spatialkit_no_scored_rows says below and the
+  # bounds record (`n_response_only`) carries for summary() and
+  # select_resolution().
+  n_resp_only <- if (has_resp) as.integer(sum(is.finite(resp))) else NA_integer_
+  no_complete <- has_resp && has_pred && n_resp == 0L && n_resp_only > 0L
   hull <- sf::st_convex_hull(sf::st_union(sf::st_geometry(data_sf)))
   area <- suppressWarnings(as.numeric(sf::st_area(hull)))
   bb   <- sf::st_bbox(data_sf)
@@ -2181,7 +2194,11 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     y_centre <- .regression_centre(resp[use])
     y[use] <- resp[use] - y_centre
     variable <- "response"
-    if (has_pred) {
+    # No complete row: there is nothing to fit, and nothing is scored.  The
+    # fit on zero rows raised base R's bare "number of rows of result is not
+    # a multiple of vector length" and logged that the raw response was
+    # scored, which no row was.
+    if (has_pred && any(use)) {
       # Fitted on the complete rows only.  lm.fit() refuses any NA, and a
       # first fit on every row turned one missing value into "the OLS fit
       # failed": the raw response, trend and all, was then scored against a
@@ -2717,6 +2734,10 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                  n_scored = as.integer(n_scored),
                  levels_given = levels_given || size_ladder,
                  predictors = has_pred)
+  # The rows with a finite response alone, where the predictors leave none
+  # of them complete: read by .no_complete_row().  Recorded in that case
+  # only, so the record of every other profile is as it was.
+  if (no_complete) bounds$n_response_only <- n_resp_only
   # The sizes, largest first, and the level each gives: NA for a size that
   # was dropped.
   if (size_ladder) {
@@ -3051,7 +3072,22 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # and this says so too.  Not raised when no row of the layer has a
   # response: then the split is not the reason.  Raised after the sweep, so a
   # call a guard stops says nothing of columns it never returns.
-  if (!is.null(split) && has_resp && n_resp > 0L && identical(n_sel_resp, 0L)) {
+  # So is a layer whose rows have a response and none of them every
+  # predictor, with or without the split: the same columns are NA at every
+  # level for the same want, and the layer, not the split, is the cause.
+  if (no_complete) {
+    .warn_classed("spatialkit_no_scored_rows",
+                  paste0("resolution_profile(): no row of the layer has a finite value of ",
+                         "'%s' and of every predictor, so `rss`, `cp`, `moran_i` and ",
+                         "`moran_z` are NA at every level. The %d row%s with a finite ",
+                         "value of '%s' %s a predictor that is missing or not finite."),
+                  response_var, n_resp_only, if (n_resp_only == 1L) "" else "s",
+                  response_var, if (n_resp_only == 1L) "has" else "each have",
+                  data = list(reason = "no row with a response and every predictor", n = 0L,
+                              selection = if (!is.null(split)) length(split$selection)
+                                          else NA_integer_,
+                              n_response = n_resp_only, column = response_var))
+  } else if (!is.null(split) && has_resp && n_resp > 0L && identical(n_sel_resp, 0L)) {
     n_sel <- length(split$selection)
     .warn_classed("spatialkit_no_scored_rows",
                   paste0("resolution_profile(): no row of the selection half has a finite ",
@@ -3402,6 +3438,25 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   b   <- attr(x, "bounds", exact = TRUE)
   (is.list(sp) && isTRUE(sp$n_response == 0L) && is.list(b) && isTRUE(b$n_response > 0L)) ||
     (is.list(est) && isTRUE(est$n == 0L) && identical(est$rows, "selection half"))
+}
+
+
+# Whether rows of the layer have a response and none of them every
+# predictor: the other case of spatialkit_no_scored_rows, where the layer and
+# not the split is the cause.  Read off the bounds record (`n_response` and
+# `n_response_only`).
+.no_complete_row <- function(x) {
+  b <- attr(x, "bounds", exact = TRUE)
+  is.list(b) && isTRUE(b$predictors) && isTRUE(b$n_response == 0L) &&
+    isTRUE(b$n_response_only > 0L)
+}
+
+# The rows of that case, in words: "the 400 rows with a response each have a
+# predictor that is missing or not finite".
+.no_complete_text <- function(x) {
+  k <- as.integer(attr(x, "bounds", exact = TRUE)$n_response_only)
+  sprintf("the %d row%s with a response %s a predictor that is missing or not finite",
+          k, if (k == 1L) "" else "s", if (k == 1L) "has" else "each have")
 }
 
 
@@ -4258,9 +4313,16 @@ select_resolution <- function(profile,
                  criterion, .got_text(ladder_sizes), criterion,
                  if (criterion == "cp") "noise variance" else "range"),
          call. = FALSE)
+  # A layer whose rows have a response and none of them every predictor
+  # leaves `cp` and `moran_z` NA, with or without the split: "it needs a
+  # response" sent the caller to look for a response that the layer has.
+  if (!any(ok) && criterion %in% c("cp", "moran_z") && .no_complete_row(profile))
+    stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because no row of the ",
+                        "layer has a response and every predictor: %s."),
+                 criterion, .no_complete_text(profile)),
+         call. = FALSE)
   # Under the split, a selection half with no response leaves `cp` and
-  # `moran_z` NA too, with or without an estimate: "it needs a response" sent
-  # the caller to look for a response that the layer has.
+  # `moran_z` NA too, with or without an estimate, for the same reason.
   if (!any(ok) && criterion %in% c("cp", "moran_z") && .split_no_response(profile))
     stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because no row of the ",
                         "selection half has a response%s: under select_on = \"split\" the ",
@@ -5434,6 +5496,9 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
     # Read off the split's count, so with or without an estimate.
     split_none <- .split_no_response(object)
     split_pred <- isTRUE(attr(object, "bounds", exact = TRUE)$predictors)
+    # And a layer whose rows have a response and none of them every
+    # predictor: "cp needs a response" was false there too.
+    none_complete <- .no_complete_row(object)
     # And values beyond what the estimate's arithmetic holds: `loo` is NA for
     # that, and not because the test for `cp` finds the response constant.
     beyond <- .estimate_beyond_range(est_c)
@@ -5441,7 +5506,14 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
     # constant: both tests are NA for the values' size.
     beyond_all <- beyond && identical(.cp_constant_case(one_c, est_c), "beyond")
     stop("summary.resolution_profile(): no count criterion is finite at any level. ",
-         if (split_none)
+         if (none_complete)
+           sprintf(paste0("No row of the layer has a response and every predictor (%s), so ",
+                          "no criterion that reads the response is finite: cp and moran_z ",
+                          "are NA at every level, and reliability needs a usable variogram; ",
+                          "elbow, read off the points alone, is NA when the WSS curve has ",
+                          "no elbow."),
+                   .no_complete_text(object))
+         else if (split_none)
            sprintf(paste0("No row of the selection half has a response%s, and under ",
                           "select_on = \"split\" the response is read on that half alone, ",
                           "so no criterion that reads it is finite: %s are NA at every ",

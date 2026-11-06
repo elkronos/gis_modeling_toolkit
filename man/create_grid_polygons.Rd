@@ -67,7 +67,10 @@ corner, covering only part of the boundary.}
 grid, a cell that meets the boundary only within a margin of one part in
 1e10 of the largest coordinate of the boundary from the cell's edge (a
 cell whose edge lies on the boundary's edge but for rounding) is
-dropped, rather than kept as a sliver.}
+dropped, rather than kept as a sliver. The call stops when the clip
+leaves no cell, as it does when the lattice has none: in degrees with
+s2 on, a boundary edge that spans more than 180 degrees of longitude is
+read as the shorter great-circle arc, the other way round the globe.}
 
 \item{crs}{Optional target CRS: anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, including
 an sf or sfc layer, whose CRS is used. When \code{NULL} (default) a lon/lat

@@ -918,7 +918,11 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' width of it, and among the cells as near to one part in ten million (plus
 #' the same margin) to the smallest cell_id: a point outside the study area
 #' beside a corner two cells share is the same distance from both, and the
-#' last bits of the distances chose between them.  The returned vector uses
+#' last bits of the distances chose between them.  For cells in degrees the
+#' nearest cell and the distances are taken on the sphere whatever
+#' \code{sf::sf_use_s2()} says (\code{.with_s2()}), in metres, and the width
+#' and the margin are taken as arcs of the sphere.  With no cell every point
+#' is NA, and the warning says so.  The returned vector uses
 #' the cell_id column of `cells_sf`, not raw row indices.
 #'
 #' @param pts An sf POINT object.
@@ -933,18 +937,21 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' @noRd
 .build_point_cell_index <- function(pts, cells_sf, warn = TRUE) {
   n <- nrow(pts)
-  if (n == 0L || nrow(cells_sf) == 0L)
-    return(structure(rep(NA_integer_, n),
+  if (n == 0L)
+    return(structure(integer(0),
                      snapped = list(n = 0L, which = integer(0), distance = numeric(0))))
 
   cell_ids <- cells_sf$cell_id
   # The margin of an edge is taken from the cells alone: a point without a
   # location (a coordinate beyond 1e150) would set it otherwise.  Rows
-  # without a location are in no cell and are not searched.
-  etol    <- .edge_tol(sf::st_bbox(cells_sf))
+  # without a location are in no cell and are not searched.  With no cell
+  # every point is in none, and is counted in the warning below: the early
+  # return that stood here left zero cells with nothing said.
+  has_cells <- nrow(cells_sf) > 0L
+  etol    <- if (has_cells) .edge_tol(sf::st_bbox(cells_sf)) else NA_real_
   located <- .located_rows(pts)
   index   <- rep(NA_integer_, n)
-  if (any(located)) {
+  if (has_cells && any(located)) {
     at   <- which(located)
     hits <- attr(.edge_join(sf::st_geometry(pts)[at], cells_sf,
                             bb = sf::st_bbox(cells_sf)), "hits")
@@ -965,24 +972,37 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   # right repair for a point a hair outside a cell edge (floating-point, a
   # clipped sliver), so keep it -- but bound it by the cell size and say how
   # many points were snapped, and leave the genuinely-outside ones NA.
-  unmatched <- which(is.na(index) & located)
+  unmatched <- if (has_cells) which(is.na(index) & located) else integer(0)
   snapped   <- list(n = 0L, which = integer(0), distance = numeric(0))
+  # For cells in degrees the nearest cell, its distance and the candidates
+  # of the tie are taken on the sphere whatever sf_use_s2() says, in metres,
+  # as the package's other measures in degrees are (.with_s2()).  With s2
+  # off sf handed these distances to lwgeom, which the package does not
+  # depend on, and the call stopped with "there is no package called
+  # 'lwgeom'".  The join above keeps the session's engine, as the clip does.
+  in_degrees <- has_cells && isTRUE(sf::st_is_longlat(cells_sf))
+  on_sphere  <- function(expr) if (in_degrees) .with_s2(expr) else expr
   if (length(unmatched) > 0L) {
-    near  <- suppressWarnings(sf::st_nearest_feature(pts[unmatched, ], cells_sf))
+    near  <- on_sphere(suppressWarnings(sf::st_nearest_feature(pts[unmatched, ], cells_sf)))
     valid <- is.finite(near)
     if (any(valid)) {
-      d <- suppressWarnings(as.numeric(sf::st_distance(
+      d <- on_sphere(suppressWarnings(as.numeric(sf::st_distance(
         sf::st_geometry(pts[unmatched[valid], ]),
-        sf::st_geometry(cells_sf)[near[valid]], by_element = TRUE)))
+        sf::st_geometry(cells_sf)[near[valid]], by_element = TRUE))))
       # A tolerance of one thousandth of the median cell width: wide enough for
       # any rounding at a shared edge, far too narrow to swallow a point that
-      # is genuinely outside the study area.
+      # is genuinely outside the study area.  In degrees the distances are in
+      # metres on the sphere, and the width is taken as an arc, with the
+      # factor .snap_lowest_cell() and .edge_join() apply to the margin: a
+      # width in degrees held against metres snapped a 0.1 degree grid within
+      # 1e-4 m, not the 11 m the rule gives.
       cw  <- suppressWarnings(stats::median(vapply(
         sf::st_geometry(cells_sf), function(g) {
           bb <- sf::st_bbox(g)
           as.numeric(bb[["xmax"]] - bb[["xmin"]])
         }, numeric(1)), na.rm = TRUE))
       tol <- if (is.finite(cw) && cw > 0) cw / 1000 else 0
+      if (in_degrees) tol <- tol * pi / 180 * 6371010
       snap <- valid
       snap[valid] <- is.finite(d) & d <= tol
       # The cell each snapped point goes to: among the cells as near as the
@@ -990,8 +1010,8 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
       # smallest cell_id.  sf::st_nearest_feature() settled such a tie by
       # the last bits of the distances.
       d_all <- rep(NA_real_, length(unmatched)); d_all[valid] <- d
-      to <- .snap_lowest_cell(sf::st_geometry(pts)[unmatched[snap]], cells_sf,
-                              d_all[snap], etol)
+      to <- on_sphere(.snap_lowest_cell(sf::st_geometry(pts)[unmatched[snap]], cells_sf,
+                                        d_all[snap], etol))
       miss <- is.na(to)
       to[miss] <- cell_ids[near[snap]][miss]
       index[unmatched[snap]] <- to
@@ -1001,9 +1021,12 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
                       distance = as.numeric(d_all[snap]))
       if (snapped$n > 0L)
         .log_info(paste0("build_tessellation(): %d point(s) sitting just outside ",
-                         "every cell (at most %.3g units, within a thousandth of ",
+                         "every cell (at most %.3g %s, within a thousandth of ",
                          "the median cell width) were assigned to the nearest cell."),
-                  snapped$n, max(snapped$distance))
+                  snapped$n, max(snapped$distance),
+                  if (in_degrees) "m"
+                  else { u <- sf::st_crs(cells_sf)$units_gdal
+                         if (length(u) == 1L && !is.na(u)) u else "units" })
     }
   }
   # A point in no cell is a point every summary built from `index` leaves
@@ -1354,6 +1377,25 @@ create_voronoi_polygons <- function(
   # into the working CRS as a smaller shape, or one far larger.
   if (!is.null(cover)) cover <- .empty_unlocated(cover)
   if (nrow(points_sf) < 1) stop("create_voronoi_polygons(): `points_sf` has no rows.")
+  # No point with a location builds no cell, with a boundary or without one.
+  # Unchecked, the call gave zero cells with sf's bare "x contains no
+  # geometries of specified type" when a boundary was given, and without one
+  # stopped with GEOS's "BufferOp::getResultGeometry distance must be a
+  # finite value" on the hull of no point.  Read as given here, and again
+  # once the points are in the working CRS, where a move can leave a point
+  # without a place (a latitude beyond 90 moved to EPSG:3857); that second
+  # refusal says the move, since the points as given had a location.
+  no_location <- function(x, moved = FALSE) {
+    if (!any(.located_rows(x)))
+      stop(if (moved)
+             paste0("create_voronoi_polygons(): the move of `points_sf` to the CRS the ",
+                    "cells are built in placed none of its points, so no cell can be built.")
+           else
+             paste0("create_voronoi_polygons(): no point of `points_sf` has a location ",
+                    "(each is an empty point, or has a coordinate that is not finite or ",
+                    "lies beyond 1e150), so no cell can be built."), call. = FALSE)
+  }
+  no_location(points_sf)
   .msg <- function(...) if (!quiet) message(...)
   # The ground the cells have to hold, when there is no boundary: the `cover`
   # argument, else the cover a seeding function attached.  Read before the
@@ -1446,6 +1488,7 @@ create_voronoi_polygons <- function(
   # own cell even when the seed lies outside the boundary (see .seed_layer()).
   # Asked here, where the points can be compared with their record's centres.
   seed_layer <- .seed_layer(points_sf, cover, pts)
+  no_location(pts, moved = TRUE)
 
   boundary_source <- "boundary"
   if (is.null(boundary) && !is.null(cover_geom)) {
@@ -1817,7 +1860,10 @@ create_voronoi_polygons <- function(
 #'   grid, a cell that meets the boundary only within a margin of one part in
 #'   1e10 of the largest coordinate of the boundary from the cell's edge (a
 #'   cell whose edge lies on the boundary's edge but for rounding) is
-#'   dropped, rather than kept as a sliver.
+#'   dropped, rather than kept as a sliver. The call stops when the clip
+#'   leaves no cell, as it does when the lattice has none: in degrees with
+#'   s2 on, a boundary edge that spans more than 180 degrees of longitude is
+#'   read as the shorter great-circle arc, the other way round the globe.
 #' @param crs Optional target CRS: anything [sf::st_crs()] accepts, including
 #'   an sf or sfc layer, whose CRS is used. When `NULL` (default) a lon/lat
 #'   boundary is projected with [ensure_projected()], which changes the CRS of the returned
@@ -2167,6 +2213,21 @@ create_grid_polygons <- function(
     if (!in_degrees)
       grid_sf <- .drop_edge_slivers(grid_sf, lattice, .edge_tol(bb))
     grid_sf$poly_id <- seq_len(nrow(grid_sf))
+    # The refusal of zero cells holds after the clip as it does before it:
+    # in degrees a boundary whose edges span more than 180 degrees of
+    # longitude is clipped as a strip the lattice can miss whole, and the
+    # grid came back with no row and nothing said.
+    if (nrow(grid_sf) == 0L)
+      stop(paste0(
+        "create_grid_polygons(): the clip to `boundary` left zero cells.",
+        if (in_degrees && isTRUE(sf::sf_use_s2()))
+          paste0(" In degrees s2 reads each edge of `boundary` as the shorter ",
+                 "great-circle arc, so an edge that spans more than 180 degrees of ",
+                 "longitude runs the other way round the globe and the boundary s2 ",
+                 "clips with lies outside the grid. Pass a projected `crs` and a ",
+                 "`cellsize` in its units, or size the grid by `target_cells` or `n`, ",
+                 "which lays it in a projected CRS and returns it in degrees.")
+        else ""), call. = FALSE)
   }
   # The clip in degrees writes cells that list a corner twice in a row (a
   # ring that ends on its first vertex twice), which s2 refuses: on a plain
@@ -2489,7 +2550,10 @@ create_grid_polygons <- function(
 #'       origin. A point outside every cell is snapped to the nearest cell
 #'       only when it is within a thousandth of the median cell width of it,
 #'       and a point the same distance from two cells, to one part in ten
-#'       million, takes the smaller `cell_id`. That leaves points outside the
+#'       million, takes the smaller `cell_id`. For cells in degrees the
+#'       distances of the snap are taken on the sphere, in metres, whatever
+#'       [sf::sf_use_s2()] says, and the width is taken as an arc of the
+#'       sphere, as the margin is. That leaves points outside the
 #'       study area as `NA`. A summary built from `index` therefore counts only the
 #'       points the tessellation actually covers. When any point is `NA`, a
 #'       warning of class `"spatialkit_unassigned"` gives the number
@@ -2510,7 +2574,8 @@ create_grid_polygons <- function(
 #'     \item{`params`}{The parameters the tessellation was built with, plus
 #'       `snapped`, the record of that nearest-cell repair: a list with `n`,
 #'       `which` (row positions in `points_sf`) and `distance` (how far
-#'       outside every cell each sat, in CRS units; a point within the margin
+#'       outside every cell each sat, in CRS units, and in metres for cells
+#'       in degrees; a point within the margin
 #'       of an edge is in that cell and is not listed), which for seeds lists
 #'       only those whose `index` entry is the cell they were snapped to;
 #'       `n_outside`, the number
@@ -2836,6 +2901,14 @@ build_tessellation <- function(
     # the record of how their count was set; it is put back here as the
     # points arrived with it, whatever a projection did with it.
     pts_v <- .count_rule_put(pts_v, .count_rule_get(points_in))
+    # Points that had a location as given and lost it in the move above (a
+    # latitude beyond 90 moved to EPSG:3857) are refused here, in words
+    # that say the move: create_voronoi_polygons() would read them as given
+    # to it, empty, and say they were empty points.
+    if (!any(.located_rows(pts_v)) && any(.located_rows(points_in)))
+      stop(paste0("build_tessellation(voronoi): the move of `points_sf` to the CRS the ",
+                  "cells are built in placed none of its points, so no cell can be built."),
+           call. = FALSE)
     res <- create_voronoi_polygons(
       points_sf = pts_v, boundary = boundary, expand = expand,
       clip = clip, keep_duplicates = keep_duplicates,

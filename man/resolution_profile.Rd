@@ -315,8 +315,10 @@ a response and, with \code{predictor_vars}, every predictor, which the
 support ceiling counts; \code{NA} without a
 \code{response_var}), \code{n_scored} (the rows of the subsample the
 response criteria read; \code{NA} without a \code{response_var}),
-\code{levels_given} (whether \code{levels} set the ladder) and
-\code{predictors} (whether \code{predictor_vars} were given)),
+\code{levels_given} (whether \code{levels} set the ladder),
+\code{predictors} (whether \code{predictor_vars} were given) and, where
+rows have a response and none of them every predictor,
+\code{n_response_only} (the rows with a finite response)),
 \code{variogram} (a list with \code{nugget}, \code{psill}, \code{range}
 (\code{NA} when rejected), \code{model} and \code{detrended} (whether
 the sac says it is a variogram of residuals; \code{NA} when it does not
@@ -1152,7 +1154,11 @@ Raised once, after the levels are scored.  The condition carries
 (\code{"no response in the selection half"}), \code{n} (0, the rows
 of the selection half scored), \code{selection} (the rows of the
 selection half), \code{n_response} (the rows of the layer with a
-response) and \code{column}.}
+response) and \code{column}.  Raised too, with or without the split,
+when rows of the layer have a response and none of them every
+predictor: then \code{reason} is \code{"no row with a response and
+    every predictor"}, \code{n_response} the rows with a finite
+response, and \code{selection} \code{NA} without the split.}
 \item{\code{spatialkit_pool_unavailable}}{\code{resolution_profile()}
 with an \code{estimate}: the values of the response lie beyond what
 the arithmetic of the estimate holds, values so large, or so close to

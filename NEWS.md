@@ -6862,6 +6862,94 @@ old behaviour where there is a way.
   column, or `NA`, is now refused by name.  It used to fail with R's
   "'length = 2' in coercion to 'logical(1)'".
 
+* **`resolution_profile()` with `predictor_vars` on which no row is
+  complete returned `rss`, `cp` and the Moran columns `NA` with base R's
+  bare warning, and `summary()` and `select_resolution()` blamed a missing
+  response.**  On 400 points that all carry a response and a predictor
+  that is `NA` on every row, the OLS fit was taken on zero rows, which
+  raised "number of rows of result is not a multiple of vector length",
+  and the log said the raw response was scored, which no row was.
+  `summary()` said "cp needs a response" and `select_resolution(criterion =
+  "cp")` that `cp` "needs a response". The fit is now skipped when no row
+  is complete, and the warning of class `spatialkit_no_scored_rows`, which
+  `select_on = "split"` raised when only the selection half had no complete
+  row, is raised here too, with or without the split: no row of the layer
+  has a finite value of the response and of every predictor, so `rss`,
+  `cp`, `moran_i` and `moran_z` are `NA` at every level. The bounds record
+  then carries `n_response_only`, the rows with a finite response, and
+  `summary()` and
+  `select_resolution()` (`cp`, `moran_z`) name the predictors as the cause.
+  The split's own case keeps its text, now without the base R warning.
+
+* **`cell_values_at()` without `seeds` filled every location in silence
+  when every polygon of `values` was empty.**  The check that `values`
+  carries cell polygons read the geometry type alone, so a `values` of
+  `POLYGON EMPTY` rows passed it: no location was in a cell, and each was
+  filled from the cell of its nearest scored row with nothing said, where
+  seeds without a location and a `values` without polygons are refused.
+  A `values` none of whose polygons has a location now meets the same
+  refusal ("`values` carries no cell polygons"). A `values` with some empty
+  polygons runs as before.
+
+* **`create_voronoi_polygons()` and `build_tessellation(method =
+  "voronoi")` on points none of which has a location returned zero cells
+  with sf's bare warning, or stopped with GEOS's message.**  With a
+  boundary the call gave zero cells, `index` `NA` for every point and only
+  "x contains no geometries of specified type"; without one, and for seeds
+  from `get_voronoi_seeds(method = "provided")`, it stopped with
+  "BufferOp::getResultGeometry distance must be a finite value". Both now
+  stop with "no point of `points_sf` has a location ..., so no cell can be
+  built", as the triangles and the k-means seeding refuse such points.
+  Points with a location that the move to the CRS the cells are built in
+  leaves without one (latitudes beyond 90 moved to EPSG:3857) gave the
+  same bare messages; they now stop with "the move of `points_sf` to the
+  CRS the cells are built in placed none of its points", named by the
+  function that made the move. The
+  index of points in cells skipped its `spatialkit_unassigned` warning when
+  there was no cell; it now gives the count there too, as
+  `?build_tessellation` (`index`) says it does whenever a point is `NA`.
+
+* **`get_voronoi_seeds()` ignored `seeds` under `method = "kmeans"` and
+  `"random"`, and `sample_points` under `method = "random"`, with nothing
+  said.**  It reports every other argument a method does not read
+  (`partition`, `init`, the density settings, `n`). The seed of the random
+  stream is `set_seed`, so `seed = 1` was taken as `seeds = 1` and the call
+  drew from the session's stream in silence: two such calls gave two
+  different seed layouts. Each now warns that the method ignores the
+  argument, and returns what the call without it returns. A call the
+  method refuses (`"random"` without `boundary`, `"kmeans"` with neither
+  `boundary` nor `sample_points`) is told the refusal only.
+  `?get_voronoi_seeds` (`seeds`, `sample_points`) says so.
+
+* **`create_grid_polygons()` returned an empty grid without a word when the
+  clip left no cell.**  The refusal of zero cells ran on the lattice before
+  the clip only. In degrees with s2 on, a boundary whose edges span more
+  than 180 degrees of longitude is read as the shorter great-circle arcs,
+  across the antimeridian, and the strip s2 clips with can miss the lattice
+  whole: the box from (-179, -80) to (179, 80) at `cellsize = c(358 / 3,
+  10)` gave 0 cells, and `build_tessellation(method = "square")` with it
+  gave 0 cells and `index` `NA` for every point. The call now stops with
+  "the clip to `boundary` left zero cells", and in degrees names the cause
+  and the remedy (a projected `crs`, or `target_cells` or `n`).
+  `?create_grid_polygons` (`clip`) says so.
+
+* **`build_tessellation()` on cells in degrees held its snap tolerance in
+  degrees against distances in metres, and stopped with "there is no
+  package called 'lwgeom'" with s2 off.**  A point outside every cell is
+  snapped to the nearest cell within a thousandth of the median cell width,
+  but for cells in degrees that width stayed in degrees while the distance
+  was in metres on the sphere, so a 0.1 degree grid snapped within 1e-4 m:
+  a lattice point 1.2 m outside its cell (s2 reads the cell's edge as an
+  arc) was `NA` in `index`. The width is now taken as an arc of the sphere,
+  as the margin of an edge already was, about 11 m on that grid, and the
+  point is snapped. With `sf::sf_use_s2(FALSE)` sf handed those distances
+  to lwgeom, which spatialkit does not depend on, and the call stopped once
+  a point lay in no cell. The nearest cell and the distances of the snap
+  are now taken on the sphere whatever `sf::sf_use_s2()` says; the join of
+  points in cells keeps the session's engine. Projected and CRS-less cells
+  are indexed as before. `?build_tessellation` (`index`, `params$snapped`)
+  says so.
+
 ## Documentation
 
 * The README, the vignettes, the help's examples, the scripts in

@@ -101,12 +101,17 @@ whichever kind and settings the profile was built with. Pass the
 count as a number (\code{n = sel$best}) for a fresh k-means instead.}
 
 \item{seeds}{sf POINT object of user-provided seeds (method = "provided").
+Methods \code{"kmeans"} and \code{"random"} do not read it, and ignore it with a
+warning; so does a call that passes \verb{seed =}, which R matches to
+\code{seeds} (the seed of the random stream is \code{set_seed}).
 Seeds in another CRS than \code{boundary} are returned in the boundary's CRS;
 seeds that mix XY and XYZ (or XYM) points are then returned in XY, with a
 warning of class \code{"spatialkit_zm_dropped"}, since sf reads a layer in
 the dimension of its first geometry.}
 
-\item{sample_points}{Optional sf POINT cloud for k-means clustering. Only
+\item{sample_points}{Optional sf POINT cloud for k-means clustering.
+Method \code{"random"} places its seeds in \code{boundary} and does not read it;
+it is ignored there with a warning. Only
 the first two coordinate columns are clustered, so a Z or M dimension does
 not join the distance calculation and dominate it; rows without a
 location (an empty point, or a coordinate that is not finite or lies
