@@ -1302,8 +1302,9 @@
 #' its page.
 #'
 #' @param data_sf An sf object of points (other geometries are reduced to
-#'   representative points).  Features with empty or non-finite coordinates
-#'   are dropped with a warning.  A layer that mixes XY and XYZ (or XYM)
+#'   representative points).  Features without a location (an empty point, or
+#'   a coordinate that is not finite or lies beyond 1e150, as given, once
+#'   projected or in the CRS of \code{sac}) are dropped with a warning.  A layer that mixes XY and XYZ (or XYM)
 #'   geometries is read in x and y, before and after it is reduced to points,
 #'   since sf reads a layer in the dimension of its first geometry.  So is a
 #'   layer whose geometries carry M (XYM or XYZM), which GEOS refuses.  The
@@ -1862,8 +1863,13 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # before the coerce and again after it: sf reads a layer in the dimension
   # of its first geometry.  So is one whose geometries carry M, which GEOS
   # refuses at the hull and in the coerce (.xy_if_mixed_or_m()).  The
-  # profile does not return the layer, so no warning.
-  data_sf <- .xy_if_mixed_or_m(data_sf)
+  # profile does not return the layer, so no warning.  A row without a
+  # location (an empty point, or a coordinate that is not finite or lies
+  # beyond 1e150) is read on the coordinates as given: it is emptied here,
+  # before the coerce and the projection, which could otherwise bring it
+  # back finite, and the layer is then read as it is read with that row
+  # empty.  A row at 1e200 kept as a point made the WSS NA at every level.
+  data_sf <- .empty_unlocated(.xy_if_mixed_or_m(data_sf))
   # Whether the layer came as points: a feature that is not one is scored at
   # the point it is reduced to, and the record of an estimate says so.
   was_points <- all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")
@@ -1871,14 +1877,16 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # function's words, naming `data_sf` (.pointize_auto()).
   if (!was_points)
     data_sf <- .xy_if_mixed(.pointize_auto(data_sf, "resolution_profile", "`data_sf`"))
+  # The bound is read again after the projection, which can take a location
+  # away (a latitude beyond 90 comes back NaN).
   data_sf <- ensure_projected(data_sf)
   xy <- sf::st_coordinates(data_sf)[, 1:2, drop = FALSE]
-  ok_xy <- is.finite(xy[, 1]) & is.finite(xy[, 2])
+  ok_xy <- .located_rows(data_sf)
   if (!all(ok_xy)) {
     # An R warning, as in determine_optimal_levels(): a log line alone could
     # not be caught, and spatialkit_quiet() hid it.
-    .warn_and_log("resolution_profile(): dropping %d point(s) with empty or non-finite coordinates.",
-                  sum(!ok_xy))
+    .warn_and_log("resolution_profile(): dropping %d point(s) without a location (%s).",
+                  sum(!ok_xy), .UNLOCATED_WHAT)
     data_sf <- data_sf[ok_xy, , drop = FALSE]
     xy <- xy[ok_xy, , drop = FALSE]
   }
@@ -1930,12 +1938,41 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       !is.na(sf::st_crs(data_sf)) && !isTRUE(sf::st_crs(data_sf) == sac_crs)) {
     .log_info("resolution_profile(): working in the CRS of `sac` (%s), in which its range is a length.",
               sac_crs$input %||% "unnamed")
+    # The split's boxes are in data_sf's CRS: kept as given, with the row
+    # positions in the layer as passed, so a half that loses a row below is
+    # boxed again without it.
+    geom_given <- sf::st_geometry(data_sf)
+    pos_given  <- which(ok_xy)
     data_sf <- .transform_or_stamp(data_sf, sac_crs, what = "data_sf",
                                    caller = "resolution_profile")
     xy <- sf::st_coordinates(data_sf)[, 1:2, drop = FALSE]
-    if (!all(is.finite(xy)))
-      stop("resolution_profile(): some points have no coordinates in the CRS of `sac`.",
-           call. = FALSE)
+    # The rows without a location as given were dropped above, before this
+    # move; a row the move leaves without one (a coordinate that is not
+    # finite or lies beyond 1e150 in the CRS of `sac`) is dropped as they
+    # were, and the halves of the split lose it too.
+    ok_sac <- .located_rows(data_sf)
+    if (!all(ok_sac)) {
+      .warn_and_log(paste0("resolution_profile(): dropping %d point(s) without a location ",
+                           "in the CRS of `sac` (%s)."),
+                    sum(!ok_sac), .UNLOCATED_WHAT)
+      gone <- which(ok_xy)[!ok_sac]
+      ok_xy[gone] <- FALSE
+      data_sf <- data_sf[ok_sac, , drop = FALSE]
+      xy <- xy[ok_sac, , drop = FALSE]
+      if (!is.null(split)) {
+        in_sel <- in_sel[ok_sac]
+        split$selection  <- setdiff(split$selection, gone)
+        split$estimation <- setdiff(split$estimation, gone)
+        halves <- list(selection = split$selection, estimation = split$estimation)
+        split$extent <- lapply(halves, function(i)
+          sf::st_bbox(geom_given[match(i, pos_given)]))
+        sizes <- lengths(halves, use.names = FALSE)
+        split$balance <- max(sizes) / min(sizes)
+      }
+      if (nrow(xy) < 3L)
+        stop("resolution_profile(): fewer than three points in the CRS of `sac`.",
+             call. = FALSE)
+    }
   }
 
   resp <- NULL; pred <- NULL

@@ -23,7 +23,10 @@ read in x and y, for the distances and for that check, since sf reads
 a layer in the dimension of its first geometry.  So is a layer whose
 geometries carry M (XYM or XYZM), which GEOS refuses.  The points a
 layer is reduced to are read in x and y when they mix dimensions, as
-those of a layer XYZ throughout that holds points and polygons do.}
+those of a layer XYZ throughout that holds points and polygons do.  A
+row without a location (an empty point, or a coordinate that is not
+finite or lies beyond 1e150, read as given and again in the CRS the
+distances are measured in) is left out of the distances.}
 
 \item{sac}{Optional: an \code{\link{estimate_sac_range}()} result or a
 single number.  Defaults to the range the folds carry, if any.  Supplying
@@ -56,7 +59,11 @@ lengths in the CRS the folds were built in
 (\code{folds$params$crs}).  When the distances here are measured in
 another CRS (\code{data_sf} is in another projected CRS, or \code{sac}
 records another), the two are not compared, \code{print()} says so, and
-passing \code{prediction_points} has the target measured here.}
+passing \code{prediction_points} has the target measured here.  A
+prediction point without a location (an empty point, or a coordinate
+that is not finite or lies beyond 1e150) as given or in the CRS the
+distances are measured in takes no part in the target and is not
+counted.}
 }
 \value{
 A data.frame of class \code{fold_separation}, one row per fold:

@@ -2002,6 +2002,56 @@ old behaviour where there is a way.
   or lies beyond 1e150)", where they said "an empty or non-finite
   geometry".
 
+* **`estimate_sac_range()`, `make_folds()`, `resolution_profile()`,
+  `determine_optimal_levels()` and `fold_separation()` kept a row at `Inf`
+  or beyond 1e150, or read it after a move.**  They dropped a row whose
+  geometry was empty or whose coordinates were missing, or not finite after
+  the projection.  A point at x = `Inf` or at a northing of 1e200 in
+  EPSG:32617 made `estimate_sac_range()` return `NA` with the reason "the
+  points have no extent", where the same row empty gives a range; at
+  latitude 1e200 in EPSG:4326 it stopped with FNN's "Data include NAs".
+  `make_folds(method = "block_kfold")` stopped with base R's "'to' must be
+  a finite number" on the `Inf` row and gave the 1e200 row a block of its
+  own (2 folds, of 299 points and 1, where the same row empty gives 5),
+  `random_kfold` put either row in a test fold, and `cv_block_size_sweep()`
+  stopped in `make_folds()` on either.  `resolution_profile()` returned a
+  WSS of `NA` at every level with the 1e200 row, and with `sac` in
+  EPSG:32617 the same row in EPSG:32616 or EPSG:3857 was moved to a finite
+  point and the profile built around it; `determine_optimal_levels()`
+  stopped with base R's "missing value where TRUE/FALSE needed".  A
+  prediction point of `fold_separation()` or of `make_folds(method =
+  "nndm")` and `"knndm"` at 1e200 in EPSG:32616 was moved into the data's
+  EPSG:32617 and measured there, and `fold_separation()` counted such a
+  point in its print ("prediction target: 60 point(s)" where 59 have a
+  location).  A latitude beyond 90, finite as given, came back `NaN` from
+  the projection and stopped `estimate_sac_range()` and `make_folds(method
+  = "nndm")` and `"knndm"` with "Data include NAs".  The bound is now read
+  on the coordinates as given, before the reduction to points and before
+  any move, and again after the move: such a row is dropped with the rows
+  whose geometry is empty, as the same row emptied is, and so is a lon/lat
+  polygon with such a vertex.  The drop warnings and log lines count these
+  rows as points "without a location (an empty point, or a coordinate that
+  is not finite or lies beyond 1e150)", where they said "with empty or
+  non-finite coordinates".  A row that loses its location in the
+  projection is dropped too: `estimate_sac_range()` and `make_folds()` log
+  a line that says it has none once projected, `resolution_profile()` and
+  `determine_optimal_levels()` count it in their drop warning, and
+  `fold_separation()` leaves it out of the distances as it leaves out an
+  empty row.  `resolution_profile()` drops a row that loses its location in
+  the move into the CRS of `sac` with a warning that says so, where the
+  move stopped the call with "some points have no coordinates in the CRS of
+  `sac`"; with `select_on = "split"` the halves lose that row.
+  The record of the rows' locations that `make_folds()` keeps, and that the
+  `cv_*()` functions and `fold_separation()` check folds against, leaves a
+  row at `Inf` or beyond 1e150 out as it leaves out an empty one: in
+  EPSG:3857 a row at x = 1e200 made `make_folds()` wait without end on
+  PROJ's move of it to EPSG:4326, and in a layer without a CRS a row at
+  1e200 widened the check's tolerance to 1e191, so folds built on other
+  data of the same size were accepted.  `cv_block_size_sweep()` now runs
+  on such a layer.  An empty prediction point is no longer counted in
+  `make_folds()`'s `params$n_prediction_points`.  Layers whose rows all
+  have a location give the same results as before.
+
 * **`area_of_applicability()` gave a location index to a row beyond
   1e150, and refused training data with one for a false reason.**  With
   location measured (`coords = "yes"`, or a fit whose predictions depend

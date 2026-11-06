@@ -806,8 +806,9 @@
 #' \code{\link{resolution_profile}()} when the response should drive the
 #' count.
 #'
-#' @param data_sf An sf object.  Features with empty or non-finite
-#'   coordinates are dropped with a warning.  A layer that mixes XY and XYZ
+#' @param data_sf An sf object.  Features without a location (an empty
+#'   point, or a coordinate that is not finite or lies beyond 1e150, as given
+#'   or once projected) are dropped with a warning.  A layer that mixes XY and XYZ
 #'   (or XYM) geometries is read in x and y, before and after it is reduced
 #'   to points, since sf reads a layer in the dimension of its first geometry.
 #'   So is a layer whose geometries carry M (XYM or XYZM), which GEOS
@@ -1146,26 +1147,32 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # returned, so no warning.  A polygon s2 cannot take a centroid of in
   # degrees is refused in this function's words, naming `data_sf`
   # (.pointize_auto()).
-  data_sf <- .xy_if_mixed_or_m(data_sf)
+  # A row without a location (an empty point, or a coordinate that is not
+  # finite or lies beyond 1e150) is read on the coordinates as given: it is
+  # emptied here, before the coerce and the projection, which could
+  # otherwise bring it back finite, and the layer is then read as it is read
+  # with that row empty.
+  data_sf <- .empty_unlocated(.xy_if_mixed_or_m(data_sf))
   if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")) {
     data_sf <- .xy_if_mixed(.pointize_auto(data_sf, "determine_optimal_levels",
                                            "`data_sf`"))
   }
   data_sf <- ensure_projected(data_sf)
 
-  # A point with no coordinates has no place in a partition of the plane.
+  # A point with no location has no place in a partition of the plane.
   # One POINT EMPTY used to make the k = 1 WSS NA and k-means fail at every
   # k, and the failure handler then returned 1 where the clean layer gave
-  # 2 1 3, with nothing but a log line about interpolating the WSS.
-  xy <- sf::st_coordinates(data_sf)[, 1:2, drop = FALSE]
-  ok_xy <- if (nrow(xy) == nrow(data_sf)) is.finite(xy[, 1]) & is.finite(xy[, 2])
-           else !sf::st_is_empty(data_sf)
+  # 2 1 3, with nothing but a log line about interpolating the WSS; a point
+  # at 1e200 stopped the call with base R's "missing value where TRUE/FALSE
+  # needed".  The bound is read again after the projection, which can take a
+  # location away (a latitude beyond 90 comes back NaN).
+  ok_xy <- .located_rows(data_sf)
   if (!all(ok_xy)) {
-    .warn_and_log("determine_optimal_levels(): dropping %d point(s) with empty or non-finite coordinates.",
-                  sum(!ok_xy))
+    .warn_and_log("determine_optimal_levels(): dropping %d point(s) without a location (%s).",
+                  sum(!ok_xy), .UNLOCATED_WHAT)
     data_sf <- data_sf[ok_xy, , drop = FALSE]
-    xy <- sf::st_coordinates(data_sf)[, 1:2, drop = FALSE]
   }
+  xy <- sf::st_coordinates(data_sf)[, 1:2, drop = FALSE]
 
   # Sample splitting: read the response on one spatial half, hand the other
   # back for estimation.  Done on the full layer, before the subsample, so

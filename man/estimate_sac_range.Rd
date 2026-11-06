@@ -26,8 +26,9 @@ automatically if in geographic CRS).  Non-POINT geometry is reduced to
 representative points; any Z or M dimension is dropped, because
 \code{gstat::variogram()} uses every coordinate dimension and an XYZ layer
 would otherwise return a range in 3-D while every consumer of it works in
-2-D map distance; and rows with empty or non-finite coordinates are dropped
-with a logged count.}
+2-D map distance; and rows without a location (an empty point, or a
+coordinate that is not finite or lies beyond 1e150, as given or once
+projected) are dropped with a logged count.}
 
 \item{response_var}{Character(1) name of the response column.  Rows where
 it is missing or infinite are left out before anything else is done, so

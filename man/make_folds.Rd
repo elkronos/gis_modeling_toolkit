@@ -193,7 +193,10 @@ since sf reads a layer in the dimension of its first geometry.  So is a
 layer whose geometries carry M (XYM or XYZM), which GEOS refuses.  The
 points a layer is reduced to are read in x and y when they mix
 dimensions, as those of a layer XYZ throughout that holds points and
-polygons do.}
+polygons do.  A prediction point without a location (an empty point, or
+a coordinate that is not finite or lies beyond 1e150), as given or once
+brought into the CRS of the folds, takes no part in the target and is
+not counted in \code{params$n_prediction_points}.}
 
 \item{predictor_vars}{Optional character vector of predictor column names.
 Passed to \code{estimate_sac_range()} for residual variogram estimation.}
@@ -384,9 +387,11 @@ definition).  Every length in \code{params} (\code{block_size},
 units, which for geographic input is a CRS
 \code{\link{ensure_projected}()} chose for you, and not one you passed.
 
-Rows whose geometry is empty or has non-finite coordinates are dropped
-before folding, with a logged warning naming the count; they appear in no
-fold and in no \code{assignment} row.
+Rows without a location (an empty point, or a coordinate that is not
+finite or lies beyond 1e150) are dropped before folding, with a logged
+warning naming the count; they appear in no fold and in no
+\code{assignment} row.  The bound is read on the coordinates as given,
+and again after the projection for the methods that measure distance.
 }
 \description{
 Builds train/test splits by random k-fold, spatial block k-fold,

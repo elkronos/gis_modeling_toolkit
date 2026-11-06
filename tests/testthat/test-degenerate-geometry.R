@@ -346,7 +346,7 @@ test_that("make_folds drops an EMPTY geometry from a populated layer", {
     lines <- capture_spatialkit_log(
       f <- do.call(make_folds, c(list(points_sf = pts), args[[m]])))
     # Dropped, and the count is named rather than silently absorbed.
-    expect_true(log_has(lines, "dropping 1 point\\(s\\) with empty or non-finite"),
+    expect_true(log_has(lines, "dropping 1 point\\(s\\) without a location \\(an empty point"),
                 info = m)
     # The empty row appears in no fold and in no assignment row ...
     expect_equal(nrow(f$assignment), n, info = m)

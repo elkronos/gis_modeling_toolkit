@@ -563,8 +563,13 @@
     # Rows that mix XY and XYZ (or XYM) geometries are read in x and y: sf
     # reads a set in the dimension of its first geometry, so the transform
     # stopped (and the probe was not taken) or the coordinates came out of
-    # step.  So are rows that carry M, whose centroids GEOS refuses.
-    g    <- .xy_if_mixed_or_m(sf::st_geometry(x)[take])
+    # step.  So are rows that carry M, whose centroids GEOS refuses.  A row
+    # without a location (a coordinate that is not finite or lies beyond
+    # 1e150) is emptied, so it gives NA and is left out of the comparison,
+    # as an empty row is: moved to EPSG:4326 from EPSG:3857, an x of 1e200
+    # never came back from PROJ, and a CRS-less row at 1e200 set the
+    # tolerance of the comparison to 1e191, so any folds matched.
+    g    <- .empty_unlocated(.xy_if_mixed_or_m(sf::st_geometry(x)[take]))
     kind <- if (isTRUE(legacy)) "session_centroid" else "planar_centroid"
     # A legacy probe is retaken under the session's setting, so with s2 on a
     # lon/lat polygon s2 refuses stopped it, the probe was NULL, and folds
@@ -1690,6 +1695,32 @@
 # -----------------------------------------------------------------------------
 # Spatial autocorrelation range estimation
 # -----------------------------------------------------------------------------
+
+# What a row without a location is, as the drop and count warnings say it: an
+# empty geometry, or a coordinate that is not finite or lies beyond
+# .POOL_XY_MAX (.unlocated_features()).
+.UNLOCATED_WHAT <- paste0("an empty point, or a coordinate that is not finite ",
+                          "or lies beyond 1e150")
+
+#' The rows of a layer that have a location
+#'
+#' A row has a location when its geometry is not empty and no coordinate of
+#' it is non-finite or beyond \code{.POOL_XY_MAX}: for a point, the test
+#' \code{.values_at_xy()} applies.  The callers read it on the coordinates
+#' as given, before any move, and again after the move, since a move can
+#' bring a coordinate beyond the bound back finite (a northing of 1e200 in
+#' EPSG:32616 lands at a finite point in EPSG:32617) and can leave a
+#' coordinate finite as given without a place (a latitude beyond 90).
+#'
+#' @param x An sf or sfc object.
+#' @return A logical vector, one element per row.
+#' @keywords internal
+#' @noRd
+.located_rows <- function(x) {
+  g <- sf::st_geometry(x)
+  !sf::st_is_empty(g) & !.unlocated_features(g)
+}
+
 
 #' Nearest-neighbour distance from each feature of \code{query} to \code{data}
 #'
@@ -2861,8 +2892,9 @@ sac_nugget <- function(x) {
 #'   representative points; any Z or M dimension is dropped, because
 #'   \code{gstat::variogram()} uses every coordinate dimension and an XYZ layer
 #'   would otherwise return a range in 3-D while every consumer of it works in
-#'   2-D map distance; and rows with empty or non-finite coordinates are dropped
-#'   with a logged count.
+#'   2-D map distance; and rows without a location (an empty point, or a
+#'   coordinate that is not finite or lies beyond 1e150, as given or once
+#'   projected) are dropped with a logged count.
 #' @param response_var Character(1) name of the response column.  Rows where
 #'   it is missing or infinite are left out before anything else is done, so
 #'   they neither take part in the choice of projection for lon/lat input
@@ -3313,9 +3345,12 @@ estimate_sac_range <- function(points_sf, response_var,
   # before the coerce and after it, as prep_model_data() reads it, and so is
   # one whose geometries carry M, which GEOS refuses in the coerce.  A
   # polygon s2 cannot take a centroid of in degrees is refused in this
-  # function's words, naming `points_sf` (.pointize_auto()).
+  # function's words, naming `points_sf` (.pointize_auto()).  A feature
+  # without a location (a coordinate that is not finite or lies beyond 1e150)
+  # is emptied first, so that it is reduced to an empty point and dropped
+  # below, as the same feature empty is.
   if (!all(sf::st_geometry_type(points_sf, by_geometry = TRUE) == "POINT"))
-    points_sf <- .xy_if_mixed(.pointize_auto(.xy_if_mixed_or_m(points_sf),
+    points_sf <- .xy_if_mixed(.pointize_auto(.empty_unlocated(.xy_if_mixed_or_m(points_sf)),
                                              "estimate_sac_range", "`points_sf`"))
 
   # gstat::variogram() uses EVERY coordinate dimension, so an XYZ layer has
@@ -3324,17 +3359,15 @@ estimate_sac_range <- function(points_sf, response_var,
   # and summarize_by_cell(deff = "variogram") all work in 2-D map distance.
   points_sf <- sf::st_zm(points_sf, drop = TRUE, what = "ZM")
 
-  # A row with an empty or non-finite geometry makes gstat fail in every
-  # direction; it is dropped, with a count, as make_folds() drops it.
-  bad_geom <- sf::st_is_empty(points_sf)
-  if (!all(bad_geom)) {
-    xy_chk <- suppressWarnings(sf::st_coordinates(points_sf[!bad_geom, ]))
-    if (nrow(xy_chk) == sum(!bad_geom) && ncol(xy_chk) >= 2L)
-      bad_geom[!bad_geom] <- !stats::complete.cases(xy_chk[, 1:2, drop = FALSE])
-  }
+  # A row without a location (an empty point, or a coordinate that is not
+  # finite or lies beyond 1e150) makes gstat fail in every direction, or
+  # spans the extent alone; it is dropped, with a count, as make_folds()
+  # drops it.  The bound is read on the coordinates as given, before the
+  # projection, and again after it (below).
+  bad_geom <- !.located_rows(points_sf)
   if (any(bad_geom)) {
-    .log_warn("estimate_sac_range(): dropping %d point(s) with empty or non-finite coordinates.",
-              sum(bad_geom))
+    .log_warn("estimate_sac_range(): dropping %d point(s) without a location (%s).",
+              sum(bad_geom), .UNLOCATED_WHAT)
     points_sf <- points_sf[!bad_geom, , drop = FALSE]
   }
 
@@ -3463,6 +3496,15 @@ estimate_sac_range <- function(points_sf, response_var,
   points_sf <- points_sf[ord, , drop = FALSE]
 
   pts <- ensure_projected(points_sf)
+  # A row with a location as given can lose it in the projection (a latitude
+  # beyond 90 comes back NaN); it is dropped as the rows above are.  The
+  # floor on locations below then counts the rows kept.
+  off_moved <- !.located_rows(pts)
+  if (any(off_moved)) {
+    .log_warn("estimate_sac_range(): dropping %d point(s) without a location once projected (%s).",
+              sum(off_moved), .UNLOCATED_WHAT)
+    pts <- pts[!off_moved, , drop = FALSE]
+  }
 
   # Subsample if large.  `seed` defaults to a constant, NOT to NULL: the
   # subsample is an internal approximation that keeps an O(n^2) variogram
@@ -4801,7 +4843,10 @@ print.sac_range <- function(x, ...) {
 #'   layer whose geometries carry M (XYM or XYZM), which GEOS refuses.  The
 #'   points a layer is reduced to are read in x and y when they mix
 #'   dimensions, as those of a layer XYZ throughout that holds points and
-#'   polygons do.
+#'   polygons do.  A prediction point without a location (an empty point, or
+#'   a coordinate that is not finite or lies beyond 1e150), as given or once
+#'   brought into the CRS of the folds, takes no part in the target and is
+#'   not counted in \code{params$n_prediction_points}.
 #' @param min_train For \code{method = "nndm"}: the smallest fraction of the
 #'   data any fold's training set may be reduced to by neighbour exclusion.
 #'   Default \code{0.5}, as in \code{CAST::nndm()}.  Where it binds, the
@@ -5267,9 +5312,11 @@ print.sac_range <- function(x, ...) {
 #'   units, which for geographic input is a CRS
 #'   \code{\link{ensure_projected}()} chose for you, and not one you passed.
 #'
-#'   Rows whose geometry is empty or has non-finite coordinates are dropped
-#'   before folding, with a logged warning naming the count; they appear in no
-#'   fold and in no \code{assignment} row.
+#'   Rows without a location (an empty point, or a coordinate that is not
+#'   finite or lies beyond 1e150) are dropped before folding, with a logged
+#'   warning naming the count; they appear in no fold and in no
+#'   \code{assignment} row.  The bound is read on the coordinates as given,
+#'   and again after the projection for the methods that measure distance.
 #' @family cross-validation
 #' @examples
 #' library(sf)
@@ -5447,9 +5494,12 @@ make_folds <- function(points_sf, k,
   # pointization -- because that is what the cv_*() wrappers will probe too.
   row_probe <- .fold_row_probe(points_sf)
   # A polygon s2 cannot take a centroid of in degrees is refused in this
-  # function's words, naming `points_sf` (.pointize_auto()).
+  # function's words, naming `points_sf` (.pointize_auto()).  A feature
+  # without a location is emptied first (after the probe, which reads the
+  # layer as supplied), so it is reduced to an empty point and dropped below.
   if (!all(sf::st_geometry_type(points_sf, by_geometry = TRUE) == "POINT"))
-    points_sf <- .xy_if_mixed(.pointize_auto(points_sf, "make_folds", "`points_sf`"))
+    points_sf <- .xy_if_mixed(.pointize_auto(.empty_unlocated(points_sf), "make_folds",
+                                             "`points_sf`"))
 
   # Drop rows with no usable coordinates, AFTER ..row_id is stamped so the
   # survivors keep their original row identities and the dropped rows simply
@@ -5473,19 +5523,38 @@ make_folds <- function(points_sf, k,
     points_sf <- sf::st_zm(points_sf, drop = TRUE, what = "ZM")
   }
 
-  bad_geom <- sf::st_is_empty(points_sf)
-  if (!all(bad_geom)) {
-    xy_chk <- suppressWarnings(sf::st_coordinates(points_sf[!bad_geom, ]))
-    if (nrow(xy_chk) == sum(!bad_geom) && ncol(xy_chk) >= 2L)
-      bad_geom[!bad_geom] <- !stats::complete.cases(xy_chk[, 1:2, drop = FALSE])
-  }
+  # A row has no location when its point is empty or a coordinate of it is
+  # not finite or lies beyond 1e150 (.located_rows()).  The bound is read on
+  # the coordinates as given, before any projection: a row at Inf stopped
+  # the block grid with base R's "'to' must be a finite number", one at 1e200
+  # took a block of its own, and random_kfold put either in a test fold.
+  bad_geom <- !.located_rows(points_sf)
   if (any(bad_geom)) {
-    .log_warn("make_folds(): dropping %d point(s) with empty or non-finite coordinates.",
-              sum(bad_geom))
+    .log_warn("make_folds(): dropping %d point(s) without a location (%s).",
+              sum(bad_geom), .UNLOCATED_WHAT)
     points_sf <- points_sf[!bad_geom, , drop = FALSE]
     if (nrow(points_sf) == 0L)
       stop("make_folds(): `points_sf` has no usable coordinates; there is nothing to split into folds.",
            call. = FALSE)
+  }
+  # The methods that measure distance project the rows kept, and read the
+  # bound again after the move: a row with a location as given can lose it
+  # there (a latitude beyond 90 comes back NaN).  Such a row is dropped as
+  # the rows above are.  Only `pts` is read after this, so its rows are the
+  # ones the folds name.
+  .projected_located <- function(label) {
+    pts <- ensure_projected(points_sf)
+    off <- !.located_rows(pts)
+    if (any(off)) {
+      .log_warn("make_folds(%s): dropping %d point(s) without a location once projected (%s).",
+                label, sum(off), .UNLOCATED_WHAT)
+      pts <- pts[!off, , drop = FALSE]
+      if (nrow(pts) == 0L)
+        stop(sprintf(paste0("make_folds(%s): no point of `points_sf` has a location once ",
+                            "projected; there is nothing to split into folds."), label),
+             call. = FALSE)
+    }
+    pts
   }
 
   # One probe for every return path: .ret() is the single exit, so the folds
@@ -5541,7 +5610,7 @@ make_folds <- function(points_sf, k,
   # ---- BLOCK K-FOLD ----
   if (method == "block_kfold") {
     if (k < 2) k <- 2L
-    pts <- ensure_projected(points_sf)
+    pts <- .projected_located("block_kfold")
     blocks_supplied <- !is.null(blocks)
     if (blocks_supplied) {
       # The blocks ARE the design: the region a grid would be built over and
@@ -6276,7 +6345,7 @@ make_folds <- function(points_sf, k,
         if (length(buffer) == 1L && is.na(buffer))
           " An NA from estimate_sac_range() means no range was identified; choose a buffer yourself."
         else ""), call. = FALSE)
-    pts <- ensure_projected(points_sf)
+    pts <- .projected_located("buffered_loo")
     n <- nrow(pts)
     # With `max_test`, folds are built for a seeded random subset of the
     # held-out points only.  Every row stays available for training, so the
@@ -6418,7 +6487,7 @@ make_folds <- function(points_sf, k,
 
   # ---- NNDM: nearest-neighbour distance matching ----
   if (method == "nndm") {
-    pts <- ensure_projected(points_sf)
+    pts <- .projected_located("nndm")
     n <- nrow(pts)
     if (n > 5000L)
       stop(sprintf(paste0(
@@ -6761,7 +6830,7 @@ make_folds <- function(points_sf, k,
 
   # ---- kNNDM: k-fold nearest-neighbour distance matching ----
   if (method == "knndm") {
-    pts <- ensure_projected(points_sf)
+    pts <- .projected_located("knndm")
     n <- nrow(pts)
     if (n < 3L)
       stop("make_folds(knndm): need at least 3 points.", call. = FALSE)
@@ -7034,7 +7103,8 @@ make_folds <- function(points_sf, k,
 #' @param prediction_points The argument as passed.
 #' @param label \code{"nndm"} or \code{"knndm"}, for the messages.
 #' @return A list: \code{pts} (stamped with the prediction points' CRS when
-#'   they had none), \code{pred} and \code{g_target}, the finite distances.
+#'   they had none), \code{pred} (the prediction points that have a location,
+#'   in the samples' CRS) and \code{g_target}, the finite distances.
 #' @keywords internal
 #' @noRd
 .nndm_target <- function(pts, prediction_points, label) {
@@ -7054,6 +7124,13 @@ make_folds <- function(points_sf, k,
   # returned, so no warning.
   if (inherits(prediction_points, "sf"))
     prediction_points <- .xy_if_mixed_or_m(prediction_points)
+  # A prediction point without a location as given (an empty point, or a
+  # coordinate that is not finite or lies beyond 1e150) has none after the
+  # move either: it is emptied before the coerce and the move, which could
+  # otherwise bring it back finite (a northing of 1e200 in EPSG:32616 lands
+  # at a finite point in EPSG:32617), and every row without a location
+  # after the move is left out of the target and of the count.
+  prediction_points <- .empty_unlocated(prediction_points)
   if (!all(sf::st_geometry_type(prediction_points,
                                 by_geometry = TRUE) == "POINT")) {
     .log_info(paste0("make_folds(%s): `prediction_points` are not POINTs; ",
@@ -7072,6 +7149,7 @@ make_folds <- function(points_sf, k,
                                    what = "prediction_points",
                                    caller = "make_folds")
   pred <- sf::st_zm(pred, drop = TRUE, what = "ZM")
+  pred <- pred[.located_rows(pred), , drop = FALSE]
 
   # Target: distance from each prediction location to its nearest training
   # point.  This is the distance regime the model will actually face, and the

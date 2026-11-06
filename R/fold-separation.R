@@ -90,7 +90,10 @@
 #'   a layer in the dimension of its first geometry.  So is a layer whose
 #'   geometries carry M (XYM or XYZM), which GEOS refuses.  The points a
 #'   layer is reduced to are read in x and y when they mix dimensions, as
-#'   those of a layer XYZ throughout that holds points and polygons do.
+#'   those of a layer XYZ throughout that holds points and polygons do.  A
+#'   row without a location (an empty point, or a coordinate that is not
+#'   finite or lies beyond 1e150, read as given and again in the CRS the
+#'   distances are measured in) is left out of the distances.
 #' @param sac Optional: an \code{\link{estimate_sac_range}()} result or a
 #'   single number.  Defaults to the range the folds carry, if any.  Supplying
 #'   one adds the \code{mean_cor} column and, with a prediction target,
@@ -121,7 +124,11 @@
 #'   (\code{folds$params$crs}).  When the distances here are measured in
 #'   another CRS (\code{data_sf} is in another projected CRS, or \code{sac}
 #'   records another), the two are not compared, \code{print()} says so, and
-#'   passing \code{prediction_points} has the target measured here.
+#'   passing \code{prediction_points} has the target measured here.  A
+#'   prediction point without a location (an empty point, or a coordinate
+#'   that is not finite or lies beyond 1e150) as given or in the CRS the
+#'   distances are measured in takes no part in the target and is not
+#'   counted.
 #' @return A data.frame of class \code{fold_separation}, one row per fold:
 #'   \code{fold} (the fold's number: for the \code{$folds} of a
 #'   \code{cv_*()} result, the \code{fold_id} its \code{fold_metrics} use,
@@ -263,7 +270,10 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
   # returned, so no warning.  A polygon s2 cannot take a centroid of in
   # degrees is refused in this function's words, naming `data_sf`
   # (.pointize_auto()).
-  pts <- .xy_if_mixed_or_m(data_sf)
+  # A row without a location as given (an empty point, or a coordinate that
+  # is not finite or lies beyond 1e150) is emptied before the coerce and the
+  # move, which could otherwise bring it back finite, and has none after it.
+  pts <- .empty_unlocated(.xy_if_mixed_or_m(data_sf))
   if (!all(sf::st_geometry_type(pts, by_geometry = TRUE) == "POINT"))
     pts <- .xy_if_mixed(.pointize_auto(pts, "fold_separation", "`data_sf`"))
   pts <- if (is.null(rng_crs)) ensure_projected(pts) else
@@ -271,9 +281,9 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
   pts <- sf::st_zm(pts, drop = TRUE, what = "ZM")
   crs_lbl <- .fold_crs_label(pts)
 
-  # A distance is only meaningful between finite coordinates.
-  xy <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
-  ok <- stats::complete.cases(xy) & is.finite(xy[, 1L]) & is.finite(xy[, 2L])
+  # A distance is only meaningful between points that have a location, read
+  # again after the move.
+  ok <- .located_rows(pts)
   if (!any(ok))
     stop("fold_separation(): `data_sf` has no usable coordinates.", call. = FALSE)
 
@@ -471,7 +481,7 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
 #'
 #' @param prediction_points An sf/sfc layer, as passed.
 #' @param pts The data points, already in the measuring CRS.
-#' @return An sf POINT layer with finite coordinates.
+#' @return An sf POINT layer of the points that have a location.
 #' @keywords internal
 #' @noRd
 .fold_sep_prediction_points <- function(prediction_points, pts) {
@@ -485,6 +495,11 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
     stop("fold_separation(): `prediction_points` has no rows.", call. = FALSE)
   # Read in x and y when it mixes dimensions or carries M, as `data_sf` is.
   prediction_points <- .xy_if_mixed_or_m(prediction_points)
+  # A point without a location as given (an empty point, or a coordinate
+  # that is not finite or lies beyond 1e150) is emptied before the coerce and
+  # the move, which could otherwise bring it back finite (a northing of 1e200
+  # in EPSG:32616 lands at a finite point in EPSG:32617).
+  prediction_points <- .empty_unlocated(prediction_points)
   if (!all(sf::st_geometry_type(prediction_points, by_geometry = TRUE) == "POINT")) {
     .log_info(paste0("fold_separation(): `prediction_points` are not POINTs; ",
                      "using one representative point per feature so the ",
@@ -504,10 +519,10 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
                                 caller = "fold_separation")
   }
   pred <- sf::st_zm(pred, drop = TRUE, what = "ZM")
-  empty <- sf::st_is_empty(pred)
-  if (any(empty)) pred <- pred[!empty, , drop = FALSE]
-  xy <- if (nrow(pred)) sf::st_coordinates(pred)[, 1:2, drop = FALSE] else matrix(0, 0, 2)
-  keep <- is.finite(xy[, 1L]) & is.finite(xy[, 2L])
+  # Only the points that have a location are measured and counted: the bound
+  # (finite and within 1e150) is read on the coordinates as given, above,
+  # and again here.
+  keep <- .located_rows(pred)
   if (!any(keep))
     stop("fold_separation(): `prediction_points` has no usable coordinates.",
          call. = FALSE)
