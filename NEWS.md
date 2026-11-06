@@ -2545,6 +2545,25 @@ old behaviour where there is a way.
   `predict()` raises neither.  `attr(, "dropped")` gains `by_column`,
   `response_std_diff`, `constant_predictors` and `n_duplicate_locations`.
 
+* **`prep_model_data()` measured the shift of the dropped rows on the
+  rounding of a response at a large offset.**  `response_std_diff` and the
+  `spatialkit_rows_dropped` warning's "a difference of X SD" were a
+  difference of the raw means of the dropped and the kept rows, and a
+  double holds each mean of a response at 1e15 only to an eighth.  On 40
+  rows with 6 dropped, the same stored values gave 0.87 SD at offset 0 and
+  0.93 SD at 1e15, and only the second added "more than two standard
+  errors, so the rows are not missing at random".  Where the raw values of
+  the response lose their spread, the means and the standard deviation are
+  now taken less the response's centre, as `estimate_sac_range()` takes
+  it, and the centre is added back to the means the message quotes.  The
+  shift and the verdict are those of the same values at 0.  A response of
+  one value up to rounding, whose standard deviation is its last bit, now
+  gets `NA` and no shift sentence, as a response of one value does: with
+  the dropped rows one unit in the last place above most kept rows, it
+  read "a difference of 1.61 SD, more than two standard errors, so the
+  rows are not missing at random" at 1.23, 4.5e6 and 1e15 alike.  Every
+  other response is read as it was, to the last bit.
+
 * `fit_bayesian_spatial_model()` stops before compiling when the response
   takes a single value, and raises a warning of class
   `spatialkit_gp_basis_size` when there are fewer rows than a tenth of the
@@ -3924,14 +3943,21 @@ old behaviour where there is a way.
   where neither reading finds spread; a column with spread gets its ICC
   from the scaled column, which is the ICC of the column.  A column whose
   values are all equal still has an ICC of `NA` and standard errors of 0.
-  A column whose standard deviation is below that floor and whose values
-  differ only by their rounding (0.1 beside 0.3 / 3) still has an ICC of
-  `NA` with "the column does not vary"; its standard errors are 0 in a cell
-  whose values are equal, and of the size of that rounding in a cell whose
-  values differ.  A column whose standard deviation overflows, with values
-  near 1e200, had an ICC of `NA` with "the variance decomposition is
-  undefined"; its ICC is now estimated.  Columns whose standard deviation is
-  finite and at or above the floor give the ICC they gave.
+  A column whose values differ only by their rounding (0.1 beside
+  0.3 / 3) still has an ICC of `NA` with "the column does not vary"; its
+  standard errors are 0 in a cell whose values are equal, and of the size
+  of that rounding in a cell whose values differ.  Such a column was read
+  that way only while its standard deviation was below the floor: the same
+  values multiplied by 16 or more, whose rounding is above it, got an ICC
+  of 0.395 from that rounding and a design effect on their standard errors,
+  while the pooled summary of the same call said the column does not vary.
+  Now the column is also read again where its sum of squares shows no
+  spread on the scale of its values, so a column that differs only by its
+  rounding does not vary at any size.  A column whose standard deviation
+  overflows, with values near 1e200, had an ICC of `NA` with "the variance
+  decomposition is undefined"; its ICC is now estimated.  Columns with
+  spread whose standard deviation is finite and at or above the floor give
+  the ICC they gave.
 
 * **`summarize_by_cell()` gave standard errors of `NA` or 0 in silence for a
   column in very large or very small units.**  The standard deviation inside
@@ -4348,7 +4374,20 @@ old behaviour where there is a way.
   table are now those of the same values at 0, to rounding; fitted values
   and predictions of a response at 1e15 are in its units, to the eighth a
   double holds there, and `residuals()` is the centred response less the
-  centred fitted values.  `fit$engine$lm` is solved on the centred columns
+  centred fitted values.  `model_metrics()`, `summary()`,
+  `evaluate_insample()`, `compare_models()`, `cv_gwr()`, `cv_spatial()`
+  with a GWR learner and `select_features_forward()`'s `score_holdout`
+  scored such a fit on its fitted values and predictions in the response's
+  units, which carry that eighth: on 300 points at 1e15 RMSE was 0.49555
+  where `residuals()` give 0.49543, `cv_gwr()`'s RMSE 0.65316 where the
+  values at 0 give 0.65533, and R-squared was `NA`.  They now score it on
+  the response, the fitted values and the predictions less the centre, so
+  RMSE, MAE and R-squared are those of the values at 0, and MAPE and SMAPE
+  divide the same errors by the values in the response's units.  The
+  `predictions` of a cross-validation whose fold fits took the response
+  about a centre gain the columns `y_centre`, `yhat_centred` and
+  `y_train_mean_centred`, which the pooled scores read; `yhat` stays in
+  the response's units.  `fit$engine$lm` is solved on the centred columns
   and returned as the fit at the data's origin, with the QR factor of the
   raw columns, so `summary()`, `vcov()`, `confint()` and `predict()` on it
   give the intercept at 0 and its standard error; with a predictor more
@@ -4429,9 +4468,15 @@ old behaviour where there is a way.
   basis's resolution and the floor of the range check are those of the
   axis with extent.  The scale used is stored in
   `$info$predictor_scaling` and `$info$coord_scaling`, and `predict()`
-  reads it there.  A predictor or a
-  coordinate whose standard deviation is at least `.Machine$double.eps` is
-  scaled as before.
+  reads it there.  A predictor or a coordinate axis whose values differ
+  only by their rounding was read as one without spread only while its
+  standard deviation was below the floor: at 4.5e6 such a predictor was
+  divided by a scale of 7.5e-10 and handed to `brms::brm()` with a standard
+  deviation of 1, and a transect at x = 4.5e6 with jitter in the last bit
+  of x got an x scale of 7.7e-10.  Such a column is now read as without
+  spread at any size.  A predictor or a coordinate with spread whose
+  standard deviation is at least `.Machine$double.eps` is scaled as
+  before.
 
 * **The print of a profile of one level read "1 levels" and "WSS rises at 0
   step(s)".**  Every default profile has one level.  The print now reads "1
@@ -5715,6 +5760,19 @@ old behaviour where there is a way.
   and on a response spanning many orders of magnitude a row whose
   denominator is no larger than 100 epsilons times the largest (such as 1e-9
   against 1e6) no longer enters MAPE.
+
+* **R-squared was `NA` for a response at a large offset.**
+  `model_metrics()`, `summary()`, `evaluate_insample()`, `compare_models()`,
+  the `cv_*()` functions and `select_features_forward(metric = "R2")` took
+  R-squared only where the total sum of squares showed spread on the scale
+  of the values, a test that reads their size: a response of 1e15 plus a
+  spread of 2.3 failed it, and R-squared and adjusted R-squared were `NA`
+  with RMSE and MAE computed.  On 200 rows R-squared was 0.804 at offset 0
+  and 1e14 and `NA` at 1e15.  Where that test finds no spread, the
+  response is now read again centred and scaled, as the pooled summaries
+  read a constant column, and R-squared is computed where it varies; a
+  response of one value up to rounding still gets `NA`.  Every response
+  the first test passes gets the R-squared it got.
 
 * **`compare_models()` set out-of-bag random-forest metrics beside in-sample
   ones without saying so.**  Without `newdata` an `rf_fit`'s fitted values

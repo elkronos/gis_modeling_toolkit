@@ -270,6 +270,70 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
 }
 
 
+#' The observed and fitted values a fit is scored on in sample
+#'
+#' A \code{gwr_fit} whose response \code{fit_gwr_model()} took about a
+#' centre (\code{.morans_fit_centre()}: a response at a large offset) returns
+#' fitted values in the response's units, which a double holds at 1e15 only
+#' to an eighth, so a score of them reads that rounding.  It is scored on the
+#' response less the centre, which the subtraction gives exactly at the
+#' offset, and on that less \code{residuals()}, the residuals of the
+#' centred response.  Every other fit is scored on the values as given.
+#'
+#' @param object A \code{spatial_fit}.
+#' @param y_obs,fit_vals The observed response and \code{fitted(object)}.
+#' @return A list for \code{.compute_reg_metrics()}: \code{y}, \code{yhat}
+#'   and \code{centre} (0 where the values are as given).
+#' @keywords internal
+#' @noRd
+.scored_fitted <- function(object, y_obs, fit_vals) {
+  yc <- .morans_fit_centre(object)
+  if (yc == 0) return(list(y = y_obs, yhat = fit_vals, centre = 0))
+  r <- as.numeric(residuals(object))
+  if (length(r) != length(y_obs)) return(list(y = y_obs, yhat = fit_vals, centre = 0))
+  y_c <- y_obs - yc
+  list(y = y_c, yhat = y_c - r, centre = yc)
+}
+
+
+#' The predictions a fit is scored on, on new rows
+#'
+#' \code{predict()} of the fit, and for a \code{gwr_fit} whose response
+#' \code{fit_gwr_model()} took about a centre, the same predictions less
+#' that centre, taken before it is added back
+#' (\code{.gwr_predict_centred_at()}).  The scores read the observed values
+#' less the same centre against those (\code{.compute_reg_metrics()}'s
+#' \code{centre}).  \code{se.fit = FALSE}, the one argument
+#' \code{predict.gwr_fit()} takes that leaves its values as they are, keeps
+#' that path; any other argument takes the plain path, where
+#' \code{predict()} reads it.
+#'
+#' @param object A \code{spatial_fit}.
+#' @param newdata The rows to predict.
+#' @param predict_args A list of further arguments to \code{predict()}.
+#' @return A list: \code{yhat}, \code{predict()}'s values, in the
+#'   response's units; \code{yhat_centred}, those less \code{centre}; and
+#'   \code{centre}, 0 for every fit but such a \code{gwr_fit}.
+#' @keywords internal
+#' @noRd
+.scored_predictions <- function(object, newdata, predict_args = list()) {
+  plain_args <- length(predict_args) == 0L ||
+    (length(predict_args) == 1L && identical(names(predict_args), "se.fit") &&
+       isFALSE(predict_args[[1L]]))
+  if (inherits(object, "gwr_fit") && plain_args &&
+      .morans_fit_centre(object) != 0) {
+    r <- .gwr_predict_rows(object, newdata, centred = TRUE)
+    if (r$centre != 0)
+      return(list(yhat = r$fit + r$centre, yhat_centred = r$fit,
+                  centre = r$centre))
+    return(list(yhat = r$fit, yhat_centred = r$fit, centre = 0))
+  }
+  yh <- do.call(stats::predict, c(list(object = object, newdata = newdata),
+                                  predict_args))
+  list(yhat = yh, yhat_centred = yh, centre = 0)
+}
+
+
 # ---------------------------------------------------------------------------
 # print / summary
 # ---------------------------------------------------------------------------
@@ -575,7 +639,8 @@ summary.spatial_fit <- function(object, ...) {
   # global predictor count is not a valid effective-parameter count for
   # Adj R².  Pass p = NULL to suppress it, consistent with cv_gwr().
   # Bayesian fits likewise use p = NULL.
-  met      <- .compute_reg_metrics(y_obs, fit_vals, p = NULL)
+  sc       <- .scored_fitted(object, y_obs, fit_vals)
+  met      <- .compute_reg_metrics(sc$y, sc$yhat, p = NULL, centre = sc$centre)
 
   out <- list(
     class          = class(object)[1L],
@@ -737,8 +802,17 @@ print.summary.spatial_fit <- function(x, ...) {
 #' against the new rows' own mean, which it could not have known.  It is
 #' below 0 when the model predicts the new rows worse than the training mean
 #' does, and it is \code{NA} when the response does not vary about that
-#' baseline by more than rounding error (100 machine epsilons of its
-#' magnitude, whatever its units).
+#' baseline beyond the rounding of its values, whatever its units and
+#' origin.
+#'
+#' A \code{gwr_fit} whose response \code{fit_gwr_model()} took about a
+#' centre (\code{fit$engine$centres$response}, a response at a large offset)
+#' is scored on the response and the fitted values or predictions less that
+#' centre, which keep the spread a double rounds away at the response's
+#' size: \code{RMSE}, \code{MAE} and \eqn{R^2} are those of the same values
+#' at 0, and \code{MAPE} and \code{SMAPE} divide the same errors by the
+#' values in the response's units.  \code{fitted()} and \code{predict()}
+#' still return values in the response's units.
 #'
 #' @section Percentage errors on responses with zeros:
 #' \code{MAPE} divides by the observed value and \code{SMAPE} by
@@ -863,10 +937,24 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
            object$response_var,
            "' to compute evaluation metrics. predict() can be used without it.",
            call. = FALSE)
-    y_hat <- predict(object, newdata = newdata, ...)
+    sp <- .scored_predictions(object, newdata, list(...))
     y_obs <- sf::st_drop_geometry(newdata)[[object$response_var]]
   }
   y_obs <- .checked_response(y_obs, object$response_var, "model_metrics")
+  # A GWR whose response the fit took about a centre is scored on the
+  # values less that centre (.scored_fitted(), .scored_predictions()).
+  yc <- 0
+  if (is.null(newdata)) {
+    sc <- .scored_fitted(object, y_obs, y_hat)
+    y_obs <- sc$y; y_hat <- sc$yhat; yc <- sc$centre
+  } else {
+    y_hat <- sp$yhat
+    if (sp$centre != 0) {
+      yc <- sp$centre
+      y_obs <- y_obs - yc
+      y_hat <- sp$yhat_centred
+    }
+  }
   # R² on newdata is measured against the TRAINING mean, as every cv_*()
   # measures it: the null prediction the model had to beat.  It used the
   # held-out rows' own mean, so the same predictions scored R² -0.89 here and
@@ -878,12 +966,13 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
     y_tr <- tryCatch(suppressWarnings(as.numeric(
       sf::st_drop_geometry(object$data_sf)[[object$response_var]])),
       error = function(e) NULL)
-    if (length(y_tr) && any(is.finite(y_tr))) ytm <- mean(y_tr[is.finite(y_tr)])
+    if (length(y_tr) && any(is.finite(y_tr)))
+      ytm <- if (yc != 0) mean(y_tr[is.finite(y_tr)] - yc) else mean(y_tr[is.finite(y_tr)])
   }
   # Adj R² is suppressed (p = NULL) because GWR's effective parameter count
   # far exceeds the global predictor count, and Bayesian GP models likewise
   # lack a simple p.  This is consistent with the CV evaluation path.
-  .compute_reg_metrics(y_obs, y_hat, p = NULL, y_train_mean = ytm)
+  .compute_reg_metrics(y_obs, y_hat, p = NULL, y_train_mean = ytm, centre = yc)
 }
 
 # ---------------------------------------------------------------------------
@@ -1036,10 +1125,31 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #' @export
 predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
   .check_dots(list(...), "predict.gwr_fit")
+  .gwr_predict_rows(object, newdata, se.fit = se.fit)
+}
+
+
+#' The work of \code{predict.gwr_fit()}, with the predictions also less the
+#' response's centre
+#'
+#' @param object,newdata,se.fit As for \code{predict.gwr_fit()}.
+#' @param centred \code{TRUE} to return the predictions less the centre
+#'   \code{fit_gwr_model()} took the response about
+#'   (\code{.gwr_predict_centred_at()}), for the scores of the fit
+#'   (\code{.scored_predictions()}); \code{se.fit} is then ignored.
+#' @return What \code{predict.gwr_fit()} returns; with \code{centred =
+#'   TRUE}, a list: \code{fit}, the predictions less the centre, aligned to
+#'   \code{nrow(newdata)} as \code{predict()}'s are, and \code{centre}, the
+#'   centre (0 for a response fitted on its raw values).
+#' @keywords internal
+#' @noRd
+.gwr_predict_rows <- function(object, newdata = NULL, se.fit = FALSE,
+                              centred = FALSE) {
+  if (centred) se.fit <- FALSE
   if (!is.logical(se.fit) || length(se.fit) != 1L || is.na(se.fit))
     stop("predict.gwr_fit(): `se.fit` must be TRUE or FALSE.", call. = FALSE)
   if (is.null(newdata)) {
-    if (!se.fit) return(fitted(object))
+    if (!se.fit && !centred) return(fitted(object))
     # The standard errors need each row's weights on the training responses,
     # which the fit does not keep; the training rows are predicted afresh.
     newdata <- object$data_sf
@@ -1092,6 +1202,7 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
   # What comes back when nothing can be predicted, in the shape asked for.
   na_result <- function() {
     v <- rep(NA_real_, n_orig)
+    if (centred) return(list(fit = v, centre = 0))
     if (!se.fit) return(v)
     list(fit = v, se.fit = v, se.pred = v,
          residual.scale = NA_real_, df = NA_real_)
@@ -1119,12 +1230,13 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
   # solved for itself, so a location whose window is empty or cannot place
   # its row (a grid cell beyond a fixed bandwidth, a point inside a held-out
   # block) is NA and the others are what they would be without it.
+  predict_at <- if (centred) .gwr_predict_centred_at else .gwr_predict_at
   res <- tryCatch(
-    .gwr_predict_at(object$formula, sp_train,
-                    newdata_df = sf::st_drop_geometry(newdata),
-                    rp = sf::st_coordinates(newdata)[, 1:2, drop = FALSE],
-                    bw = bw, kernel = kernel, adaptive = adaptive,
-                    se = se.fit),
+    predict_at(object$formula, sp_train,
+               newdata_df = sf::st_drop_geometry(newdata),
+               rp = sf::st_coordinates(newdata)[, 1:2, drop = FALSE],
+               bw = bw, kernel = kernel, adaptive = adaptive,
+               se = se.fit),
     error = function(e) e
   )
   if (inherits(res, "error")) {
@@ -1182,6 +1294,7 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
 
   # Expand back to original length, filling dropped rows with NA.
   fit_vals <- .expand_predictions(preds_clean, clean_idx, n_orig)
+  if (centred) return(list(fit = fit_vals, centre = res$centre))
   if (!se.fit) return(fit_vals)
 
   sigma2 <- suppressWarnings(as.numeric(object$info$sigma2 %||% NA_real_))[1L]

@@ -141,11 +141,10 @@ column's standard errors are the uncorrected ones. A column that
 does not vary (all its values equal, those of rows with no cell id
 included) has an ICC of \code{NA} and standard errors of 0, with no
 warning: its mean has no error whatever the correlation. A column
-whose standard deviation is below \code{.Machine$double.eps} and whose
-values differ only by their rounding (0.1 beside 0.3 / 3) is read
-the same way, as one that does not vary; its standard errors are 0
-in a cell whose values are equal and of the size of that rounding in
-one whose values differ. The
+whose values differ only by their rounding (0.1 beside 0.3 / 3) is
+read the same way, as one that does not vary, at any size of its
+values; its standard errors are 0 in a cell whose values are equal
+and of the size of that rounding in one whose values differ. The
 \code{"deff_applied"} attribute is attached when any ICC is positive, so
 when all are 0 or \code{NA} there is none.}
 \item{A positive number}{Applied as a uniform design effect to every

@@ -1022,13 +1022,21 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   if (!is.null(holdout_sf) && length(selected) > 0L) {
     score_holdout <- tryCatch({
       fit <- fit_fn(train_sf, selected)
-      yh  <- as.numeric(do.call(stats::predict, list(object = fit, newdata = holdout_sf)))
+      # A GWR whose response the fit took about a centre is scored on the
+      # values less that centre (.scored_predictions()).
+      sp  <- .scored_predictions(fit, holdout_sf)
+      yh  <- as.numeric(sp$yhat_centred)
+      yc  <- sp$centre
       y   <- as.numeric(sf::st_drop_geometry(holdout_sf)[[response_var]])
       if (length(yh) != length(y))
         stop(sprintf("predict() returned %d values for %d rows", length(yh), length(y)))
       y_tr <- as.numeric(sf::st_drop_geometry(train_sf)[[response_var]])
-      met <- .compute_reg_metrics(y, yh, p = NULL,
-                                  y_train_mean = mean(y_tr[is.finite(y_tr)]))
+      met <- if (yc != 0)
+        .compute_reg_metrics(y - yc, yh, p = NULL,
+                             y_train_mean = mean(y_tr[is.finite(y_tr)] - yc),
+                             centre = yc)
+      else .compute_reg_metrics(y, yh, p = NULL,
+                                y_train_mean = mean(y_tr[is.finite(y_tr)]))
       v <- met[[metric]]
       if (is.null(v) || !is.finite(v)) NA_real_ else as.numeric(v)
     }, error = function(e) {

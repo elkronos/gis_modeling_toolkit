@@ -554,7 +554,9 @@
 #' (\code{engine$centres$response}) and \code{residuals.gwr_fit()} returns
 #' the residuals of the centred response, which carry no rounding of that
 #' centre.  The rounding \code{.morans_ols_design()} allows such residuals
-#' is that of a regression at the offset left after the centre.
+#' is that of a regression at the offset left after the centre.  The scores
+#' of the fit read the values less the same centre (\code{.scored_fitted()},
+#' \code{.scored_predictions()}).
 #'
 #' @param fit A \code{spatial_fit}.
 #' @return The centre, in the response's units, for a \code{gwr_fit} that

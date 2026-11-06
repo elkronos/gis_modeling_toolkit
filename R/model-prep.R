@@ -65,8 +65,9 @@
 #'   non-finite in; a row can count under several),
 #'   \code{response_std_diff} (the mean response of the dropped rows minus
 #'   that of the kept rows, in standard deviations of the response over both;
-#'   \code{NA} when the response is not numeric, or is itself missing in
-#'   every dropped row),
+#'   \code{NA} when the response is not numeric, is itself missing in
+#'   every dropped row, or takes one value up to the rounding of its
+#'   values),
 #'   plus \code{n_rows}, the number of rows returned, which the record was
 #'   made for.  The same record carries two marks on the rows that were
 #'   kept: \code{constant_predictors}, the names of the predictors that take
@@ -330,11 +331,28 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
     if (is.numeric(y_all)) {
       y_drop <- y_all[!keep]; y_drop <- y_drop[is.finite(y_drop)]
       y_keep <- y_all[keep]
+      # A response at a large offset (1e15 plus a spread of 1) is stored to
+      # an eighth, and so is each of the two means: their difference reads
+      # that rounding.  Where the raw values lose their spread, the means and
+      # the spread are taken less the centre (.regression_centre(), 0
+      # otherwise, so every other response is read as before), and the
+      # centre goes back only on the means the message quotes.  A response
+      # of one value up to rounding has no centre and a standard deviation
+      # of its last bit; it has no spread to measure a shift in, as one of
+      # a single value has none (.constant_column(), which a response with
+      # spread fails at its first, raw test).
+      y_ctr  <- .regression_centre(c(y_drop, y_keep), bounded = FALSE)
+      if (y_ctr != 0) {
+        y_drop <- y_drop - y_ctr
+        y_keep <- y_keep - y_ctr
+      }
       s_all  <- stats::sd(c(y_drop, y_keep))
-      if (length(y_drop) > 0L && is.finite(s_all) && s_all > 0) {
+      if (length(y_drop) > 0L && is.finite(s_all) && s_all > 0 &&
+          (y_ctr != 0 || !.constant_column(c(y_drop, y_keep)))) {
         resp_means <- c(dropped = mean(y_drop), kept = mean(y_keep))
         response_std_diff <- unname((resp_means[["dropped"]] -
                                        resp_means[["kept"]]) / s_all)
+        if (y_ctr != 0) resp_means <- resp_means + y_ctr
         # Two standard errors of a difference of means in SD units: below
         # that, a handful of dropped rows says nothing about why they are
         # missing, and the message states the difference without reading it.

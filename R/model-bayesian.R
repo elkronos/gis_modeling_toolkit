@@ -435,13 +435,20 @@
 #' The centre and scale a predictor or a coordinate is standardised by
 #'
 #' The mean and standard deviation, as given, wherever the standard
-#' deviation is finite and at least \code{.Machine$double.eps}.  Below that
-#' the column is read again: one with spread (\code{.constant_column()}) is
-#' scaled by its standard deviation at any size (\code{.cell_sd()}), so a
-#' predictor in small units (a spread of 1e-17) is standardised to a
-#' standard deviation of 1 as in any other unit, and one without spread
+#' deviation is finite and at least \code{.Machine$double.eps} and the
+#' column's sum of squares shows spread on the scale of its values
+#' (\code{.no_spread()}).  Elsewhere the column is read again: one with
+#' spread (\code{.constant_column()}) keeps the standard deviation given
+#' where that is at least \code{.Machine$double.eps} and finite, and is
+#' scaled by its standard deviation at any size (\code{.cell_sd()}) below
+#' that, so a predictor in small units (a spread of 1e-17) is standardised
+#' to a standard deviation of 1 as in any other unit; one without spread
 #' gets the scale \code{none}, so its rounding is not blown up to values of
-#' order 1.  A predictor without spread takes a scale of 1.  A coordinate
+#' order 1.  A column of one value up to rounding has a standard deviation
+#' of about a unit in the last place of its values, which is above
+#' \code{.Machine$double.eps} for values above about 4, so the reading does
+#' not depend on the column's size.  A predictor without spread takes a
+#' scale of 1.  A coordinate
 #' axis without spread is given \code{none = NA} and takes the other
 #' axis's scale, since a fixed scale of 1 map unit would enter the basis's
 #' resolution along that axis and the pre-fit floor as if it were a
@@ -455,12 +462,15 @@
 #' @keywords internal
 #' @noRd
 .standardise_by <- function(x, m, s, none = 1) {
-  if (is.finite(s) && s >= .Machine$double.eps) return(list(center = m, scale = s))
   f <- as.numeric(x[is.finite(x)])
+  raw_ok <- is.finite(s) && s >= .Machine$double.eps
+  if (raw_ok && (length(f) < 2L || !.no_spread(sum((f - mean(f))^2), f)))
+    return(list(center = m, scale = s))
   if (length(f) < 2L) return(list(center = m, scale = max(s, .Machine$double.eps)))
   sc <- .spread_scaled(f)
   if (!is.finite(m)) m <- sc$centre
-  list(center = m, scale = if (.constant_column(f, sc)) none else .cell_sd(f))
+  if (.constant_column(f, sc)) return(list(center = m, scale = none))
+  list(center = m, scale = if (raw_ok) s else .cell_sd(f))
 }
 
 

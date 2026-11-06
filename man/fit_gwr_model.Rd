@@ -169,7 +169,11 @@ and \code{predict()}'s values, which take a new row's predictors about the
 same centres.  Residuals, slopes and their standard errors, AICc and the
 bandwidth are those of the same values at 0, to rounding; the fitted
 values and predictions of a response at 1e15 are held to the eighth a
-double holds there.  Every other predictor and response is used as it is.
+double holds there.  \code{model_metrics()}, \code{summary()} and the
+cross-validations score the fit on the response, the fitted values and
+the predictions less the response's centre, so their RMSE, MAE and
+R-squared are those of the same values at 0 too.  Every other predictor
+and response is used as it is.
 
 One tolerance, \code{1e-7}, decides what a window can estimate:
 \itemize{

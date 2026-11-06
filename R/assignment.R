@@ -2494,11 +2494,10 @@ assign_features_to_polygons <- function(
 #'       does not vary (all its values equal, those of rows with no cell id
 #'       included) has an ICC of `NA` and standard errors of 0, with no
 #'       warning: its mean has no error whatever the correlation. A column
-#'       whose standard deviation is below `.Machine$double.eps` and whose
-#'       values differ only by their rounding (0.1 beside 0.3 / 3) is read
-#'       the same way, as one that does not vary; its standard errors are 0
-#'       in a cell whose values are equal and of the size of that rounding in
-#'       one whose values differ. The
+#'       whose values differ only by their rounding (0.1 beside 0.3 / 3) is
+#'       read the same way, as one that does not vary, at any size of its
+#'       values; its standard errors are 0 in a cell whose values are equal
+#'       and of the size of that rounding in one whose values differ. The
 #'       `"deff_applied"` attribute is attached when any ICC is positive, so
 #'       when all are 0 or `NA` there is none.}
 #'     \item{A positive number}{Applied as a uniform design effect to every
@@ -3151,14 +3150,22 @@ summarize_by_cell <- function(assigned_points_sf,
       # vary, and its no-id row kept the uncorrected standard error.
       # A standard deviation below .Machine$double.eps is not by itself no
       # spread: a column in small units has one, and a column near 1e200 has
-      # one that overflows.  There the column is read again by the pool's
-      # test (.constant_column()), and it does not vary only where neither
-      # its raw values nor its values centred and scaled show spread beyond
-      # their rounding.
+      # one that overflows.  One above it is not by itself spread either: a
+      # column of one value up to rounding has a standard deviation of a unit
+      # in the last place of its values, above eps for values above about 4.
+      # So the column is read again by the pool's test (.constant_column())
+      # where its standard deviation is below the floor or not finite, or
+      # its sum of squares shows no spread on the scale of its values
+      # (.no_spread()), and it does not vary only where neither its raw
+      # values nor its values centred and scaled show spread beyond their
+      # rounding.  A column with spread fails .no_spread() and is read as
+      # before, to the last bit.
       x_all <- df[[v]][!is.na(df[[v]])]
       n_all <- n_all + length(x_all)
       s_all <- sd(x_all)
-      if (!is.na(s_all) && !(s_all >= .Machine$double.eps && is.finite(s_all)) &&
+      if (!is.na(s_all) &&
+          (!(s_all >= .Machine$double.eps && is.finite(s_all)) ||
+           .no_spread(sum((x_all - mean(x_all))^2), x_all)) &&
           .constant_column(x_all)) {
         # No spread: the column adds no variance information.
         n_const <- n_const + 1L
@@ -3174,10 +3181,12 @@ summarize_by_cell <- function(assigned_points_sf,
       if (is.na(s)) next
       # The same reading on the rows with a cell id.  A column with spread
       # there is z-scored from .spread_scaled(), which divides by powers of
-      # two, since its raw squares can underflow or overflow; the ICC does
-      # not change under a shift and a scale.  Elsewhere the raw values are
-      # z-scored as they stand.
-      if (!(s >= .Machine$double.eps && is.finite(s))) {
+      # two, since its raw squares can underflow or overflow, or its raw
+      # values lose their spread to rounding; the ICC does not change under
+      # a shift and a scale.  Elsewhere the raw values are z-scored as they
+      # stand.
+      if (!(s >= .Machine$double.eps && is.finite(s)) ||
+          .no_spread(sum((raw - mean(raw))^2), raw)) {
         if (.constant_column(raw)) next
         raw <- .spread_scaled(raw)$y
         s <- sd(raw)

@@ -61,8 +61,9 @@ dropped row: \code{"geometry"}, \code{"missing"} or
 non-finite in; a row can count under several),
 \code{response_std_diff} (the mean response of the dropped rows minus
 that of the kept rows, in standard deviations of the response over both;
-\code{NA} when the response is not numeric, or is itself missing in
-every dropped row),
+\code{NA} when the response is not numeric, is itself missing in
+every dropped row, or takes one value up to the rounding of its
+values),
 plus \code{n_rows}, the number of rows returned, which the record was
 made for.  The same record carries two marks on the rows that were
 kept: \code{constant_predictors}, the names of the predictors that take

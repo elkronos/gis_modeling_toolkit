@@ -182,7 +182,10 @@ below 0 when the model predicts worse than the training mean.
 pooled out-of-sample predictions come from \code{k} separately fitted
 models and have no single parameter count to adjust for.  The per-fold
 \code{fold_metrics$Adj_R2} carries the adjusted value when \code{p} is
-supplied, and is \code{NA} otherwise.
+supplied, and is \code{NA} otherwise.  A \code{fit_fn} that returns a
+\code{gwr_fit} of a response at a large offset gives \code{predictions}
+the columns \code{y_centre}, \code{yhat_centred} and
+\code{y_train_mean_centred} (see \code{\link{cv_gwr}()}).
 }
 \description{
 Run K-fold CV for any model that returns a \code{spatial_fit} object.

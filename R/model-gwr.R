@@ -465,7 +465,11 @@
 #' same centres.  Residuals, slopes and their standard errors, AICc and the
 #' bandwidth are those of the same values at 0, to rounding; the fitted
 #' values and predictions of a response at 1e15 are held to the eighth a
-#' double holds there.  Every other predictor and response is used as it is.
+#' double holds there.  \code{model_metrics()}, \code{summary()} and the
+#' cross-validations score the fit on the response, the fitted values and
+#' the predictions less the response's centre, so their RMSE, MAE and
+#' R-squared are those of the same values at 0 too.  Every other predictor
+#' and response is used as it is.
 #'
 #' One tolerance, \code{1e-7}, decides what a window can estimate:
 #' \itemize{
@@ -3484,6 +3488,33 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 #' @noRd
 .gwr_predict_at <- function(formula, sp_train, newdata_df, rp, bw, kernel,
                             adaptive, se = FALSE) {
+  sv <- .gwr_predict_centred_at(formula, sp_train, newdata_df, rp, bw, kernel,
+                                adaptive, se = se)
+  yc <- sv$centre
+  sv$centre <- NULL
+  sv$fitted <- sv$fitted + yc
+  sv$fitted[!is.finite(sv$fitted)] <- NA_real_
+  sv
+}
+
+
+#' GWR predictions at new locations, less the response's centre
+#'
+#' What \code{.gwr_predict_at()} computes before it adds the response's
+#' centre (\code{.gwr_centre()}) back: the predictions of the response as
+#' the local regressions fitted it.  At a response of 1e15 plus a spread of
+#' 1, a double holds a prediction in the response's units only to an
+#' eighth, and these keep the spread; the scores of a fit
+#' (\code{.scored_predictions()}) read them.
+#'
+#' @inheritParams .gwr_predict_at
+#' @return What \code{.gwr_predict_at()} returns, with \code{fitted} less
+#'   the centre (\code{NA} where not finite), and \code{centre}, the
+#'   response's centre or 0.
+#' @keywords internal
+#' @noRd
+.gwr_predict_centred_at <- function(formula, sp_train, newdata_df, rp, bw,
+                                    kernel, adaptive, se = FALSE) {
   dsn <- .gwr_design(formula, sp_train@data, newdata_df)
   k   <- ncol(dsn$X)
   if (nrow(dsn$X_new) != nrow(rp) || ncol(dsn$X_new) != k)
@@ -3503,8 +3534,9 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   sv <- .gwr_local_solve(cen$X, cen$y, sp::coordinates(sp_train), bw, kernel,
                          adaptive, rp = rp, X_rp = X_new,
                          what = "predict", se = se)
-  sv$fitted <- unname(sv$fitted) + cen$y_centre
+  sv$fitted <- unname(sv$fitted)
   sv$fitted[!is.finite(sv$fitted)] <- NA_real_
+  sv$centre <- cen$y_centre
   sv
 }
 

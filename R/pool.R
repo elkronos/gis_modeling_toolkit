@@ -415,9 +415,13 @@
 #' \code{resolution_profile()} reads it for its estimate's columns and, where
 #' the raw values show no spread, for the test of a constant response for
 #' \code{cp}; \code{estimate_sac_range()} where its floor finds no spread on
-#' the raw response (\code{.regression_centre()}); and the Kish ICC of
-#' \code{summarize_by_cell()} for a column whose standard deviation is below
-#' \code{.Machine$double.eps} or not finite.
+#' the raw response (\code{.regression_centre()}); the Kish ICC of
+#' \code{summarize_by_cell()} and the standardisation of
+#' \code{fit_bayesian_spatial_model()} (\code{.standardise_by()}) for a
+#' column whose standard deviation is below \code{.Machine$double.eps} or
+#' not finite, or whose raw values show no spread (\code{.no_spread()});
+#' and R-squared (\code{.compute_reg_metrics()}) where the raw test finds
+#' no spread.
 #'
 #' @param y The values, at least one.
 #' @param sc \code{.spread_scaled(y)}.

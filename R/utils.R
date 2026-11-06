@@ -383,6 +383,15 @@
 #'   is filtered in parallel with `y` and `yhat` to remove non-finite cases.
 #'   Any other length is an error. Recycling it would silently produce a wrong
 #'   R-squared.
+#' @param centre The value `y`, `yhat` and `y_train_mean` are given less of:
+#'   0 (the default) for values in the response's units, or the centre a fit
+#'   regressed its response about (one value, or one per observation for
+#'   pooled folds, each the centre of its own fold's fit). RMSE, MAE and R2
+#'   do not change under a shift, so they read the centred values, which
+#'   keep the spread a double rounds away at the response's size; MAPE and
+#'   SMAPE, which read the size of the values, read the centred error over
+#'   the values with the centre added back. With 0 the arithmetic is that of
+#'   values in the response's units, to the last bit.
 #' @return A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2, n_MAPE and
 #'   n_SMAPE. `Adj_R2` is always present, and is `NA` when `p` is NULL or
 #'   `n <= p + 1`.
@@ -393,9 +402,11 @@
 #'   where `y == 0`, `SMAPE` where `|y| + |yhat| == 0`), returning `NA` only
 #'   when no row qualifies. "Zero" is relative to the data, as for every
 #'   metric here: a denominator no larger than `100 * .Machine$double.eps`
-#'   times the largest one, and, for `R2`, a total sum of squares whose RMS
-#'   deviation is no larger than that fraction of the RMS of `y` (then `R2`
-#'   is `NA`). The result therefore does not depend on the response's units.
+#'   times the largest one. `R2` is `NA` where the total sum of squares has
+#'   an RMS deviation no larger than that fraction of the RMS of `y` and `y`,
+#'   read again centred and scaled (`.constant_column()`), shows no spread
+#'   beyond its rounding. The result therefore does not depend on the
+#'   response's units or origin.
 #'   `n_MAPE` and `n_SMAPE` are the row counts each was
 #'   actually averaged over, so that a percentage error over a subset is
 #'   labelled as one; they equal `n` whenever no row was dropped, and are `0`
@@ -406,7 +417,8 @@
 #'   the count makes the subsetting visible, not harmless.
 #' @keywords internal
 #' @noRd
-.compute_reg_metrics <- function(y, yhat, p = NULL, y_train_mean = NULL) {
+.compute_reg_metrics <- function(y, yhat, p = NULL, y_train_mean = NULL,
+                                 centre = 0) {
   ok <- is.finite(y) & is.finite(yhat)
 
   # A scalar baseline (per-fold training mean) is used as-is; a per-observation
@@ -420,6 +432,17 @@
       ), call. = FALSE)
     y_train_mean <- y_train_mean[ok]
   }
+  if (length(centre) != 1L) {
+    if (length(centre) != length(ok))
+      stop(sprintf(
+        ".compute_reg_metrics(): `centre` must be length 1 or length %d (one per observation); got %d.",
+        length(ok), length(centre)
+      ), call. = FALSE)
+    centre <- centre[ok]
+  }
+  if (!all(is.finite(centre)))
+    stop(".compute_reg_metrics(): `centre` must be finite.", call. = FALSE)
+  centred <- any(centre != 0)
 
   y <- y[ok]; yhat <- yhat[ok]
   n <- length(y)
@@ -442,10 +465,15 @@
   # response still has a TSS of exactly 0 (or of rounding noise, below the
   # threshold), so its R2 stays NA.
   tol <- 100 * .Machine$double.eps
-  nz <- abs(y) > tol * max(abs(y))
-  mape <- if (any(nz)) mean(abs((y[nz] - yhat[nz]) / y[nz])) * 100 else NA_real_
+  # The percentage errors read the size of the values, so centred values
+  # are read with their centre added back; the error itself is that of the
+  # centred values.
+  ya  <- if (centred) y + centre else y
+  yha <- if (centred) yhat + centre else yhat
+  nz <- abs(ya) > tol * max(abs(ya))
+  mape <- if (any(nz)) mean(abs((y[nz] - yhat[nz]) / ya[nz])) * 100 else NA_real_
 
-  denom <- abs(y) + abs(yhat)
+  denom <- abs(ya) + abs(yha)
   smape_ok <- denom > tol * max(denom)
   smape <- if (any(smape_ok)) {
     mean(2 * abs(y[smape_ok] - yhat[smape_ok]) / denom[smape_ok]) * 100
@@ -454,8 +482,17 @@
   # TSS against the squared magnitude of y: R2 needs the spread about the
   # baseline to exceed rounding, i.e. an RMS deviation above tol times the
   # RMS of y.  (Relative to sum(y^2) itself, not squared tol, it would turn
-  # R2 NA for an ordinary response on a large offset, 1e8 +- 0.1.)
-  r2 <- if (tss > tol^2 * sum(y^2)) 1 - rss / tss else NA_real_
+  # R2 NA for an ordinary response on a large offset, 1e8 +- 0.1.)  At a
+  # larger offset the bound reads the size of the values, not their
+  # spread: 1e15 plus a spread of 2.3 has an RMS deviation under 100 eps
+  # of its RMS.  Where the bound finds no spread, y is read again centred
+  # and scaled (.constant_column()), and R2 is NA only where that reading
+  # finds none either.  TSS and RSS are sums of differences, which a double
+  # holds at the offset, so only the test changes.  The test reads y's own
+  # spread whatever the baseline.
+  r2 <- if (tss > tol^2 * sum(y^2)) 1 - rss / tss
+        else if (is.finite(tss) && tss > 0 && !.constant_column(y)) 1 - rss / tss
+        else NA_real_
 
   adj_r2 <- NA_real_
   if (!is.null(p) && is.finite(r2) && n > (p + 1L)) {

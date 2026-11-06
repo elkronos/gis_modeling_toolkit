@@ -121,7 +121,14 @@ location whose local regression cannot be estimated has \code{yhat}
 scored; each case raises one warning for the whole run (classes
 \code{"spatialkit_gwr_not_estimable"} and
 \code{"spatialkit_gwr_extrapolation"}), with the totals over the folds
-that had any.  See \code{\link{predict.gwr_fit}}.
+that had any.  See \code{\link{predict.gwr_fit}}.  Where a fold's
+fit took the response about a centre (a response at a large offset;
+see \code{\link{fit_gwr_model}}), \code{predictions} also carries
+\code{y_centre} (that centre, 0 in the rows of a fold fitted on the raw
+response), \code{yhat_centred} and \code{y_train_mean_centred}
+(\code{yhat} and \code{y_train_mean} less the centre, to the spread a
+double rounds away at the response's size), and the metrics are those
+of the centred values, as \code{\link{model_metrics}()} computes them.
 }
 \description{
 Refits a geographically weighted regression from scratch on each training

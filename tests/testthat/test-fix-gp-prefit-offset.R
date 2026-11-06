@@ -336,7 +336,7 @@ test_that("a coordinate axis without spread takes the other axis's scale (BUG-91
   expect_identical(r3$fit$info$gp_k, r$fit$info$gp_k)
 })
 
-test_that(".standardise_by() reads a column again only below eps", {
+test_that(".standardise_by() reads a column again below eps or where its raw values show no spread", {
   sb <- spatialkit:::.standardise_by
   x <- c(1, 4, 9, 16)
   expect_identical(sb(x, mean(x), sd(x)), list(center = mean(x), scale = sd(x)))

@@ -270,7 +270,15 @@
   # independently with its own training set — the resulting Adj_R² has no
   # clean statistical interpretation.  Per-fold Adj_R² (computed in
   # .cv_run_folds()) is valid and should be used instead.
-  met <- .compute_reg_metrics(preds$y, preds$yhat, p = NULL, y_train_mean = ytm)
+  # Rows whose fold's fit took the response about a centre (a GWR of a
+  # response at a large offset) are scored on the values less that centre,
+  # each with its own fold's (.cv_centred_columns()).
+  met <- if (all(.cv_centred_cols %in% names(preds)) &&
+             any(preds$y_centre[ok] != 0))
+    .compute_reg_metrics(preds$y - preds$y_centre, preds$yhat_centred,
+                         p = NULL, y_train_mean = preds$y_train_mean_centred,
+                         centre = preds$y_centre)
+  else .compute_reg_metrics(preds$y, preds$yhat, p = NULL, y_train_mean = ytm)
   out <- data.frame(RMSE = met$RMSE, MAE = met$MAE, MAPE = met$MAPE, SMAPE = met$SMAPE,
                     R2 = met$R2, Adj_R2 = met$Adj_R2, n_pred = met$n,
                     n_MAPE = met$n_MAPE, n_SMAPE = met$n_SMAPE,
@@ -953,10 +961,13 @@
 
   # Predict on test fold via the S3 generic
   y_true <- test_df[[response_var]]
-  y_hat  <- try(
-    do.call(predict, c(list(object = fit_obj, newdata = test_sf), predict_args)),
-    silent = TRUE
-  )
+  # A GWR whose response the fit took about a centre (a response at a large
+  # offset) is scored on the values less that centre, which keep the spread
+  # its predictions in the response's units round away
+  # (.scored_predictions()); `y_hat` stays in the response's units.
+  scored <- try(.scored_predictions(fit_obj, test_sf, predict_args),
+                silent = TRUE)
+  y_hat <- if (inherits(scored, "try-error")) scored else scored$yhat
   if (inherits(y_hat, "try-error") || !is.numeric(y_hat)) {
     msg <- if (inherits(y_hat, "try-error")) .try_error_message(y_hat) else
       sprintf("predict() returned a %s, not a numeric vector",
@@ -987,8 +998,16 @@
   y_train <- train_df[[response_var]]
   y_train_mean <- mean(y_train[is.finite(y_train)], na.rm = TRUE)
 
-  met <- .compute_reg_metrics(y_true, y_hat, p = p,
-                              y_train_mean = y_train_mean)
+  yc <- scored$centre
+  if (yc != 0) {
+    y_train_mean_centred <- mean(y_train[is.finite(y_train)] - yc, na.rm = TRUE)
+    met <- .compute_reg_metrics(y_true - yc, scored$yhat_centred, p = p,
+                                y_train_mean = y_train_mean_centred,
+                                centre = yc)
+  } else {
+    met <- .compute_reg_metrics(y_true, y_hat, p = p,
+                                y_train_mean = y_train_mean)
+  }
   if (met$n == 0L)
     return(list(skip = "no finite (observed, predicted) pair among the test rows"))
 
@@ -1075,7 +1094,22 @@
     y_train_mean = y_train_mean,
     stringsAsFactors = FALSE
   )
-  if (!is.null(per_row)) pr <- cbind(pr, per_row)
+  # The values the fold was scored on, for the pooled score: present only
+  # where the fold's fit took the response about a centre
+  # (.cv_centred_columns()).
+  if (yc != 0) {
+    pr$y_centre <- yc
+    pr$yhat_centred <- as.numeric(scored$yhat_centred)
+    pr$y_train_mean_centred <- y_train_mean_centred
+  }
+  if (!is.null(per_row)) {
+    clash <- intersect(names(per_row), names(pr))
+    if (length(clash))
+      stop("cross-validation: `fold_info_fn`'s `..per_row` has columns that ",
+           "`predictions` already has: ", paste(clash, collapse = ", "),
+           ". Use other names.", call. = FALSE)
+    pr <- cbind(pr, per_row)
+  }
 
   list(pred_row = pr, fold_stat = fs, note = note)
 }
@@ -1116,6 +1150,39 @@
 #' @keywords internal
 #' @noRd
 .cv_prediction_cols <- c("..row_id", "fold", "y", "yhat", "y_train_mean")
+
+
+# The columns a fold's prediction rows add where its fit took the response
+# about a centre (a gwr_fit of a response at a large offset): that centre,
+# the prediction less it and the training mean less it.
+.cv_centred_cols <- c("y_centre", "yhat_centred", "y_train_mean_centred")
+
+
+#' Give every fold's prediction rows the centred columns where one has them
+#'
+#' A fold whose fit took the response about a centre carries
+#' \code{.cv_centred_cols}; the pooled score reads them
+#' (\code{.cv_overall_metrics()}).  Where some folds carry them and others
+#' do not, the others get a centre of 0 and their own values, so the rows
+#' bind and each is scored as its fold was.  Where no fold carries them the
+#' rows are returned as they are.
+#'
+#' @param pred_rows The folds' prediction rows.
+#' @return \code{pred_rows}, each with the centred columns where any has them.
+#' @keywords internal
+#' @noRd
+.cv_centred_columns <- function(pred_rows) {
+  has <- vapply(pred_rows, function(pr) "y_centre" %in% names(pr), logical(1))
+  if (!any(has) || all(has)) return(pred_rows)
+  lapply(pred_rows, function(pr) {
+    if ("y_centre" %in% names(pr)) return(pr)
+    extra <- data.frame(y_centre = rep(0, nrow(pr)), yhat_centred = pr$yhat,
+                        y_train_mean_centred = pr$y_train_mean)
+    k <- match("y_train_mean", names(pr))
+    cbind(pr[, seq_len(k), drop = FALSE], extra,
+          pr[, setdiff(seq_along(pr), seq_len(k)), drop = FALSE])
+  })
+}
 
 
 #' Validate what a \code{fold_info_fn} returned, before it is written
@@ -1440,7 +1507,7 @@
   fit_errors <- msg[status %in% c("worker_error", "error")]
   results <- results[status == "ok"]
 
-  pred_rows  <- lapply(results, `[[`, "pred_row")
+  pred_rows  <- .cv_centred_columns(lapply(results, `[[`, "pred_row"))
   fold_stats <- lapply(results, `[[`, "fold_stat")
 
   list(pred_rows = pred_rows, fold_stats = fold_stats,
@@ -8329,7 +8396,14 @@ make_folds <- function(points_sf, k,
 #'   scored; each case raises one warning for the whole run (classes
 #'   \code{"spatialkit_gwr_not_estimable"} and
 #'   \code{"spatialkit_gwr_extrapolation"}), with the totals over the folds
-#'   that had any.  See \code{\link{predict.gwr_fit}}.
+#'   that had any.  See \code{\link{predict.gwr_fit}}.  Where a fold's
+#'   fit took the response about a centre (a response at a large offset;
+#'   see \code{\link{fit_gwr_model}}), \code{predictions} also carries
+#'   \code{y_centre} (that centre, 0 in the rows of a fold fitted on the raw
+#'   response), \code{yhat_centred} and \code{y_train_mean_centred}
+#'   (\code{yhat} and \code{y_train_mean} less the centre, to the spread a
+#'   double rounds away at the response's size), and the metrics are those
+#'   of the centred values, as \code{\link{model_metrics}()} computes them.
 #' @family cross-validation
 #' @examples
 #' if (requireNamespace("sp", quietly = TRUE)) {
@@ -9206,7 +9280,10 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'   pooled out-of-sample predictions come from \code{k} separately fitted
 #'   models and have no single parameter count to adjust for.  The per-fold
 #'   \code{fold_metrics$Adj_R2} carries the adjusted value when \code{p} is
-#'   supplied, and is \code{NA} otherwise.
+#'   supplied, and is \code{NA} otherwise.  A \code{fit_fn} that returns a
+#'   \code{gwr_fit} of a response at a large offset gives \code{predictions}
+#'   the columns \code{y_centre}, \code{yhat_centred} and
+#'   \code{y_train_mean_centred} (see \code{\link{cv_gwr}()}).
 #' @family cross-validation
 #' @seealso \code{\link{new_spatial_fit}()} for the constructor a \code{fit_fn}
 #'   must use; \code{\link{cv_gwr}()}, \code{\link{cv_bayes}()} and
