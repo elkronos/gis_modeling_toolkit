@@ -545,7 +545,11 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 #'   dominated by within-cluster spacing in clustered data, producing
 #'   a misleadingly small lower bound.
 #' @param max_n Maximum number of \emph{distinct} points to use in the distance
-#'   computation.  Default 1000. Set to \code{Inf} to use all of them.
+#'   computation.  Default 1000. Set to \code{Inf} to use all of them.  Above
+#'   it, a subsample is drawn with a fixed seed from the distinct points in
+#'   coordinate order, so the bounds do not depend on the row order of
+#'   \code{coords_xy}, and the caller's random-number stream is left where it
+#'   was.
 #' @return Named numeric vector \code{c(lower, upper)} on the length-scale;
 #'   \code{c(lower = 0.001, upper = 1)} when fewer than two distinct located
 #'   rows or no positive distances remain.
@@ -602,6 +606,16 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
   coords_xy <- coords_xy[!duplicated(coords_xy), , drop = FALSE]
   if (nrow(coords_xy) < 2L) return(c(lower = 0.001, upper = 1))
 
+  # Above max_n the distances are taken on a subsample, which .safe_dist()
+  # draws by row position.  The distinct locations go in coordinate order
+  # first (.canonical_order(); they are distinct, so the order is total), so
+  # the subsample is the same for the locations in any row order.  In the
+  # order given, 1500 locations got a lower bound of 675.7 as given and
+  # 684.0 reversed.
+  if (nrow(coords_xy) > max_n)
+    coords_xy <- coords_xy[.canonical_order(coords_xy[, 1L], coords_xy[, 2L],
+                                            coords_xy[, 1L], coords_xy[, 2L]), ,
+                           drop = FALSE]
   d <- .safe_dist(coords_xy, max_n = max_n)
   d <- d[d > 0]
   if (!length(d)) return(c(lower = 0.001, upper = 1))

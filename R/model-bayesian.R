@@ -591,7 +591,10 @@
 #'
 #' The band needs every pairwise distance, so more than \code{max_n} rows are
 #' thinned to \code{max_n} at even steps through the rows (no random draw:
-#' the fit must leave the caller's random-number stream where it was).
+#' the fit must leave the caller's random-number stream where it was).  The
+#' steps run through the rows in a canonical order, by coordinates, then the
+#' response, then the predictors, so the statistic does not depend on the
+#' row order of the layer.
 #'
 #' @param xy Coordinate matrix.
 #' @param y Numeric response.
@@ -613,7 +616,15 @@
       return(NULL)
     X <- if (is.null(X) || !length(X)) matrix(1, n, 1L) else cbind(1, as.matrix(X))
     if (n > max_n) {
-      keep <- unique(round(seq(1, n, length.out = max_n)))
+      # The even steps run through the rows in a canonical order: the
+      # coordinates (.canonical_order()), then the response and the
+      # predictors, which tell apart rows at one location.  Through the rows
+      # as given, 2400 rows in 10 orders got I from 0.031 to 0.061 at one
+      # floor, either side of .gp_range_correlation.
+      ord  <- do.call(.canonical_order,
+                      c(list(xy[, 1L], xy[, 2L], xy[, 1L], xy[, 2L], y),
+                        lapply(seq_len(ncol(X))[-1L], function(j) X[, j])))
+      keep <- ord[unique(round(seq(1, n, length.out = max_n)))]
       xy <- xy[keep, , drop = FALSE]; y <- y[keep]; X <- X[keep, , drop = FALSE]
     }
     band <- c(0.75, 1.25) * floor

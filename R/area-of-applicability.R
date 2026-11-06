@@ -601,9 +601,20 @@
          call. = FALSE)
   subsampled <- FALSE
   if (is.finite(max_n) && n > max_n) {
+    # Drawn from the rows in a canonical order, so the subsample is the same
+    # for the training rows in any order: the predictors by their columns in
+    # turn, the location by its coordinates (.canonical_order()).  Equal rows
+    # contribute alike to the mean distance, so these are the only keys.
+    # Drawn from the rows as given, 1000 training rows at max_n = 300 got a
+    # normaliser of 1.018 as given and 1.155 reversed.
+    ord <- if (identical(what, "location"))
+      .canonical_order(X[, 1L], X[, 2L], X[, 1L], X[, 2L])
+    else
+      do.call(order, c(unname(lapply(seq_len(ncol(X)), function(j) X[, j])),
+                       list(seq_len(n), na.last = TRUE, method = "radix")))
     cleanup <- .with_seed(seed)
     on.exit(cleanup(), add = TRUE)
-    X <- X[sort(sample.int(n, as.integer(max_n))), , drop = FALSE]
+    X <- X[ord[sort(sample.int(n, as.integer(max_n)))], , drop = FALSE]
     subsampled <- TRUE
     .log_info("area_of_applicability(): %snormaliser estimated from a %d-point subsample of %d training points.",
               if (identical(what, "location")) "location " else "",
@@ -1441,6 +1452,9 @@
 #'   threshold from the rule.
 #' @param normalizer_max_n Subsample the training data to this many points when
 #'   computing the mean pairwise distance, which is quadratic. Default 5000.
+#'   The subsample is drawn from the training rows in a fixed order (by the
+#'   predictors, and for the location index by the coordinates), so it does
+#'   not depend on the row order of the training data.
 #' @param seed Seed for that subsample. Default 123.
 #' @param chunk_size Query rows per distance block on the dense path. Default
 #'   \code{NULL} (chosen from the training size). Otherwise a single number of

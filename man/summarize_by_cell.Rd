@@ -176,7 +176,11 @@ it corrects response columns (see "Design effects and variable types").}
 \item{deff_max_n}{Cells with more than this many points are subsampled
 before forming the \verb{n x n} correlation matrix used by
 \code{deff = "variogram"}. Default 500. It must be a single number of at
-least 2 when \code{deff = "variogram"}; anything else is an error.}
+least 2 when \code{deff = "variogram"}; anything else is an error. The
+subsample is drawn with a fixed seed from the cell's points in
+coordinate order, so it does not depend on the row order of
+\code{assigned_points_sf}, and the caller's random-number stream is left
+where it was.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo

@@ -89,7 +89,10 @@ predictor index. The location index, when there is one, always takes its
 threshold from the rule.}
 
 \item{normalizer_max_n}{Subsample the training data to this many points when
-computing the mean pairwise distance, which is quadratic. Default 5000.}
+computing the mean pairwise distance, which is quadratic. Default 5000.
+The subsample is drawn from the training rows in a fixed order (by the
+predictors, and for the location index by the coordinates), so it does
+not depend on the row order of the training data.}
 
 \item{seed}{Seed for that subsample. Default 123.}
 

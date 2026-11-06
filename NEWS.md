@@ -4523,6 +4523,40 @@ old behaviour where there is a way.
   as `estimate_sac_range()` reads them, and a layer XYZ or XYM throughout
   gives the result of its XY copy.
 
+* **Four subsamples were drawn by row position, so their results moved with
+  the row order of the input.**  Each draws, or thins, from the rows in a
+  fixed order now, as `estimate_sac_range()` and
+  `determine_optimal_levels()` order their rows before their draws: by
+  coordinates, then the other values that tell rows at one location apart,
+  and for the predictor index of `area_of_applicability()` by the
+  predictors in turn:
+  - `summarize_by_cell(deff = "variogram")` on a cell of more than
+    `deff_max_n` points.  One cell of 1500 points had a standard error of
+    0.261 with its rows as given and 0.255 with them reversed, and a
+    `cell_weight` of 12.8 against 13.4; `..neff_*`, `..df_*` and `..ci_*`
+    moved with them.
+  - `area_of_applicability()` with more training rows than
+    `normalizer_max_n`, for the normaliser of the predictor index and of
+    the location index.  1000 training rows at `normalizer_max_n = 300` gave
+    a normaliser of 1.018 as given and 1.155 reversed, and DI and the
+    threshold with it; with a `threshold` supplied, the inside or outside
+    call moved too.
+  - `gp_lengthscale_bounds()` above `max_n` distinct locations, and the GP
+    prior and basis that `fit_bayesian_spatial_model()` and `cv_bayes()`
+    build from it.  1500 locations gave a lower bound of 675.7 as given and
+    684.0 reversed.
+  - The GP pre-fit check of `fit_bayesian_spatial_model()` and `cv_bayes()`
+    on more than 1500 rows, whose Moran's I at the basis floor thins the
+    rows at even steps.  On 2400 rows, 10 row orders gave I from 0.031 to
+    0.061 at one floor, so the status, and the pre-fit message, was
+    `"below_floor_long_range"` in 4 and `"below_floor"` in 6.  The thinning
+    still draws no random number.
+
+  Each result is now the same for the input in any row order; under the cap
+  nothing is drawn and the results are those of before.  Above it the
+  subsample is another one, so the figures differ from before for the rows
+  as given.
+
 * **`residual_morans_i()` read its response, design and residuals at their
   origin and unit.**  It rebuilt the design and regressed the response on
   the raw columns to test whether the residuals are OLS residuals, and gave

@@ -24,7 +24,11 @@ dominated by within-cluster spacing in clustered data, producing
 a misleadingly small lower bound.}
 
 \item{max_n}{Maximum number of \emph{distinct} points to use in the distance
-computation.  Default 1000. Set to \code{Inf} to use all of them.}
+computation.  Default 1000. Set to \code{Inf} to use all of them.  Above
+it, a subsample is drawn with a fixed seed from the distinct points in
+coordinate order, so the bounds do not depend on the row order of
+\code{coords_xy}, and the caller's random-number stream is left where it
+was.}
 }
 \value{
 Named numeric vector \code{c(lower, upper)} on the length-scale;
