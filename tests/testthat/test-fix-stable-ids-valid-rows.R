@@ -120,10 +120,13 @@ test_that("a row s2 refuses is still rebuilt with s2 on, and the rows beside it 
   out <- .sv_q(ensure_stable_poly_id(x))
   g <- sf::st_geometry(out)[order(out$v)]
   rebuilt <- suppressWarnings(sf::st_make_valid(sf::st_geometry(x)))
-  # The two rows s2 refuses get s2's rebuild, as before; the square with a
-  # corner listed twice comes back valid under s2.
+  # The square with a corner listed twice gets s2's rebuild, as before, and
+  # comes back valid under s2.  s2's rebuild leaves the bowtie's crossing
+  # edges, so the bowtie gets GEOS's repair of its coordinates, as with s2
+  # off (BUG-195; this line pinned s2's rebuild before).
   expect_identical(g[[1]], rebuilt[[1]])
-  expect_identical(g[[2]], rebuilt[[2]])
+  geos <- suppressWarnings(sf::st_make_valid(sf::st_set_crs(sf::st_geometry(x), NA)))
+  expect_identical(g[[2]], geos[[2]])
   expect_true(sf::st_is_valid(g[1]))
   # The valid row comes back as it arrived.
   expect_identical(g[[3]], ok)

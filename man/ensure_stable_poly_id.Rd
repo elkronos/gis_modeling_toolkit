@@ -29,7 +29,9 @@ in longitude and latitude with \code{sf::sf_use_s2()} on, the repair is
 s2's rebuild, which can move the corners of a polygon it rebuilds and
 return a POLYGON as a MULTIPOLYGON, so only the rows s2 or GEOS does
 not call valid are rebuilt, and the other rows are returned as they
-arrived. A projected layer, or one in degrees
+arrived. s2's rebuild does not split crossing edges, so a row it leaves
+invalid (crossing edges, parts that overlap) is repaired by GEOS on its
+coordinates, as with s2 off. A projected layer, or one in degrees
 with s2 off, is repaired by GEOS. The rows
 returned are the repaired polygons, made in x and y whenever
 \code{polygons_sf} carries Z or M: polygons that mix XY and XYZ (or XYM)

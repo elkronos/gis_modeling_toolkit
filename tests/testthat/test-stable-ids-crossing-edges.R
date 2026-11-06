@@ -236,11 +236,25 @@ test_that("a feature s2 refuses after the second repair is measured in the plane
 
   # A layer that arrives in lon/lat has no plane of its own to fall back to
   # but its degrees; the plane route must not send it back to s2 (the call
-  # that stopped) or to lwgeom (not a dependency) to measure it.
-  ll_in <- .sce_run(sf::st_transform(cells, 4326))
-  expect_length(ll_in$warnings, 1L)
-  expect_match(ll_in$warnings, "plane geometry in the layer's own CRS instead: 1\\.")
+  # that stopped) or to lwgeom (not a dependency) to measure it.  With
+  # make_valid = FALSE the refused cell goes straight to that route.
+  ll <- sf::st_transform(cells, 4326)
+  ll_raw <- .sce_run(ll, make_valid = FALSE)
+  expect_length(ll_raw$warnings, 1L)
+  expect_match(ll_raw$warnings, "plane geometry in the layer's own CRS instead: 1\\.")
+  expect_equal(ll_raw$out$src, ref$src)
+  # With the repair on, the cell that crosses itself in lon/lat is invalid
+  # under s2 and GEOS, and s2's rebuild leaves its crossing edges, so it is
+  # repaired by GEOS on its coordinates (BUG-195).  It comes back valid
+  # under both and is keyed on the sphere: no feature is refused, and the
+  # IDs are the same.  (This part expected the cell to be keyed in the plane
+  # before, when it came back invalid.)
+  ll_in <- .sce_run(ll)
+  expect_length(ll_in$warnings, 0L)
   expect_equal(ll_in$out$src, ref$src)
+  back <- sf::st_geometry(ll_in$out)[ll_in$out$src == .sce_bad_cell]
+  expect_true(.sce_with_s2(TRUE, sf::st_is_valid(back)))
+  expect_true(sf::st_is_valid(sf::st_set_crs(back, NA)))
 })
 
 

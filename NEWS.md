@@ -3458,6 +3458,18 @@ old behaviour where there is a way.
   other key is unchanged, so a grid laid and returned in a projected CRS is
   still found in a cache filled before this change.
 
+* **`create_grid_polygons_cached()` returned a different grid from
+  `create_grid_polygons()` for a boundary in degrees with `crs` given.**  It
+  projected the boundary to the CRS `create_grid_polygons()` picks without
+  `crs`, and the builder then transformed that copy to `crs`, where the
+  uncached builder transforms the boundary once.  The cell counts and IDs
+  agreed, but every corner of the grid differed in the last bits, so no
+  cached cell matched an uncached one on geometry.  With `crs` given the
+  builder is now handed the boundary as the caller gave it, and the cached
+  grid is the one `ensure_stable_poly_id(create_grid_polygons())` returns.
+  The same holds for a boundary with no CRS and `crs` given.  The cache
+  keys are unchanged.
+
 * **`ensure_stable_poly_id()` moved the corners of valid polygons in
   degrees with s2 on.**  With `make_valid = TRUE` (the default), on a layer
   in longitude and latitude with `sf::sf_use_s2()` on, every row went
@@ -3468,6 +3480,21 @@ old behaviour where there is a way.
   geographic `crs`.  Only the rows s2 or GEOS calls invalid are rebuilt
   now, and the other rows are returned as they arrived.  The IDs are
   unchanged.
+
+* **`ensure_stable_poly_id()` returned rows with crossing edges unrepaired
+  in degrees with s2 on.**  With `make_valid = TRUE` (the default), s2's
+  rebuild does not split crossing edges, so a bowtie, a figure eight or a
+  MULTIPOLYGON whose parts overlap came back invalid under s2 and GEOS,
+  where with s2 off GEOS returns it valid.  `sf::st_area()` then stopped
+  on the row, and its copy in a projected CRS stopped GEOS's overlay.  A
+  row s2's rebuild leaves invalid is now repaired by GEOS on its
+  coordinates, as with s2 off.  Such a row is keyed on that repair, so its
+  ID is the one s2 off gives.  With s2 on it was keyed from a second repair
+  that drops the overlap of overlapping parts, and in a layer that holds
+  one, the ID of that row and of its neighbours in the sort order can
+  differ from before.  A row GEOS's repair does not make valid under s2
+  either, such as a polygon whose edges cross only as great circles, is
+  returned as GEOS repaired it, with a warning that names its rows.
 
 * **Cells built on seeds placed from lon/lat points could leave observations
   near the edge of a wide layer in no cell.**  The seeding functions attach

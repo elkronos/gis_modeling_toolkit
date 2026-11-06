@@ -75,12 +75,11 @@ test_that("a grid returned in degrees is cached once per sf_use_s2() setting, in
 test_that("a lon/lat boundary laid in degrees gets the grid of the session's setting", {
   b <- nc8()
   a <- list(cellsize = 0.1, crs = 4326, quiet = TRUE)
-  # create_grid_polygons_cached() hands create_grid_polygons() the boundary
-  # after .project_for_grid(), so that is the boundary its uncached grid is
-  # built on.
-  bp <- quiet(spatialkit:::.project_for_grid(b, "create_grid_polygons_cached"))
-  local_s2(TRUE);  u_on  <- uncached(bp, a)
-  local_s2(FALSE); u_off <- uncached(bp, a)
+  # With `crs` given, create_grid_polygons_cached() hands create_grid_polygons()
+  # the boundary as the caller gave it (BUG-191), so the cached grid is the
+  # uncached grid of that boundary.
+  local_s2(TRUE);  u_on  <- uncached(b, a)
+  local_s2(FALSE); u_off <- uncached(b, a)
   expect_false(identical(u_on, u_off))
   for (first in c(TRUE, FALSE)) {
     env <- new.env()

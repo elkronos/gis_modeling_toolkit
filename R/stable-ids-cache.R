@@ -31,7 +31,9 @@
 #'   s2's rebuild, which can move the corners of a polygon it rebuilds and
 #'   return a POLYGON as a MULTIPOLYGON, so only the rows s2 or GEOS does
 #'   not call valid are rebuilt, and the other rows are returned as they
-#'   arrived. A projected layer, or one in degrees
+#'   arrived. s2's rebuild does not split crossing edges, so a row it leaves
+#'   invalid (crossing edges, parts that overlap) is repaired by GEOS on its
+#'   coordinates, as with s2 off. A projected layer, or one in degrees
 #'   with s2 off, is repaired by GEOS. The rows
 #'   returned are the repaired polygons, made in x and y whenever
 #'   \code{polygons_sf} carries Z or M: polygons that mix XY and XYZ (or XYM)
@@ -314,7 +316,10 @@ ensure_stable_poly_id <- function(polygons_sf,
 #' coordinates on the plane: s2 reads rings without their orientation and
 #' calls valid a hole outside its shell, a part inside another part and a
 #' ring of collinear points, which GEOS calls invalid and s2's rebuild
-#' mends.  Everywhere else every row is
+#' mends.  s2's rebuild does not split crossing edges, so a row it leaves
+#' invalid under either check (a bowtie, a figure eight, parts that overlap)
+#' gets GEOS's repair of its coordinates, as with s2 off.  Everywhere else
+#' every row is
 #' repaired by GEOS, as before.  create_voronoi_polygons() repairs its
 #' clipped cells with this as well, to find each cell
 #' ensure_stable_poly_id() returns among them.
@@ -327,13 +332,35 @@ ensure_stable_poly_id <- function(polygons_sf,
   g <- sf::st_geometry(x)
   if (!length(g) || !.is_longlat(g) || !isTRUE(sf::sf_use_s2()))
     return(.safe_make_valid(x))
-  ok <- tryCatch(suppressWarnings(sf::st_is_valid(g)),
-                 error = function(e) rep(NA, length(g)))
-  ok_geos <- tryCatch(suppressWarnings(sf::st_is_valid(sf::st_set_crs(g, NA))),
-                      error = function(e) rep(NA, length(g)))
-  bad <- which(!(ok %in% TRUE) | !(ok_geos %in% TRUE))
+  invalid <- function(g) {
+    ok <- tryCatch(suppressWarnings(sf::st_is_valid(g)),
+                   error = function(e) rep(NA, length(g)))
+    ok_geos <- tryCatch(suppressWarnings(sf::st_is_valid(sf::st_set_crs(g, NA))),
+                        error = function(e) rep(NA, length(g)))
+    !(ok %in% TRUE) | !(ok_geos %in% TRUE)
+  }
+  bad <- which(invalid(g))
   if (!length(bad)) return(x)
+  g0 <- g
   g[bad] <- .safe_make_valid(g[bad])
+  # s2's rebuild does not split crossing edges, so a bowtie, a figure eight
+  # or a MULTIPOLYGON whose parts overlap came back with them, invalid under
+  # s2 and GEOS, where with s2 off GEOS returns it valid.  Such a row gets
+  # GEOS's repair of the coordinates it arrived with, which is what the call
+  # gives with s2 off.  (.s2_mend(split = TRUE) is for s2 to measure: GEOS
+  # does not read its loops that meet at a vertex, and it drops the overlap
+  # of parts.)
+  still <- bad[invalid(g[bad])]
+  if (length(still)) {
+    crs <- sf::st_crs(g)
+    g[still] <- sf::st_set_crs(.safe_make_valid(sf::st_set_crs(g0[still], NA)), crs)
+    left <- still[invalid(g[still])]
+    if (length(left))
+      .warn_and_log(paste0("ensure_stable_poly_id(): the repair could not make ",
+                           "%d row(s) valid under both s2 and GEOS (rows %s); ",
+                           "they are returned as GEOS repaired them."),
+                    length(left), paste(left, collapse = ", "))
+  }
   if (!inherits(x, "sf")) return(g)
   sf::st_geometry(x) <- g
   x
@@ -601,17 +628,24 @@ ensure_stable_poly_id <- function(polygons_sf,
   paste0("spatialkit_grid::", type, "::", digest::digest(payload))
 }
 
-# Whether create_grid_polygons() returns its grid in degrees for these
-# arguments: a geographic `crs`, read as create_grid_polygons() reads it
-# (by name, partial name or position, and a layer as its CRS), or a boundary
-# that is still in degrees.  `crs` is taken from a copy of
+# The `crs` create_grid_polygons() is given in these arguments, read as it
+# reads it: by name, partial name or position.  It is taken from a copy of
 # create_grid_polygons() whose body returns it, so the arguments are matched
-# to the builder's own formals.  Arguments the builder refuses give FALSE
-# here; the builder then stops on them as it does uncached.
-.grid_returned_in_degrees <- function(boundary, ...) {
+# to the builder's own formals.  NULL when no `crs` is given, and when the
+# builder refuses the arguments; the builder then stops on them as it does
+# uncached.
+.grid_crs_arg <- function(boundary, ...) {
   crs_of <- create_grid_polygons
   body(crs_of) <- quote(crs)
-  crs <- tryCatch(crs_of(boundary, ...), error = function(e) NULL)
+  tryCatch(crs_of(boundary, ...), error = function(e) NULL)
+}
+
+# Whether create_grid_polygons() returns its grid in degrees for these
+# arguments: a geographic `crs` (.grid_crs_arg(); a layer is read as its
+# CRS), or a boundary that is still in degrees.  Arguments the builder
+# refuses give FALSE here.
+.grid_returned_in_degrees <- function(boundary, ...) {
+  crs <- .grid_crs_arg(boundary, ...)
   .is_geographic_crs(crs) || .is_longlat(boundary)
 }
 
@@ -743,9 +777,17 @@ create_grid_polygons_cached <- function(boundary,
   # nothing is said, and such a boundary shares its key with the same
   # boundary in XY.
   bnd <- .xy_if_mixed_or_m(bnd)
-  # The same projection create_grid_polygons() makes, so a cached grid is laid
-  # in the CRS an uncached one would be (see .project_for_grid()).
+  # The key is taken on the boundary projected as create_grid_polygons()
+  # projects it without `crs` (.project_for_grid()).  Without `crs` the grid
+  # is built on that copy too, which is the projection the uncached builder
+  # makes.  With `crs` the builder transforms the boundary to `crs` itself,
+  # so it is handed the caller's boundary: built on the projected copy, a
+  # boundary in degrees was transformed twice, and every corner of the grid
+  # differed from the uncached grid's in the last bits.
+  own <- bnd
   bnd <- .project_for_grid(bnd, "create_grid_polygons_cached")
+  build_on <- if (is.null(.grid_crs_arg(bnd, target_cells = target_cells,
+                                        type = type, ...))) bnd else own
 
   # A grid returned in degrees (a geographic `crs` in `...`) follows the
   # session's sf::sf_use_s2(): laid in degrees it is clipped by s2 with s2 on
@@ -772,7 +814,7 @@ create_grid_polygons_cached <- function(boundary,
   # cached builder is documented as memoizing create_grid_polygons(), so the
   # renumbering has to be visible in its documentation -- see @return -- and
   # callers must not mix the two builders for one analysis.
-  out <- create_grid_polygons(bnd, target_cells = target_cells, type = type, ...)
+  out <- create_grid_polygons(build_on, target_cells = target_cells, type = type, ...)
   out <- ensure_stable_poly_id(out)
 
   # Evict the oldest entries first when the cache is full.  The order vector
