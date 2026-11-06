@@ -3862,6 +3862,37 @@ old behaviour where there is a way.
   of 1e3 w + 1e-11 f on w, 45 `.Machine$double.eps` times the size of the
   terms, reach the variogram fit and `cp`.
 
+* **At a large offset, Moran's I of the cell means scored the residuals of
+  an exact fit and refused cell means with real spread, so the counts of
+  `determine_optimal_levels(criterion = "morans_i")` and the `moran_z` of
+  `"morans_i"` and `"combined"` depended on the response's origin.**  Where
+  the raw values lost their spread and the response was taken about its
+  centre (1e12 or 1e15 plus a spread of a few units), the residuals of the
+  cell means were tested only against the centred cell means, and the
+  residuals of an exact fit, which are the rounding of the offset, were
+  scored: on 800 points, 30 of 30 random fits a + b w + c w2 at 1e15.
+  Where the cell means were regressed again about the response's centre,
+  the residuals were refused when within three units in the last place of
+  the raw response, the rounding of a single row, while the rounding and
+  the spread of a mean of n rows are both those of a row over sqrt(n):
+  1e15 + 1e5 w + f on w gave `NA` at 20 to 80 cells, and the call fell back
+  to the geometric ranking with a log line that said the cell means differ
+  by rounding alone.  The rows are now fitted first, and where their
+  residuals are within the rounding of a row, as `resolution_profile()`
+  reads its own, I and z are `NA`.  Both passes then test the residuals of
+  the cell means against the rounding of cell means: three units in the
+  last place of the raw response over the square root of each cell's rows,
+  plus the rounding of the sums each mean is formed from, summed over the
+  cells on the residual degrees of freedom, or the rounding of the
+  regression on the size of the terms of the cell design.  The exact fits
+  give `NA` at offsets 0, 1e6, 1e12 and 1e15, and so do exact fits on
+  cells of 1,200 to 2,200 rows and those on a predictor along which the
+  response at 1e15 changes by a unit in the last place over the layer.
+  The spread above gives the same I and z at 0 and at 1e15, so the counts
+  and `moran_z` are the same at both offsets.  Residuals that the rounding
+  of a row holds (1e15 + 1e5 w + 0.3 f) give `NA`, and residuals above the
+  bounds are scored as before.
+
 * **A predictor at a large offset was left out of the OLS fits in silence,
   so `rss`, `cp`, Moran's I and z, the nugget and the range depended on the
   predictor's origin.**  The QR decomposition behind `lm.fit()` and `lm()`

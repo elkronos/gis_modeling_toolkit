@@ -668,14 +668,34 @@
 #'   \code{yd}, read on \code{e}.
 #' @param b The fit's coefficients; \code{NA} (an aliased column) counts as
 #'   0.
+#' @param n For residuals of means (the cell means of
+#'   \code{.morans_i_for_k()}), the rows behind each mean, one per residual;
+#'   \code{NULL} for residuals of rows.  The mean of \code{n_j} rows carries
+#'   the rounding of its values over \code{sqrt(n_j)}, and so does its
+#'   spread, so the first bound is then the sum over the means of
+#'   \code{(.POOL_ULPS * ulp)^2 / n_j}, taken on the residual degrees of
+#'   freedom (the means less the rank of \code{X}, or less one without it).
+#' @param m With \code{n}, the rounding of forming each mean from its rows,
+#'   as a standard deviation in the units of \code{yd}, added to that of
+#'   its values; \code{NULL} for none.
 #' @return \code{TRUE} or \code{FALSE}.
 #' @keywords internal
 #' @noRd
-.residuals_rounding <- function(e, y, yd, X = NULL, b = NULL) {
+.residuals_rounding <- function(e, y, yd, X = NULL, b = NULL, n = NULL, m = NULL) {
   ss <- function(r) sum((r - mean(r))^2)
+  # .POOL_ULPS units in the last place of the raw response, in units of `a`,
+  # as a sum of squares: a standard deviation over n - 1 degrees of freedom
+  # for residuals of rows, and for residuals of means that over the square
+  # root of each mean's rows, plus the rounding of forming the mean (`m`),
+  # on the residual degrees of freedom.
+  ulps <- function(a) {
+    u2 <- (.POOL_ULPS * .ulp_of(y) / a)^2
+    if (is.null(n)) return((length(e) - 1L) * u2)
+    df <- length(e) - if (is.null(X)) 1L else qr(as.matrix(X))$rank
+    max(df, 0) * mean(u2 / n + if (is.null(m)) 0 else (m / a)^2)
+  }
   if (is.null(X) || is.null(b))
-    return(ss(e) <= max(100 * .Machine$double.eps^2 * sum(yd^2),
-                        (length(e) - 1L) * (.POOL_ULPS * .ulp_of(y))^2))
+    return(ss(e) <= max(100 * .Machine$double.eps^2 * sum(yd^2), ulps(1)))
   X <- as.matrix(X)
   b <- as.numeric(b)
   b[!is.finite(b)] <- 0
@@ -684,10 +704,7 @@
   # The power of two at or below it, so that the division is exact.
   a <- if (is.finite(a) && a > 0) 2^min(floor(log2(a)), 1023) else 1
   if (a > max(size, abs(yd))) a <- a / 2
-  # .POOL_ULPS units in the last place of the raw response, as a standard
-  # deviation over n - 1 degrees of freedom, on the scale of `a`.
-  ulps <- function(r) (length(r) - 1L) * (.POOL_ULPS * .ulp_of(y) / a)^2
-  if (ss(e / a) <= ulps(e)) return(TRUE)
+  if (ss(e / a) <= ulps(a)) return(TRUE)
   r <- yd / a - drop(X %*% (b / a))
   fit <- try(stats::lm.fit(X, r), silent = TRUE)
   if (!inherits(fit, "try-error")) {
@@ -695,7 +712,7 @@
     b2[!is.finite(b2)] <- 0
     r <- r - drop(X %*% b2)
   }
-  ss(r) <= max(ulps(r), (.FIT_EPS * .Machine$double.eps)^2 * sum((size / a)^2))
+  ss(r) <= max(ulps(a), (.FIT_EPS * .Machine$double.eps)^2 * sum((size / a)^2))
 }
 
 

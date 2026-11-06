@@ -468,6 +468,8 @@
       seen <- !is.na(r)
       as.numeric(rowsum(ifelse(seen, r, 0), g)) / as.numeric(rowsum(as.numeric(seen), g))
     }
+    cell_rows <- as.numeric(rowsum(as.numeric(!is.na(response)), g))
+    cell_all  <- as.numeric(cnt)
     cell_xy   <- unname(rowsum(xy[, 1:2, drop = FALSE], g)) / cnt
     pred_means <- function(P) if (ncol(P)) unname(rowsum(P, g)) / cnt
                               else matrix(0, n_cells, 0L)
@@ -476,6 +478,8 @@
     masks <- lapply(cell_ids, function(id) cluster_ids == id)
     cell_means <- function(r)
       vapply(masks, function(mask) mean(r[mask], na.rm = TRUE), numeric(1))
+    cell_rows <- vapply(masks, function(mask) sum(!is.na(response[mask])), numeric(1))
+    cell_all  <- vapply(masks, function(mask) as.numeric(sum(mask)), numeric(1))
     pred_means <- function(P) {
       m <- matrix(0, n_cells, ncol(P))
       for (j in seq_along(cell_ids)) m[j, ] <- colMeans(P[masks[[j]], , drop = FALSE])
@@ -496,6 +500,46 @@
   predictors <- .centre_columns(predictors)
   centres <- attr(predictors, "centres")
   if (!is.null(centres)) centres <- c(0, centres)
+
+  # Residuals of the rows within the rounding of a row: the predictors fit
+  # the response exactly, and its cell means differ by rounding alone.  The
+  # rows are fitted by OLS and read as resolution_profile() reads its own
+  # residuals (.residuals_rounding() on the rows), about the response's
+  # centre where the residuals of the raw values are under 1e-12 of them,
+  # as the cell means are below: the rounding of a fit on 1e15 + 1e5 w + f
+  # at its raw values holds the spread of f.  The
+  # bounds on the cell means below take the rounding of each row as its
+  # own, and so shrink with the rows of a cell; where the rounding is the
+  # same over the rows of a cell, as on a response at 1e15 that changes by
+  # a unit in the last place over the layer, they call it spread.
+  rows_rounding <- function() {
+    P <- as.matrix(predictors)
+    okr <- is.finite(response)
+    if (ncol(P)) okr <- okr & rowSums(!is.finite(P)) == 0
+    if (sum(okr) <= ncol(P) + 1L) return(FALSE)
+    X <- cbind(1, P[okr, , drop = FALSE])
+    yd <- response[okr]
+    p <- rs$p
+    fr <- try(stats::lm.fit(x = X, y = yd), silent = TRUE)
+    if (inherits(fr, "try-error")) return(FALSE)
+    e <- fr$residuals
+    if (centre == 0 && sum((e - mean(e))^2) <= 1e-12 * sum(yd^2)) {
+      c0 <- .residual_centre(raw, bounded = FALSE)
+      if (c0 != 0) {
+        rs0 <- shift_scale(raw - c0)
+        f0 <- try(stats::lm.fit(x = X, y = rs0$r[okr]), silent = TRUE)
+        if (!inherits(f0, "try-error")) {
+          fr <- f0
+          yd <- rs0$r[okr]
+          p <- rs0$p
+        }
+      }
+    }
+    rd <- .rounding_design(X, fr$coefficients, centres)
+    isTRUE(.residuals_rounding(fr$residuals, raw[okr] / p, yd, rd$X, rd$b))
+  }
+  if (rows_rounding()) return(.morans_na())
+
   cell_pred <- pred_means(predictors)
   cell_resp <- cell_means(response)
 
@@ -515,6 +559,35 @@
   # the predictors fit exactly.  The bound is relative, so a response in
   # small units is not refused for its unit.
   no_spread <- .no_spread(sum(resid^2), cell_resp[ok])
+  # The rounding of cell means: .POOL_ULPS units in the last place of the
+  # raw response over the square root of each cell's rows, plus the
+  # rounding of the sums the means are formed from, summed over the cells
+  # on the residual degrees of freedom, or the rounding of the regression,
+  # taken on the size of the terms of the cell design
+  # (.residuals_rounding() with the rows of each cell).  The mean of n_j
+  # rows carries the rounding of its values over sqrt(n_j), and so does its
+  # spread, so the bound of a single row would refuse cell means with real
+  # spread where the cells hold many rows.  The sum of n_j terms carries a
+  # rounding that grows with them: the bound takes one
+  # .Machine$double.eps times the mean absolute term over the cell's rows
+  # (of the response as its means are formed, and of each predictor times
+  # its coefficient) times sqrt(n_j), on the mean.  A response taken about
+  # its centre above lost its spread to the rounding of its raw values, and
+  # the residuals of an exact fit are then that rounding, which the bound on
+  # the centred cell means alone (.no_spread()) calls spread.
+  mean_rounding <- function(fit, cell_resp, ok, p, r) {
+    rd <- .rounding_design(cbind(1, cell_pred[ok, , drop = FALSE]), fit$coefficients,
+                           centres)
+    b <- abs(as.numeric(fit$coefficients[-1L]))
+    b[!is.finite(b)] <- 0
+    m <- sqrt(cell_rows[ok]) * cell_means(abs(r))[ok]
+    if (length(b))
+      m <- m + sqrt(cell_all[ok]) * drop(pred_means(abs(predictors))[ok, , drop = FALSE] %*% b)
+    .residuals_rounding(fit$residuals, raw[is.finite(raw)] / p, cell_resp[ok],
+                        rd$X, rd$b, n = cell_rows[ok], m = .Machine$double.eps * m)
+  }
+  if (centre != 0 && !no_spread)
+    no_spread <- mean_rounding(fit, cell_resp, ok, rs$p, response)
   # A response whose raw values show their spread is not centred above, but
   # its residuals can still be small beside the cell means (1e15 plus 1e5
   # times a predictor plus a spread of 1, or 1e11 plus a spread of 1), and
@@ -525,10 +598,9 @@
   # means are formed and regressed again about the response's centre
   # (.residual_centre(), as resolution_profile() takes its fit since
   # BUG-36), and refused only if those residuals are within the rounding of
-  # the regression, taken on the size of the fit's terms, or of the raw
-  # values (.residuals_rounding(), the bound resolution_profile() and
-  # estimate_sac_range() read).  Residuals do not change under a shift, so
-  # this changes nothing but the rounding.
+  # the regression, taken on the size of the fit's terms, or of the cell
+  # means (mean_rounding(), above).  Residuals do not change under a shift,
+  # so this changes nothing but the rounding.
   if (centre == 0 && (no_spread || sum(resid^2) <= 1e-12 * sum(cell_resp[ok]^2))) {
     c0 <- .residual_centre(raw, bounded = FALSE)
     if (c0 != 0) {
@@ -540,10 +612,7 @@
             silent = TRUE)
       if (!is.null(fit0) && !inherits(fit0, "try-error")) {
         cell_resp <- cr0; ok <- ok0; resid <- fit0$residuals
-        yr <- raw[is.finite(raw)] / rs0$p
-        rd <- .rounding_design(cbind(1, cell_pred[ok, , drop = FALSE]),
-                               fit0$coefficients, centres)
-        no_spread <- .residuals_rounding(resid, yr, cell_resp[ok], rd$X, rd$b)
+        no_spread <- mean_rounding(fit0, cell_resp, ok, rs0$p, rs0$r)
       }
     }
   }
