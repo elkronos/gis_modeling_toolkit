@@ -3838,6 +3838,52 @@ old behaviour where there is a way.
   scale, and the note is logged only for a column without spread beyond
   the rounding of its values.
 
+* **The range check of `fit_bayesian_spatial_model()` before sampling read
+  its Moran's I tests at the origin of a column, and scored the rounding of
+  an exact fit.**  The short-lag and floor-distance tests regressed the raw
+  response on the raw predictors.  A predictor at 1e8 plus a spread of 1
+  was dropped by the QR, and a response at 1e15 left the rounding of the
+  offset in the residuals: on 600 points, the short-lag Moran's I went from
+  0.770 to 0.177 with the predictor at 1e8 and to 0.023 (p 0.18) with the
+  response at 1e15, and a layer whose range is below the basis floor went
+  from "below_floor" to "below_floor_no_autocorrelation".  The only test
+  for residuals without spread was a sum of squares of 0, so where
+  `estimate_sac_range()` refused the layer as an exact fit of the response
+  on `predictor_vars`, the check still computed Moran's I on the rounding,
+  and could log in the same line that the response "is autocorrelated at
+  short range".  Now the predictors are fitted about their centres where
+  the centre is more than 1,000 times the spread, as in the other OLS fits,
+  and the response by the same rule; the moments read that design.  A
+  response whose residuals lose their spread through a trend is fitted
+  again about its centre, as `estimate_sac_range()` fits it.  Residuals within the rounding
+  of an exact fit, the bound `estimate_sac_range()` and
+  `residual_morans_i()` read, give no test (`$info$gp_prefit$moran` and
+  `moran_floor` are `NULL`), and the log says nothing about
+  autocorrelation.  The sums are taken on the residuals divided by a power
+  of two, so I, z and the p-value are the same in every unit.  Every other
+  layer gives the numbers it gave, to the last bit.
+
+* **`fit_bayesian_spatial_model(standardize_predictors = TRUE)` did not
+  standardise a predictor in small units.**  A predictor's scale was its
+  standard deviation floored at `.Machine$double.eps`, so a predictor with a
+  standard deviation below 2.2e-16 was handed to `brms::brm()` with a
+  standard deviation of 0.063 (at 1.4e-17) down to 3.8e-6 (at 8.5e-22), while
+  the slope prior is set for a predictor with a standard deviation of 1; the
+  slope and its posterior depended on the predictor's unit.  The scales of
+  the coordinates had the same floor.  Now a predictor or a coordinate whose
+  standard deviation is below `.Machine$double.eps` is read again: one with
+  spread is scaled by its standard deviation, taken at any size.  One
+  without spread got a scale of `.Machine$double.eps`, which turned the
+  rounding of a constant column into values of order 1; now a predictor
+  without spread gets a scale of 1, and a coordinate axis without spread
+  (a transect along the other axis) takes the other axis's scale, so the
+  basis's resolution and the floor of the range check are those of the
+  axis with extent.  The scale used is stored in
+  `$info$predictor_scaling` and `$info$coord_scaling`, and `predict()`
+  reads it there.  A predictor or a
+  coordinate whose standard deviation is at least `.Machine$double.eps` is
+  scaled as before.
+
 * **The print of a profile of one level read "1 levels" and "WSS rises at 0
   step(s)".**  Every default profile has one level.  The print now reads "1
   level", and leaves out the count of steps the WSS curve rises at when

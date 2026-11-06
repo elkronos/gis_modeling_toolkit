@@ -432,25 +432,99 @@
 }
 
 
+#' The centre and scale a predictor or a coordinate is standardised by
+#'
+#' The mean and standard deviation, as given, wherever the standard
+#' deviation is finite and at least \code{.Machine$double.eps}.  Below that
+#' the column is read again: one with spread (\code{.constant_column()}) is
+#' scaled by its standard deviation at any size (\code{.cell_sd()}), so a
+#' predictor in small units (a spread of 1e-17) is standardised to a
+#' standard deviation of 1 as in any other unit, and one without spread
+#' gets the scale \code{none}, so its rounding is not blown up to values of
+#' order 1.  A predictor without spread takes a scale of 1.  A coordinate
+#' axis without spread is given \code{none = NA} and takes the other
+#' axis's scale, since a fixed scale of 1 map unit would enter the basis's
+#' resolution along that axis and the pre-fit floor as if it were a
+#' length.  Where the mean is not finite the centre is that of
+#' \code{.spread_scaled()}.
+#'
+#' @param x The values; non-finite ones are left out of the second reading.
+#' @param m,s The mean and standard deviation the caller took.
+#' @param none The scale of a column without spread.
+#' @return A list: \code{center} and \code{scale}.
+#' @keywords internal
+#' @noRd
+.standardise_by <- function(x, m, s, none = 1) {
+  if (is.finite(s) && s >= .Machine$double.eps) return(list(center = m, scale = s))
+  f <- as.numeric(x[is.finite(x)])
+  if (length(f) < 2L) return(list(center = m, scale = max(s, .Machine$double.eps)))
+  sc <- .spread_scaled(f)
+  if (!is.finite(m)) m <- sc$centre
+  list(center = m, scale = if (.constant_column(f, sc)) none else .cell_sd(f))
+}
+
+
 #' Moran's I of a variable's OLS residuals over a weight matrix
 #'
 #' One-sided (greater), with the Cliff and Ord regression-residual moments.
+#'
+#' The residuals, I, z and p do not change under a shift of a predictor or
+#' of the response, and the rounding of the fit grows with the ratio of a
+#' column's size to its spread.  So a predictor at an offset (1e8 plus a
+#' spread of 1), which the QR drops as collinear with the intercept, is
+#' fitted about its centre (\code{.lm_fit_centred()}), and the moments read
+#' that same design.  The response is taken about its centre by the same
+#' rule (\code{.centre_columns()}: a centre more than
+#' \code{.PRED_CENTRE_RATIO} times the spread; at 1e12 plus a spread of 1
+#' the raw fit moved I by 2e-5 of its value, at 1e15 it read the rounding
+#' of the offset).  A response whose raw values show their spread through a
+#' trend but whose residuals do not is fitted again about the centre of
+#' \code{.residual_centre()}, as \code{estimate_sac_range()} takes its fit.
+#' Every other fit is the raw one, to the last bit.  Residuals within the
+#' rounding of the regression (\code{.residuals_rounding()}, on the
+#' predictors as given) leave I a ratio of rounding, and give no test:
+#' \code{estimate_sac_range()} refuses the same layer as an exact fit.
 #'
 #' @param y Numeric response.
 #' @param X Design matrix with its intercept column.
 #' @param W Weight matrix, base or \pkg{Matrix}.
 #' @return A list with \code{I}, \code{z} and \code{p}, or \code{NULL} when
-#'   it cannot be computed.
+#'   it cannot be computed or the residuals are rounding.
 #' @keywords internal
 #' @noRd
 .gp_resid_moran <- function(y, X, W) {
   n  <- length(y)
-  e  <- stats::lm.fit(X, y)$residuals
-  e  <- e - mean(e)
   S0 <- sum(W)
-  if (!is.finite(S0) || S0 <= 0 || sum(e^2) <= 0) return(NULL)
+  if (!is.finite(S0) || S0 <= 0) return(NULL)
+  yc <- attr(.centre_columns(matrix(y, ncol = 1L)), "centres") %||% 0
+  cf <- .lm_fit_centred(X, y - yc)
+  if (inherits(cf$fit, "try-error")) return(NULL)
+  if (yc == 0) {
+    # A response whose raw values show their spread through a trend (1e15
+    # plus 1e5 times a predictor plus a spread of 1): where the residuals of
+    # the raw fit show none to estimate_sac_range()'s floor, the fit is
+    # taken again about the response's centre.
+    e0 <- cf$fit$residuals
+    a  <- max(abs(y))
+    if (a > 0 && all(is.finite(e0)) && !isTRUE(stats::sd(e0 / a) > 1e-12)) {
+      c0 <- .residual_centre(y, bounded = FALSE)
+      cf0 <- if (c0 != 0) .lm_fit_centred(X, y - c0)
+      if (!is.null(cf0) && !inherits(cf0$fit, "try-error")) {
+        cf <- cf0
+        yc <- c0
+      }
+    }
+  }
+  e <- cf$fit$residuals
+  if (!all(is.finite(e))) return(NULL)
+  rd <- .rounding_design(cf$X, cf$fit$coefficients, cf$centres)
+  if (.residuals_rounding(e, y, y - yc, rd$X, rd$b)) return(NULL)
+  e <- e - mean(e)
+  # The sums on the residuals divided by a power of two, which is exact and
+  # keeps their squares within the doubles at any unit.
+  e <- e / .pow2_below(max(abs(e)))
   I   <- as.numeric((n / S0) * sum(e * (W %*% e)) / sum(e^2))
-  mom <- .morans_residual_moments(W = W, X = X, S0 = S0,
+  mom <- .morans_residual_moments(W = W, X = cf$X, S0 = S0,
                                   is_sparse = inherits(W, "Matrix"))
   if (is.null(mom) || !is.finite(mom$VI) || mom$VI <= 0) return(NULL)
   z <- (I - mom$EI) / sqrt(mom$VI)
@@ -1469,7 +1543,9 @@
 #'   \code{"not_estimated"} or \code{"not_run"}), \code{range} (the
 #'   estimated range in map units), \code{floor}, \code{k_needed},
 #'   \code{moran} and \code{moran_floor} (the two Moran's I tests, each with
-#'   \code{I}, \code{z} and a one-sided \code{p}), \code{reason} and
+#'   \code{I}, \code{z} and a one-sided \code{p}; \code{NULL} where the
+#'   test is not run, or where the residuals are the rounding of an exact
+#'   fit), \code{reason} and
 #'   \code{unit};
 #'   gp_adequacy: a list with \code{status} (see Details), \code{frac_below}
 #'   (the share of length-scale draws below \code{gp_ell_min}),
@@ -1877,8 +1953,14 @@ fit_bayesian_spatial_model <- function(
   # See @details in the roxygen block above.
   x_raw <- coords[, "X"]
   y_raw <- coords[, "Y"]
-  x_center <- mean(x_raw);  x_scale <- max(sd(x_raw), .Machine$double.eps)
-  y_center <- mean(y_raw);  y_scale <- max(sd(y_raw), .Machine$double.eps)
+  x_sc <- .standardise_by(x_raw, mean(x_raw), sd(x_raw), none = NA_real_)
+  y_sc <- .standardise_by(y_raw, mean(y_raw), sd(y_raw), none = NA_real_)
+  # An axis without spread takes the other axis's scale (1 where neither has
+  # spread), so it neither blows up its rounding nor sets the resolution.
+  if (is.na(x_sc$scale)) x_sc$scale <- if (is.na(y_sc$scale)) 1 else y_sc$scale
+  if (is.na(y_sc$scale)) y_sc$scale <- x_sc$scale
+  x_center <- x_sc$center;  x_scale <- x_sc$scale
+  y_center <- y_sc$center;  y_scale <- y_sc$scale
   coord_scaling <- list(
     x_center = x_center, x_scale = x_scale,
     y_center = y_center, y_scale = y_scale,
@@ -2071,8 +2153,10 @@ fit_bayesian_spatial_model <- function(
     predictor_scaling <- list()
     for (pv in predictor_vars) {
       if (is.numeric(dat_df[[pv]])) {
-        pv_mean <- mean(dat_df[[pv]], na.rm = TRUE)
-        pv_sd   <- max(sd(dat_df[[pv]], na.rm = TRUE), .Machine$double.eps)
+        pv_sc   <- .standardise_by(dat_df[[pv]], mean(dat_df[[pv]], na.rm = TRUE),
+                                   sd(dat_df[[pv]], na.rm = TRUE))
+        pv_mean <- pv_sc$center
+        pv_sd   <- pv_sc$scale
         dat_df[[pv]] <- (dat_df[[pv]] - pv_mean) / pv_sd
         predictor_scaling[[pv]] <- list(center = pv_mean, scale = pv_sd)
       }

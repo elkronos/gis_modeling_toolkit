@@ -261,7 +261,9 @@ short-lag or the floor-distance test did not bear out;
 \code{"not_estimated"} or \code{"not_run"}), \code{range} (the
 estimated range in map units), \code{floor}, \code{k_needed},
 \code{moran} and \code{moran_floor} (the two Moran's I tests, each with
-\code{I}, \code{z} and a one-sided \code{p}), \code{reason} and
+\code{I}, \code{z} and a one-sided \code{p}; \code{NULL} where the
+test is not run, or where the residuals are the rounding of an exact
+fit), \code{reason} and
 \code{unit};
 gp_adequacy: a list with \code{status} (see Details), \code{frac_below}
 (the share of length-scale draws below \code{gp_ell_min}),
