@@ -216,6 +216,10 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   # has no location (.unlocated_features()), so it is emptied before the
   # coerce and comes back as an empty point, dropped below with the
   # geometry count.
+  # Points held in a column of the general class sfc_GEOMETRY are read in
+  # sfc_POINT (.typed_points()): sf::st_coordinates() below refuses that
+  # class.
+  data_sf <- .typed_points(data_sf)
   if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")) {
     data_sf <- .xy_if_mixed(tryCatch(
       coerce_to_points(.empty_unlocated(.xy_if_mixed_or_m(data_sf)), pointize),

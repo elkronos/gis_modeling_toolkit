@@ -494,7 +494,10 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
   if (!nrow(prediction_points))
     stop("fold_separation(): `prediction_points` has no rows.", call. = FALSE)
   # Read in x and y when it mixes dimensions or carries M, as `data_sf` is.
-  prediction_points <- .xy_if_mixed_or_m(prediction_points)
+  # Points held in a column of the general class sfc_GEOMETRY are read in
+  # sfc_POINT (.typed_points()): sf::st_transform() below stops on the
+  # column sf::st_cast(x, "GEOMETRY") returns.
+  prediction_points <- .xy_if_mixed_or_m(.typed_points(prediction_points))
   # A point without a location as given (an empty point, or a coordinate
   # that is not finite or lies beyond 1e150) is emptied before the coerce and
   # the move, which could otherwise bring it back finite (a northing of 1e200

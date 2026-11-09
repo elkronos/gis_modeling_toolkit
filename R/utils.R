@@ -136,6 +136,39 @@
   as.numeric(sf::st_area(g))
 }
 
+#' A point layer read in its typed class
+#'
+#' A geometry column of the general class \code{sfc_GEOMETRY} can hold
+#' points only: \code{sf::st_cast(x, "GEOMETRY")} builds one, and so do
+#' \code{c()} of such a column with points and a point set with
+#' \code{[[<-} in place of the last other geometry of a mixed column.
+#' \code{sf::st_coordinates()} refuses that class ("not implemented for
+#' objects of class sfc_GEOMETRY"), and \code{sf::st_dimension()} and
+#' \code{sf::st_transform()} stop with "Not compatible with STRSXP" on the
+#' column \code{sf::st_cast()} returns.  When every geometry is a POINT, empty ones included, the
+#' column is cast to \code{sfc_POINT}, which holds the same geometries; the
+#' layer is then read as the same points in that class are.  Any other
+#' layer, one that mixes points with other types among them, is returned as
+#' it came.
+#'
+#' @param x An sf or sfc object.
+#' @return \code{x}, with its geometry column in \code{sfc_POINT} when it
+#'   was an \code{sfc_GEOMETRY} of points.
+#' @keywords internal
+#' @noRd
+.typed_points <- function(x) {
+  is_sf <- inherits(x, "sf")
+  if (!is_sf && !inherits(x, "sfc")) return(x)
+  g <- if (is_sf) sf::st_geometry(x) else x
+  if (!inherits(g, "sfc_GEOMETRY") || length(g) == 0L ||
+      !all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
+    return(x)
+  g <- sf::st_cast(g, "POINT")
+  if (!is_sf) return(g)
+  sf::st_geometry(x) <- g
+  x
+}
+
 
 # The one place the package hands a line to logger.  Every helper formats its
 # message with sprintf() first, so it is marked skip_formatter(): no formatter

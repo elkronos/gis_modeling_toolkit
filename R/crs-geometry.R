@@ -1969,7 +1969,11 @@
 #' beyond \code{.LONLAT_MOVE_MAX} is emptied before a move to a CRS in
 #' degrees, which from Web Mercator at x = 1e20 never came back from PROJ.
 #' Any other layer whose rows all have a location is moved by
-#' \code{sf::st_transform()} alone.
+#' \code{sf::st_transform()} alone.  Points held in a column of the general
+#' class \code{sfc_GEOMETRY} are moved in \code{sfc_POINT}
+#' (\code{.typed_points()}): \code{sf::st_transform()} stops with "Not
+#' compatible with STRSXP" on the column \code{sf::st_cast(x, "GEOMETRY")}
+#' returns, and such a layer comes back in \code{sfc_POINT}.
 #'
 #' @param x An sf or sfc object with a CRS.
 #' @param crs The CRS to move it to.
@@ -1977,6 +1981,7 @@
 #' @keywords internal
 #' @noRd
 .transform_keep_unlocated <- function(x, crs) {
+  x <- .typed_points(x)
   rows <- which(.unlocated_features(sf::st_geometry(x)))
   .empty_unlocated(.lonlat_of_placed(x, crs), rows)
 }

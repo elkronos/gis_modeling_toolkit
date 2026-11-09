@@ -5913,7 +5913,11 @@ make_folds <- function(points_sf, k,
   # from here on, the probe included, and so is one whose geometries carry
   # M, which GEOS refuses (.xy_if_mixed_or_m()); the points reduced from it
   # are tested again, as prep_model_data() tests them.
-  points_sf <- .xy_if_mixed_or_m(points_sf)
+  # Points held in a column of the general class sfc_GEOMETRY are read in
+  # sfc_POINT (.typed_points()): sf::st_dimension() below stops on the
+  # column sf::st_cast(x, "GEOMETRY") returns, and sf::st_coordinates()
+  # refuses that class.
+  points_sf <- .xy_if_mixed_or_m(.typed_points(points_sf))
   # So is a boundary, before it is moved, repaired or intersected.
   if (inherits(boundary, "sf") || inherits(boundary, "sfc"))
     boundary <- .xy_if_mixed_or_m(boundary)
@@ -7568,8 +7572,11 @@ make_folds <- function(points_sf, k,
   # layer in the dimension of its first geometry.  So is one whose
   # geometries carry M, which GEOS refuses in the coerce.  It is not
   # returned, so no warning.
+  # Points held in a column of the general class sfc_GEOMETRY are read in
+  # sfc_POINT (.typed_points()): sf::st_transform() below stops on the
+  # column sf::st_cast(x, "GEOMETRY") returns.
   if (inherits(prediction_points, "sf"))
-    prediction_points <- .xy_if_mixed_or_m(prediction_points)
+    prediction_points <- .xy_if_mixed_or_m(.typed_points(prediction_points))
   # A prediction point without a location as given (an empty point, or a
   # coordinate that is not finite or lies beyond 1e150) has none after the
   # move either: it is emptied before the coerce and the move, which could

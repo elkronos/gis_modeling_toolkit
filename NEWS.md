@@ -1743,6 +1743,33 @@ old behaviour where there is a way.
 
 ## Bug fixes
 
+* **A point layer in an `sfc_GEOMETRY` column stopped the fits, the
+  cross-validations and the folds.**  A geometry column of the general
+  class `sfc_GEOMETRY` can hold points only: `sf::st_cast(x, "GEOMETRY")`
+  builds one, and so do `c()` of such a column with points and a point set
+  with `[[<-` in place of the last other geometry of a mixed column.
+  `sf::st_coordinates()` refuses that class, so `fit_gwr_model()`,
+  `fit_rf_model()`, `fit_bayesian_spatial_model()`,
+  `gwr_model_selection()`, `prep_model_data()`, `predict()` of a fit,
+  `model_metrics()`, `evaluate_insample()`, `compare_models()`,
+  `cv_spatial()`, `cv_gwr()`, `cv_rf()`, `compare_models_cv()`,
+  `cv_block_size_sweep()` and `area_of_applicability()` stopped with sf's
+  "not implemented for objects of class sfc_GEOMETRY".  On the column
+  `sf::st_cast()` returns, `sf::st_dimension()` and `sf::st_transform()`
+  stop with "Not compatible with STRSXP": `make_folds()` stopped with it,
+  as `points_sf` and as `prediction_points`, and so did
+  `fold_separation()`, `ensure_projected()`, `harmonize_crs()` and every
+  call that moves such a layer to another CRS, such as `model_metrics()`
+  with it as `newdata` in another CRS than the fit.
+  `select_features_forward()` reported that stop as a failure to build its
+  inner folds, and on the other form of the column it scored no candidate
+  and returned an empty selection.  When every geometry of such a column
+  is a POINT, these functions now read it as the same points in
+  `sfc_POINT` and give the answer those points give.  A layer moved to
+  another CRS comes back in `sfc_POINT`; `area_of_applicability()` still
+  returns the rows of `newdata` in the class they came in.  A layer that
+  mixes points with other geometry types is read as before.
+
 * **`resolution_profile()` with a variogram stopped on a study area much
   longer than wide.**  The mean correlation over the study area, which
   `reliability` reads, came from a grid over the hull's bounding box at a

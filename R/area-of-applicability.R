@@ -254,7 +254,11 @@
       !all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT"))
     data_sf <- .xy_if_mixed(.pointize_auto(
       .empty_unlocated(.xy_if_mixed_or_m(data_sf)), "area_of_applicability", arg))
-  crd <- sf::st_coordinates(.xy_if_mixed(data_sf))
+  # Points held in a column of the general class sfc_GEOMETRY are read from
+  # a copy in sfc_POINT (.typed_points()): sf::st_coordinates() refuses that
+  # class.  The layer keeps its own column, as `newdata` does in `aoa` when
+  # it is read by .aoa_location_coords().
+  crd <- sf::st_coordinates(.xy_if_mixed(.typed_points(data_sf)))
   if (ncol(crd) < 2L)
     stop("area_of_applicability(): could not extract X/Y coordinates.",
          call. = FALSE)
@@ -673,8 +677,10 @@
   # its first geometry, and GEOS does not read M), and so are the points
   # when they mix dimensions.
   # A row without a location as given is emptied before the move.
-  train_sf <- .empty_unlocated(.xy_if_mixed_or_m(train_sf))
-  newdata  <- .empty_unlocated(.xy_if_mixed_or_m(newdata))
+  # Points held in a column of the general class sfc_GEOMETRY are read in
+  # sfc_POINT (.typed_points()): sf::st_coordinates() refuses that class.
+  train_sf <- .empty_unlocated(.xy_if_mixed_or_m(.typed_points(train_sf)))
+  newdata  <- .empty_unlocated(.xy_if_mixed_or_m(.typed_points(newdata)))
   tr_crs <- sf::st_crs(train_sf)
   if (!is.na(tr_crs)) {
     if (!identical(sf::st_crs(newdata), tr_crs))
