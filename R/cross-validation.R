@@ -1237,6 +1237,26 @@
 }
 
 
+#' The standard deviation of draws at any size
+#'
+#' \code{sd()} squares the deviations, which overflow for draws near 1e160
+#' (\code{Inf}) and lose their bits for a spread near 1e-160.  Where the
+#' plain reading is not finite or is below \code{.POOL_Y_MIN}, it is taken by
+#' \code{.cell_sd()}, which divides by a power of two first; elsewhere it is
+#' \code{sd()} as before.
+#'
+#' @param x Numeric draws.
+#' @return Their standard deviation; \code{NA} where \code{sd()} gives
+#'   \code{NA}.
+#' @keywords internal
+#' @noRd
+.sd_any_size <- function(x) {
+  s <- stats::sd(x)
+  if (is.na(s) || s == 0 || (is.finite(s) && s >= .POOL_Y_MIN)) return(s)
+  .cell_sd(x)
+}
+
+
 #' Empirical CRPS via the energy (NRG) form for equally weighted draws
 #'
 #' Computes the continuous ranked probability score per observation:
@@ -9150,7 +9170,7 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
         # give the coverage below give this for free.
         if (nrow(ppred_draws) >= 2L && ncol(ppred_draws) == length(y_true))
           extras$..per_row <- data.frame(
-            yhat_sd = apply(ppred_draws, 2L, stats::sd),
+            yhat_sd = apply(ppred_draws, 2L, .sd_any_size),
             stringsAsFactors = FALSE)
 
         # Coverage at each level, and the empirical CRPS via the NRG (energy)

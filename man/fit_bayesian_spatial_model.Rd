@@ -97,6 +97,9 @@ what earlier versions set, left a slope alone when income was in
 thousands of dollars and shrank the same slope to nothing when it was in
 dollars.  The prior brms used is stored as \code{$info$b_prior} and shown
 by \code{print()}.  When \code{prior} is given, no slope prior is added.
+A prior given here on a class that lives on the response's scale
+(\code{b}, \code{Intercept}, \code{sigma}, \code{sdgp}) keeps the
+response as it is; see "The response's centre and scale".
 A data-informed GP length-scale prior is always appended
 automatically unless \code{prior} already contains an entry with
 \code{class = "lscale"}.}
@@ -310,7 +313,10 @@ with enough effective draws, which do not fail the verdict, plus
 \code{gp_lscale_below_resolution} and \code{gp_adequacy}, the share and
 status described under Details; and n_dropped: the rows
 \code{prep_model_data()} removed for missing or non-finite values or a
-bad geometry, so \code{$n} can be read against \code{nrow(data_sf)}).
+bad geometry, so \code{$n} can be read against \code{nrow(data_sf)});
+response_scaling: the \code{centre} and \code{scale} the response was
+handed to brms with, absent when it was handed over as it is (see "The
+response's centre and scale").
 The raw brmsfit is in \code{$engine}.
 }
 \description{
@@ -570,6 +576,10 @@ can catch or muffle exactly one of them by name:
 \code{spatialkit_constant_predictor}}{From
 \code{\link{prep_model_data}()}: incomplete rows were dropped, with the
 counts; a predictor takes one value in every row kept.}
+\item{\code{spatialkit_response_scale}}{The response lies far from zero
+or its standard deviation far from 1, and \code{prior} sets a prior on
+a class on the response's scale, so the response is handed to brms as
+it is; see "The response's centre and scale".}
 \item{\code{spatialkit_gp_basis_size}}{Fewer than one row per ten basis
 functions.}
 \item{\code{spatialkit_gp_resolution}}{A variogram fitted before
@@ -583,12 +593,44 @@ data: the posterior asks for a shorter length-scale than it resolves
 short range (\code{"unresolved_short_range"}).}
 }
 A response that takes a single value is an error, raised before anything
-is compiled.  The convergence warning carries the checks that failed as
+is compiled, and so is one whose values differ only by rounding (1e15 and
+the next double).  The convergence warning carries the checks that failed as
 \code{failed} (\code{"divergent"}, \code{"ebfmi"}, \code{"rhat"},
 \code{"ess"}).  \code{\link{cv_bayes}()} fits once per fold; it collects
 the last four classes from its folds and raises each once for the run,
 naming the folds, and \code{\link{cv_spatial}()} does the same for a
 \code{fit_fn} that calls this function.
+}
+
+\section{The response's centre and scale}{
+
+Stan starts every parameter between -2 and 2, and brms sets its default
+priors for the intercept, the residual standard deviation and the
+Gaussian process's standard deviation from the response it is given, with
+scales of at least 2.5 in its units.  A response at 1e8 plus a spread of 1,
+or in units of 1e-20, lies far from both, and its fit missed the data by
+orders of magnitude.  So under the gaussian, student and skew_normal
+families with an identity link, a response whose centre is more than
+1,000 times its spread from zero is handed to brms less that centre, and
+one whose standard deviation lies outside \eqn{2^{-20}} to \eqn{2^{20}} is
+divided by the power of two nearest that standard deviation.  Both steps
+are exact.  Every other response, and every response under another
+family, is handed over as it is.
+
+\code{fitted()}, \code{predict()} and its draws, \code{residuals()},
+\code{coef()}, \code{$info$loo}, \code{$info$looic} and
+\code{$info$gp_adequacy$sdgp} are put back in the response's units, and
+\code{$info$b_prior} gives the automatic slope prior in those units.  The
+same data from another origin or in other units then give the same fit,
+up to Monte Carlo error.  The centre and scale are in
+\code{$info$response_scaling}.  \code{$engine} is the fit of the response
+brms was given, so brms's own functions on it (\code{brms::fixef()},
+\code{brms::posterior_epred()}) answer on that scale.
+
+A prior given in \code{prior} on a class on the response's scale
+(\code{b}, \code{Intercept}, \code{sigma}, \code{sdgp}) is read by brms on
+the response it is given.  With such a prior the response is handed over
+as it is, and the warning \code{spatialkit_response_scale} says so.
 }
 
 \section{Non-Gaussian responses}{

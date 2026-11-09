@@ -2676,6 +2676,32 @@ old behaviour where there is a way.
   `spatialkit_gp_basis_size` when there are fewer rows than a tenth of the
   basis functions.
 
+* **`fit_bayesian_spatial_model()` handed brms the response as given, so
+  its fit depended on the response's origin and units.**  Stan starts every
+  parameter between -2 and 2, and brms floors its default priors for the
+  intercept, the residual SD and the GP's SD at a scale of 2.5 in the
+  response's units.  At an offset of 1e8 the posterior mean fitted values
+  missed the response by the offset; in units of 1e-20 they were 1e15
+  response SDs off, after divergent transitions; near 1e160 the fit had no
+  draws and said nothing; and `cv_bayes()` folds failed or scored the same
+  way.  Under the gaussian, student and skew_normal families with an
+  identity link, a response whose centre is more than 1,000 times its
+  spread from zero is now handed to brms less that centre, and one whose SD
+  lies outside 2^-20 to 2^20 is divided by the power of two nearest it.
+  `fitted()`, `predict()` and its draws, `residuals()`, `coef()`,
+  `$info$loo`, `$info$looic`, `$info$gp_adequacy$sdgp` and `$info$b_prior`
+  are given in the response's units, and `$info$response_scaling` records
+  the centre and scale.  Every other response is handed over as it is, and
+  its draws do not change.  A `prior` on a class on the response's scale
+  keeps the response as given, with a warning of class
+  `spatialkit_response_scale`.  A response whose values differ only by
+  rounding (1e15 and the next double) is refused as a constant one is; it
+  was sampled.  `cv_bayes()` takes `yhat_sd` at any size, where `sd()` of
+  draws near 1e160 overflowed.  The spatial share in `$info$gp_adequacy`
+  is taken at any size of the response: its squares overflowed near 1e160
+  and underflowed below about 1e-162, so the share was `NA` and the
+  length-scale rule decided whether the GP is identified in its place.
+
 * **`summarize_by_cell()` let one infinite value through.**  An `Inf` in a
   response or predictor column made its cell's mean `Inf` and, under
   `deff = "kish"`, set the ICC to 0 for every cell.  Infinite values are now

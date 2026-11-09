@@ -1740,7 +1740,9 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
 #'   point summary.  Default FALSE.
 #' @param ... Ignored.
 #' @return Numeric vector of length \code{nrow(newdata)}, or a
-#'   \code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE}.  Rows
+#'   \code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE}, in the
+#'   units of the response (see "The response's centre and scale" in
+#'   \code{\link{fit_bayesian_spatial_model}}).  Rows
 #'   with a missing or non-finite predictor or coordinate, and rows carrying
 #'   a level of a categorical predictor the model was not fitted with, are
 #'   \code{NA} (an \code{NA} column with \code{draws = TRUE}); the other
@@ -1934,6 +1936,10 @@ predict.bayesian_fit <- function(object, newdata = NULL,
            else rep(NA_real_, n_orig))
   }
 
+  # Back in the response's units where the response was handed to brms
+  # less a centre or divided by a scale ($info$response_scaling).
+  draw_mat <- .bayes_unscale(draw_mat, object$info$response_scaling)
+
   if (draws) {
     # Expand draw matrix: insert NA columns for dropped rows.
     if (sum(clean_idx) < n_orig) {
@@ -1982,7 +1988,9 @@ fitted.gwr_fit <- function(object, ...) {
 #' In-sample fitted values from a Bayesian spatial GP fit
 #'
 #' Posterior expectation at the training locations: the column means of
-#' \code{brms::posterior_epred()}.  These are \strong{in-sample} values.
+#' \code{brms::posterior_epred()}, in the units of the response (see "The
+#' response's centre and scale" in \code{\link{fit_bayesian_spatial_model}}).
+#' These are \strong{in-sample} values.
 #'
 #' @section The result is cached:
 #' \code{posterior_epred()} is O(draws x n), and \code{summary()},
@@ -2089,7 +2097,9 @@ fitted.bayesian_fit <- function(object, ...) {
                  if (is.matrix(draws)) paste(dim(draws), collapse = " x ")
                  else class(draws)[1L], object$n), call. = FALSE)
 
-  fitted_vals <- colMeans(draws)
+  # In the response's units where it was handed to brms less a centre or
+  # divided by a scale ($info$response_scaling).
+  fitted_vals <- .bayes_unscale(colMeans(draws), object$info$response_scaling)
 
   # Store in cache for subsequent calls, stamped so a copy carrying different
   # data cannot read it back.  A wrong-length result is never cached.
@@ -2419,7 +2429,13 @@ coef.gwr_fit <- function(object, se = FALSE, ...) {
 #' @param ... Ignored.
 #' @return A matrix of fixed-effect posterior summaries, as returned by
 #'   \code{brms::fixef()}, on the fitted scale (per standard deviation of each
-#'   predictor under \code{standardize_predictors = TRUE}; see above).  Never
+#'   predictor under \code{standardize_predictors = TRUE}; see above), in the
+#'   units of the response: where the response was handed to brms less a
+#'   centre or divided by a scale, the intercept has the centre added back
+#'   and every column is multiplied by the scale (see "The response's centre
+#'   and scale" in \code{\link{fit_bayesian_spatial_model}}).  Read on
+#'   \code{object$engine}, \code{brms::fixef()} answers on the scale brms was
+#'   given.  Never
 #'   \code{NULL}: a missing 'brms' or a failing
 #'   \code{fixef()} call errors, following the \code{coef()} contract described
 #'   in \code{\link{new_spatial_fit}}.
@@ -2435,7 +2451,7 @@ coef.bayesian_fit <- function(object, ...) {
   if (inherits(fx, "error"))
     stop(sprintf("coef.bayesian_fit(): brms::fixef() failed: %s",
                  conditionMessage(fx)), call. = FALSE)
-  fx
+  .bayes_unscale_fixef(fx, object$info$response_scaling)
 }
 
 

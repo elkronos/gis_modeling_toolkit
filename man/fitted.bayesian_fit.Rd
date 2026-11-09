@@ -18,7 +18,9 @@ category (ordinal, categorical), which has no single fitted value per row.
 }
 \description{
 Posterior expectation at the training locations: the column means of
-\code{brms::posterior_epred()}.  These are \strong{in-sample} values.
+\code{brms::posterior_epred()}, in the units of the response (see "The
+response's centre and scale" in \code{\link{fit_bayesian_spatial_model}}).
+These are \strong{in-sample} values.
 }
 \section{The result is cached}{
 

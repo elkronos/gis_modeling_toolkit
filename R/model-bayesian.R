@@ -362,6 +362,187 @@
 
 
 # ---------------------------------------------------------------------------
+# The response's centre and scale
+# ---------------------------------------------------------------------------
+
+# Families whose model does not change when the response is taken less a
+# centre and divided by a scale: a location on the response's own scale
+# (identity link), a scale parameter, and shape parameters free of both.
+.bayes_location_scale_families <- c("gaussian", "student", "skew_normal")
+
+# Prior classes whose parameters do not change under a shift and a scale of
+# the response: the GP's length-scales (on the scaled coordinates), the
+# degrees of freedom of student() and the skewness of skew_normal().
+.bayes_scale_free_classes <- c("lscale", "nu", "alpha")
+
+# The standard deviations of the response that are handed to brms as they
+# are.  Outside this range the response is divided by a power of two.
+.BAYES_SD_MIN <- 2^-20
+.BAYES_SD_MAX <- 2^20
+
+#' The centre and scale the response is handed to brms with
+#'
+#' Stan starts every parameter between -2 and 2, and brms floors the scales
+#' of its default priors for the intercept, the residual standard deviation
+#' and the GP's standard deviation at 2.5 in the units of the response.  A
+#' response far from zero (1e8 plus a spread of 1) or with a standard
+#' deviation far from 1 (1e-20 or 1e160) is then far from where the sampler
+#' starts and from what those priors expect: the posterior mean fitted
+#' values missed the response by the whole offset, and in units of 1e-20 by
+#' 1e15 standard deviations of the response.  Such a response is handed to
+#' brms taken less its centre where that centre is more than
+#' \code{.PRED_CENTRE_RATIO} times its spread (\code{.spread_scaled()}, the
+#' rule of \code{.centre_columns()}), and divided by the power of two
+#' nearest its standard deviation where that lies outside
+#' \code{[2^-20, 2^20]} (\code{.cell_sd()}, which holds at any size).  Both
+#' steps are exact: the subtraction because every value lies within a
+#' factor of two of the centre, and the division because the divisor is a
+#' power of two.  Every other response is handed over as it is, so its
+#' draws do not change.
+#'
+#' Only for a family whose model is unchanged by the transform: gaussian,
+#' student and skew_normal with an identity link, not mixtures.  A count, a
+#' proportion or a log-scale family is never transformed.
+#'
+#' @param y The response on the training rows.
+#' @param family As handed to \code{brms::brm()}.
+#' @return \code{NULL} where the response is handed over as it is; otherwise
+#'   a list with \code{centre} (0 where it is not taken about a centre),
+#'   \code{scale} (1 where it is not divided) and \code{sd} (its standard
+#'   deviation in its own units).
+#' @keywords internal
+#' @noRd
+.bayes_response_scaling <- function(y, family) {
+  fam <- tryCatch({
+    f <- family
+    if (is.function(f)) f <- f()
+    if (is.character(f)) f <- brms::brmsfamily(f[[1L]])
+    f
+  }, error = function(e) NULL)
+  if (!is.list(fam) || (is.list(fam$mix) && length(fam$mix) > 0L)) return(NULL)
+  one <- function(nm) {
+    v <- tryCatch(as.character(fam[[nm]]), error = function(e) character(0))
+    if (length(v) < 1L) NA_character_ else v[[1L]]
+  }
+  if (!isTRUE(one("family") %in% .bayes_location_scale_families) ||
+      !identical(one("link"), "identity"))
+    return(NULL)
+  if (!is.numeric(y) || length(y) < 2L || !all(is.finite(y))) return(NULL)
+  y  <- as.numeric(y)
+  sc <- .spread_scaled(y)
+  if (!(sc$spread > 0)) return(NULL)
+  centre <- if (abs(sc$centre) > .PRED_CENTRE_RATIO * sc$spread) sc$centre else 0
+  r <- if (centre != 0) y - centre else y
+  s <- .cell_sd(r)
+  if (!is.finite(s) || !(s > 0)) s <- .spread_scaled(r)$spread
+  scale <- if (s < .BAYES_SD_MIN || s > .BAYES_SD_MAX)
+    2^max(min(round(log2(s)), 1023), -1022) else 1
+  if (centre == 0 && scale == 1) return(NULL)
+  list(centre = centre, scale = scale, sd = s)
+}
+
+
+#' What a response's centre and scale are, for a message
+#'
+#' @param rs A list from \code{.bayes_response_scaling()}.
+#' @return One clause, completing "response 'y' ...".
+#' @keywords internal
+#' @noRd
+.bayes_response_scaling_text <- function(rs) {
+  paste(c(
+    if (rs$centre != 0)
+      sprintf("is centred at %s, more than %s times its spread from zero",
+              format(signif(rs$centre, 6)), format(.PRED_CENTRE_RATIO)),
+    if (rs$scale != 1)
+      sprintf("has a standard deviation of %s, outside 2^-20 to 2^20",
+              format(signif(rs$sd, 3)))),
+    collapse = " and ")
+}
+
+
+#' A response-scale quantity put back in the response's units
+#'
+#' The inverse of \code{.bayes_response_scaling()}: \code{centre + scale *
+#' x} for a location (fitted values, predictions and their draws),
+#' \code{scale * x} for a difference or a standard deviation.
+#'
+#' @param x Numbers on the scale brms was given, any shape.
+#' @param rs \code{$info$response_scaling} of the fit, or \code{NULL}.
+#' @param location \code{TRUE} to add the centre back.
+#' @return \code{x} in the response's units; \code{x} itself when \code{rs}
+#'   is \code{NULL}.
+#' @keywords internal
+#' @noRd
+.bayes_unscale <- function(x, rs, location = TRUE) {
+  if (is.null(x) || !is.list(rs) || !is.numeric(rs$scale) ||
+      !is.numeric(rs$centre))
+    return(x)
+  x <- x * rs$scale
+  if (location && rs$centre != 0) x <- x + rs$centre
+  x
+}
+
+
+#' brms::fixef() put back in the response's units
+#'
+#' Slopes and every column are multiplied by the scale; the intercept's
+#' estimate and quantiles have the centre added back.  The scale is
+#' positive, so the quantiles keep their order.
+#'
+#' @param fx The matrix \code{brms::fixef()} returned.
+#' @param rs \code{$info$response_scaling}, or \code{NULL}.
+#' @return \code{fx} in the response's units.
+#' @keywords internal
+#' @noRd
+.bayes_unscale_fixef <- function(fx, rs) {
+  if (!is.matrix(fx) || !is.list(rs) || !is.numeric(rs$scale)) return(fx)
+  fx[] <- fx * rs$scale
+  ic   <- rownames(fx) %in% "Intercept"
+  loc  <- colnames(fx) != "Est.Error"
+  if (any(ic) && rs$centre != 0) fx[ic, loc] <- fx[ic, loc] + rs$centre
+  fx
+}
+
+
+#' A loo object put back in the response's units
+#'
+#' The density of the response is that of the scaled response divided by
+#' the scale, so each row's elpd moves by \code{-log(scale)} and its looic by
+#' \code{2 * log(scale)}; a centre changes neither.  The standard errors, the
+#' effective number of parameters and the Pareto k do not change.
+#'
+#' @param lo A \code{loo} object.
+#' @param rs \code{$info$response_scaling}, or \code{NULL}.
+#' @return \code{lo} in the response's units.
+#' @keywords internal
+#' @noRd
+.bayes_unscale_loo <- function(lo, rs) {
+  if (!is.list(rs) || !is.numeric(rs$scale) || rs$scale == 1) return(lo)
+  ls  <- log(rs$scale)
+  # unclass(): loo's own `[[` and `$` warn on the old top-level names.
+  cls <- class(lo)
+  u   <- unclass(lo)
+  pw  <- u$pointwise
+  if (!is.matrix(pw)) return(lo)
+  n <- nrow(pw)
+  if ("elpd_loo" %in% colnames(pw)) pw[, "elpd_loo"] <- pw[, "elpd_loo"] - ls
+  if ("looic" %in% colnames(pw))    pw[, "looic"]    <- pw[, "looic"] + 2 * ls
+  u$pointwise <- pw
+  est <- u$estimates
+  if (is.matrix(est)) {
+    rn <- rownames(est)
+    if ("elpd_loo" %in% rn) est["elpd_loo", "Estimate"] <- est["elpd_loo", "Estimate"] - n * ls
+    if ("looic" %in% rn)    est["looic", "Estimate"]    <- est["looic", "Estimate"] + 2 * n * ls
+    u$estimates <- est
+  }
+  if (is.numeric(u$elpd_loo)) u$elpd_loo <- u$elpd_loo - n * ls
+  if (is.numeric(u$looic))    u$looic    <- u$looic + 2 * n * ls
+  class(u) <- cls
+  u
+}
+
+
+# ---------------------------------------------------------------------------
 # What the basis resolves, in map units
 # ---------------------------------------------------------------------------
 
@@ -1011,7 +1192,20 @@
   share <- NULL
   if (is.numeric(sdgp_draws) && is.numeric(sigma_draws) &&
       length(sdgp_draws) == length(sigma_draws) && length(sdgp_draws) > 0L) {
-    sh <- sdgp_draws^2 / (sdgp_draws^2 + sigma_draws^2)
+    # Both divided first by the power of two nearest the larger of the two,
+    # so that the squares neither overflow (draws near 1e160) nor underflow
+    # (near 1e-170).  The division is exact, so at ordinary sizes the share
+    # is the same to the bit; without it the share was NaN at those sizes
+    # and the length-scale rule decided in its place.
+    m <- suppressWarnings(max(abs(c(sdgp_draws, sigma_draws)), na.rm = TRUE))
+    if (is.finite(m) && m > 0) {
+      p2 <- 2^max(min(floor(log2(m)), 1023), -1022)
+      sdgp_s  <- sdgp_draws / p2
+      sigma_s <- sigma_draws / p2
+    } else {
+      sdgp_s <- sdgp_draws; sigma_s <- sigma_draws
+    }
+    sh <- sdgp_s^2 / (sdgp_s^2 + sigma_s^2)
     share <- stats::quantile(sh, qs, names = FALSE, na.rm = TRUE)
     names(share) <- c("q2.5", "q50", "q97.5")
   }
@@ -1216,6 +1410,9 @@
 #'   thousands of dollars and shrank the same slope to nothing when it was in
 #'   dollars.  The prior brms used is stored as \code{$info$b_prior} and shown
 #'   by \code{print()}.  When \code{prior} is given, no slope prior is added.
+#'   A prior given here on a class that lives on the response's scale
+#'   (\code{b}, \code{Intercept}, \code{sigma}, \code{sdgp}) keeps the
+#'   response as it is; see "The response's centre and scale".
 #'   A data-informed GP length-scale prior is always appended
 #'   automatically unless \code{prior} already contains an entry with
 #'   \code{class = "lscale"}.
@@ -1613,7 +1810,10 @@
 #'   \code{gp_lscale_below_resolution} and \code{gp_adequacy}, the share and
 #'   status described under Details; and n_dropped: the rows
 #'   \code{prep_model_data()} removed for missing or non-finite values or a
-#'   bad geometry, so \code{$n} can be read against \code{nrow(data_sf)}).
+#'   bad geometry, so \code{$n} can be read against \code{nrow(data_sf)});
+#'   response_scaling: the \code{centre} and \code{scale} the response was
+#'   handed to brms with, absent when it was handed over as it is (see "The
+#'   response's centre and scale").
 #'   The raw brmsfit is in \code{$engine}.
 #' @family model fitting
 #' @section Warnings:
@@ -1624,6 +1824,10 @@
 #'     \code{spatialkit_constant_predictor}}{From
 #'     \code{\link{prep_model_data}()}: incomplete rows were dropped, with the
 #'     counts; a predictor takes one value in every row kept.}
+#'   \item{\code{spatialkit_response_scale}}{The response lies far from zero
+#'     or its standard deviation far from 1, and \code{prior} sets a prior on
+#'     a class on the response's scale, so the response is handed to brms as
+#'     it is; see "The response's centre and scale".}
 #'   \item{\code{spatialkit_gp_basis_size}}{Fewer than one row per ten basis
 #'     functions.}
 #'   \item{\code{spatialkit_gp_resolution}}{A variogram fitted before
@@ -1637,12 +1841,42 @@
 #'     short range (\code{"unresolved_short_range"}).}
 #' }
 #' A response that takes a single value is an error, raised before anything
-#' is compiled.  The convergence warning carries the checks that failed as
+#' is compiled, and so is one whose values differ only by rounding (1e15 and
+#' the next double).  The convergence warning carries the checks that failed as
 #' \code{failed} (\code{"divergent"}, \code{"ebfmi"}, \code{"rhat"},
 #' \code{"ess"}).  \code{\link{cv_bayes}()} fits once per fold; it collects
 #' the last four classes from its folds and raises each once for the run,
 #' naming the folds, and \code{\link{cv_spatial}()} does the same for a
 #' \code{fit_fn} that calls this function.
+#' @section The response's centre and scale:
+#' Stan starts every parameter between -2 and 2, and brms sets its default
+#' priors for the intercept, the residual standard deviation and the
+#' Gaussian process's standard deviation from the response it is given, with
+#' scales of at least 2.5 in its units.  A response at 1e8 plus a spread of 1,
+#' or in units of 1e-20, lies far from both, and its fit missed the data by
+#' orders of magnitude.  So under the gaussian, student and skew_normal
+#' families with an identity link, a response whose centre is more than
+#' 1,000 times its spread from zero is handed to brms less that centre, and
+#' one whose standard deviation lies outside \eqn{2^{-20}} to \eqn{2^{20}} is
+#' divided by the power of two nearest that standard deviation.  Both steps
+#' are exact.  Every other response, and every response under another
+#' family, is handed over as it is.
+#'
+#' \code{fitted()}, \code{predict()} and its draws, \code{residuals()},
+#' \code{coef()}, \code{$info$loo}, \code{$info$looic} and
+#' \code{$info$gp_adequacy$sdgp} are put back in the response's units, and
+#' \code{$info$b_prior} gives the automatic slope prior in those units.  The
+#' same data from another origin or in other units then give the same fit,
+#' up to Monte Carlo error.  The centre and scale are in
+#' \code{$info$response_scaling}.  \code{$engine} is the fit of the response
+#' brms was given, so brms's own functions on it (\code{brms::fixef()},
+#' \code{brms::posterior_epred()}) answer on that scale.
+#'
+#' A prior given in \code{prior} on a class on the response's scale
+#' (\code{b}, \code{Intercept}, \code{sigma}, \code{sdgp}) is read by brms on
+#' the response it is given.  With such a prior the response is handed over
+#' as it is, and the warning \code{spatialkit_response_scale} says so.
+#'
 #' @section Non-Gaussian responses:
 #' Nothing in this function is Gaussian-specific except its default.  A
 #' numeric count, binary (0/1 or logical) or bounded response passes straight
@@ -1938,6 +2172,50 @@ fit_bayesian_spatial_model <- function(
                         "produced these rows."),
                  response_var, format(y_resp[[1L]]), nrow(dat_sf)),
          call. = FALSE)
+  # A response whose values differ in their last bits only (1e15 and the next
+  # double) is one value stored two ways, and is refused as one value is.  It
+  # used to be sampled: a fit to its rounding.  .constant_column() is the
+  # test the rest of the package reads for a constant column, at any size.
+  if (is.numeric(y_resp) && all(is.finite(y_resp)) &&
+      .constant_column(as.numeric(y_resp)))
+    stop(sprintf(paste0("fit_bayesian_spatial_model(): response '%s' takes a ",
+                        "single value up to rounding in all %d row(s): its ",
+                        "values differ only by rounding (%s to %s), so there ",
+                        "is no variation for the regression or the Gaussian ",
+                        "process to explain. Check the column and the filter ",
+                        "that produced these rows."),
+                 response_var, nrow(dat_sf),
+                 format(min(y_resp), digits = 17), format(max(y_resp), digits = 17)),
+         call. = FALSE)
+
+  # The response is handed to brms less its centre and divided by a power of
+  # two where it lies far from zero or its standard deviation far from 1
+  # (.bayes_response_scaling()), and everything returned on its scale is put
+  # back.  A prior the caller set on a class that lives on the response's
+  # scale is read by brms on the response it is given, so a response with
+  # such a prior is handed over as it is, and the warning says so.
+  resp_scaling <- .bayes_response_scaling(y_resp, family)
+  if (!is.null(resp_scaling)) {
+    user_cls <- if (is.null(prior)) character(0)
+                else tryCatch(unique(as.character(prior$class)),
+                              error = function(e) NA_character_)
+    on_resp <- setdiff(user_cls, .bayes_scale_free_classes)
+    if (length(on_resp) > 0L) {
+      .warn_classed(
+        "spatialkit_response_scale",
+        paste0("fit_bayesian_spatial_model(): response '%s' %s. It is handed ",
+               "to brms as it is, not taken about its centre and scaled, ",
+               "because `prior` sets a prior on %s, which brms reads on the ",
+               "response it is given. Stan starts every parameter between -2 ",
+               "and 2, so the sampler may not reach the posterior: check ",
+               "$info$convergence_ok and the fitted values, or leave those ",
+               "classes out of `prior`."),
+        response_var, .bayes_response_scaling_text(resp_scaling),
+        if (anyNA(on_resp)) "classes it does not name"
+        else paste0("class ", paste(sQuote(on_resp, q = FALSE), collapse = ", ")))
+      resp_scaling <- NULL
+    }
+  }
 
   # NOTE: prep_model_data() coerces geometry to points and drops incomplete
   # rows, and projects the CRS *whenever one can be established* --
@@ -1992,6 +2270,22 @@ fit_bayesian_spatial_model <- function(
     `..x` = (x_raw - x_center) / x_scale,
     `..y` = (y_raw - y_center) / y_scale
   )
+  # The response as brms is given it.  Only where .bayes_response_scaling()
+  # asked for it; every other response is handed over as it is.
+  y_fit <- y_resp
+  if (!is.null(resp_scaling)) {
+    y_fit <- as.numeric(y_resp)
+    if (resp_scaling$centre != 0) y_fit <- y_fit - resp_scaling$centre
+    y_fit <- y_fit / resp_scaling$scale
+    dat_df[[response_var]] <- y_fit
+    .log_info(paste0("fit_bayesian_spatial_model(): response '%s' %s, so brms ",
+                     "is given (%s - %s) / %s; fitted values, predictions, ",
+                     "coefficients and LOO are put back in its units ",
+                     "($info$response_scaling)."),
+              response_var, .bayes_response_scaling_text(resp_scaling),
+              response_var, format(resp_scaling$centre, digits = 17),
+              format(resp_scaling$scale))
+  }
 
   # ---- Data-informed GP length-scale bounds ----
   # gp_lengthscale_bounds() is calibrated for the squared-exponential kernel
@@ -2238,7 +2532,10 @@ fit_bayesian_spatial_model <- function(
       # different prior for every choice of units: with income in dollars it
       # shrank a slope of 10,236 per SD to 0.3, with the same income in
       # thousands it left 98.8% of it, and convergence_ok was TRUE both times.
-      b_prior_auto <- .b_prior_auto(y_resp, family)
+      # Taken on the response brms is given: 2.5 SD of it there is 2.5 SD of
+      # the response in its own units, and sd() of a response near 1e160
+      # overflows.
+      b_prior_auto <- .b_prior_auto(y_fit, family)
       # One row per distributional parameter's slopes (.b_prior_rows()): a
       # dpar-less row matches no slope of a categorical or mixture model.
       prior_parts <- c(prior_parts, list(
@@ -2426,6 +2723,13 @@ fit_bayesian_spatial_model <- function(
   b_prior_used <- if (length(predictor_vars) > 0L)
     .b_prior_used(if (is.data.frame(vp)) vp else NULL, b_prior_auto$spec)
     else NA_character_
+  # brms reads the automatic slope prior on the response it is given.  The
+  # record gives it in the response's own units, with the prior brms used.
+  if (!is.null(resp_scaling) && !is.null(b_prior_auto) &&
+      identical(b_prior_auto$basis, "sd"))
+    b_prior_used <- sprintf("normal(0, %.10g) in the units of '%s' (%s on the response brms was given)",
+                            2.5 * b_prior_auto$scale * resp_scaling$scale,
+                            response_var, b_prior_used)
   b_prior_source <- if (length(predictor_vars) == 0L) NA_character_
     else if (!is.null(b_prior_auto)) sprintf("automatic: %s", b_prior_auto$label)
     else if (prior_from_user) "from `prior`"
@@ -2790,6 +3094,10 @@ fit_bayesian_spatial_model <- function(
       # scale as the GP: a Gaussian response, or one Gaussian on the log scale.
       sigma_draws <- if (fam_name %in% c("gaussian", "lognormal"))
         one_col("sigma", FALSE) else NULL
+      # In the response's units.  The share of variance is a ratio of the
+      # two and does not change; $info$gp_adequacy$sdgp does.
+      sdgp_draws  <- .bayes_unscale(sdgp_draws, resp_scaling, location = FALSE)
+      sigma_draws <- .bayes_unscale(sigma_draws, resp_scaling, location = FALSE)
       gp_adequacy <- .gp_adequacy(ls_draws, sdgp_draws, sigma_draws,
                                   gp_ell_min = gp_ell_min,
                                   prior_spec = gp_lscale_prior_used,
@@ -2807,7 +3115,9 @@ fit_bayesian_spatial_model <- function(
   if (isTRUE(compute_loo)) {
     loo_try <- try(brms::loo(fit), silent = TRUE)
     if (!inherits(loo_try, "try-error")) {
-      loo_obj <- loo_try
+      # On the response's own scale: brms computed it on the response it
+      # was given.
+      loo_obj <- .bayes_unscale_loo(loo_try, resp_scaling)
       est <- try(loo_obj$estimates, silent = TRUE)
       if (!inherits(est, "try-error") && is.matrix(est)) {
         rn <- rownames(est)
@@ -2880,6 +3190,11 @@ fit_bayesian_spatial_model <- function(
       predictor_scaling        = predictor_scaling
     )
   )
+  # The centre and scale the response was handed to brms with; absent when
+  # it was handed over as it is.  fitted(), predict(), coef() and the
+  # residual check below read it, so it is set before them.
+  if (!is.null(resp_scaling))
+    obj$info$response_scaling <- resp_scaling[c("centre", "scale")]
 
   # ---- What the surface left behind ----
   # The posterior of the GP cannot say whether structure was left in the
