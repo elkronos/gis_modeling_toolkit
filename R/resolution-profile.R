@@ -33,6 +33,79 @@
 }
 
 
+#' Rectangle of least area around a polygon
+#'
+#' Over the directions of the edges of the polygon's convex hull, the
+#' rectangle with one side along an edge that holds the hull and has the
+#' least area, which is the rectangle of least area around the polygon.
+#' Rotating calipers over the hull's vertices in R, so a hull of many
+#' vertices (points along a transect) costs time in proportion to their
+#' number.  The vertices are taken about the centre of their bounding box,
+#' so the projections keep their digits at a large offset.
+#'
+#' @param domain A polygon (sfc).
+#' @return A list: \code{L} and \code{W}, the long and short side
+#'   (\code{L >= W}); \code{a} and \code{b}, unit vectors along them; \code{u0} and
+#'   \code{v0}, the rectangle's least coordinates along \code{a} and
+#'   \code{b}; and \code{centre}, the origin of those coordinates.  The
+#'   sides are \code{NA} when the hull is not a polygon (points on a line).
+#' @keywords internal
+#' @noRd
+.least_area_rect <- function(domain) {
+  none <- list(L = NA_real_, W = NA_real_)
+  hull <- sf::st_convex_hull(sf::st_union(sf::st_geometry(domain)))
+  if (length(hull) != 1L || !inherits(hull[[1L]], "POLYGON")) return(none)
+  xy <- hull[[1L]][[1L]][, 1:2, drop = FALSE]        # exterior ring, closed
+  if (!all(is.finite(xy))) return(none)
+  centre <- c((min(xy[, 1]) + max(xy[, 1])) / 2, (min(xy[, 2]) + max(xy[, 2])) / 2)
+  p <- cbind(xy[, 1] - centre[1], xy[, 2] - centre[2])
+  p <- p[-nrow(p), , drop = FALSE]
+  # Drop repeated vertices, then turn the ring anticlockwise.
+  nxt <- c(seq_len(nrow(p))[-1L], 1L)
+  p <- p[p[, 1] != p[nxt, 1] | p[, 2] != p[nxt, 2], , drop = FALSE]
+  n <- nrow(p)
+  if (n < 3L) return(none)
+  nx <- c(2:n, 1L)
+  if (sum(p[, 1] * p[nx, 2] - p[nx, 1] * p[, 2]) < 0) p <- p[n:1, , drop = FALSE]
+  if (sum(p[, 1] * p[nx, 2] - p[nx, 1] * p[, 2]) <= 0) return(none)
+  d <- p[nx, , drop = FALSE] - p
+  e <- d / sqrt(d[, 1]^2 + d[, 2]^2)                  # unit edge directions
+  at <- function(k) (k - 1L) %% n + 1L
+  # For each edge i: the vertex farthest along it (ia), the vertex least
+  # along it (ib) and the vertex farthest across it (ic, on the inner side
+  # of an anticlockwise ring).  Each moves forward round the ring as the
+  # edge does, so each is advanced while that improves it.
+  along  <- function(k, i) p[k, 1] * e[i, 1] + p[k, 2] * e[i, 2]
+  across <- function(k, i) (p[k, 1] - p[i, 1]) * -e[i, 2] + (p[k, 2] - p[i, 2]) * e[i, 1]
+  pa <- p %*% e[1L, ]
+  ia <- which.max(pa); ib <- which.min(pa)
+  ic <- which.max((p[, 1] - p[1L, 1]) * -e[1L, 2] + (p[, 2] - p[1L, 2]) * e[1L, 1])
+  best <- Inf; out <- none
+  for (i in seq_len(n)) {
+    s <- 0L
+    while (s < n && along(at(ia + 1L), i) >= along(ia, i)) { ia <- at(ia + 1L); s <- s + 1L }
+    s <- 0L
+    while (s < n && along(at(ib + 1L), i) <= along(ib, i)) { ib <- at(ib + 1L); s <- s + 1L }
+    s <- 0L
+    while (s < n && across(at(ic + 1L), i) >= across(ic, i)) { ic <- at(ic + 1L); s <- s + 1L }
+    su <- along(ia, i) - along(ib, i)
+    sv <- across(ic, i)
+    if (su * sv < best) {
+      best <- su * sv
+      ei <- e[i, ]; ni <- c(-ei[2], ei[1])
+      v0 <- p[i, 1] * ni[1] + p[i, 2] * ni[2]
+      u0 <- along(ib, i)
+      out <- if (su >= sv) {
+        list(L = su, W = sv, a = ei, b = ni, u0 = u0, v0 = v0, centre = centre)
+      } else {
+        list(L = sv, W = su, a = ni, b = ei, u0 = v0, v0 = u0, centre = centre)
+      }
+    }
+  }
+  out
+}
+
+
 #' Mean correlation between two random points in a polygon
 #'
 #' The domain term of Krige's relation, \eqn{\bar r(V)}, over the study area
@@ -48,6 +121,22 @@
 #' (10 on the square).  The grid is isotropic, where \code{.rbar_rect()}'s
 #' \eqn{q \times q} grid on a thin rectangle is 25 times coarser along it
 #' than across.
+#'
+#' The grid is laid over the bounding box, at a spacing \eqn{s} that follows
+#' the domain's area, where the domain's width (the short side of its
+#' rectangle of least area) is at least \eqn{2s}: two or more rows of nodes
+#' cross it.  A thinner domain (a transect, a road corridor) is laid out in
+#' the frame of that rectangle instead, with long side \eqn{L} and short side
+#' \eqn{W}: a spacing \eqn{t = \sqrt{L W} / q}, \eqn{k = \max(1, \lfloor W /
+#' t \rfloor)} equal bands along it, and about \eqn{q^2 / k} nodes in each,
+#' a rank-1 lattice over a quarter of the band mirrored in its two
+#' midlines, so the nodes spread over the band's width and do not depend on
+#' which way the frame's axes point.  A strip narrower than \eqn{t} is one
+#' band.  Nodes on the bands' centre lines would read a hull that tapers (a
+#' wedge, a lens) along those lines only.  On the box, the rows of a strip
+#' at a slant crossed part of its length, or fewer than 10 nodes fell inside
+#' and the box's value was used, and a strip along an axis narrower than
+#' \eqn{s / 2} stopped \code{seq()}.
 #'
 #' @param cor_fn Correlation function of distance.
 #' @param domain A polygon (sfc) in the coordinate units of \code{cor_fn}.
@@ -66,9 +155,46 @@
   # q^2 grid nodes over the box, so a sliver of a hull costs no more than a
   # point-in-polygon test on 16,000 points.
   s  <- max(sqrt(area) / q, sqrt(w * h / (40 * q^2)))
-  gx <- seq(bb[["xmin"]] + s / 2, bb[["xmax"]], by = s)
-  gy <- seq(bb[["ymin"]] + s / 2, bb[["ymax"]], by = s)
-  g  <- as.matrix(expand.grid(x = gx, y = gy))
+  # The box grid where two or more of its rows cross the domain: its width,
+  # the short side of its rectangle of least area, at least 2 s.  A convex
+  # domain's area is at most its diameter (at most the box's diagonal) times
+  # its width, so a large enough area settles that without the rectangle.
+  fits <- w >= s / 2 && h >= s / 2
+  rect <- NULL
+  if (fits && area / sqrt(w^2 + h^2) < 2 * s) {
+    rect <- .least_area_rect(domain)
+    fits <- is.finite(rect$W) && rect$W >= 2 * s
+  }
+  if (fits) {
+    gx <- seq(bb[["xmin"]] + s / 2, bb[["xmax"]], by = s)
+    gy <- seq(bb[["ymin"]] + s / 2, bb[["ymax"]], by = s)
+    g  <- as.matrix(expand.grid(x = gx, y = gy))
+  } else {
+    # A domain narrower than two steps of the box grid: bands along its
+    # rectangle of least area, rotated back to the CRS frame.
+    if (is.null(rect)) rect <- .least_area_rect(domain)
+    if (!is.finite(rect$W) || !is.finite(rect$L) || rect$W <= 0)
+      return(.rbar_rect(cor_fn, w, h, q))
+    sp <- sqrt(rect$L * rect$W) / q
+    k  <- max(1L, as.integer(floor(rect$W / sp)))
+    nq <- max(1L, as.integer(round(q^2 / (4 * k))))
+    # In each of k equal bands across: nq nodes of a rank-1 lattice over a
+    # quarter of the band (node j at the centre of step j along it, and at
+    # frac((j - 0.5) * phi) / 2 of the band across, phi the golden ratio's
+    # conjugate) and their mirror images in the band's two midlines.  The
+    # nodes spread over the band's width, so a hull that tapers (a wedge, a
+    # lens) is read over its area and not along a centre line, and the
+    # mirrors make them the same nodes whichever way the frame's axes point.
+    j  <- seq_len(nq)
+    u1 <- (j - 0.5) * rect$L / (2 * nq)
+    v1 <- (((j - 0.5) * ((sqrt(5) - 1) / 2)) %% 1) / 2
+    uq <- c(u1, rect$L - u1, u1, rect$L - u1)
+    vq <- c(v1, v1, 1 - v1, 1 - v1)
+    f  <- cbind(rect$u0 + rep(uq, times = k),
+                rect$v0 + rect$W * (rep(seq_len(k) - 1L, each = 4L * nq) + rep(vq, times = k)) / k)
+    g  <- cbind(x = rect$centre[1] + f[, 1] * rect$a[1] + f[, 2] * rect$b[1],
+                y = rect$centre[2] + f[, 1] * rect$a[2] + f[, 2] * rect$b[2])
+  }
   inside <- lengths(sf::st_intersects(
     sf::st_as_sf(as.data.frame(g), coords = c("x", "y"), crs = sf::st_crs(domain)),
     domain)) > 0L

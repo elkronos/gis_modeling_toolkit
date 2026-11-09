@@ -1743,6 +1743,23 @@ old behaviour where there is a way.
 
 ## Bug fixes
 
+* **`resolution_profile()` with a variogram stopped on a study area much
+  longer than wide.**  The mean correlation over the study area, which
+  `reliability` reads, came from a grid over the hull's bounding box at a
+  spacing that follows the hull's area.  On a strip along an axis narrower
+  than half that spacing (300 points over 20000 x 10 m, in metres or in
+  kilometres), the call stopped with "wrong sign in 'by' argument" whenever
+  it held a fitted variogram (`sac` from `estimate_sac_range()`, or a
+  ladder set with `levels` and `sac = "auto"`).  On a thin strip at a
+  slant, the grid's rows crossed part of its length, or fewer than 10 nodes
+  fell inside and the bounding box's value was used: on the strip at 30
+  degrees the mean correlation was 0.058 where the strip's own is about
+  0.096.  A hull narrower than two steps of the grid is now laid out in
+  the frame of its rectangle of least area, in bands along it with the
+  nodes spread over each band's width, so a hull that tapers (a wedge, a
+  lens) is read over its area, and its value does not move with its angle.
+  Every other hull keeps its grid and its results.
+
 * **Areas in a CRS whose unit sf has no name for were read in square
   metres.**  For a projected CRS whose `+to_meter` unit sf has no name for
   (a unit of 1000 km, of 3.28 m or of 0.5 mm), `sf::st_area()` converts to
