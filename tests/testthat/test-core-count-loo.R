@@ -835,7 +835,9 @@ test_that("the nearest other location of a location is searched once for the who
   run <- function(est, fnn = TRUE) {
     testthat::local_mocked_bindings(.nearest_location_search = spy)
     if (!fnn) .co_without_fnn()
-    .co_profile(pts, estimate = est, obs_per_cell = c(9, 4.5, 2))
+    # Under seed 1 two levels hold a row alone in its region (133 and 300
+    # cells), so without FNN there is more than one level to search at.
+    .co_profile(pts, estimate = est, obs_per_cell = c(9, 4.5, 2), seed = 1)
   }
   # With FNN: one search, of every location, before the sweep.
   with <- run("mean")

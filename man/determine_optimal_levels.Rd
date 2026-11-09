@@ -270,8 +270,9 @@ lazily: k-means is re-run only for a focused neighbourhood around the
 elbow (±4 by default, or ±\code{top_n} if larger), so that only the most
 promising candidate k values incur the cost of the full Moran's I
 computation.  The re-run at each count draws its starts from a stream of
-its own, so with the other arguments fixed a count gets the same cells,
-\code{wss_eval} and Moran's I whichever \code{top_n} sets the
+its own, seeded before the sweep, so for one \code{set_seed} a count gets
+the same cells, \code{wss_eval} and Moran's I in any neighbourhood that
+holds it, whichever \code{top_n} and \code{max_levels} set the
 neighbourhood: a larger \code{top_n} adds counts to the neighbourhood and
 leaves the scores of the others as they were.
 

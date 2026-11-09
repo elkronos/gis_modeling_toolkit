@@ -3816,7 +3816,7 @@ old behaviour where there is a way.
   by more than about a two-hundred-millionth of the distance between
   neighbouring locations; coordinates rounded more coarsely can still give
   other regions.
-  The lattice above gives `loo` 0.3016 and the same regions in all three.
+  The lattice above gives `loo` 0.3066 and the same regions in all three.
   The scoring of a profile's levels, the refit of `select_resolution()`, the
   edge rule of `assign_features_to_polygons()` and `cell_values_at()` take
   the same tie between centres, so a row the profile scores in the cell of
@@ -3854,7 +3854,7 @@ old behaviour where there is a way.
   cells are taken in the layer's own coordinates.  The seeding functions with `init = "kmeans++"` and
   `determine_optimal_levels()` put the rows in order as `resolution_profile()`
   does, first coordinates equal but for their last bits counting as one
-  column.  The lattice above gives `loo` 0.2974 and the same regions in all
+  column.  The lattice above gives `loo` 0.2929 and the same regions in all
   three.  A change of unit or origin can still move a coordinate across the
   middle of a rounding step, and does so more often the smaller the extent:
   over 60 lattices, each in five other units or origins, the regions were
@@ -5514,21 +5514,20 @@ old behaviour where there is a way.
   first at `top_n` 1 to 4 and 16 at `top_n = 5`, both counts in both
   windows, and k = 17 had a |z| of 0.0013 at `top_n = 6` and of 0.30 at
   `top_n = 7`.  Under `"combined"` the ranking stayed and the diagnostics
-  moved.  Each re-run is now seeded with one integer drawn after the sweep
-  plus its count, and the stream is put back after it, so with the other
-  arguments fixed a count gets the same cells, `wss_eval` and Moran's I
-  whichever `top_n` sets the window.  A
+  moved.  Each re-run is now seeded with one integer drawn before the sweep
+  plus its count, and the stream is put back after it, so for one
+  `set_seed` a count gets the same cells, `wss_eval` and Moran's I in any
+  window that holds it.  A
   wider window still scores more counts, and under `"morans_i"` one of
-  them can rank first: on the same layer the first count is 15 at `top_n`
-  1 to 4, 17 at 5 and 18 at 6 and 7, each the count of smallest |z| in its
-  window, and 17 and 18 are counts the wider windows add.  For a given
+  them can rank first: on the same layer the first count is 16 at `top_n`
+  1 to 4, 17 at 5 and 6 and 19 at 7, each the count of smallest |z| in its
+  window, and 17 and 19 are counts the wider windows add.  For a given
   seed, `moran_i`, `moran_z`, `wss_eval` and the `"morans_i"` ranking can
   differ from before, and a `"morans_i"` call can fall back to the
   geometric ranking where it ranked, or rank where it fell back; the
   sweep, the elbow and the `"combined"` ranking are as before.  With
-  `set_seed = NULL` the re-runs take one draw from the caller's stream in
-  place of the draws of every re-run, so the stream after the call no
-  longer depends on `top_n`.
+  `set_seed = NULL` the re-runs no longer draw from the caller's stream,
+  so the stream after the call no longer depends on `top_n`.
 
 * **Moran's I of the cell means was `NA` for a response in small units, and
   in `determine_optimal_levels()` moved with the response's origin.**
@@ -6983,6 +6982,43 @@ old behaviour where there is a way.
   points in cells keeps the session's engine. Projected and CRS-less cells
   are indexed as before. `?build_tessellation` (`index`, `params$snapped`)
   says so.
+
+* **`determine_optimal_levels()` scored a count on other cells when
+  `max_levels` changed and the window around the elbow did not.**  Under
+  `criterion = "morans_i"` and `"combined"` the integer that seeds the
+  re-runs in the window was drawn after the sweep, which takes more draws
+  the more counts it runs, so `max_levels` moved it. On 480 points in
+  twelve clusters, `max_levels` 30 and 31 both put the elbow at 12 and the
+  window at 8 to 16, and `moran_z` at 14, 15 and 16 cells was -0.45, -0.45
+  and -0.59 against -1.27, -0.41 and 0.53; `"morans_i"` returned 15, 14, 16
+  against 15, 16, 10. The integer is now read before the sweep and the
+  stream is put back after the read, so for one `set_seed` a count gets the
+  same cells, `wss_eval`, `moran_i` and `moran_z` in any window that holds
+  it, whatever `max_levels` and `top_n` are. The sweep, the elbow and the
+  geometric ranking are as before; for a given seed the re-runs' scores
+  and the `"morans_i"` ranking can differ from before.
+  `?determine_optimal_levels` (Details) says so.
+
+* **`resolution_profile()` gave a level other cells when the ladder held
+  other levels.**  Every level's partition drew from one random stream in
+  ladder order, so a level's cells, and `wss`, `rss`, `cp`, `moran_z`,
+  `loo` and the other columns read off them, depended on the levels before
+  it: on 480 points in twelve clusters at `seed = 123`, the 20-cell level
+  had a `wss` of 106,786 on the ladder 10, 20, 30, 40 and of 106,030 on 20,
+  30, 40, and a `moran_z` of 0.65 against -1.02. Dropping low levels that
+  did not win moved the count `select_resolution()` chose: on the ladders
+  of even counts to 36 from 6, 8, 10 and 12, `criterion = "cp"` chose 34,
+  36, 30 and 28. A ladder of sizes moved the same way with the sizes it
+  held. Each level now runs on a stream of its own, seeded with one integer
+  drawn after the subsample plus the level, and the stream is put back
+  after it, so for one `seed` a level gets the same cells on any ladder
+  that holds it and is fitted to the same rows (on a layer of more than
+  `sample_n` rows a ladder of counts is fitted to a subsample and a ladder
+  of sizes to every row); on those four ladders `"cp"` and `"loo"` each choose one
+  count. Profiles for a given seed differ from before, and so do the
+  selections, seeds and cells built from them. With `seed = NULL` the
+  levels no longer draw from the caller's stream; the integer is one draw
+  from it. `?resolution_profile` (`seed`) says so.
 
 ## Documentation
 

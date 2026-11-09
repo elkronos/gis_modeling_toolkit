@@ -106,8 +106,12 @@ test_that("a count with no structure behind it is a classed warning where it bec
     expect_match(conditionMessage(w), "the count is not identified")
     expect_identical(nrow(out$value), as.integer(w$n))
   }
-  expect_identical(tryCatch(voronoi_seeds_kmeans(pts, k = p, partition = "kmeans"),
-                            spatialkit_no_structure = function(w) "caught"), "caught")
+  # On this noise Cp can be lowest at the ladder's first level, and the count
+  # then also raises spatialkit_bound_chosen, which this handler is not for.
+  expect_identical(withCallingHandlers(
+    tryCatch(voronoi_seeds_kmeans(pts, k = p, partition = "kmeans"),
+             spatialkit_no_structure = function(w) "caught"),
+    spatialkit_bound_chosen = function(w) invokeRestart("muffleWarning")), "caught")
   # A structured field raises none.
   f <- fns_field()
   pf <- fns_catch(resolution_profile(f, "z", sac = fns_sac(f), n_levels = 8, nstart = 3,

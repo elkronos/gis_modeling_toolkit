@@ -171,13 +171,14 @@ test_that("on lattices at spacings of 1, 30, 250 and 1000 every row is in the ce
   expect_length(moved$kmeans, 16L)
   # Which rows the polygons alone settle the other way rests on GEOS, so the
   # counts are held only on the platform the frozen fixture was recorded on.
-  # There the polygons alone would place rows of every lattice in another
-  # cell than the profile's under the density kind, and none under k-means,
+  # There the polygons alone would place rows of three of the four lattices
+  # in another cell than the profile's under the density kind, and none
+  # under k-means,
   # so the profile's rule decides the rows on an edge.  A point within the
   # margin of an edge is on it in every unit, so the four spacings of one
   # lattice, scaled copies of each other, give one count.
   if (.gt_same_platform()) {
-    expect_identical(moved$density, rep(c(1L, 8L, 5L, 5L), each = 4L))
+    expect_identical(moved$density, rep(c(0L, 1L, 7L, 19L), each = 4L))
     expect_identical(moved$kmeans, rep(0L, 16L))
   }
 })
@@ -236,11 +237,11 @@ test_that("cells returned in EPSG:4326 are joined in the profile's CRS: rows in 
   # apart, which the transform to degrees puts at one point: s2 refuses such
   # a cell, and a join on the sphere stopped.  Which cells that hits rests on
   # the last bits of GEOS's corners and of PROJ, so the counts are held only
-  # on the fixture's platform: there it is 15 of the 16 lattices under
-  # k-means and 11 of the 16 under the density kind.
+  # on the fixture's platform: there it is 14 of the 16 lattices under
+  # k-means and 8 of the 16 under the density kind.
   if (.gt_same_platform() && sf::sf_use_s2()) {
-    expect_identical(sum(refused$kmeans > 0L), 15L)
-    expect_identical(sum(refused$density > 0L), 11L)
+    expect_identical(sum(refused$kmeans > 0L), 14L)
+    expect_identical(sum(refused$density > 0L), 8L)
   }
 })
 
@@ -576,10 +577,11 @@ test_that("cells drawn in a projected CRS the caller names are its nearest-seed 
   }
   # Which ties the CRS named settles the other way rests on PROJ and GEOS,
   # so the counts are held only on the platform the frozen fixture was
-  # recorded on.  There no row is elsewhere in NAD83 / UTM 15N, and 4 and 3
-  # are, each with the warning's `what = "loo"`, in Albers and Web Mercator.
+  # recorded on.  There no row is elsewhere in NAD83 / UTM 15N, and 11 and
+  # 10 are, each with the warning's `what = "loo"`, in Albers and Web
+  # Mercator.
   if (.gt_same_platform()) {
-    expect_identical(n_elsewhere, c(`26915` = 0L, `5070` = 4L, `3857` = 3L))
+    expect_identical(n_elsewhere, c(`26915` = 0L, `5070` = 11L, `3857` = 10L))
     expect_identical(what, c(`26915` = NA_character_, `5070` = "loo", `3857` = "loo"))
   }
 })
@@ -682,12 +684,12 @@ test_that("rows the polygons alone place beside the record are reported, and the
   }
   # Which ties the polygons settle the other way rests on GEOS, so the counts
   # are held only on the platform the frozen fixture was recorded on.  There
-  # the polygons put 8 rows of the 30 m lattice and 5 of the 1000 m one in
+  # the polygons put 1 row of the 30 m lattice and 19 of the 1000 m one in
   # the other cell (a point within the margin of an edge is on it, and the
-  # smallest-area rule settles it), the first match of sf::st_join() 3 and
-  # 4, and every warning has `what = "loo"`.
+  # smallest-area rule settles it), the first match of sf::st_join() 1 and
+  # 6, and every warning has `what = "loo"`.
   if (.gt_same_platform()) {
-    expect_identical(unname(n_elsewhere), c(8L, 8L, 3L, 5L, 5L, 4L))
+    expect_identical(unname(n_elsewhere), c(1L, 1L, 1L, 19L, 19L, 6L))
     expect_identical(unname(what), rep("loo", 6L))
   }
 })
@@ -722,10 +724,10 @@ test_that("cells transformed to another projected CRS keep the record and are jo
     what[info] <- .gt_expect_reported(asg, cells, length(elsewhere), clause, info)
     n_elsewhere[info] <- length(elsewhere)
   }
-  # On the platform the frozen fixture was recorded on, 3 rows of the 1000 m
-  # lattice are elsewhere in each CRS, each time with `what = "loo"`.
+  # On the platform the frozen fixture was recorded on, 11 rows of the
+  # 1000 m lattice are elsewhere in each CRS, each time with `what = "loo"`.
   if (.gt_same_platform()) {
-    expect_identical(unname(n_elsewhere), c(0L, 0L, 3L, 3L))
+    expect_identical(unname(n_elsewhere), c(0L, 0L, 11L, 11L))
     expect_identical(unname(what), c(NA_character_, NA_character_, "loo", "loo"))
   }
 })
@@ -872,7 +874,7 @@ test_that("cells whose record says they are not the scored cells keep the polygo
                                                  quiet = TRUE))
   }
   # The rule changed something on this lattice, so the record is what decided.
-  if (.gt_same_platform()) expect_identical(sum(old != .gt_cell_of(P$asg, pts)), 8L)
+  if (.gt_same_platform()) expect_identical(sum(old != .gt_cell_of(P$asg, pts)), 1L)
 })
 
 

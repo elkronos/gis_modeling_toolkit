@@ -680,9 +680,9 @@ test_that("the size criterion's note writes its two errors in the notation of th
   s <- .tm_quiet(select_resolution(resolution_profile(big, "noise")))
   expect_identical(s$criterion, "size")
   expect_identical(c(format(signif(s$loo, 3)), format(signif(s$loo_one_cell, 3))),
-                   c("1.01e+08", "98500000"))
+                   c("1e+08", "98500000"))
   nums <- spatialkit:::.one_notation(c(s$loo, s$loo_one_cell))
-  expect_identical(nums, c("1.01e+08", "9.85e+07"))
+  expect_identical(nums, c("1e+08", "9.85e+07"))
   expect_identical(s$note[["structure"]], sprintf(paste0(
     "at %d cells the leave-one-out error of the pooled value (%s) is not below that of one ",
     "mean for the whole layer (%s) by more than 2%%: the response shows no spatial structure ",

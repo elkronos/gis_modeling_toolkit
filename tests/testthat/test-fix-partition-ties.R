@@ -155,7 +155,8 @@ test_that("the help bounds the rounding the cells survive by the spacing of the 
 
 test_that("a uniform layer gives the profile it gave, in every frame", {
   # Its distances do not tie, so nothing in it changes: the figures are
-  # those of the profile before the tie rule.
+  # those of the profile before the tie rule, with each level on a stream of
+  # its own.
   layer <- local({
     .pt_seed(3)
     .pt_layer(4.5e5 + stats::runif(1200, 0, 1e4), 4.55e6 + stats::runif(1200, 0, 7500))
@@ -165,8 +166,8 @@ test_that("a uniform layer gives the profile it gave, in every frame", {
     expect_identical(prof[[r]]$loo, prof$m$loo, info = r)
     expect_identical(prof[[r]]$rss, prof$m$rss, info = r)
   }
-  expect_equal(prof$m$loo, 0.3100867, tolerance = 1e-6)
-  expect_equal(prof$m$rss, 271.3873, tolerance = 1e-6)
+  expect_equal(prof$m$loo, 0.3072578, tolerance = 1e-6)
+  expect_equal(prof$m$rss, 273.2454, tolerance = 1e-6)
 })
 
 test_that("the density partition of a lattice is the same in five frames, in any row order and without FNN", {

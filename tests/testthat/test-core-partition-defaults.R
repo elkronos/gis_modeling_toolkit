@@ -140,13 +140,13 @@ test_that("resolution_profile() with partition = \"kmeans\" named is the profile
 })
 
 test_that("the k-means profile's centres are those of the k-means++ run it always made", {
-  # Geometry only, so nothing draws from the stream before the sweep, and the
-  # first level's centres are the best of `nstart` k-means++ starts on the
-  # rows in coordinate order under the profile's seed.
+  # Geometry only, so no subsample is drawn, and the first level's centres
+  # are the best of `nstart` k-means++ starts on the rows in coordinate order
+  # on the level's stream (helper-level-streams.R).
   pts <- .pd_pts(n = 150L, seed = 4L)
   xs  <- partition_sorted(partition_xy(pts))
   prof <- resolution_profile(pts, levels = 7L, nstart = 6, seed = 19, partition = "kmeans")
-  set.seed(19); old <- .pd_old_best(xs, 7L, nstart = 6L)
+  set.seed(profile_level_seed(19L, nrow(xs), 7L)); old <- .pd_old_best(xs, 7L, nstart = 6L)
   expect_equal(attr(prof, "centres")[["7"]], unname(old$centers), tolerance = 1e-12)
   # The sum is taken in the layer's coordinates from the clusters of the
   # frame of .kmeans_frame(): the old one to rounding.

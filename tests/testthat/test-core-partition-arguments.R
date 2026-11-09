@@ -124,19 +124,21 @@ test_that("get_voronoi_seeds() hands density_power, density_k and init to the en
 })
 
 test_that("resolution_profile() hands density_power, density_k and init to the engine", {
-  # Geometry only, so nothing draws from the stream before the sweep.
+  # Geometry only, so no subsample is drawn, and the level runs on its own
+  # stream (helper-level-streams.R).
   xy  <- .pa_xy()
   pts <- partition_points_sf(xy)
   k <- 25L
   call <- function(...) resolution_profile(pts, levels = k, nstart = 3, seed = 6,
                                            partition = "density", ...)
+  level_seed <- profile_level_seed(6L, nrow(xy), k)
   base <- call()
   expect_identical(attr(base, "centres")[[as.character(k)]],
-                   .pa_engine(xy, k, 6L, 3L, list())$centers)
+                   .pa_engine(xy, k, level_seed, 3L, list())$centers)
   for (nm in names(.pa_settings)) {
     st <- .pa_settings[[nm]]
     p <- do.call(call, st)
-    eng <- .pa_engine(xy, k, 6L, 3L, st)
+    eng <- .pa_engine(xy, k, level_seed, 3L, st)
     cen <- attr(p, "centres")[[as.character(k)]]
     expect_identical(cen, eng$centers, label = nm)
     expect_gt(max(abs(cen - attr(base, "centres")[[as.character(k)]])), 1, label = nm)
@@ -149,14 +151,15 @@ test_that("resolution_profile() hands density_power, density_k and init to the e
     expect_identical(partition_xy(seeds), eng$centers, label = nm)
     expect_identical(attr(seeds, "partition"), .pa_record(st), label = nm)
   }
-  # The second level of a ladder is built with the same settings: its starts
-  # follow the first level's in the stream.
+  # The second level of a ladder is built with the same settings, each level
+  # on its own stream.
   st <- .pa_settings$all
   p2 <- do.call(resolution_profile, c(list(pts, levels = c(8L, k), nstart = 2, seed = 6,
                                            partition = "density"), st))
-  set.seed(6)
+  set.seed(profile_level_seed(6L, nrow(xy), 8L))
   e1 <- do.call(spatialkit:::.partition_centres,
                 c(list(xy, 8L, partition = "density", nstart = 2L, iter.max = 100L), st))
+  set.seed(level_seed)
   e2 <- do.call(spatialkit:::.partition_centres,
                 c(list(xy, k, partition = "density", nstart = 2L, iter.max = 100L), st))
   expect_identical(attr(p2, "centres")[["8"]], e1$centers)

@@ -106,7 +106,17 @@ kind the starts it had when 25 was the default.
 
 \item{seed}{RNG seed for the subsample and the restarts; restored
 afterwards.  Default 123.  The rows are put in coordinate order before
-either, so the profile does not depend on the order they come in.}
+either, so the profile does not depend on the order they come in.  Each
+level's restarts run on a stream of their own, seeded from \code{seed}
+and the level, so for one \code{seed} a level gets the same cells on
+any ladder that holds it and is fitted to the same rows, and with them
+the same \code{wss}, \code{rss}, \code{moran_z} and the other columns
+read off its cells.  On a layer of more than \code{sample_n} rows a
+ladder of counts is fitted to a subsample and a ladder of sizes to every
+row, so there the two can give a level other cells.
+\code{cp} also reads its noise variance, which without a usable
+variogram comes from the ladder's finest level
+(\code{attr(, "cp_noise")}).}
 
 \item{sac}{Optional \code{sac_range} object from
 \code{\link{estimate_sac_range}()} to take the range, nugget and

@@ -63,13 +63,15 @@
                "partition", "crs", "scored_cells")
 
 # 600 rows (seed 5101).  Its pooled profile at 4.5 rows a cell has 133
-# cells; its profile of plain means on the seven sizes has its lowest
-# leave-one-out error at 50 cells, a level inside the ladder.  Neither path
-# raises a warning from the profile to the summary.
+# cells; its profile of plain means on the seven sizes, under seed 11, has
+# its lowest leave-one-out error at 50 cells, a level inside the ladder (under
+# most seeds the lowest is at 33, the coarsest size).  Neither path raises a
+# warning from the profile to the summary.
 .cr_600    <- function() .cr_keep("l600", .cr_layer(600, 5101))
 .cr_pooled <- function() .cr_keep("pooled", .cr_profile(.cr_600()))
 .cr_mean7  <- function()
-  .cr_keep("mean7", .cr_profile(.cr_600(), estimate = "mean", obs_per_cell = .cr_sizes))
+  .cr_keep("mean7", .cr_profile(.cr_600(), estimate = "mean", obs_per_cell = .cr_sizes,
+                                seed = 11))
 .cr_size <- function() .cr_keep("size", select_resolution(.cr_pooled(), criterion = "size"))
 .cr_loo  <- function() .cr_keep("loo", select_resolution(.cr_mean7(), criterion = "loo"))
 
@@ -1120,7 +1122,7 @@ test_that(".count_rule_check() compares the rows, then the cells, then the error
   expect_identical(cells_of(check(list(loo = NA_real_), record = na)), "match")
   expect_identical(what_of(check(record = na)), "loo")
   expect_match(conditionMessage(check(record = na)$warnings[[1L]]),
-               "with a leave-one-out error of NA; here 600 rows in 133 cells give 2.2", fixed = TRUE)
+               "with a leave-one-out error of NA; here 600 rows in 133 cells give 2.194", fixed = TRUE)
 
   # The estimate asked for is the one scored, whatever the summary reports.
   mean_rec <- rec; mean_rec$scored$estimate <- "mean"

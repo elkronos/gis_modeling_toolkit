@@ -1377,7 +1377,17 @@
 #'   \code{attr(, "nstart")} holds the number that was run.
 #' @param seed RNG seed for the subsample and the restarts; restored
 #'   afterwards.  Default 123.  The rows are put in coordinate order before
-#'   either, so the profile does not depend on the order they come in.
+#'   either, so the profile does not depend on the order they come in.  Each
+#'   level's restarts run on a stream of their own, seeded from \code{seed}
+#'   and the level, so for one \code{seed} a level gets the same cells on
+#'   any ladder that holds it and is fitted to the same rows, and with them
+#'   the same \code{wss}, \code{rss}, \code{moran_z} and the other columns
+#'   read off its cells.  On a layer of more than \code{sample_n} rows a
+#'   ladder of counts is fitted to a subsample and a ladder of sizes to every
+#'   row, so there the two can give a level other cells.
+#'   \code{cp} also reads its noise variance, which without a usable
+#'   variogram comes from the ladder's finest level
+#'   (\code{attr(, "cp_noise")}).
 #' @param sac Optional \code{sac_range} object from
 #'   \code{\link{estimate_sac_range}()} to take the range, nugget and
 #'   correlation function from.  Pass one fitted with \code{detrend =
@@ -2173,6 +2183,16 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   if (has_pred) pred <- pred[idx, , drop = FALSE]
   if (!is.null(in_sel)) in_sel <- in_sel[idx]
   n <- nrow(xy)
+  # The integer that seeds each level's partition (see the loop over the
+  # levels below), drawn after the subsample and before anything that runs
+  # only on some calls (the variogram).  Every level drew from the one
+  # stream in ladder order, so a level's cells, and every column read off
+  # them, depended on which other levels the ladder held: on twelve
+  # clusters the 20-cell level of the ladder 10, 20, 30, 40 and of the
+  # ladder 20, 30, 40 had other cells, and dropping low levels that did
+  # not win moved the count select_resolution() chose.  The bound keeps the
+  # integer plus any level (at most n - 1) an integer.
+  level_seed <- sample.int(.Machine$integer.max - n, 1L)
 
   # The variable the cells have to represent: the response, or what the
   # predictors leave of it.  Rows with a non-finite value drop out of the RSS
@@ -2989,10 +3009,15 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   L_fit_v <- as.numeric(levels)
   for (i in seq_len(m)) {
     L  <- levels[i]
-    kb <- .partition_centres(xy, L, partition = part$kind, init = part$init,
-                             nstart = nstart, iter.max = part_iter,
-                             density_power = density_power, density_k = density_k,
-                             use_fnn = backend("FNN"))
+    # A stream of its own for each level, the stream put back after it: a
+    # level gets the same cells on every ladder that holds it.
+    restore_stream <- .with_seed(level_seed + L)
+    kb <- tryCatch(
+      .partition_centres(xy, L, partition = part$kind, init = part$init,
+                         nstart = nstart, iter.max = part_iter,
+                         density_power = density_power, density_k = density_k,
+                         use_fnn = backend("FNN")),
+      finally = restore_stream())
     if (is.null(kb)) {
       .log_warn("resolution_profile(): %s failed at %d cells; that level is NA.",
                 if (identical(part$kind, "density")) "the density-weighted k-means"

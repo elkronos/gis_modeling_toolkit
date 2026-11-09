@@ -761,8 +761,9 @@
 #' elbow (±4 by default, or ±\code{top_n} if larger), so that only the most
 #' promising candidate k values incur the cost of the full Moran's I
 #' computation.  The re-run at each count draws its starts from a stream of
-#' its own, so with the other arguments fixed a count gets the same cells,
-#' \code{wss_eval} and Moran's I whichever \code{top_n} sets the
+#' its own, seeded before the sweep, so for one \code{set_seed} a count gets
+#' the same cells, \code{wss_eval} and Moran's I in any neighbourhood that
+#' holds it, whichever \code{top_n} and \code{max_levels} set the
 #' neighbourhood: a larger \code{top_n} adds counts to the neighbourhood and
 #' leaves the scores of the others as they were.
 #'
@@ -1465,6 +1466,25 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   wss_spread <- numeric(k_max)
   failed_k <- integer(0)
 
+  # The integer that seeds the model-aware re-runs (see the loop over
+  # `eval_ks` below), read here, before the sweep.  Read after it, it came
+  # after as many draws as the sweep took, which grow with k_max, so
+  # max_levels 30 and 31 gave one knee and one window and other cells,
+  # Moran's I and ranking at the same counts.  Read here it depends on the
+  # stream and the distinct locations alone.  The stream is put back after
+  # the read, so the sweep starts where it did, and the sweep, the elbow and
+  # the geometric ranking are the same under every criterion.  The bound
+  # keeps the integer plus any count of the ladder (at most n_uniq) an
+  # integer.  With no stream yet (set_seed = NULL on a fresh session) the
+  # read starts one, and the sweep goes on from it.
+  rerun_seed <- NULL
+  if (has_model_vars) {
+    stream_before <- get0(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+    rerun_seed <- sample.int(.Machine$integer.max - n_uniq, 1L)
+    if (!is.null(stream_before))
+      assign(".Random.seed", stream_before, envir = .GlobalEnv)
+  }
+
   for (k in seq_len(k_max)) {
     if (k == 1L) {
       ctr <- colMeans(xy)
@@ -1607,20 +1627,17 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # the sweep did.  No ranking reads it; "combined" ranks by the sweep's
   # sag, the one the elbow is read from.
   #
-  # Each re-run has a stream of its own: one integer is drawn here, after
-  # the sweep, and the re-run at k is seeded with it plus k, then the stream
-  # is put back.  So a count gets the same cells, wss_eval and Moran's I
-  # whichever top_n sets the window, and a window that starts lower (top_n
-  # above 4) does not move the counts the narrower window holds.  Nothing
-  # draws from the stream between the sweep and here, so top_n, which sets
-  # the window, does not reach the draw; the bound keeps the integer plus
-  # k_max an integer.  The integer depends on set_seed, or with set_seed =
-  # NULL on the caller's stream, which then moves by this one draw for
-  # every top_n.
+  # Each re-run has a stream of its own: the re-run at k is seeded with the
+  # integer read before the sweep plus k, then the stream is put back.  So a
+  # count gets the same cells, wss_eval and Moran's I in every window that
+  # holds it, whichever top_n sets the window and whatever max_levels (or
+  # anything else that lengthens the sweep) is, and a window that starts
+  # lower does not move the counts the narrower window holds.  The integer
+  # depends on set_seed, or with set_seed = NULL on the caller's stream,
+  # which the read does not move.
   moran_vals <- rep(NA_real_, k_max)   # raw I, reported in $diagnostics
   moran_z    <- rep(NA_real_, k_max)   # standardised deviate, ranks under "morans_i"
   wss_eval   <- wss
-  rerun_seed <- sample.int(.Machine$integer.max - k_max, 1L)
   for (k in eval_ks) {
     restore_stream <- .with_seed(rerun_seed + k)
     kb <- .partition_centres(xy, k, partition = "kmeans", init = "kmeans++",

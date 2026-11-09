@@ -7,8 +7,9 @@
 # in it, and with them wss_eval, moran_i and moran_z; under "morans_i" that
 # moved the first count (15 at top_n 1 to 4 and 16 at top_n 5 on twelve
 # clusters, both counts in both windows).  Each re-run is now seeded with
-# one integer drawn after the sweep plus its count, so a count scores the
-# same whichever top_n sets the window.  A wider window still adds counts, and
+# one integer read before the sweep plus its count, so a count scores the
+# same whichever top_n sets the window (and, test-fix-streams-per-step.R,
+# whatever max_levels is).  A wider window still adds counts, and
 # under "morans_i" one of those can rank first.
 # ---------------------------------------------------------------------------
 
@@ -240,19 +241,20 @@ test_that("?determine_optimal_levels and NEWS say a count scores the same whiche
                           "\\code{max(4, top_n)}: a \\code{top_n} above 4 scores more counts, and ",
                           "under \\code{\"morans_i\"} one of them can rank first. A count scores ",
                           "the same whichever \\code{top_n} puts it in the window."), fixed = TRUE)
-  expect_match(rd, paste0("The re-run at each count draws its starts from a stream of its own, so ",
-                          "with the other arguments fixed a count gets the same cells, ",
-                          "\\code{wss_eval} and Moran's I whichever \\code{top_n} sets the ",
+  expect_match(rd, paste0("The re-run at each count draws its starts from a stream of its own, ",
+                          "seeded before the sweep, so for one \\code{set_seed} a count gets the ",
+                          "same cells, \\code{wss_eval} and Moran's I in any neighbourhood that ",
+                          "holds it, whichever \\code{top_n} and \\code{max_levels} set the ",
                           "neighbourhood"), fixed = TRUE)
   news <- read("NEWS.md")
-  expect_match(news, paste0("Each re-run is now seeded with one integer drawn after the sweep plus ",
-                            "its count, and the stream is put back after it, so with the other ",
-                            "arguments fixed a count gets the same cells, `wss_eval` and Moran's I ",
-                            "whichever `top_n` sets the window."),
+  expect_match(news, paste0("Each re-run is now seeded with one integer drawn before the sweep plus ",
+                            "its count, and the stream is put back after it, so for one ",
+                            "`set_seed` a count gets the same cells, `wss_eval` and Moran's I in ",
+                            "any window that holds it."),
                fixed = TRUE)
   expect_match(news, paste0("can fall back to the geometric ranking where it ranked, or rank where ",
                             "it fell back"), fixed = TRUE)
-  expect_match(news, paste0("With `set_seed = NULL` the re-runs take one draw from the caller's ",
-                            "stream in place of the draws of every re-run, so the stream after the ",
-                            "call no longer depends on `top_n`."), fixed = TRUE)
+  expect_match(news, paste0("With `set_seed = NULL` the re-runs no longer draw from the caller's ",
+                            "stream, so the stream after the call no longer depends on `top_n`."),
+               fixed = TRUE)
 })
