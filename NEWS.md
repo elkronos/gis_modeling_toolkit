@@ -5715,6 +5715,44 @@ old behaviour where there is a way.
   the floor and points to `resolution_profile()`, and the help page gives
   the measured numbers.  Which candidates are scored is unchanged.
 
+* **The lines `determine_optimal_levels()` logs where the window around
+  the elbow ends at nine cells or fewer told a `"combined"` call that the
+  response would take part with a larger `max_levels`, and named
+  `max_levels` whatever bound ended the ladder.**  The line logged before
+  the sweep (`k_max` of 9 or fewer) and the one logged after it said that
+  the model-aware criteria carry no information there and that the call
+  falls back to the geometric ranking for that reason, and the first said
+  to raise `max_levels` "for the criteria to contribute".  `"combined"`
+  ranks by the sag of the WSS curve and reads no response at any count: it
+  returns the geometric ranking there by a fixed rule, and a larger
+  `max_levels` gives the sag's order.  For `"combined"` the two lines now
+  say that it returns the geometric ranking when the window ends at nine
+  cells or fewer and that Moran's I, which it reports beside its ranking,
+  is computed from ten cells.  The line before the sweep also began
+  "max_levels leaves k_max = ..." and advised raising `max_levels` when
+  the distinct locations or the points ended the ladder: on 200 rows at 8
+  locations it said so at `max_levels` 12 and 30 alike, and no
+  `max_levels` takes `k_max` above 8 there.  It now names the bound that
+  ended the ladder ("the 8 distinct locations leave k_max = 8", "one short
+  of the 10 points leaves k_max = 9") and advises raising `max_levels` only
+  where a larger `max_levels` takes `k_max` above 9; otherwise it says that
+  no `max_levels` takes `k_max` higher on these points.  Where
+  `max_levels` equals the other bound (8 locations at `max_levels = 8`)
+  the line names `max_levels` and no longer advises raising it.  On a
+  subsample (more rows than `sample_n`) the points and the distinct
+  locations that end the ladder are the subsample's, and the line, the
+  warning for a curve with no elbow and the warning for a ladder too short
+  to read named them as the layer's ("one short of the 9 points" on 400
+  rows at `sample_n = 9`): they now say "one short of the sample_n = 9
+  points drawn from 400" or "the 8 distinct locations in the sample_n = 30
+  rows drawn from 361", and the advice is to raise `sample_n` where that
+  takes `k_max` higher.  The warning for a ladder too short to read
+  advised raising `max_levels` to 3 wherever `max_levels` named the bound,
+  as on 3 distinct points at `max_levels = 2`, where no `max_levels`
+  lengthens the ladder; it now says to choose the count on other grounds
+  there.  The `"morans_i"` lines bound by `max_levels` alone, the counts
+  and the diagnostics are as before.
+
 * **`build_tessellation()` could not tessellate CRS-less planar points
   inside a CRS-less boundary.**  `ensure_projected()` marks such points
   `crs_assumed = "none"` ("planar, leave alone"), and `build_tessellation()`

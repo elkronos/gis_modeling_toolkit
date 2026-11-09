@@ -335,6 +335,118 @@ test_that("the ranking warning comes with \"morans_i\" alone and names a way on 
                               criterion = "combined")$n, 0L)
 })
 
+# Where the window around the elbow ends at nine cells or fewer, the lines
+# logged for "combined" say that it returns the geometric ranking there and
+# that Moran's I, which it reports beside its ranking, is computed from ten
+# cells.  They said that the model-aware criteria carry no information there
+# and, before the sweep, to raise max_levels for the criteria to contribute;
+# "combined" ranks by the sag and reads no response at any count.  The lines
+# of "morans_i" stay.
+flc_uniform <- function(n = 400L, seed = 5L) {
+  set.seed(seed)
+  d <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+  d$w <- rnorm(n)
+  d$z <- d$w + rnorm(n)
+  sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+}
+# Two separated clusters of 25 points: an elbow at 2.
+flc_two <- function() {
+  set.seed(1)
+  d <- data.frame(x = 5e5 + c(runif(25, 0, 10), runif(25, 90, 100)),
+                  y = 5e6 + c(runif(25, 0, 10), runif(25, 90, 100)))
+  d$z <- rnorm(50)
+  sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+}
+# Four separated clusters of 100 points with a response trending in x: an
+# elbow at 4, so a window of k = 2 to 8 above k_max = 9.
+flc_four <- function() {
+  set.seed(3)
+  cen <- cbind(c(1000, 4000, 1000, 4000), c(1000, 1000, 4000, 4000))
+  id <- sample(1:4, 400, TRUE)
+  d <- data.frame(x = cen[id, 1] + rnorm(400, sd = 150), y = cen[id, 2] + rnorm(400, sd = 150))
+  d$z <- d$x / 1000 + rnorm(400)
+  sf::st_as_sf(d, coords = c("x", "y"), crs = 32615)
+}
+flc_logged <- function(...) {
+  lines <- capture_spatialkit_log(value <- suppressWarnings(tryCatch(
+    determine_optimal_levels(..., set_seed = 3), error = function(e) e)))
+  list(value = value, lines = sub("^WARN \\[[^]]*\\] ", "", lines))
+}
+flc_old_reason <- c("carry no information", "Raise max_levels", "for the criteria to contribute",
+                    "will fall back to", "score only the elbow's neighbourhood")
+
+test_that("the line before the sweep tells a \"combined\" call what it does at nine cells or fewer", {
+  uni <- flc_uniform()
+  ends <- c(na = " if the WSS curve has an elbow (with none the call returns NA)",
+            error = " if the WSS curve has an elbow (with none the call stops)",
+            warn = "")
+  for (one in names(ends)) {
+    r <- flc_logged(uni, max_levels = 8, response_var = "z", predictor_vars = "w",
+                    criterion = "combined", on_no_elbow = one)
+    line <- grep("max_levels leaves k_max = 8", r$lines, value = TRUE)
+    expect_length(line, 1L)
+    expect_identical(line, paste0("determine_optimal_levels(): max_levels leaves k_max = 8, so ",
+                                  "the window around the elbow ends at nine cells or fewer, and ",
+                                  "there criterion = 'combined' returns the geometric ranking",
+                                  ends[[one]], ". Moran's I, which it reports beside its ",
+                                  "ranking, is computed from ten cells."), info = one)
+    for (old in flc_old_reason)
+      expect_false(any(grepl(old, r$lines, fixed = TRUE)), info = paste(one, old))
+    # Said once, before the sweep: the line after it is for k_max above 9.
+    expect_false(any(grepl("the window around the elbow, k = ", r$lines, fixed = TRUE)),
+                 info = one)
+  }
+  # What the line says is what the call does: the geometric ranking where
+  # there is an elbow, and under "warn" where there is none.
+  two <- flc_two()
+  r <- flc_logged(two, max_levels = 6, response_var = "z", criterion = "combined")
+  expect_identical(as.vector(r$value),
+                   as.vector(determine_optimal_levels(two, max_levels = 6, set_seed = 3)))
+  expect_null(attr(r$value, "diagnostics"))
+  expect_match(grep("max_levels leaves k_max = 6", r$lines, value = TRUE),
+               "returns the geometric ranking if the WSS curve has an elbow", fixed = TRUE)
+  r <- flc_logged(uni, max_levels = 8, response_var = "z", criterion = "combined",
+                  on_no_elbow = "warn")
+  expect_identical(as.vector(r$value),
+                   as.vector(suppressWarnings(determine_optimal_levels(
+                     uni, max_levels = 8, on_no_elbow = "warn", set_seed = 3))))
+})
+
+test_that("the line before the sweep of a \"morans_i\" call bound by max_levels is as it was", {
+  r <- flc_logged(flc_uniform(), max_levels = 8, response_var = "z", criterion = "morans_i")
+  expect_identical(
+    grep("max_levels leaves k_max = 8", r$lines, value = TRUE),
+    paste0("determine_optimal_levels(): max_levels leaves k_max = 8, and the model-aware ",
+           "criteria carry no information at nine cells or fewer; criterion = 'morans_i' will ",
+           "fall back to the geometric ranking if the WSS curve has an elbow (with none the ",
+           "call returns NA). Raise max_levels above 9 (well above, so the elbow neighbourhood ",
+           "reaches past the floor) for the criteria to contribute."))
+})
+
+test_that("after the sweep, a window that ends at nine cells or fewer is said for \"combined\" the same way", {
+  p <- flc_four()
+  geometric <- as.vector(determine_optimal_levels(p, max_levels = 20, set_seed = 3))
+  for (ml in c(20, 60)) {
+    r <- flc_logged(p, response_var = "z", max_levels = ml, criterion = "combined")
+    expect_false(any(grepl("leaves k_max", r$lines, fixed = TRUE)), info = paste("max_levels", ml))
+    line <- grep("the window around the elbow, k = ", r$lines, value = TRUE, fixed = TRUE)
+    expect_identical(line, paste0("determine_optimal_levels(): the window around the elbow, ",
+                                  "k = 2 to 8, ends at nine cells or fewer, and there criterion ",
+                                  "= 'combined' returns the geometric ranking. Moran's I, which ",
+                                  "it reports beside its ranking, is computed from ten cells; ",
+                                  "resolution_profile() scores every level of its ladder."),
+                     info = paste("max_levels", ml))
+    for (old in flc_old_reason)
+      expect_false(any(grepl(old, r$lines, fixed = TRUE)), info = paste(ml, old))
+    expect_identical(as.vector(r$value), geometric, info = paste("max_levels", ml))
+  }
+  # "morans_i" keeps its line.
+  r <- flc_logged(p, response_var = "z", max_levels = 20, criterion = "morans_i")
+  expect_length(grep(paste0("the model-aware criteria score only the elbow's neighbourhood, ",
+                            "k = 2 to 8, and carry no information at nine cells or fewer, so ",
+                            "criterion = 'morans_i' falls back"), r$lines, fixed = TRUE), 1L)
+})
+
 
 test_that("the help and the vignette say \"combined\" ranks by the sag and the criterion stands", {
   src <- flc_source()

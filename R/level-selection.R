@@ -1398,6 +1398,10 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
                             c(list(resp_vec),
                               lapply(seq_len(ncol(pred_mat)), function(j) pred_mat[, j]))))
   idx <- if (n > sample_n) ord[sample(seq_len(n), sample_n)] else ord
+  # The distinct locations of the whole layer, for the messages below: on a
+  # subsample the ladder is bounded by the subsample's points and locations,
+  # and a larger sample_n raises those bounds up to the layer's.
+  n_uniq_layer <- if (length(idx) < n) .n_locations(xy) else NA_integer_
   xy <- xy[idx, , drop = FALSE]
   moran_rows <- moran_rows[idx]
   if (has_model_vars) {
@@ -1426,12 +1430,28 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # Which bound ended the ladder, for the messages below: they used to name
   # max_levels whatever did, and on five stations at max_levels = 12 it was
   # the stations.
+  # On a subsample the bound is named as the subsample's, with sample_n and
+  # the rows of the layer: it used to read "one short of the 9 points" on a
+  # layer of 400 rows at sample_n = 9.
+  drawn <- nrow(xy) < n
   k_max_from <- if (k_max < max(2L, ml) && k_max == n_uniq)
-    sprintf("the %d distinct locations", n_uniq)
+    (if (drawn && n_uniq < n_uniq_layer)
+       sprintf("the %d distinct locations in the sample_n = %d rows drawn from %d",
+               n_uniq, nrow(xy), n)
+     else sprintf("the %d distinct locations", n_uniq))
   else if (k_max < max(2L, ml))
-    sprintf("one short of the %d points", nrow(xy))
+    (if (drawn) sprintf("one short of the sample_n = %d points drawn from %d", nrow(xy), n)
+     else sprintf("one short of the %d points", nrow(xy)))
   else if (ml < 2L) sprintf("max_levels = %d, raised to 2", ml)
   else "max_levels"
+  # How far k_max can go with max_levels left out (cap_drawn), and with the
+  # whole layer drawn as well (cap_layer).  The advice in the messages below
+  # is read from these and not from k_max_from: where max_levels ties the
+  # other bound (8 locations at max_levels = 8), k_max_from is "max_levels"
+  # and no max_levels takes k_max higher.
+  cap_drawn <- min(nrow(xy) - 1L, n_uniq)
+  cap_layer <- if (drawn) min(n - 1L, n_uniq_layer) else cap_drawn
+  kmeans_cut <- FALSE
 
   # Say it BEFORE the sweep: the model-aware criteria carry no information at
   # nine cells or fewer (see the resolution floor in Details), so with
@@ -1440,18 +1460,51 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # run first and the fallback was logged afterwards.
   # Under "na" and "error" a curve with no elbow ends the call before any
   # ranking, so the fallback is promised only for a curve that has one.
-  if (criterion != "geometric" && k_max <= 9L)
-    .log_warn(paste0("determine_optimal_levels(): max_levels leaves k_max = %d, ",
-                     "and the model-aware criteria carry no information at ",
-                     "nine cells or fewer; criterion = '%s' will fall back to ",
-                     "the geometric ranking%s. Raise max_levels above 9 (well ",
-                     "above, so the elbow neighbourhood reaches past the ",
-                     "floor) for the criteria to contribute."),
-              k_max, criterion,
-              switch(on_no_elbow,
-                     warn = "",
-                     na = " if the WSS curve has an elbow (with none the call returns NA)",
-                     error = " if the WSS curve has an elbow (with none the call stops)"))
+  # The line names the bound that ended the ladder (k_max_from), and advises
+  # raising max_levels only where a larger max_levels takes k_max past nine
+  # cells: on eight distinct locations no max_levels takes k_max above 8.
+  # On a subsample a larger sample_n can.
+  # "combined" ranks by the sag and reads no response at any count, so it
+  # is not told that a larger max_levels lets the criteria contribute: in a
+  # window that ends at nine cells or fewer it returns the geometric ranking
+  # by a fixed rule.
+  if (criterion != "geometric" && k_max <= 9L) {
+    bound <- if (startsWith(k_max_from, "the ")) paste(k_max_from, "leave")
+             else if (ml < 2L) paste0(k_max_from, ", leaves")
+             else paste(k_max_from, "leaves")
+    if_elbow <- switch(on_no_elbow,
+                       warn = "",
+                       na = " if the WSS curve has an elbow (with none the call returns NA)",
+                       error = " if the WSS curve has an elbow (with none the call stops)")
+    if (criterion == "morans_i")
+      .log_warn(paste0("determine_optimal_levels(): %s k_max = %d, ",
+                       "and the model-aware criteria carry no information at ",
+                       "nine cells or fewer; criterion = '%s' will fall back to ",
+                       "the geometric ranking%s. %s"),
+                bound, k_max, criterion, if_elbow,
+                if (cap_drawn >= 10L)
+                  paste0("Raise max_levels above 9 (well above, so the elbow ",
+                         "neighbourhood reaches past the floor) for the criteria ",
+                         "to contribute.")
+                else if (cap_layer >= 10L)
+                  sprintf(paste0("Raise sample_n, which draws %d of the %d rows, %sfor ",
+                                 "the criteria to contribute."),
+                          nrow(xy), n,
+                          if (ml <= 9L)
+                            paste0("and max_levels above 9 (well above, so the elbow ",
+                                   "neighbourhood reaches past the floor) ")
+                          else "")
+                else sprintf(paste0("No max_levels%s takes k_max above %d on these ",
+                                    "points, so the criteria cannot contribute."),
+                             if (drawn) " or sample_n" else "", cap_layer))
+    else
+      .log_warn(paste0("determine_optimal_levels(): %s k_max = %d, so the window ",
+                       "around the elbow ends at nine cells or fewer, and there ",
+                       "criterion = 'combined' returns the geometric ranking%s. ",
+                       "Moran's I, which it reports beside its ranking, is ",
+                       "computed from ten cells."),
+                bound, k_max, if_elbow)
+  }
 
   # 25 k-means++ restarts per k rather than stats::kmeans(nstart = 5): the
   # WSS curve is read for its shape, and optimisation noise on it is what
@@ -1514,6 +1567,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
       if (hi %in% failed_k) {
         k_max <- lo
         k_max_from <- sprintf("k-means failing from k = %d", lo + 1L)
+        kmeans_cut <- TRUE
         break
       }
       wss[fk] <- (wss[lo] + wss[hi]) / 2
@@ -1556,8 +1610,14 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
                          "levels to see a bend. k = %d is not a finding about the ",
                          "data; %s"),
                   k_max, k_max_from, elbow$knee_k,
-                  if (identical(k_max_from, "max_levels") || ml < 2L)
-                    "raise max_levels to 3 or more."
+                  # max_levels is the way on only where a larger one takes
+                  # k_max to 3; at 2 locations and max_levels = 2 none does.
+                  if (kmeans_cut) "choose the count on other grounds."
+                  else if (cap_drawn >= 3L) "raise max_levels to 3 or more."
+                  else if (cap_layer >= 3L)
+                    sprintf("raise sample_n, which draws %d of the %d rows%s.",
+                            nrow(xy), n,
+                            if (ml < 3L) ", and max_levels to 3 or more" else "")
                   else "choose the count on other grounds.",
                   diagnostics = na_diagnostics)
   else if (!isTRUE(elbow$structured))
@@ -1701,9 +1761,19 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     # alone.  The warning used to say only that Moran's I "could not be
     # computed", and the one before the sweep fires only at k_max <= 9.
     # Such a window falls back under either criterion, set by the ladder and
-    # not by the response.
+    # not by the response.  "combined" reads no response at any count, so
+    # its line says the rule and not a want of information (as before the
+    # sweep).
     if (max(eval_ks) <= 9L) {
-      if (k_max > 9L)
+      if (k_max > 9L && criterion == "combined")
+        .log_warn(paste0("determine_optimal_levels(): the window around the elbow, ",
+                         "k = %d to %d, ends at nine cells or fewer, and there ",
+                         "criterion = 'combined' returns the geometric ranking. ",
+                         "Moran's I, which it reports beside its ranking, is computed ",
+                         "from ten cells; resolution_profile() scores every level of ",
+                         "its ladder."),
+                  min(eval_ks), max(eval_ks))
+      else if (k_max > 9L)
         .log_warn(paste0("determine_optimal_levels(): the model-aware criteria score ",
                          "only the elbow's neighbourhood, k = %d to %d, and carry no ",
                          "information at nine cells or fewer, so criterion = '%s' ",

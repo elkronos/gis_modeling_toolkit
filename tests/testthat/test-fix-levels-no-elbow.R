@@ -209,23 +209,28 @@ test_that("the line before the sweep promises the fallback only where there is a
                              criterion = "combined")))
   expect_true(is.na(out$value))
   expect_length(line(lines), 1L)
-  expect_match(line(lines), paste0("criterion = 'combined' will fall back to the geometric ",
-                                   "ranking if the WSS curve has an elbow (with none the call ",
-                                   "returns NA). Raise max_levels"), fixed = TRUE)
+  # "combined" reads no response at any count: the line says it returns the
+  # geometric ranking there, not that a larger max_levels lets it contribute.
+  expect_match(line(lines), paste0("criterion = 'combined' returns the geometric ranking if ",
+                                   "the WSS curve has an elbow (with none the call returns ",
+                                   "NA). Moran's I, which it reports beside its ranking"),
+               fixed = TRUE)
+  expect_false(grepl("Raise max_levels", line(lines), fixed = TRUE))
   lines <- capture_spatialkit_log(e <- tryCatch(
     determine_optimal_levels(uni, max_levels = 8, response_var = "z", predictor_vars = "w",
                              criterion = "combined", on_no_elbow = "error"),
     error = function(e) e))
   expect_s3_class(e, "spatialkit_no_elbow")
-  expect_match(line(lines), "if the WSS curve has an elbow (with none the call stops). Raise",
+  expect_match(line(lines), "if the WSS curve has an elbow (with none the call stops). Moran's I",
                fixed = TRUE)
-  # Under "warn" the call does fall back, and the line says so as it did.
+  # Under "warn" the call does return the geometric ranking, as the line says.
   lines <- capture_spatialkit_log(out <- fne_catch(
     determine_optimal_levels(uni, max_levels = 8, response_var = "z", predictor_vars = "w",
                              criterion = "combined", on_no_elbow = "warn")))
   expect_true(all(is.finite(out$value)))
-  expect_match(line(lines), "will fall back to the geometric ranking. Raise max_levels",
+  expect_match(line(lines), "returns the geometric ranking. Moran's I, which it reports beside",
                fixed = TRUE)
+  expect_false(grepl("Raise max_levels", line(lines), fixed = TRUE))
   # A curve with an elbow falls back at the default, as the line says.
   lines <- capture_spatialkit_log(
     k <- determine_optimal_levels(fne_two(response = TRUE), max_levels = 6, response_var = "z",
@@ -234,6 +239,193 @@ test_that("the line before the sweep promises the fallback only where there is a
                "if the WSS curve has an elbow (with none the call returns NA)", fixed = TRUE)
   expect_identical(as.vector(k), c(2L, 1L, 3L))
   expect_identical(attr(k, "structured"), TRUE)
+})
+
+test_that("the line before the sweep names the bound that ended the ladder, and advises max_levels only where it is that bound", {
+  presweep <- function(lines) grep("leaves? k_max = ", lines, value = TRUE)
+  run <- function(...) {
+    lines <- capture_spatialkit_log(out <- fne_catch(determine_optimal_levels(...)))
+    list(value = out$value, line = presweep(lines))
+  }
+  # Eight distinct locations visited 25 times each: the locations end the
+  # ladder at 8 whatever max_levels is, so raising it changes nothing.
+  set.seed(1)
+  loc <- data.frame(x = runif(8, 0, 1000), y = runif(8, 0, 1000))
+  d8 <- loc[rep(1:8, each = 25), ]
+  d8$z <- rnorm(200)
+  p8 <- sf::st_as_sf(d8, coords = c("x", "y"), crs = 32632)
+  for (ml in c(12, 30)) {
+    r <- run(p8, max_levels = ml, response_var = "z", criterion = "morans_i")
+    expect_length(r$line, 1L)
+    expect_match(r$line, paste0("determine_optimal_levels(): the 8 distinct locations leave ",
+                                "k_max = 8, and the model-aware criteria carry no information ",
+                                "at nine cells or fewer; criterion = 'morans_i' will fall back ",
+                                "to the geometric ranking if the WSS curve has an elbow (with ",
+                                "none the call returns NA). No max_levels takes k_max above 8 ",
+                                "on these points, so the criteria cannot contribute."),
+                 fixed = TRUE, info = paste("max_levels", ml))
+    expect_false(grepl("max_levels leaves", r$line, fixed = TRUE), info = paste("max_levels", ml))
+    expect_false(grepl("Raise max_levels", r$line, fixed = TRUE), info = paste("max_levels", ml))
+    expect_identical(as.vector(r$value), c(8L, 7L), info = paste("max_levels", ml))
+    # "combined" names the same bound in its own line.
+    r <- run(p8, max_levels = ml, response_var = "z", criterion = "combined")
+    expect_match(r$line, paste0("determine_optimal_levels(): the 8 distinct locations leave ",
+                                "k_max = 8, so the window around the elbow ends at nine cells ",
+                                "or fewer"), fixed = TRUE, info = paste("max_levels", ml))
+    expect_false(grepl("Raise max_levels", r$line, fixed = TRUE), info = paste("max_levels", ml))
+  }
+  # Ten distinct points: k-means fits one short of them.
+  set.seed(2)
+  p10 <- sf::st_as_sf(data.frame(x = runif(10, 0, 1000), y = runif(10, 0, 1000), z = rnorm(10)),
+                      coords = c("x", "y"), crs = 32632)
+  for (ml in c(30, 60)) {
+    r <- run(p10, max_levels = ml, response_var = "z", criterion = "morans_i",
+             on_no_elbow = "warn")
+    expect_match(r$line, paste0("one short of the 10 points leaves k_max = 9, and the ",
+                                "model-aware criteria"), fixed = TRUE, info = paste("max_levels", ml))
+    expect_match(r$line, "No max_levels takes k_max above 9 on these points", fixed = TRUE,
+                 info = paste("max_levels", ml))
+    expect_false(grepl("Raise max_levels", r$line, fixed = TRUE), info = paste("max_levels", ml))
+  }
+  # A max_levels below 2 is raised to 2, and raising it is the way on.
+  r <- run(fne_uniform(400L, seed = 5L, response = TRUE), max_levels = 1, response_var = "z",
+           criterion = "morans_i", on_no_elbow = "warn")
+  expect_match(r$line, paste0("max_levels = 1, raised to 2, leaves k_max = 2, and the ",
+                              "model-aware criteria"), fixed = TRUE)
+  expect_match(r$line, "Raise max_levels above 9", fixed = TRUE)
+})
+
+# Where max_levels ties the other bound, k_max_from names max_levels, and
+# the line used to advise raising it though no max_levels takes k_max
+# higher: 8 locations at max_levels = 8, 10 points at max_levels = 9.  The
+# advice now reads how far k_max can go with max_levels left out.
+fne_presweep <- function(...) {
+  lines <- capture_spatialkit_log(out <- fne_catch(determine_optimal_levels(...)))
+  lines <- sub("^WARN \\[[^]]*\\] ", "", lines)
+  list(value = out$value, line = grep("leaves? k_max = ", lines, value = TRUE),
+       lines = lines,
+       warnings = vapply(out$warnings, conditionMessage, character(1)))
+}
+fne_stations <- function(n_loc = 8L, visits = 25L, seed = 1L) {
+  set.seed(seed)
+  loc <- data.frame(x = runif(n_loc, 0, 1000), y = runif(n_loc, 0, 1000))
+  d <- loc[rep(seq_len(n_loc), each = visits), ]
+  d$z <- rnorm(nrow(d))
+  sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+}
+
+test_that("the line before the sweep does not advise max_levels where it ties the other bound", {
+  p8 <- fne_stations()
+  r <- fne_presweep(p8, max_levels = 8, response_var = "z", criterion = "morans_i")
+  expect_identical(r$line, paste0(
+    "determine_optimal_levels(): max_levels leaves k_max = 8, and the model-aware criteria ",
+    "carry no information at nine cells or fewer; criterion = 'morans_i' will fall back to ",
+    "the geometric ranking if the WSS curve has an elbow (with none the call returns NA). No ",
+    "max_levels takes k_max above 8 on these points, so the criteria cannot contribute."))
+  expect_identical(as.vector(r$value), c(8L, 7L))
+  # Below the locations, a larger max_levels raises k_max, but not past 8.
+  r <- fne_presweep(p8, max_levels = 5, response_var = "z", criterion = "morans_i")
+  expect_match(r$line, paste0("max_levels leaves k_max = 5, and the model-aware criteria"),
+               fixed = TRUE)
+  expect_match(r$line, "No max_levels takes k_max above 8 on these points", fixed = TRUE)
+  expect_false(grepl("Raise max_levels", r$line, fixed = TRUE))
+  # Ten distinct points at max_levels = 9: k-means fits nine at most.
+  set.seed(2)
+  p10 <- sf::st_as_sf(data.frame(x = runif(10, 0, 1000), y = runif(10, 0, 1000), z = rnorm(10)),
+                      coords = c("x", "y"), crs = 32632)
+  r <- fne_presweep(p10, max_levels = 9, response_var = "z", criterion = "morans_i",
+                    on_no_elbow = "warn")
+  expect_match(r$line, "max_levels leaves k_max = 9, and the model-aware criteria", fixed = TRUE)
+  expect_match(r$line, "No max_levels takes k_max above 9 on these points", fixed = TRUE)
+  expect_false(grepl("Raise max_levels", r$line, fixed = TRUE))
+  expect_identical(as.vector(r$value), c(4L, 3L, 5L))
+  # Two locations at max_levels = 2.
+  p2 <- fne_stations(n_loc = 2L)
+  r <- fne_presweep(p2, max_levels = 2, response_var = "z", criterion = "morans_i",
+                    on_no_elbow = "warn")
+  expect_match(r$line, "No max_levels takes k_max above 2 on these points", fixed = TRUE)
+  expect_false(grepl("Raise max_levels", r$line, fixed = TRUE))
+  # Where a larger max_levels does take k_max past nine cells, the advice
+  # stays, at a tie with nothing.
+  r <- fne_presweep(fne_uniform(400L, seed = 5L, response = TRUE), max_levels = 8,
+                    response_var = "z", criterion = "morans_i", on_no_elbow = "warn")
+  expect_match(r$line, "Raise max_levels above 9 (well above", fixed = TRUE)
+})
+
+test_that("a ladder too short to read is told to raise max_levels only where that lengthens it", {
+  # Three distinct points: k-means fits two at most, so no max_levels makes
+  # the ladder longer.  At max_levels = 2 the warning named max_levels and
+  # said to raise it to 3.
+  set.seed(4)
+  p3 <- sf::st_as_sf(data.frame(x = runif(3, 0, 1000), y = runif(3, 0, 1000)),
+                     coords = c("x", "y"), crs = 32632)
+  for (ml in c(2, 30)) {
+    r <- fne_presweep(p3, max_levels = ml, on_no_elbow = "warn")
+    w <- grep("too short to read an elbow", r$warnings, value = TRUE, fixed = TRUE)
+    expect_length(w, 1L)
+    expect_match(w, "k = 1 is not a finding about the data; choose the count on other grounds.",
+                 fixed = TRUE, info = paste("max_levels", ml))
+    expect_false(grepl("raise max_levels", w, fixed = TRUE), info = paste("max_levels", ml))
+  }
+  # Two separated clusters at max_levels = 2: a larger max_levels does.
+  r <- fne_presweep(fne_two(), max_levels = 2, on_no_elbow = "warn")
+  expect_match(grep("too short", r$warnings, value = TRUE), "raise max_levels to 3 or more.",
+               fixed = TRUE)
+})
+
+# On a subsample (more rows than sample_n) the points and the distinct
+# locations that end the ladder are the subsample's, and a larger sample_n
+# raises them.  The lines named them as if the layer had that many ("one
+# short of the 9 points" on 400 rows), and the line before the sweep said
+# no max_levels takes k_max higher "on these points".
+test_that("a bound set by the subsample is named with sample_n, and raising sample_n is the advice", {
+  uni <- fne_uniform(400L, seed = 5L, response = TRUE)
+  r <- fne_presweep(uni, max_levels = 30, sample_n = 9, response_var = "z",
+                    criterion = "morans_i", on_no_elbow = "warn", set_seed = 3)
+  expect_identical(r$line, paste0(
+    "determine_optimal_levels(): one short of the sample_n = 9 points drawn from 400 leaves ",
+    "k_max = 8, and the model-aware criteria carry no information at nine cells or fewer; ",
+    "criterion = 'morans_i' will fall back to the geometric ranking. Raise sample_n, which ",
+    "draws 9 of the 400 rows, for the criteria to contribute."))
+  expect_false(grepl("No max_levels", r$line, fixed = TRUE))
+  expect_match(grep("no elbow", r$warnings, value = TRUE),
+               "(k = 1 to 8, one short of the sample_n = 9 points drawn from 400)", fixed = TRUE)
+  expect_identical(as.vector(r$value), c(3L, 2L, 4L))
+  # "combined" names the same bound.
+  r <- fne_presweep(uni, max_levels = 30, sample_n = 9, response_var = "z",
+                    criterion = "combined", on_no_elbow = "warn", set_seed = 3)
+  expect_match(r$line, paste0("determine_optimal_levels(): one short of the sample_n = 9 points ",
+                              "drawn from 400 leaves k_max = 8, so the window"), fixed = TRUE)
+  # max_levels below ten as well: both are named.
+  r <- fne_presweep(uni, max_levels = 8, sample_n = 9, response_var = "z",
+                    criterion = "morans_i", on_no_elbow = "warn", set_seed = 3)
+  expect_match(r$line, paste0("Raise sample_n, which draws 9 of the 400 rows, and max_levels ",
+                              "above 9 (well above, so the elbow neighbourhood reaches past the ",
+                              "floor) for the criteria to contribute."), fixed = TRUE)
+  # A ladder too short to read on three drawn points.
+  r <- fne_presweep(uni, max_levels = 30, sample_n = 3, on_no_elbow = "warn", set_seed = 3)
+  w <- grep("too short", r$warnings, value = TRUE)
+  expect_match(w, "(ended by one short of the sample_n = 3 points drawn from 400)", fixed = TRUE)
+  expect_match(w, "raise sample_n, which draws 3 of the 400 rows.", fixed = TRUE)
+  # Ten stations, one visited once: 30 rows drawn reach 8 of them.
+  set.seed(7)
+  loc <- data.frame(x = runif(10, 0, 1000), y = runif(10, 0, 1000))
+  d <- loc[c(rep(1:9, each = 40), 10), ]
+  d$z <- rnorm(nrow(d))
+  p <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+  r <- fne_presweep(p, max_levels = 30, sample_n = 30, response_var = "z",
+                    criterion = "morans_i", on_no_elbow = "warn", set_seed = 3)
+  expect_match(r$line, paste0("the 8 distinct locations in the sample_n = 30 rows drawn from ",
+                              "361 leave k_max = 8"), fixed = TRUE)
+  expect_match(r$line, "Raise sample_n, which draws 30 of the 361 rows, for the criteria",
+               fixed = TRUE)
+  # A subsample that holds every location of the layer names them as the
+  # layer's, and neither argument raises k_max.
+  r <- fne_presweep(fne_stations(), max_levels = 30, sample_n = 100, response_var = "z",
+                    criterion = "morans_i", set_seed = 3)
+  expect_match(r$line, paste0("the 8 distinct locations leave k_max = 8"), fixed = TRUE)
+  expect_match(r$line, "No max_levels or sample_n takes k_max above 8 on these points",
+               fixed = TRUE)
 })
 
 test_that("a model-aware count at the default carries the flag and the sag beside the diagnostics", {
