@@ -46,7 +46,13 @@
 #' polygons s2 refused as they arrived; with s2 on (sf's default), the join
 #' by `predicate` meets those polygons too. When s2 refused no polygon of
 #' either layer as it arrived, the error says to pass `largest = FALSE` or to
-#' project both layers. In longitude and latitude the largest-overlap join
+#' project both layers. Whether s2 refuses such a piece follows the last bits
+#' of the vertices s2 computes for it, which differ between platforms and s2
+#' versions: a figure eight pinched on the edge of a polygon of the other
+#' layer can give a piece that s2 refuses on macOS on arm64 and accepts on
+#' Linux on x86-64. Where s2 accepts the piece, the join runs and gives each
+#' feature the polygon of its largest overlap.
+#' In longitude and latitude the largest-overlap join
 #' runs on s2, and the areas `tie_break` compares are measured on the sphere
 #' with s2, whatever [sf::sf_use_s2()] says, as the package's other areas in
 #' degrees are; the join by `predicate` runs with the engine the session

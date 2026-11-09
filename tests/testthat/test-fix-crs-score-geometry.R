@@ -120,8 +120,12 @@ test_that("MULTIPOINT layers of 40 distinct locations or more score as before", 
   set.seed(7)
   big <- lay_of(lapply(1:45, function(j)
     sf::st_multipoint(cbind(stats::runif(3, -110, -85), stats::runif(3, 30, 45)))))
-  expect_identical(score(big, 5070), as.numeric("0x1.3c83cd0b0504p-7"))
-  expect_identical(score(big, 32614), as.numeric("0x1.b09e66399c6p-7"))
+  # The scores are sums of distances taken from PROJ transforms, whose last
+  # bits differ between platforms and PROJ versions (Linux x86-64 with PROJ
+  # 9.7 differs from macOS arm64 with PROJ 9.5 by up to 2e-12 relative), so
+  # they are compared within 1e-10 relative and not to the bit.
+  expect_equal(score(big, 5070), as.numeric("0x1.3c83cd0b0504p-7"), tolerance = 1e-10)
+  expect_equal(score(big, 32614), as.numeric("0x1.b09e66399c6p-7"), tolerance = 1e-10)
 })
 
 # ---- BUG-123: mixed types and collections ----------------------------------
@@ -327,7 +331,10 @@ test_that("a layer with Z or M scores, chooses and logs as its XY copy", {
 
 test_that("layers of one geometry type in x and y score as before", {
   # Recorded before the change, as hexadecimal doubles, which read back
-  # exactly.
+  # exactly.  The scores are sums of distances taken from PROJ transforms,
+  # whose last bits differ between platforms and PROJ versions (up to 2e-12
+  # relative between Linux x86-64 and macOS arm64), so they are compared
+  # within 1e-10 relative and not to the bit.
   set.seed(3)
   pts <- lay_of(lapply(1:60, function(i) sf::st_point(c(stats::runif(1, -120, -75), stats::runif(1, 30, 47)))))
   hole <- sf::st_polygon(list(rbind(c(-120, 30), c(-80, 30), c(-80, 48), c(-120, 48), c(-120, 30)),
@@ -356,6 +363,9 @@ test_that("layers of one geometry type in x and y score as before", {
     pz    = c("0x1.65f401a77e14p-5", "0x1.0fa289ec73b8p-8", "0x1.a11f2b8c12da4p-2"))
   pins <- lapply(pins, as.numeric)
   for (nm in names(L))
-    expect_identical(vapply(c(32614, 5070, 3857), function(code) score(L[[nm]], code), numeric(1)),
-                     pins[[nm]], label = nm)
+    for (k in 1:3) {
+      code <- c(32614, 5070, 3857)[k]
+      expect_equal(score(L[[nm]], code), pins[[nm]][k], tolerance = 1e-10,
+                   label = paste(nm, code))
+    }
 })

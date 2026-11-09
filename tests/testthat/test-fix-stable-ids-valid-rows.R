@@ -44,14 +44,20 @@
 # Each input row's ID, read through the column `orig` the input carries.
 .sv_ids <- function(out) out$poly_id[order(out$orig)]
 
-# Whether any two rows share interior, in a projected CRS by GEOS.
+# The pairs of rows that share interior, in a projected CRS by GEOS, each
+# named by the input rows (the column `orig`), the smaller first.
 .sv_overlap <- function(x) {
   old <- sf::sf_use_s2()
   suppressMessages(sf::sf_use_s2(FALSE))
   on.exit(suppressMessages(sf::sf_use_s2(old)))
   p  <- sf::st_transform(sf::st_geometry(x), 32617)
   rl <- sf::st_relate(p, p, pattern = "2********")
-  any(vapply(seq_along(rl), function(i) any(rl[[i]] != i), logical(1)))
+  o  <- x$orig
+  pairs <- unlist(lapply(seq_along(rl), function(i) {
+    j <- rl[[i]][rl[[i]] != i]
+    if (length(j)) sprintf("%d-%d", pmin(o[i], o[j]), pmax(o[i], o[j]))
+  }))
+  sort(unique(as.character(pairs)))
 }
 
 
@@ -79,10 +85,14 @@ test_that("valid rows in degrees come back as they arrived with s2 on, and with 
                           sf::st_geometry(x)[from_off]))
     expect_identical(gap_on, 0, info = nm)
     expect_identical(gap_off, 0, info = nm)
-    # The same IDs under both settings, and no row overlaps another.
-    expect_identical(.sv_ids(on), .sv_ids(off), info = nm)
-    expect_false(.sv_overlap(on), info = nm)
-    expect_false(.sv_overlap(off), info = nm)
+    # The same IDs under both settings, and no two rows share interior
+    # unless the same two input rows do.  The grids' neighbouring cells take
+    # their shared corners from s2's clip, whose last bits differ between
+    # platforms: on Linux x86-64 two cells of `grid_tc` overlap by 2e-7 m^2
+    # as they arrive, where on macOS arm64 none do.
+    ov_in <- .sv_overlap(x)
+    expect_true(all(.sv_overlap(on) %in% ov_in), info = nm)
+    expect_true(all(.sv_overlap(off) %in% ov_in), info = nm)
   }
 })
 

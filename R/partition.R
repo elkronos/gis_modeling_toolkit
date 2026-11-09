@@ -327,7 +327,12 @@
 #' coordinates in a frame that does not move with either: centred on the
 #' middle of their bounding box, divided by its diagonal and rounded to
 #' \code{.KMEANS_STEP}.  A coordinate that lies within its own rounding noise
-#' of the middle of a step can still fall on either side of it.  Rows at
+#' of the middle of a step can still fall on either side of it.  The frame
+#' does not reach the last bits of \code{stats::kmeans()}'s own compiled
+#' arithmetic, which differ between platforms (Linux on x86-64 and macOS on
+#' arm64 give a 40 by 30 lattice at 250 m other clusters from the same frame
+#' and the same starts), so where ties decide cells the regions can differ
+#' between platforms.  Rows at
 #' distinct locations that would round to one point keep their coordinates
 #' centred and scaled but not rounded, so the frame has as many distinct
 #' points as the layer: the callers count the locations a partition can

@@ -9,7 +9,9 @@
 # `largest = FALSE`, which stopped too.  Both joins now stop with an error
 # that names the layer s2 refused, its rows and the transform:
 # "spatialkit_features_degenerate" for the features, the cells' class for
-# the polygons.
+# the polygons.  Whether s2 refuses that piece follows the last bits of the
+# vertices it computes, which differ between platforms; where s2 accepts it
+# the largest-overlap join runs (.jf_pieces_accepted()).
 #
 # The smallest-area tie-break read GEOS's area of a ring whose edges cross
 # (its lobes cancel), and gave a point to a bowtie as the smaller polygon.
@@ -84,6 +86,64 @@
   assign_features_to_polygons(x, cells, polygon_id_col = "cell_id", quiet = TRUE, ...)
 .jf_catch <- function(expr) tryCatch(suppressWarnings(expr), error = function(e) e)
 .jf_ids <- function(got) got$cell_id[order(got$row)]
+
+# Whether s2 accepts every piece of the overlaps of two layers in degrees, as
+# the largest-overlap join takes them: the rows s2 refuses repaired with
+# sf::st_make_valid(), the features intersected with the polygons, and each
+# piece's area taken on s2.  A figure eight is repaired into two parts that
+# touch at its pinch, and where the pinch lies on the edge of a polygon of
+# the other layer, s2 can compute that point twice in a row in the piece
+# and then refuses it.  Whether it does follows the last bits of the
+# vertices s2 computes: on macOS on arm64 (s2 1.1.11) the piece of `edge8`
+# with cell 3 holds 39.644999999999996 twice and s2 refuses it, on Linux on
+# x86-64 (s2 1.1.13) it holds 39.644999999999989 and then
+# 39.644999999999996 and s2 accepts it, from the same repaired feature.  So
+# the tests below read it on the platform they run on and pin each branch.
+.jf_pieces_accepted <- function(feats, cells) spatialkit:::.with_s2({
+  mend <- function(x) {
+    g <- sf::st_geometry(x)
+    bad <- !(sf::st_is_valid(g) %in% TRUE)
+    if (any(bad)) g[bad] <- suppressWarnings(sf::st_make_valid(g[bad]))
+    g
+  }
+  f <- mend(feats); p <- mend(cells)
+  tryCatch({
+    pieces <- suppressMessages(sf::st_intersection(f, p))
+    all(is.finite(as.numeric(sf::st_area(pieces))))
+  }, error = function(e) FALSE)
+})
+
+# Each feature's polygons of largest overlap, read without the package: the
+# overlaps measured by GEOS in the equal-area EPSG:5070, on both layers
+# repaired there.  The two lobes of `edge8` are mirror images across the
+# edge of cells 2 and 3, and their areas there agree to 3e-14 relative, so
+# areas within 1e-9 relative of the largest count as tied and every tied
+# polygon is listed.
+.jf_largest <- function(feats, cells) {
+  old <- suppressMessages(sf::sf_use_s2(FALSE))
+  on.exit(suppressMessages(sf::sf_use_s2(old)))
+  f <- sf::st_make_valid(sf::st_transform(sf::st_geometry(feats), 5070))
+  p <- sf::st_make_valid(sf::st_transform(sf::st_geometry(cells), 5070))
+  lapply(seq_along(f), function(i) {
+    a <- vapply(seq_along(p), function(j) {
+      x <- suppressMessages(sf::st_intersection(f[i], p[j]))
+      if (length(x)) sum(as.numeric(sf::st_area(x))) else 0
+    }, numeric(1))
+    cells$cell_id[a > 0 & a >= max(a) * (1 - 1e-9)]
+  })
+}
+
+# Where s2 accepts the pieces, the largest-overlap join returns: each
+# feature gets a polygon of its largest overlap, and for these layers the
+# polygon the join by `predicate` gives (`ids`).
+.jf_expect_joined <- function(got, feats, cells, ids) {
+  expect_s3_class(got, "sf")
+  expect_identical(nrow(got), nrow(feats))
+  got_ids <- .jf_ids(got)
+  expect_identical(got_ids, ids)
+  lg <- .jf_largest(feats, cells)
+  expect_true(all(vapply(seq_along(lg), function(i) got_ids[i] %in% lg[[i]], logical(1))))
+}
 
 test_that("a polygon feature s2 refuses stops the join by `predicate` with the features' error", {
   .jf_s2(TRUE)
@@ -204,20 +264,28 @@ test_that("a figure-eight cell the largest-overlap join repairs stops it with th
   expect_identical(.jf_ids(.jf_assign(.jf_patches(), proj, largest = FALSE)), 1:6)
 })
 
-test_that("a figure-eight feature on a cell edge stops the largest-overlap join with the features' error", {
+test_that("a figure-eight feature on a cell edge stops the largest-overlap join with the features' error where s2 refuses its piece, and is joined where s2 accepts it", {
   .jf_s2(TRUE)
   cells <- .jf_squares()
   feats <- .jf_features("edge8")
   err <- .jf_catch(.jf_assign(feats, cells))
-  expect_s3_class(err, "spatialkit_features_degenerate")
-  expect_identical(err$rows, 3L)
-  expect_true(err$repaired)
-  msg <- conditionMessage(err)
-  expect_match(msg, "refuses 1 of the 6 features of `features_sf` (row 3: \"", fixed = TRUE)
-  expect_match(msg, "The largest-overlap join repaired it with sf::st_make_valid()", fixed = TRUE)
-  expect_match(msg, "Transform `features_sf` to a projected CRS", fixed = TRUE)
-  expect_no_match(msg, "Pass largest = FALSE", fixed = TRUE)
-  expect_no_match(msg, "polygons_sf", fixed = TRUE)
+  if (.jf_pieces_accepted(feats, cells)) {
+    # s2 accepts the piece (Linux on x86-64): the join runs.
+    .jf_expect_joined(err, feats, cells, c(1L, 2L, 2L, 4L, 5L, 6L))
+  } else {
+    # s2 refuses the piece (macOS on arm64): the features' error.
+    expect_s3_class(err, "spatialkit_features_degenerate")
+    expect_identical(err$rows, 3L)
+    expect_true(err$repaired)
+    msg <- conditionMessage(err)
+    expect_match(msg, "refuses 1 of the 6 features of `features_sf` (row 3: \"", fixed = TRUE)
+    expect_match(msg, "The largest-overlap join repaired it with sf::st_make_valid()", fixed = TRUE)
+    expect_match(msg, "Transform `features_sf` to a projected CRS", fixed = TRUE)
+    expect_no_match(msg, "Pass largest = FALSE", fixed = TRUE)
+    expect_no_match(msg, "polygons_sf", fixed = TRUE)
+  }
+  # The join by `predicate` meets the feature as it arrived, which s2
+  # refuses on every platform.
   err <- .jf_catch(.jf_assign(feats, cells, largest = FALSE))
   expect_s3_class(err, "spatialkit_features_degenerate")
   expect_identical(err$rows, 3L)
@@ -249,23 +317,33 @@ test_that("features the largest-overlap join's repair leaves refused stop it wit
 test_that("layers s2 accepts as they arrive keep the advice of `largest = FALSE`, which runs", {
   .jf_s2(TRUE)
   # The caller repaired the figure-eight cell, or the figure-eight feature:
-  # s2 accepts both layers, refuses a piece of an overlap, and the join by
-  # `predicate` runs.
+  # s2 accepts both layers and the join by `predicate` runs.  Where s2
+  # refuses a piece of an overlap (macOS on arm64) the largest-overlap join
+  # stops with the advice; where it accepts the piece (Linux on x86-64) the
+  # join runs.
   cells <- sf::st_make_valid(.jf_cells8())
   expect_true(all(sf::st_is_valid(cells)))
   err <- .jf_catch(.jf_assign(.jf_patches(), cells))
-  expect_s3_class(err, "simpleError")
-  expect_match(conditionMessage(err), paste0(
-    "assign_features_to_polygons(): the largest-overlap join failed (Loop 0 is not valid: ",
-    "Edge 4 is degenerate (duplicate vertex)). Pass largest = FALSE to assign every feature by ",
-    "`predicate` and `tie_break` instead, or project both layers first (see ensure_projected())."),
-    fixed = TRUE)
+  if (.jf_pieces_accepted(.jf_patches(), cells)) {
+    .jf_expect_joined(err, .jf_patches(), cells, 1:6)
+  } else {
+    expect_s3_class(err, "simpleError")
+    expect_match(conditionMessage(err), paste0(
+      "assign_features_to_polygons(): the largest-overlap join failed (Loop 0 is not valid: ",
+      "Edge 4 is degenerate (duplicate vertex)). Pass largest = FALSE to assign every feature by ",
+      "`predicate` and `tie_break` instead, or project both layers first (see ensure_projected())."),
+      fixed = TRUE)
+  }
   expect_identical(.jf_ids(.jf_assign(.jf_patches(), cells, largest = FALSE)), 1:6)
   feats <- sf::st_make_valid(.jf_features("edge8"))
   expect_true(all(sf::st_is_valid(feats)))
   err <- .jf_catch(.jf_assign(feats, .jf_squares()))
-  expect_s3_class(err, "simpleError")
-  expect_match(conditionMessage(err), "Pass largest = FALSE", fixed = TRUE)
+  if (.jf_pieces_accepted(feats, .jf_squares())) {
+    .jf_expect_joined(err, feats, .jf_squares(), c(1L, 2L, 2L, 4L, 5L, 6L))
+  } else {
+    expect_s3_class(err, "simpleError")
+    expect_match(conditionMessage(err), "Pass largest = FALSE", fixed = TRUE)
+  }
   expect_identical(.jf_ids(.jf_assign(feats, .jf_squares(), largest = FALSE)), c(1L, 2L, 2L, 4L, 5L, 6L))
   # Layers s2 accepts join as before.
   expect_identical(.jf_ids(.jf_assign(.jf_points(), .jf_squares())), 1:6)
@@ -421,18 +499,26 @@ test_that("with s2 off, the largest-overlap join's error for a polygon s2 refuse
     list(feats = .jf_features("edge8"), cells = .jf_squares(),
          class = "spatialkit_features_degenerate", rows = 3L, repaired = TRUE,
          ids = c(1L, 2L, 2L, 4L, 5L, 6L)))
+  # Whether s2 refuses the piece of the repaired figure eight `edge8`
+  # follows the platform (.jf_pieces_accepted()); where it accepts it, the
+  # largest-overlap join runs, on s2 in degrees whatever the session says.
+  # The other three cases stop on every platform.
   for (cs in cases) {
     err <- .jf_catch(.jf_assign(cs$feats, cs$cells))
-    expect_s3_class(err, cs$class)
-    expect_identical(err$rows, cs$rows)
-    expect_identical(err$repaired, cs$repaired)
-    expect_true(err$s2_forced)
-    msg <- conditionMessage(err)
-    expect_match(msg, engine, fixed = TRUE)
-    expect_match(msg, "so the largest-overlap join cannot run in degrees.", fixed = TRUE)
-    expect_match(msg, offer, fixed = TRUE)
-    expect_no_match(msg, "meets it as it arrived", fixed = TRUE)
-    expect_no_match(msg, "the engine sf uses", fixed = TRUE)
+    if (cs$repaired && .jf_pieces_accepted(cs$feats, cs$cells)) {
+      .jf_expect_joined(err, cs$feats, cs$cells, cs$ids)
+    } else {
+      expect_s3_class(err, cs$class)
+      expect_identical(err$rows, cs$rows)
+      expect_identical(err$repaired, cs$repaired)
+      expect_true(err$s2_forced)
+      msg <- conditionMessage(err)
+      expect_match(msg, engine, fixed = TRUE)
+      expect_match(msg, "so the largest-overlap join cannot run in degrees.", fixed = TRUE)
+      expect_match(msg, offer, fixed = TRUE)
+      expect_no_match(msg, "meets it as it arrived", fixed = TRUE)
+      expect_no_match(msg, "the engine sf uses", fixed = TRUE)
+    }
     expect_false(sf::sf_use_s2())
     # The join it offers runs, with GEOS.
     got <- suppressMessages(suppressWarnings(.jf_assign(cs$feats, cs$cells, largest = FALSE)))
@@ -444,6 +530,10 @@ test_that("with s2 off, the largest-overlap join's error for a polygon s2 refuse
   .jf_s2(TRUE)
   for (cs in cases) {
     err <- .jf_catch(.jf_assign(cs$feats, cs$cells))
+    if (cs$repaired && .jf_pieces_accepted(cs$feats, cs$cells)) {
+      .jf_expect_joined(err, cs$feats, cs$cells, cs$ids)
+      next
+    }
     expect_s3_class(err, cs$class)
     expect_false(err$s2_forced)
     expect_no_match(conditionMessage(err), "largest = FALSE", fixed = TRUE)
@@ -586,4 +676,37 @@ test_that("?assign_features_to_polygons and NEWS say what the joins do with thes
   expect_match(news, "now run on s2 whatever the session says", fixed = TRUE)
   expect_match(news, paste0("With s2 off, the error of the largest-overlap join for a polygon s2 ",
                             "refuses offers `largest = FALSE`"), fixed = TRUE)
+})
+
+test_that("the help and NEWS say whether s2 refuses a piece of a repaired figure eight follows the platform", {
+  root <- testthat::test_path("..", "..")
+  # The page's source where it is here, else the installed page as Rd text.
+  rd <- if (file.exists(file.path(root, "man", "assign_features_to_polygons.Rd"))) {
+    paste(readLines(file.path(root, "man", "assign_features_to_polygons.Rd"), warn = FALSE),
+          collapse = "\n")
+  } else {
+    db <- tools::Rd_db("spatialkit")
+    if (is.null(db[["assign_features_to_polygons.Rd"]])) skip("the help is not here to read")
+    paste(as.character(db[["assign_features_to_polygons.Rd"]]), collapse = "")
+  }
+  rd <- gsub("[[:space:]]+", " ", rd)
+  expect_match(rd, paste0(
+    "Whether s2 refuses such a piece follows the last bits of the vertices s2 computes for it, ",
+    "which differ between platforms and s2 versions: a figure eight pinched on the edge of a ",
+    "polygon of the other layer can give a piece that s2 refuses on macOS on arm64 and accepts ",
+    "on Linux on x86-64. Where s2 accepts the piece, the join runs and gives each feature the ",
+    "polygon of its largest overlap."), fixed = TRUE)
+  if (!file.exists(file.path(root, "NEWS.md"))) skip("NEWS.md is not here to read")
+  news <- gsub("[[:space:]]+", " ",
+               paste(readLines(file.path(root, "NEWS.md"), warn = FALSE), collapse = " "))
+  expect_match(news, paste0(
+    "Whether s2 refuses such a piece follows the last bits of the vertices s2 computes for it, ",
+    "which differ between platforms and s2 versions: a figure eight pinched on the edge of two ",
+    "cells can give a piece that s2 refuses on macOS on arm64 and accepts on Linux on x86-64, ",
+    "and where s2 accepts the piece the join runs and gives each feature the polygon of its ",
+    "largest overlap."), fixed = TRUE)
+  # Most figure eights pinched on that edge get the same outcome on both
+  # platforms (some refused, some accepted on each); only some differ, so
+  # NEWS does not say that every one does.
+  expect_no_match(news, "cells gives a piece that s2 refuses", fixed = TRUE)
 })

@@ -92,8 +92,13 @@ test_that("a grid clipped in degrees comes back without repeated corners, which 
   for (ty in c("square", "hex")) {
     raw <- clip_in_degrees(b_sq, 0.1, ty)
     bad <- s2_refused(raw)
-    # The scan's grids: one square cell of 25 and three hexagons of 39.
-    expect_length(bad, if (ty == "square") 1L else 3L)
+    # The scan's grids: one square cell of 25 and three hexagons of 39 on
+    # macOS arm64 (s2 1.1.11), two square cells on Linux x86-64 (s2 1.1.13).
+    # How many cells s2's clip leaves with a repeated corner follows the last
+    # bits of the corners it computes, so the test asks for at least one,
+    # which gives the clean-up below something to do, and checks each of
+    # them.
+    expect_gte(length(bad), 1L)
     g <- quiet(create_grid_polygons(b_sq, cellsize = 0.1, crs = 4326, type = ty, quiet = TRUE))
     expect_identical(nrow(g), nrow(raw))
     expect_length(s2_refused(g), 0L)

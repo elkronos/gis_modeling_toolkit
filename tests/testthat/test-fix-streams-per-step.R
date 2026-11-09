@@ -277,11 +277,18 @@ test_that("the NEWS figures read off the level streams and the re-run streams ho
   frames <- list(lat, sf::st_transform(lat, "+proj=utm +zone=15 +datum=NAD83 +units=us-ft +no_defs"),
                  sf::st_transform(lat, paste("+proj=tmerc +lat_0=0 +lon_0=-93 +k=0.9996",
                                              "+x_0=500000.1 +y_0=0.1 +datum=NAD83 +units=m +no_defs")))
-  loo <- vapply(c("density", "kmeans"), function(part)
-    paste(unique(vapply(frames, function(l)
-      sprintf("%.4f", .ss_q(resolution_profile(l, "z", partition = part))$loo[1L]), "")),
-      collapse = ","), "")
-  expect_identical(unname(loo), c("0.3066", "0.2929"))
+  # Each kind gives one `loo` in the three frames (the same regions); the
+  # figure is pinned for the density kind only.  stats::kmeans() (Hartigan
+  # and Wong) settles ties on this lattice by the last bits of its own
+  # compiled arithmetic, which differ between platforms: from the same frame
+  # and the same starts it gives other regions on Linux on x86-64 (`loo`
+  # 0.2910) than on macOS on arm64 (0.2929), so the kind "kmeans" has no
+  # figure that holds on both.
+  loo <- lapply(c(density = "density", kmeans = "kmeans"), function(part)
+    unique(vapply(frames, function(l)
+      sprintf("%.4f", .ss_q(resolution_profile(l, "z", partition = part))$loo[1L]), "")))
+  expect_length(loo$kmeans, 1L)
+  expect_identical(loo$density, "0.3066")
   root <- testthat::test_path("..", "..")
   if (!file.exists(file.path(root, "NEWS.md"))) skip("NEWS.md is not here to read")
   news <- gsub("[[:space:]]+", " ",
@@ -291,8 +298,35 @@ test_that("the NEWS figures read off the level streams and the re-run streams ho
                             "17 and 19 are counts the wider windows add."), fixed = TRUE)
   expect_match(news, "The lattice above gives `loo` 0.3066 and the same regions in all three.",
                fixed = TRUE)
-  expect_match(news, "The lattice above gives `loo` 0.2929 and the same regions in all three.",
-               fixed = TRUE)
+  expect_match(news, paste0("column. The lattice above gives the same regions in all three. ",
+                            "`stats::kmeans()` also settles ties by the last bits of its own ",
+                            "compiled arithmetic, which differ between platforms, so on a layer ",
+                            "where ties decide cells the regions, and every figure read off them, ",
+                            "can differ between platforms for the same coordinates and seed: this ",
+                            "lattice gets other regions on Linux on x86-64 than on macOS on ",
+                            "arm64."), fixed = TRUE)
+  expect_false(grepl("`loo` 0.2929", news, fixed = TRUE))
+})
+
+test_that("?resolution_profile says the kind \"kmeans\" can give other regions on another platform", {
+  root <- testthat::test_path("..", "..")
+  # The page's source where it is here, else the installed page as Rd text.
+  rp <- if (file.exists(file.path(root, "man", "resolution_profile.Rd"))) {
+    paste(readLines(file.path(root, "man", "resolution_profile.Rd"), warn = FALSE),
+          collapse = "\n")
+  } else {
+    db <- tools::Rd_db("spatialkit")
+    if (is.null(db[["resolution_profile.Rd"]])) skip("the help is not here to read")
+    paste(as.character(db[["resolution_profile.Rd"]]), collapse = "")
+  }
+  rp <- gsub("[[:space:]]+", " ", rp)
+  expect_match(rp, paste0(
+    "\\code{stats::kmeans()} also settles such ties by the last bits of its own compiled ",
+    "arithmetic, which differ between platforms, so on a layer where ties decide cells the kind ",
+    "\\code{\"kmeans\"} can return other regions on another platform from the same coordinates ",
+    "and \\code{seed}, and with them every column read off the cells: the 40 by 30 lattice at ",
+    "250 m of the package's NEWS gets other regions on Linux on x86-64 than on macOS on arm64, ",
+    "the same in all of its units and origins on each."), fixed = TRUE)
 })
 
 test_that("the help and NEWS say a count or level scores the same in any window or ladder that holds it", {

@@ -56,10 +56,15 @@ test_that("summarize_by_cell(deff = 'variogram') gives what it gave on cells und
   r <- sf::st_drop_geometry(.fso_quiet(summarize_by_cell(
     pts, "z", id_col = "cell_id", deff = "variogram", estimate = "mean")))
   r <- r[order(r$cell_id), ]
+  # The field is drawn through chol() of a dense covariance matrix
+  # (.fso_layer()), whose last bits follow the BLAS and LAPACK in use, and
+  # the variogram fit carries them into the design effect: Linux x86-64 and
+  # macOS arm64 differ by up to 1.4e-11 relative here.  So the figures are
+  # compared within 1e-9 relative.
   expect_equal(r$..se_resp_z, c(0.28584766841440995, 0.27506304572341911),
-               tolerance = 1e-12)
+               tolerance = 1e-9)
   expect_equal(r$cell_weight, c(8.8204054172786872, 8.8864136640242126),
-               tolerance = 1e-12)
+               tolerance = 1e-9)
 })
 
 test_that("the DI normaliser above normalizer_max_n does not depend on the order of the training rows (BUG-117)", {

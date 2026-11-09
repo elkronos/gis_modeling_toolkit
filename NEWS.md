@@ -3561,9 +3561,15 @@ old behaviour where there is a way.
   repaired into two triangles that touch at a point), the join gave the
   same advice, and with s2 on the join by `predicate` then stopped on the
   polygon as it arrived; it now stops with the error that names that
-  polygon and the transform.  Where s2 refuses a polygon of either layer
-  even after the repair, the error names that polygon, and not a polygon
-  of the other layer that the repair made s2 accept.  A polygon of `features_sf` that s2 refuses stopped the join by
+  polygon and the transform.  Whether s2 refuses such a piece follows the
+  last bits of the vertices s2 computes for it, which differ between
+  platforms and s2 versions: a figure eight pinched on the edge of two
+  cells can give a piece that s2 refuses on macOS on arm64 and accepts on
+  Linux on x86-64, and where s2 accepts the piece the join runs and gives
+  each feature the polygon of its largest overlap.  Where s2 refuses a
+  polygon of either layer even after the repair, the error names that
+  polygon, and not a polygon of the other layer that the repair made s2
+  accept.  A polygon of `features_sf` that s2 refuses stopped the join by
   `predicate` with s2's bare message, such as "Loop 0 is not valid: Edge 0
   crosses edge 2" for a bowtie; it now stops with an error of class
   `spatialkit_features_degenerate`, with the fields of the cells' class,
@@ -4084,9 +4090,14 @@ old behaviour where there is a way.
   cells are taken in the layer's own coordinates.  The seeding functions with `init = "kmeans++"` and
   `determine_optimal_levels()` put the rows in order as `resolution_profile()`
   does, first coordinates equal but for their last bits counting as one
-  column.  The lattice above gives `loo` 0.2929 and the same regions in all
-  three.  A change of unit or origin can still move a coordinate across the
-  middle of a rounding step, and does so more often the smaller the extent:
+  column.  The lattice above gives the same regions in all three.
+  `stats::kmeans()` also settles ties by the last bits of its own compiled
+  arithmetic, which differ between platforms, so on a layer where ties
+  decide cells the regions, and every figure read off them, can differ
+  between platforms for the same coordinates and seed: this lattice gets
+  other regions on Linux on x86-64 than on macOS on arm64.  A change of
+  unit or origin can still move a coordinate across the middle of a
+  rounding step, and does so more often the smaller the extent:
   over 60 lattices, each in five other units or origins, the regions were
   the same on every lattice that spans a kilometre or more and differed in
   205 of 1,560 partitions of lattices that span less ("The partition" in

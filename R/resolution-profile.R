@@ -797,6 +797,13 @@
 #' cells came back in 205 of the 1,560 partitions of the 26 lattices that
 #' span less (78 to 719 m).  Distinct locations that would round to one
 #' point keep their coordinates unrounded, so they stay distinct.
+#' \code{stats::kmeans()} also settles such ties by the last bits of its own
+#' compiled arithmetic, which differ between platforms, so on a layer where
+#' ties decide cells the kind \code{"kmeans"} can return other regions on
+#' another platform from the same coordinates and \code{seed}, and with them
+#' every column read off the cells: the 40 by 30 lattice at 250 m of the
+#' package's NEWS gets other regions on Linux on x86-64 than on macOS on
+#' arm64, the same in all of its units and origins on each.
 #'
 #' The columns keep their meaning under \code{"density"}, because each is
 #' read off the cells and not off the way they were drawn.  \code{wss} is the

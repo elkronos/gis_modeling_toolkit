@@ -629,7 +629,13 @@ test_that("one cell of values far from 0 keeps the plain mean as its value", {
   expect_identical(A$status, "one cell")
   expect_false(A$constant)
   expect_identical(A$value, A$m)
-  expect_identical(A$m, sum(y) / length(y))
+  # The plain mean as .pool_fit() takes it, the sum in doubles (rowsum()).
+  # sum() accumulates in long double, which is 80-bit on x86-64 and 64-bit
+  # on arm64, so sum(y) / length(y) is 1e15 + 0.375 on one and 1e15 on the
+  # other and cannot serve as the reference.  Against the exact mean the
+  # value is within a few units in the last place at 1e15 (0.125 each).
+  expect_identical(A$m, as.numeric(rowsum(y, one)) / length(y))
+  expect_lte(abs(A$m - (1e15 + mean(y - 1e15))), 4 * 0.125)
   expect_identical(A$w, 1)
   for (f in c("sigma2", "loo_pooled", "loo_one", "loo_one_se"))
     expect_equal(A[[f]], E[[f]], tolerance = 1e-12, info = f)
