@@ -34,6 +34,10 @@ those.  So is anything \code{ranger}'s predict method itself refuses,
 such as \code{type = "quantiles"} on a forest grown without
 \code{quantreg = TRUE} or \code{type = "se"} without
 \code{keep.inbag = TRUE}: the error names ranger's reason.
+\code{fit$engine} predicts \code{(y - fit$info$response_centre) /
+fit$info$response_scale}, which is \code{y} unless the forest was grown
+on the response taken about a centre or scaled (see the Value section of
+\code{\link{fit_rf_model}}); this method puts the centre and scale back.
 \code{seed} defaults to a constant: an unset \code{seed} makes
 \code{ranger} draw one uniform from the global RNG stream per call, so the
 number of \code{predict()} calls a script happens to make (via

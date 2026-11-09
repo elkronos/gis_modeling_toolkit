@@ -94,6 +94,78 @@
 }
 
 
+# Bounds of a response the forest is grown on as it is given.  ranger scores
+# a split by sum_left^2 / n_left + sum_right^2 / n_right, the square of a sum
+# of up to n values: values up to 1e100 square below the largest double on
+# any number of rows a forest can be grown on, and a spread down to 1e-100
+# squares well above the smallest normal double.  Beyond them the squares
+# overflow or lose their bits, and the response is divided by a power of two.
+.RF_Y_MAX <- 1e100
+.RF_Y_MIN <- 1e-100
+
+
+#' The response a forest is grown on, taken about its centre and scaled
+#'
+#' ranger scores a split by a sum of squares it forms from sums of the
+#' response and their squares.  At an offset of 1e8 (1e8 plus a spread of
+#' 1) those squares are near 1e17 and their differences read the rounding,
+#' so the trees split elsewhere than on the response less the offset; at
+#' 1e160 the squares overflow and at 1e-160 they lose their bits.  The
+#' forest's splits do not change under a shift or a scale of the response,
+#' so the response is taken less the centre of \code{.spread_scaled()}
+#' where that centre is more than \code{.PRED_CENTRE_RATIO} times its
+#' spread (the predictors' gate in \code{.centre_columns()}), and divided
+#' by the power of two \code{.spread_scaled()} gives where its spread is
+#' below \code{.RF_Y_MIN} or its largest absolute value, after the centre,
+#' above \code{.RF_Y_MAX}.  Every other response, a constant one among
+#' them, is returned as it is, so its forest is the one it was to the last
+#' bit.  Not under \code{splitrule = "beta"}, which needs the response as
+#' given in (0, 1).
+#'
+#' @param y The response.
+#' @param splitrule The \code{splitrule} passed to ranger, or \code{NULL}.
+#' @return A list: \code{y}, the response the forest is grown on, which is
+#'   \code{(y - centre) / scale}; \code{centre} (0 where none is taken) and
+#'   \code{scale} (1 where none is applied).
+#' @keywords internal
+#' @noRd
+.rf_response <- function(y, splitrule = NULL) {
+  out <- list(y = y, centre = 0, scale = 1)
+  if (identical(splitrule, "beta")) return(out)
+  f <- y[is.finite(y)]
+  if (length(f) < 2L || !(max(abs(f)) > 0)) return(out)
+  sc <- .spread_scaled(f)
+  if (!(sc$spread > 0)) return(out)
+  centre <- if (abs(sc$centre) > .PRED_CENTRE_RATIO * sc$spread) sc$centre else 0
+  yc <- if (centre != 0) y - centre else y
+  a  <- max(abs(yc[is.finite(yc)]))
+  scale <- if (sc$spread < .RF_Y_MIN || a > .RF_Y_MAX) sc$scale else 1
+  if (scale != 1) yc <- yc / scale
+  list(y = yc, centre = centre, scale = scale)
+}
+
+
+#' Values of the forest's response put back in the response's units
+#'
+#' The forest in \code{$engine} is grown on \code{(y - centre) / scale}
+#' (\code{.rf_response()}); its predictions are \code{centre + scale * p}.
+#' A fit with no centre or scale recorded (one saved before they were) is
+#' returned as it is.
+#'
+#' @param p Predictions of the forest.
+#' @param info The fit's \code{$info}.
+#' @return \code{p} in the response's units.
+#' @keywords internal
+#' @noRd
+.rf_unscale <- function(p, info) {
+  centre <- info$response_centre %||% 0
+  scale  <- info$response_scale %||% 1
+  if (scale != 1) p <- p * scale
+  if (centre != 0) p <- p + centre
+  p
+}
+
+
 #' Check that categorical predictor levels in newdata were seen at fit time
 #'
 #' \code{ranger} matches factor predictors by level, so a level that was not
@@ -335,8 +407,30 @@
 #'   \code{TRUE}; \code{summary()} reads it to label its metrics),
 #'   \code{seed} and \code{n_dropped} (the rows \code{prep_model_data()}
 #'   removed for missing or non-finite values or a bad geometry, so \code{$n}
-#'   can be read against \code{nrow(data_sf)}). The raw forest is in
+#'   can be read against \code{nrow(data_sf)}), and \code{response_centre}
+#'   and \code{response_scale} (below). The raw forest is in
 #'   \code{$engine}.
+#'
+#'   The forest is grown on the response taken about its centre where that
+#'   centre is more than 1000 times the response's spread (as at 1e8 plus
+#'   a spread of 1), and divided by a power of two where the response is so
+#'   large or its spread so small that its squares overflow or lose their
+#'   bits (beyond about 1e100 or 1e-100).  The splits of a forest do not
+#'   change under a shift or a scale of the response, and ranger's split
+#'   scores, formed from squares of the response, read the rounding of the
+#'   offset otherwise.  \code{$info$response_centre} (0 where none is taken)
+#'   and \code{$info$response_scale} (1 where none is applied) record them,
+#'   and they are put back on \code{fitted()}, \code{predict()},
+#'   \code{residuals()}, \code{oob_rmse} and \code{importance} (squared
+#'   units, so multiplied by the scale twice; beyond the range of doubles it
+#'   is \code{Inf} or loses its bits, and a WARN line says so).  The
+#'   permutation importance under \code{scale.permutation.importance = TRUE}
+#'   and the impurity importance under \code{splitrule = "maxstat"} have no
+#'   units and are left as ranger reports them.  The forest
+#'   in \code{$engine} predicts \code{(y - response_centre) /
+#'   response_scale}, and its own \code{predictions} and
+#'   \code{prediction.error} are in those units.  Every other response is
+#'   passed to ranger as it is.
 #'
 #' @references
 #' Meyer, H., Reudenbach, C., Wöllauer, S. and Nauss, T. (2019). Importance of
@@ -498,6 +592,15 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
   } else if (length(cat_pred) == 0L) NA_character_
   else if (extratrees) "partition" else "order"
 
+  # The forest is grown on the response taken about its centre where it
+  # lies far from zero, and divided by a power of two where its squares
+  # would overflow or lose their bits; see .rf_response().  The centre and
+  # scale are put back on everything the fit returns.  `y` keeps its name,
+  # which ranger records in its call.
+  splitrule <- if ("splitrule" %in% dot_names) list(...)[["splitrule"]]
+  ry <- .rf_response(y, splitrule)
+  y <- ry$y
+
   # .call_capturing_stderr(): ranger diagnoses a bad argument on stderr from
   # C++ and then throws "User interrupt or internal error.", so the message
   # this reported named nothing a caller could act on while the real reason
@@ -527,6 +630,40 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
   # .num1() collapses an unset ranger field to NA_real_ rather than the
   # numeric(0) that as.numeric(NULL) produces -- see ?.num1.
   oob_mse <- .num1(fit$prediction.error)
+  oob_rmse <- if (is.finite(oob_mse)) sqrt(oob_mse) else NA_real_
+  # The importance is in squared units of the response, and so is the OOB
+  # error: they are multiplied by the scale twice (scale^2 itself can pass
+  # the largest double), and the OOB RMSE by the scale once.  A shift
+  # changes neither.  Two importances ranger reports without units are left
+  # as they are: permutation importance under scale.permutation.importance
+  # = TRUE (divided by its standard error) and impurity importance under
+  # splitrule = "maxstat" (a rank statistic).
+  imp_unitless <-
+    (identical(importance, "permutation") &&
+       isTRUE(list(...)[["scale.permutation.importance"]])) ||
+    (identical(importance, "impurity") &&
+       identical(splitrule, "maxstat"))
+  if (ry$scale != 1) {
+    oob_rmse <- oob_rmse * ry$scale
+    if (!is.null(imp) && !imp_unitless) {
+      imp_fit <- imp
+      imp <- imp * ry$scale * ry$scale
+      lost <- is.finite(imp_fit) & imp_fit != 0 &
+        (!is.finite(imp) | abs(imp) < .Machine$double.xmin)
+      # Not for a cv_rf() fold forest, whose importance the run never reads
+      # (as for the out-of-bag warning below).
+      if (any(lost) && !isTRUE(.already_prepped))
+        .log_warn(paste0("fit_rf_model(): the %s importance of %s is in ",
+                         "squared units of the response and lies %s, so it ",
+                         "is reported as %s. Rescale the response to compare ",
+                         "the importances."),
+                  importance, paste(sQuote(names(imp)[which(lost)]), collapse = ", "),
+                  if (ry$scale > 1) "above the largest double"
+                  else "below the smallest normal double",
+                  if (ry$scale > 1) "Inf"
+                  else "a number with few or none of its bits")
+    }
+  }
 
   # A row every tree sampled has no out-of-bag prediction, and ranger returns
   # NaN for it: every row under replace = FALSE with sample_fraction = 1
@@ -607,9 +744,13 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
       respect_unordered_factors = ruf,
       replace          = isTRUE(replace),
       sample_fraction  = sample_fraction,
-      oob_rmse         = if (is.finite(oob_mse)) sqrt(oob_mse) else NA_real_,
+      oob_rmse         = oob_rmse,
       oob_r_squared    = .num1(fit$r.squared),
       fitted_are_oob   = TRUE,
+      # The forest in `engine` is grown on (y - response_centre) /
+      # response_scale; see .rf_response().
+      response_centre  = ry$centre,
+      response_scale   = ry$scale,
       seed             = seed,
       n_dropped        = n_dropped
     )
@@ -891,6 +1032,10 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
 #'   such as \code{type = "quantiles"} on a forest grown without
 #'   \code{quantreg = TRUE} or \code{type = "se"} without
 #'   \code{keep.inbag = TRUE}: the error names ranger's reason.
+#'   \code{fit$engine} predicts \code{(y - fit$info$response_centre) /
+#'   fit$info$response_scale}, which is \code{y} unless the forest was grown
+#'   on the response taken about a centre or scaled (see the Value section of
+#'   \code{\link{fit_rf_model}}); this method puts the centre and scale back.
 #'   \code{seed} defaults to a constant: an unset \code{seed} makes
 #'   \code{ranger} draw one uniform from the global RNG stream per call, so the
 #'   number of \code{predict()} calls a script happens to make (via
@@ -1002,7 +1147,8 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
                         "one prediction per row of newdata. Call ",
                         "predict(<fit>$engine, data = ...) directly instead."),
                  paste(dim(p), collapse = " x ")), call. = FALSE)
-  preds <- if (is.null(p)) rep(NA_real_, n_new) else as.numeric(p)
+  preds <- if (is.null(p)) rep(NA_real_, n_new)
+           else .rf_unscale(as.numeric(p), object$info)
   .expand_predictions(preds, clean_idx, n_orig)
 }
 
@@ -1024,7 +1170,7 @@ fitted.rf_fit <- function(object, ...) {
     .log_warn("fitted.rf_fit(): no usable out-of-bag predictions; returning NA.")
     return(rep(NA_real_, object$n))
   }
-  as.numeric(p)
+  .rf_unscale(as.numeric(p), object$info)
 }
 
 
@@ -1145,13 +1291,19 @@ print.rf_fit <- function(x, ...) {
   }
   imp <- x$info$importance
   if (!is.null(imp) && length(imp) > 0L) {
-    imp_ok <- imp[is.finite(imp)]
+    # NaN is undefined; Inf is an importance whose squared units lie above
+    # the largest double (fit_rf_model() says so in a WARN line) and is
+    # printed as such.
+    imp_ok <- imp[!is.na(imp)]
     cat(sprintf("  Importance (%s): %s\n", x$info$importance_type,
                 if (!length(imp_ok)) {
                   if (no_oob) "undefined (no row is out of bag)" else "undefined"
                 } else {
                   top <- utils::head(sort(imp_ok, decreasing = TRUE), 5L)
-                  paste(sprintf("%s=%.4g", names(top), top), collapse = ", ")
+                  paste0(paste(sprintf("%s=%.4g", names(top), top), collapse = ", "),
+                         if (any(is.infinite(top)))
+                           " (Inf: above the largest double in squared units of the response)"
+                         else "")
                 }))
   }
   # What the out-of-bag error is the error of, and for which map it reads

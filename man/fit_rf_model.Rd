@@ -103,8 +103,30 @@ ranger did not compute it; forwarding \code{oob.error = FALSE} through
 \code{TRUE}; \code{summary()} reads it to label its metrics),
 \code{seed} and \code{n_dropped} (the rows \code{prep_model_data()}
 removed for missing or non-finite values or a bad geometry, so \code{$n}
-can be read against \code{nrow(data_sf)}). The raw forest is in
+can be read against \code{nrow(data_sf)}), and \code{response_centre}
+and \code{response_scale} (below). The raw forest is in
 \code{$engine}.
+
+The forest is grown on the response taken about its centre where that
+centre is more than 1000 times the response's spread (as at 1e8 plus
+a spread of 1), and divided by a power of two where the response is so
+large or its spread so small that its squares overflow or lose their
+bits (beyond about 1e100 or 1e-100).  The splits of a forest do not
+change under a shift or a scale of the response, and ranger's split
+scores, formed from squares of the response, read the rounding of the
+offset otherwise.  \code{$info$response_centre} (0 where none is taken)
+and \code{$info$response_scale} (1 where none is applied) record them,
+and they are put back on \code{fitted()}, \code{predict()},
+\code{residuals()}, \code{oob_rmse} and \code{importance} (squared
+units, so multiplied by the scale twice; beyond the range of doubles it
+is \code{Inf} or loses its bits, and a WARN line says so).  The
+permutation importance under \code{scale.permutation.importance = TRUE}
+and the impurity importance under \code{splitrule = "maxstat"} have no
+units and are left as ranger reports them.  The forest
+in \code{$engine} predicts \code{(y - response_centre) /
+  response_scale}, and its own \code{predictions} and
+\code{prediction.error} are in those units.  Every other response is
+passed to ranger as it is.
 }
 \description{
 Fits a regression random forest on an \code{sf} dataset and returns it as a

@@ -7092,6 +7092,30 @@ old behaviour where there is a way.
   levels no longer draw from the caller's stream; the integer is one draw
   from it. `?resolution_profile` (`seed`) says so.
 
+* **`fit_rf_model()` grew another forest on a response at a large offset,
+  and on one whose squares overflow or underflow.**  ranger scores a split
+  by sums of squares it forms from the response, so at 1e8 plus a spread of
+  1 those squares are near 1e17 and their differences read the rounding:
+  the same forest (seed, rows, trees) less the offset gave fitted values up
+  to 1.3 from those at the origin, and `cv_rf()` and `compare_models_cv()`
+  scored those forests in every fold. At 1e160 the squares overflow, the
+  forest was grown on infinite scores and its fitted values were off by
+  1.5e160 with no OOB error at all; at 1e-160 the OOB error lost its bits.
+  The forest is now grown on the response taken about its centre where
+  that centre is more than 1000 times its spread, and divided by a power
+  of two where it lies beyond 1e100 or its spread below 1e-100; the centre
+  and scale are recorded in `$info$response_centre` and
+  `$info$response_scale` and put back on `fitted()`, `predict()`,
+  `residuals()`, the OOB RMSE and the importance. An importance whose
+  squared units lie beyond the range of doubles is `Inf`, or keeps few of
+  its bits, with a WARN line that says so, and `print()` shows it as `Inf`
+  with that reason. The permutation importance under
+  `scale.permutation.importance = TRUE` and the impurity importance under
+  `splitrule = "maxstat"` have no units and are left as ranger reports
+  them. Any other response gives the forest it gave. `fit$engine`
+  predicts the response less the centre over the scale; `?fit_rf_model`
+  (Value) and `?predict.rf_fit` say so.
+
 ## Documentation
 
 * The README, the vignettes, the help's examples, the scripts in
