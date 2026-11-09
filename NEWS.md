@@ -3737,6 +3737,87 @@ old behaviour where there is a way.
   grid, to pass a projected `crs` or to size the grid by `target_cells` or
   `n`).
 
+* **`voronoi_seeds_random()` and `get_voronoi_seeds(method = "random")` and
+  `"kmeans"` stopped with sf's bare "sampling box is N times larger than
+  sampling region" on a lon/lat boundary of small pieces far apart.**  In
+  longitude and latitude sf does not sample a region whose bounding box is
+  over 10,000 times its area, so two small squares on two continents were
+  refused, while the same boundary in a projected CRS was sampled.  Such a
+  boundary is now sampled piece by piece: the seeds (or the k-means cloud)
+  are shared among the pieces in proportion to their areas in one draw from
+  the random stream, so they stay uniform over the whole, and each piece is
+  sampled as before.  A piece whose own bounding box is over 10,000 times
+  its area stops the call with an error that names `boundary` and says to
+  transform it to a projected CRS.  A boundary sf samples whole gives the
+  seeds it gave.
+
+* **A lon/lat `boundary` with a vertex at a latitude beyond 90 was read as a
+  shape folded over the pole.**  `voronoi_seeds_random()` and
+  `get_voronoi_seeds()` placed seeds 180 degrees of longitude away, a grid
+  laid in degrees put its cells there, `clip_target_for()` returned a target
+  a few metres high, `create_voronoi_polygons()` returned 0 cells or
+  stopped with "`boundary` must be polygonal" on a polygon, and
+  `make_folds(method = "block_kfold")` said none of the points fell inside
+  `boundary`, all without saying why.  Such a vertex is no place on the
+  Earth, usually metres stamped with a geographic CRS or x and y swapped.
+  These functions, `create_grid_polygons()`, `create_grid_polygons_cached()`
+  and `build_tessellation()` now refuse such a boundary, read as given,
+  with an error of class `"spatialkit_cells_degenerate"` (`site =
+  "boundary"`) that names its rows and their latitudes and says to check
+  its CRS.  A boundary without a CRS that `create_grid_polygons(crs =)` or
+  `build_tessellation(crs =)` stamps with a geographic CRS is tested in the
+  same way.  A boundary that reaches latitude 90 and not beyond is read as
+  before.
+
+* **A `boundary` with no polygon that has a location was read in silence or
+  stopped with a bare or false message.**  A row that is empty, or has a
+  vertex with a coordinate that is not finite or lies beyond 1e150, covers
+  no ground, but `clip_target_for()` returned a target of area 0 (or 5e204
+  with a vertex at 1e200), `create_voronoi_polygons()` returned 0 cells
+  with a warning that blamed the points, the random and k-means seeders
+  stopped with R's "no applicable method for 'st_geometry'" or put every
+  seed near y = 1e199, a vertex at `Inf` moved the cells of the grids, and
+  `build_tessellation(method = "hex")` and `"square"` refused a square
+  beside an empty row as "not polygonal".  The readers of `boundary`
+  (`clip_target_for()`, `create_voronoi_polygons()`, `build_tessellation()`,
+  `create_grid_polygons()`, `create_grid_polygons_cached()`, the seeders and
+  `make_folds(method = "block_kfold")`) now leave such rows out, read as
+  given and again after a move into another CRS, which empties a row it
+  cannot place, so a square beside such a row gives what the square alone
+  gives.  A boundary with no row left stops the call with an error that
+  says `boundary` has no polygon with a location, and why.
+
+* **The random and k-means seeders stopped with R's "no applicable method
+  for 'st_geometry'" on a lon/lat boundary whose repair leaves no polygon,
+  and never returned on one whose bounding box has no height.**  s2 refuses
+  a ring with no height (every vertex on one parallel), and its repair
+  leaves nothing; such a row is now left out like a row without a location,
+  and a boundary with no polygon left stops the call with the error above,
+  whose reason says the repair left no polygon with an area.  A ring of
+  three vertices on one parallel is valid under s2, which reads its edges
+  as great circles, but its bounding box has no height, and sf drew in that
+  box without end: `voronoi_seeds_random()` and `get_voronoi_seeds()` now
+  refuse a boundary whose bounding box has no height or no width at once,
+  as `create_grid_polygons()` does.
+
+* **A `boundary` row whose repair leaves no polygon made the builders
+  refuse a valid boundary or return a line.**  A ring with no height (every
+  vertex on one line, or in degrees on one parallel) comes out of the
+  repair of `boundary` as a line or as nothing.  Beside a valid square,
+  `build_tessellation(method = "hex")` and `"square"` refused the boundary
+  as "not polygonal", `clip_target_for()` returned a target with a line in
+  it, and the grids and Voronoi cells changed; alone, `clip_target_for()`
+  returned a line and `create_voronoi_polygons()` returned cells that held
+  none of the points, with a warning that blamed them.  Every reader of
+  `boundary` now leaves such a row out before any move, and again after its
+  own repair, so a square beside it gives what the square alone gives, and
+  a boundary with no polygon left stops the call with the error above.
+
+* **`make_folds(method = "block_kfold")` stopped with R's "no applicable
+  method for 'st_geometry'" on a `boundary` that is not an sf or sfc
+  layer** (a bounding box, a data frame).  It now refuses such a boundary
+  by name, as `build_tessellation()` does.
+
 * **`create_grid_polygons_cached()` handed a grid returned in degrees to a
   session with the other `sf::sf_use_s2()` setting.**  A grid with a
   geographic `crs` and a `cellsize` is laid in degrees and clipped by s2

@@ -31,7 +31,25 @@ refuses (crossing edges, a vertex listed twice) is repaired again, with
 crossing edges split as GEOS splits them in a projected CRS; a row s2
 refuses even then stops the call with an error of class
 \code{"spatialkit_cells_degenerate"} that names it and says to transform
-\code{boundary} to a projected CRS.}
+\code{boundary} to a projected CRS.
+A row that is empty, or has a coordinate that is not finite or lies
+beyond 1e150 (read as given, and again after any move into another
+CRS), covers no ground and is left out; a boundary with no such row
+left is refused with an error that says so. A boundary in a geographic
+CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+the Earth, is refused with an error of class
+\code{"spatialkit_cells_degenerate"} that names its rows and says to check
+its CRS.
+A row the repair leaves without a polygon (a ring with no height:
+every vertex on one line, or in degrees on one parallel) is left out
+as well, and a boundary with no polygon left is refused. In
+longitude and latitude, a boundary whose bounding box is over 10,000
+times its area (small pieces far apart), which sf does not sample whole,
+is sampled piece by piece, the points shared among the pieces in
+proportion to their areas; a piece whose own box is over 10,000 times
+its area stops the call with an error that says to transform
+\code{boundary} to a projected CRS. A boundary whose bounding box has no
+height or no width (three vertices on one parallel) is refused.}
 
 \item{method}{One of "kmeans", "random", "provided".}
 

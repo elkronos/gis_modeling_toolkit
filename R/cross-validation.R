@@ -5198,6 +5198,17 @@ print.sac_range <- function(x, ...) {
 #'   mixes XY and XYZ (or XYM) geometries is read in x and y, since sf reads
 #'   a layer in the dimension of its first geometry, and so is one whose
 #'   polygons carry M (XYM or XYZM), which GEOS refuses.
+#'   A row that is empty, or has a coordinate that is not finite or lies
+#'   beyond 1e150 (read as given, and again after any move into another
+#'   CRS), covers no ground and is left out; a boundary with no such row
+#'   left is refused with an error that says so. A boundary in a geographic
+#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+#'   the Earth, is refused with an error of class
+#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
+#'   its CRS.
+#'   A row the repair of `boundary` leaves without a polygon (a ring with no
+#'   height: every vertex on one line, or in degrees on one parallel) is
+#'   left out as well, and a boundary with no polygon left is refused.
 #' @param buffer For \code{"buffered_loo"}: a single positive number, the
 #'   distance within which the held-out point's neighbours are excluded from
 #'   its training set.  Like \code{block_size} it is in the units of the CRS
@@ -6058,6 +6069,16 @@ make_folds <- function(points_sf, k,
                                  what = "points_sf", caller = "make_folds")
     }
     reg <- if (!is.null(boundary)) {
+      # Only the rows of `boundary` with a location, read as given before the
+      # move (.boundary_located()), and again after it, which empties a row
+      # it cannot place.  A boundary with no row left was read as ground
+      # none of the points fell in, and one in degrees with a latitude
+      # beyond 90 was moved to an empty row; both are refused by name.
+      nothing <- "no block region can be built from it"
+      # A boundary that is not an sf or sfc layer (a bbox, a data frame)
+      # stopped with R's "no applicable method for 'st_geometry'".
+      .check_boundary_arg(boundary, "make_folds")
+      boundary <- .boundary_located(boundary, "make_folds", nothing)
       # A CRS-less boundary is aligned to the points as every other function
       # given one aligns it: an R warning naming this function and argument.
       # ensure_projected()'s stamp was a log line naming neither, invisible
@@ -6066,12 +6087,17 @@ make_folds <- function(points_sf, k,
            else .transform_or_stamp(boundary, sf::st_crs(pts),
                                     what = "boundary", caller = "make_folds")
       if (inherits(b, "sfc")) b <- sf::st_sf(geometry = b)
+      # No move here empties a row with a location yet (a move into a
+      # projected CRS keeps a row at 1e20 as another shape); the test guards
+      # a move that empties it.
+      b <- .boundary_located(b, "make_folds", nothing, moved = TRUE)
       # The rows are repaired before the union (.boundary_union()): unioned
       # as they came, a bowtie row beside a valid one stopped the call with
       # GEOS's bare "TopologyException", where the builders repair it.  Valid
       # rows are unioned as they arrived, and the union is repaired as before.
       b <- .safe_make_valid(.boundary_union(
-        b, caller = "make_folds", task = "the union of the block region"))
+        b, caller = "make_folds", task = "the union of the block region",
+        nothing = nothing))
       # A point on the boundary is inside it.  st_intersects() read a
       # lattice point on the boundary as inside or outside by the last bits
       # of its coordinates, so in another unit or origin such points were

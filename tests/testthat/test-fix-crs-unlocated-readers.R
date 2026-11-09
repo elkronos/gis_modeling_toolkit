@@ -211,14 +211,19 @@ test_that("a boundary without a CRS is read on the vertices that have a location
   got <- with_warnings(.cv_boundary_crs(bd_inf, "probe"))
   expect_identical(sf::st_crs(got$value), ll)
   expect_identical(got$warnings, ref$warnings)
-  # Through a builder: refused with the same message as the boundary without
-  # the infinite vertex (it stopped with "`boundary` must be polygonal").
+  # Through a builder (it stopped with "`boundary` must be polygonal"): a
+  # row with a vertex at Inf has no location as a whole, so the builder
+  # leaves it out as given; beside the boundary without that vertex it is
+  # refused with that boundary's message, and alone, as a boundary with no
+  # polygon that has a location.
   set.seed(3)
   pts <- sf::st_as_sf(data.frame(x = stats::runif(20, -93.9, -92.1), y = stats::runif(20, 44.1, 45.9)),
                       coords = c("x", "y"), crs = 4326)
   err_of <- function(b) tryCatch(build_tessellation(pts, method = "voronoi", boundary = b),
                                  error = function(e) conditionMessage(e))
-  expect_identical(err_of(bm_inf), err_of(bm))
+  bm_and_inf <- sf::st_sf(geometry = c(sf::st_geometry(bm), sf::st_geometry(bm_inf)))
+  expect_identical(err_of(bm_and_inf), err_of(bm))
+  expect_match(err_of(bm_inf), "`boundary` has no polygon with a location", fixed = TRUE)
 })
 
 test_that("a boundary without a CRS and with no located coordinate is refused by name", {

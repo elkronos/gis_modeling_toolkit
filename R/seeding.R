@@ -48,6 +48,24 @@
 #'   refuses even then stops the call with an error of class
 #'   `"spatialkit_cells_degenerate"` that names it and says to transform
 #'   `boundary` to a projected CRS.
+#'   A row that is empty, or has a coordinate that is not finite or lies
+#'   beyond 1e150 (read as given, and again after any move into another
+#'   CRS), covers no ground and is left out; a boundary with no such row
+#'   left is refused with an error that says so. A boundary in a geographic
+#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+#'   the Earth, is refused with an error of class
+#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
+#'   its CRS.
+#'   A row the repair leaves without a polygon (a ring with no height:
+#'   every vertex on one line, or in degrees on one parallel) is left out
+#'   as well, and a boundary with no polygon left is refused. In
+#'   longitude and latitude, a boundary whose bounding box is over 10,000
+#'   times its area (small pieces far apart), which sf does not sample whole,
+#'   is sampled piece by piece, the points shared among the pieces in
+#'   proportion to their areas; a piece whose own box is over 10,000 times
+#'   its area stops the call with an error that says to transform
+#'   `boundary` to a projected CRS. A boundary whose bounding box has no
+#'   height or no width (three vertices on one parallel) is refused.
 #' @param method One of "kmeans", "random", "provided".
 #' @param n Integer; number of seeds to return. Required for
 #'   `method = "kmeans"` and `method = "random"`. **Ignored** for
@@ -451,12 +469,21 @@ get_voronoi_seeds <- function(boundary = NULL,
   # valid: Edge 0 crosses edge 2"; the rows s2 still refuses are rebuilt with
   # those edges split, as GEOS does in a projected CRS, and a row s2 refuses
   # even then stops the call with an error that names it.
+  task <- if (identical(method, "kmeans")) "the sampling of the k-means cloud inside it"
+          else "the sampling of random seeds inside it"
+  nothing <- if (identical(method, "kmeans")) "no point of the k-means cloud can be drawn in it"
+             else "no seed can be drawn in it"
   boundary_union <- function(b)
-    .boundary_union(b, caller = "get_voronoi_seeds",
-                    task = if (identical(method, "kmeans"))
-                      "the sampling of the k-means cloud inside it"
-                    else "the sampling of random seeds inside it",
-                    all = TRUE)
+    .boundary_union(b, caller = "get_voronoi_seeds", task = task, all = TRUE,
+                    nothing = nothing)
+  # The rows of `boundary` sampled below are those with a location, read as
+  # given before the repair (.boundary_located()): a row that is empty or
+  # has a vertex at Inf or beyond 1e150 covers no ground, and one with a
+  # latitude beyond 90 is refused.  An empty row came out of the repair as
+  # an empty line, and the union of nothing stopped the sampling with R's
+  # "no applicable method for 'st_geometry'"; a row with a vertex at 1e200
+  # took every seed.  The seeds' cover is these rows.
+  located <- function(b) .boundary_located(b, "get_voronoi_seeds", nothing)
 
   out <- switch(
     method,
@@ -487,8 +514,9 @@ get_voronoi_seeds <- function(boundary = NULL,
     "random" = {
       if (is.null(boundary))
         stop("get_voronoi_seeds(): random seeds require 'boundary'.", call. = FALSE)
+      boundary <- located(boundary)
       b <- boundary_union(boundary)
-      pts <- .robust_st_sample(b, n)
+      pts <- .robust_st_sample(b, n, "get_voronoi_seeds", nothing)
       pts_sfc <- sf::st_sfc(pts, crs = sf::st_crs(boundary))
       sf::st_sf(seed_id = seq_along(pts_sfc), method = "random",
                 geometry = pts_sfc)
@@ -501,9 +529,10 @@ get_voronoi_seeds <- function(boundary = NULL,
         if (is.null(boundary))
           stop("get_voronoi_seeds(): k-means seeds require 'boundary' (or provide 'sample_points').",
                call. = FALSE)
+        boundary <- located(boundary)
         b <- boundary_union(boundary)
         cloud_n <- .kmeans_cloud_size(n)
-        cloud_geom <- .robust_st_sample(b, cloud_n)
+        cloud_geom <- .robust_st_sample(b, cloud_n, "get_voronoi_seeds", nothing)
         cloud_sfc <- sf::st_sfc(cloud_geom, crs = sf::st_crs(boundary))
         cloud <- sf::st_sf(geometry = cloud_sfc)
       }
@@ -675,17 +704,39 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' Tries exact sampling first, then falls back to iterative padding to
 #' reach the desired count.
 #'
+#' The box the draw is made in is read from the coordinates first.  With no
+#' width or no height (a lon/lat ring of three vertices on one parallel,
+#' which s2 reads as a sliver with an area) \code{sf::st_sample()} drew in
+#' it without end, so the call stops in the caller's name instead.
+#'
+#' In longitude and latitude sf refuses to sample a region whose bounding
+#' box is over 10^4 times its area ("sampling box is N times larger than
+#' sampling region"), as for small pieces far apart.  Only that refusal is
+#' caught: the geometry is then cast to its polygons, \code{n} is shared
+#' among them by their areas on the sphere in one multinomial draw from the
+#' stream, so the points stay uniform over the whole, and each piece is
+#' sampled as above, in the order of the pieces.  A piece sf still refuses
+#' stops the call with an error in the caller's name that gives the cause
+#' and says to transform `boundary` to a projected CRS.  Every geometry sf
+#' samples whole is sampled as before, to the bit.
+#'
 #' @param geom An sfc geometry to sample within.
 #' @param n Integer; desired number of sample points.
+#' @param caller Name of the exported function, for the errors.
+#' @param nothing What cannot be drawn ("no seed can be drawn in it").
+#' @param by_piece \code{FALSE} for a piece of the piece-by-piece draw,
+#'   which stops where sf refuses it.
 #' @return An sfc_POINT of length n.
 #' @keywords internal
 #' @noRd
-.robust_st_sample <- function(geom, n) {
+.robust_st_sample <- function(geom, n, caller = "spatialkit",
+                              nothing = "no point can be drawn in it", by_piece = TRUE) {
   # st_sample() sizes its draw from st_area(), which on lon/lat input needs
   # lwgeom (not a dependency) when sf_use_s2() is FALSE: random and k-means
   # seeding on a lon/lat boundary failed with "package lwgeom required".
   if (.is_longlat(geom) && !isTRUE(sf::sf_use_s2()))
-    return(.with_s2(.robust_st_sample(geom, n)))
+    return(.with_s2(.robust_st_sample(geom, n, caller, nothing, by_piece)))
+  .sample_box_check(geom, caller, nothing)
   # Without lwgeom (not a dependency) sf warns "coordinate ranges not computed
   # along great circles; install package lwgeom to get rid of this warning"
   # on every lon/lat draw, so every random or k-means seeding on a lon/lat
@@ -697,10 +748,17 @@ get_voronoi_seeds <- function(boundary = NULL,
       if (grepl("coordinate ranges not computed along great circles",
                 conditionMessage(w), fixed = TRUE))
         invokeRestart("muffleWarning"))
+  # sf's refusal of a lon/lat region whose box is over 10^4 times its area.
+  # It stops before any number is drawn, so the stream is where it was.
+  box_refused <- function(e)
+    grepl("sampling box is .* times larger than sampling region", conditionMessage(e))
   pts <- try(st_sample_quiet(geom, size = n, type = "random", exact = TRUE),
              silent = TRUE)
   if (inherits(pts, "try-error")) {
-    pts <- st_sample_quiet(geom, size = n, type = "random")
+    pts <- tryCatch(st_sample_quiet(geom, size = n, type = "random"),
+                    error = function(e) if (box_refused(e)) e else stop(e))
+    if (inherits(pts, "error"))
+      return(.sample_by_piece(geom, n, pts, caller, nothing, by_piece))
   }
   # Pad or trim to exactly n
   max_attempts <- 10L
@@ -715,6 +773,64 @@ get_voronoi_seeds <- function(boundary = NULL,
     .log_warn(".robust_st_sample(): could only generate %d of %d requested points.",
               length(pts), n)
   pts
+}
+
+#' Refuse a region whose bounding box has no width or no height
+#'
+#' \code{sf::st_sample()} draws in the bounding box of the region, read from
+#' its coordinates, and keeps the points inside.  A lon/lat ring of three
+#' vertices on one parallel is valid under s2 (its edges are great circles,
+#' so it holds a sliver of ground) and its box has no height: no point drawn
+#' in the box falls inside, and the draw ran without end.
+#' create_grid_polygons() refuses such a box ("non-positive extent").
+#'
+#' @param geom An sfc.
+#' @param caller,nothing As \code{.robust_st_sample()}.
+#' @return \code{NULL}, invisibly, when the box has a width and a height;
+#'   otherwise it stops.
+#' @keywords internal
+#' @noRd
+.sample_box_check <- function(geom, caller, nothing) {
+  bb <- sf::st_bbox(geom)
+  w  <- as.numeric(bb[["xmax"]] - bb[["xmin"]])
+  h  <- as.numeric(bb[["ymax"]] - bb[["ymin"]])
+  if (!(is.finite(h) && h > 0) || !(is.finite(w) && w > 0))
+    stop(sprintf(paste0("%s(): `boundary` cannot be sampled (its bounding box, read from ",
+                        "its coordinates, has no %s), so %s."),
+                 caller, if (!(is.finite(h) && h > 0)) "height" else "width", nothing),
+         call. = FALSE)
+  invisible(NULL)
+}
+
+#' Sample a lon/lat region piece by piece, where sf refuses it whole
+#'
+#' See \code{.robust_st_sample()}.
+#'
+#' @param geom,n,caller,nothing,by_piece As \code{.robust_st_sample()}.
+#' @param parent sf's refusal of the box of \code{geom}.
+#' @return An sfc_POINT of length n.
+#' @keywords internal
+#' @noRd
+.sample_by_piece <- function(geom, n, parent, caller, nothing, by_piece) {
+  pieces <- if (isTRUE(by_piece)) suppressWarnings(sf::st_cast(
+    sf::st_collection_extract(geom, "POLYGON", warn = FALSE), "POLYGON"))
+  if (!isTRUE(by_piece) || length(pieces) < 2L) {
+    said <- sub(";$", "", trimws(strsplit(conditionMessage(parent), "\n",
+                                         fixed = TRUE)[[1L]][1L]))
+    stop(sprintf(paste0(
+      "%s(): sf refuses to sample `boundary` in longitude and latitude: the bounding ",
+      "box of %s is over 10,000 times %s area (sf: \"%s\"), so %s. Transform `boundary` ",
+      "to a projected CRS, such as the one ensure_projected() picks for it ",
+      "(sf::st_transform()), and call %s() again."),
+      caller, if (isTRUE(by_piece)) "`boundary`" else "one of its polygons",
+      if (isTRUE(by_piece)) "its" else "that polygon's", said, nothing, caller),
+      call. = FALSE)
+  }
+  area <- as.numeric(.with_s2(sf::st_area(pieces)))
+  take <- as.vector(stats::rmultinom(1L, n, area / sum(area)))
+  got  <- lapply(which(take > 0L), function(i)
+    .robust_st_sample(pieces[i], take[i], caller, nothing, by_piece = FALSE))
+  do.call(c, got)
 }
 
 
@@ -1088,6 +1204,24 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
 #'   (in a projected CRS) or s2 (in longitude and latitude) refuses are
 #'   repaired before the rows are unioned, as in [get_voronoi_seeds()];
 #'   valid rows are used as they are.
+#'   A row that is empty, or has a coordinate that is not finite or lies
+#'   beyond 1e150 (read as given, and again after any move into another
+#'   CRS), covers no ground and is left out; a boundary with no such row
+#'   left is refused with an error that says so. A boundary in a geographic
+#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+#'   the Earth, is refused with an error of class
+#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
+#'   its CRS.
+#'   A row the repair leaves without a polygon (a ring with no height:
+#'   every vertex on one line, or in degrees on one parallel) is left out
+#'   as well, and a boundary with no polygon left is refused. In
+#'   longitude and latitude, a boundary whose bounding box is over 10,000
+#'   times its area (small pieces far apart), which sf does not sample whole,
+#'   is sampled piece by piece, the points shared among the pieces in
+#'   proportion to their areas; a piece whose own box is over 10,000 times
+#'   its area stops the call with an error that says to transform
+#'   `boundary` to a projected CRS. A boundary whose bounding box has no
+#'   height or no width (three vertices on one parallel) is refused.
 #' @param k Integer; number of random seeds.
 #' @param set_seed Optional integer RNG seed. Default `NULL`: the seeds are
 #'   drawn from the session's random-number stream, so consecutive calls give
@@ -1147,9 +1281,15 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   # twice in degrees, a bowtie among valid rows).  The rows GEOS or s2
   # refuses are repaired first (.boundary_union()); valid rows are unioned as
   # they arrived, so their seeds are those they were.
-  geom <- .boundary_union(boundary, caller = "voronoi_seeds_random",
-                          task = "the sampling of random seeds inside it")
-  pts <- .robust_st_sample(geom, k)
+  # Only the rows with a location, read as given before the repair
+  # (.boundary_located(), as in get_voronoi_seeds()); a latitude beyond 90
+  # is refused.
+  task    <- "the sampling of random seeds inside it"
+  nothing <- "no seed can be drawn in it"
+  boundary <- .boundary_located(boundary, "voronoi_seeds_random", nothing)
+  geom <- .boundary_union(boundary, caller = "voronoi_seeds_random", task = task,
+                          nothing = nothing)
+  pts <- .robust_st_sample(geom, k, "voronoi_seeds_random", nothing)
   out <- sf::st_sf(geometry = pts) |> sf::st_set_crs(sf::st_crs(boundary))
   # Same output contract as get_voronoi_seeds(), so the three seeding
   # functions are drop-in interchangeable.
@@ -1194,12 +1334,22 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #'   the engine of the union refuses (GEOS's validity in a projected CRS,
 #'   s2's conversion in degrees), so a boundary of valid rows is unioned as it
 #'   arrived, to the bit.
-#' @return \code{b}, of the same class, with the rows repaired.
+#' @param nothing What cannot be done in `boundary` when the repair leaves no
+#'   polygon in it ("no seed can be drawn in it"), for the error
+#'   \code{.stop_boundary_unlocated()} raises then.
+#' @return \code{b}, of the same class, with the rows repaired.  A row the
+#'   repair leaves without a polygon (a ring with no height, which the repair
+#'   empties or turns into a line) is left out, when \code{b} had a polygon
+#'   before the repair.  With no polygon left the call stops: the union
+#'   handed the samplers nothing, and they stopped with R's "no applicable
+#'   method for 'st_geometry'".
 #' @keywords internal
 #' @noRd
-.boundary_mend <- function(b, refuse = NULL, caller = NULL, task = NULL, all = FALSE) {
+.boundary_mend <- function(b, refuse = NULL, caller = NULL, task = NULL, all = FALSE,
+                           nothing = "nothing can be built or drawn in it") {
   g  <- sf::st_geometry(b)
   ll <- .is_longlat(g)
+  had <- any(.has_polygon(g))
   if (isTRUE(all)) {
     g <- .safe_make_valid(g)
   } else if (!ll && length(g)) {
@@ -1233,8 +1383,17 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
       m$g
     })
   }
-  if (!inherits(b, "sf")) return(g)
+  # A row the repair leaves without a polygon (an empty collection, or a
+  # line for a ring with no height) covers no ground and is left out, so a
+  # square beside it is unioned as the square alone; with no polygon left
+  # the call stops.
+  keep <- if (had && length(g)) .has_polygon(g) else rep(TRUE, length(g))
+  if (!any(keep))
+    .stop_boundary_unlocated(if (is.null(caller)) "spatialkit" else caller, nothing,
+                             if (ll) "s2" else "geos")
+  if (!inherits(b, "sf")) return(if (all(keep)) g else g[keep])
   if (!identical(g, sf::st_geometry(b))) sf::st_geometry(b) <- g
+  if (!all(keep)) b <- b[keep, ]
   b
 }
 
@@ -1249,26 +1408,64 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #' @return An sfc of one geometry.
 #' @keywords internal
 #' @noRd
-.boundary_union <- function(b, refuse = NULL, caller = NULL, task = NULL, all = FALSE) {
-  g <- sf::st_geometry(.boundary_mend(b, refuse, caller, task, all))
+.boundary_union <- function(b, refuse = NULL, caller = NULL, task = NULL, all = FALSE,
+                            nothing = "nothing can be built or drawn in it") {
+  g <- sf::st_geometry(.boundary_mend(b, refuse, caller, task, all, nothing))
   if (.is_longlat(g)) .with_s2(sf::st_union(g)) else sf::st_union(g)
 }
 
-#' The error for a boundary row s2 refuses even repaired
+#' The error for a boundary row s2 refuses even repaired, or that lies
+#' beyond a pole
 #'
 #' Of class \code{"spatialkit_cells_degenerate"}, built by
 #' \code{.raise_cells_degenerate()}: it names `boundary`, its rows and s2's
 #' reason for each, and says to transform `boundary` to a projected CRS,
 #' where GEOS repairs it.  It carries \code{site = "boundary"}.
 #'
+#' With \code{cause = "latitude"} the rows have a vertex at a latitude
+#' beyond 90 degrees in a geographic CRS (\code{.boundary_located()}).  Such
+#' a vertex is no place on the Earth: s2 read the row as a shape over the
+#' pole, on the far meridian, and no transform places it.  The error then
+#' names the rows and their latitudes and says to check the CRS of
+#' `boundary`; it carries \code{cause = "latitude"} as well, so a caller
+#' that raises the s2 refusal again in its own words passes this one on as
+#' it is.
+#'
 #' @param parent,rows,reasons,n,s2_forced As \code{.boundary_mend()} gives
-#'   them.
+#'   them; for \code{cause = "latitude"}, \code{reasons} gives each row's
+#'   latitude.
 #' @param caller Name of the exported function.
-#' @param task What cannot run in degrees.
+#' @param task What cannot run in degrees; for \code{cause = "latitude"},
+#'   what cannot be done in `boundary` ("no seed can be drawn in it").
+#' @param cause \code{"s2"} or \code{"latitude"}.
 #' @return Does not return.
 #' @keywords internal
 #' @noRd
-.boundary_refused <- function(parent, rows, reasons, n, caller, task, s2_forced = FALSE) {
+.boundary_refused <- function(parent, rows, reasons, n, caller, task, s2_forced = FALSE,
+                              cause = c("s2", "latitude")) {
+  cause <- match.arg(cause)
+  if (cause == "latitude") {
+    rows_text <- if (length(rows) == 1L) sprintf("row %d", rows)
+                 else if (length(rows) <= 6L)
+                   sprintf("rows %s and %d", paste(rows[-length(rows)], collapse = ", "),
+                           rows[length(rows)])
+                 else sprintf("rows %s and %d more", paste(rows[1:6], collapse = ", "),
+                              length(rows) - 6L)
+    shown <- seq_len(min(length(rows), 6L))
+    msg <- sprintf(paste0(
+      "%s(): %s of the %d %s of `boundary` %s a vertex at a latitude beyond 90 degrees ",
+      "(%s), which is no place on the Earth, so %s. Coordinates in metres stamped with ",
+      "a geographic CRS, or x and y swapped, are the usual cause: check the CRS of ",
+      "`boundary` (sf::st_crs()) and the order of its coordinates, and call %s() again."),
+      caller, rows_text, n, if (n == 1L) "polygon" else "polygons",
+      if (length(rows) == 1L) "has" else "have",
+      paste(sprintf("row %d: %s", rows[shown], reasons[shown]), collapse = "; "),
+      task, caller)
+    stop(errorCondition(msg, class = "spatialkit_cells_degenerate", call = NULL,
+                        rows = rows, n = n, reasons = reasons, parent = parent,
+                        repaired = FALSE, s2_forced = FALSE, site = "boundary",
+                        cause = "latitude"))
+  }
   .raise_cells_degenerate(
     parent, rows, reasons, n, caller, "`boundary`", task, again = NULL,
     of = sprintf("the %d %s of `boundary`", n, if (n == 1L) "polygon" else "polygons"),
@@ -1277,6 +1474,190 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
       "Transform `boundary` to a projected CRS, such as the one ensure_projected() picks ",
       "for it (sf::st_transform()), and call %s() again; it is then repaired there with ",
       "sf::st_make_valid(), which splits crossing edges."), caller))
+}
+
+
+# Why `boundary` has no polygon with a location, for the error
+# .stop_boundary_unlocated() raises: read as given, after a move, or after
+# the repair of the rows the engine of the union refuses.
+.BOUNDARY_UNLOCATED_WHY <- c(
+  given = paste0("every row is empty, or has a coordinate that is not finite or lies ",
+                 "beyond 1e150"),
+  moved = "every row is empty after its move to the CRS the call works in, which cannot place them",
+  s2    = "the repair of the rows s2 refuses leaves no polygon with an area",
+  geos  = "the repair of the rows GEOS refuses leaves no polygon with an area")
+
+#' The error for a boundary with no polygon that has a location
+#'
+#' @param caller Name of the exported function.
+#' @param nothing What cannot be done in `boundary` ("no seed can be drawn
+#'   in it").
+#' @param why One of the names of \code{.BOUNDARY_UNLOCATED_WHY}.
+#' @return Does not return.
+#' @keywords internal
+#' @noRd
+.stop_boundary_unlocated <- function(caller, nothing, why) {
+  stop(sprintf("%s(): `boundary` has no polygon with a location (%s), so %s.",
+               caller, .BOUNDARY_UNLOCATED_WHY[[why]], nothing), call. = FALSE)
+}
+
+#' The rows of a boundary that have a location
+#'
+#' A row of `boundary` that is empty, or that has a vertex with a coordinate
+#' that is not finite or lies beyond 1e150 (\code{.unlocated_features()}),
+#' covers no ground.  Such rows are left out, read on the coordinates as
+#' given (\code{moved = FALSE}), before any move and any repair, so the
+#' repair never turns an empty polygon into an empty line and a builder
+#' reads a square beside such a row as it reads the square alone.  A move
+#' empties a row it cannot place (\code{.transform_keep_unlocated()}), so
+#' the test runs again after it (\code{moved = TRUE}).  With no row left the
+#' call stops (\code{.stop_boundary_unlocated()}).
+#'
+#' Read as given, a boundary in a geographic CRS with a vertex at a latitude
+#' beyond 90 degrees, on a row that has a location, is refused first
+#' (\code{.boundary_refused(cause = "latitude")}): s2 read such a row as a
+#' shape folded over the pole, so seeds and cells were placed on the far
+#' meridian.
+#'
+#' Read as given, a row the repair would leave without a polygon (a ring
+#' with no height; \code{.repair_leaves_no_polygon()}) is left out too, and
+#' with no polygon left the call stops with the reason that the repair
+#' leaves none.  Left in, it set the CRS a grid was laid in, entered the
+#' cover of the seeds, and came out of each builder's repair as a line.
+#' A boundary without a CRS that a call stamps with a geographic CRS is
+#' read again as given after the stamp, so its latitude is tested.
+#'
+#' @param b The boundary, sf or sfc, or \code{NULL}.
+#' @param caller Name of the exported function.
+#' @param nothing What cannot be done in `boundary`, for the errors.
+#' @param moved \code{TRUE} after a move of `boundary`.
+#' @return \code{b} itself when every row has a location; otherwise its rows
+#'   that have one.
+#' @keywords internal
+#' @noRd
+.boundary_located <- function(b, caller, nothing, moved = FALSE) {
+  if (is.null(b)) return(b)
+  g <- sf::st_geometry(b)
+  if (!length(g)) return(b)
+  unloc <- .unlocated_features(g)
+  if (!isTRUE(moved) && isTRUE(sf::st_crs(g)$IsGeographic)) {
+    far <- which(.beyond_pole_features(g) & !unloc)
+    if (length(far)) {
+      lat <- vapply(far, function(i) {
+        y <- sf::st_coordinates(g[i])[, "Y"]
+        y[which.max(ifelse(is.finite(y), abs(y), -Inf))]
+      }, numeric(1))
+      # Six digits, or as many more as show the latitude beyond 90: rounded
+      # to six, 90 + 1e-9 read "latitude 90".
+      shown <- vapply(lat, function(v) {
+        for (d in 6:17) {
+          s <- format(v, digits = d)
+          if (abs(as.numeric(s)) > 90) break
+        }
+        s
+      }, character(1))
+      .boundary_refused(simpleError("a vertex at a latitude beyond 90 degrees"), far,
+                        sprintf("latitude %s", shown), length(g),
+                        caller, nothing, cause = "latitude")
+    }
+  }
+  keep <- !unloc & !sf::st_is_empty(g)
+  if (!any(keep))
+    .stop_boundary_unlocated(caller, nothing, if (isTRUE(moved)) "moved" else "given")
+  # Read as given, a row whose repair leaves no polygon (a ring with no
+  # height) covers no ground either, and is left out before any move, so the
+  # CRS a call picks, the cover of the seeds and the cells are those of the
+  # other rows.  With no polygon left the call stops.
+  if (!isTRUE(moved)) {
+    flat <- .repair_leaves_no_polygon(g, which(keep))
+    if (any(flat)) {
+      keep <- keep & !flat
+      if (!any(keep))
+        .stop_boundary_unlocated(caller, nothing, if (.is_longlat(g)) "s2" else "geos")
+    }
+  }
+  if (all(keep)) return(b)
+  if (inherits(b, "sf")) b[keep, ] else g[keep]
+}
+
+#' Which rows of a boundary its repair leaves without a polygon
+#'
+#' A row that holds a polygon and that the engine of the boundary's union
+#' refuses (s2 in longitude and latitude, as \code{.boundary_mend()} judges
+#' it, GEOS otherwise) is repaired, and a row the repair leaves without a
+#' polygon (a ring with no height: an empty collection, or a line) is
+#' marked.  Rows the engine takes are not repaired, so a boundary of valid
+#' rows costs one validity test.
+#'
+#' @param g An sfc.
+#' @param idx The rows to test (those with a location).
+#' @return A logical vector, one element per row of \code{g}.
+#' @keywords internal
+#' @noRd
+.repair_leaves_no_polygon <- function(g, idx = seq_along(g)) {
+  out <- logical(length(g))
+  idx <- idx[.has_polygon(g[idx])]
+  if (!length(idx)) return(out)
+  if (.is_longlat(g)) {
+    .with_s2({
+      bad <- idx[.s2_refused(g[idx])]
+      if (length(bad)) out[bad] <- !.has_polygon(.safe_make_valid(g[bad]))
+    })
+  } else {
+    bad <- idx[!(suppressWarnings(sf::st_is_valid(g[idx])) %in% TRUE)]
+    if (length(bad)) out[bad] <- !.has_polygon(.safe_make_valid(g[bad]))
+  }
+  out
+}
+
+#' Repair the rows of a boundary and leave out those the repair empties
+#'
+#' The builders repair `boundary` with \code{.safe_make_valid()}.  A row
+#' with no height (every vertex on one line, or in degrees on one parallel)
+#' comes out of the repair as a line or an empty collection: beside a square
+#' the hex and square grids refused the boundary as "not polygonal", the
+#' clip target held the line, and alone the Voronoi cells held none of the
+#' seeds.  A row that held a polygon before the repair and holds none after
+#' it is left out, as \code{.boundary_mend()} leaves it out for the seeders;
+#' with no polygon left the call stops (\code{.stop_boundary_unlocated()}).
+#' A row that was not a polygon as given is kept, as before, for the type
+#' tests of the callers.
+#'
+#' @param b The boundary, sf or sfc.
+#' @param caller Name of the exported function.
+#' @param nothing What cannot be done in `boundary`, for the error.
+#' @return \code{.safe_make_valid(b)}, without the rows the repair empties.
+#' @keywords internal
+#' @noRd
+.boundary_repaired <- function(b, caller, nothing) {
+  before <- .has_polygon(sf::st_geometry(b))
+  b <- .safe_make_valid(b)
+  g <- sf::st_geometry(b)
+  after <- .has_polygon(g)
+  lost <- before & !after
+  if (!any(lost)) return(b)
+  if (!any(after))
+    .stop_boundary_unlocated(caller, nothing,
+                             if (.is_longlat(g) && isTRUE(sf::sf_use_s2())) "s2" else "geos")
+  if (inherits(b, "sf")) b[!lost, ] else g[!lost]
+}
+
+#' Whether each row holds a polygon that is not empty
+#'
+#' The repair of a row s2 or GEOS refuses can leave an empty collection or a
+#' line (a ring with no height).
+#'
+#' @param g An sfc.
+#' @return A logical vector, one element per row.
+#' @keywords internal
+#' @noRd
+.has_polygon <- function(g) {
+  poly <- function(s) {
+    if (inherits(s, "GEOMETRYCOLLECTION"))
+      return(any(vapply(s, poly, logical(1))))
+    inherits(s, c("POLYGON", "MULTIPOLYGON")) && length(s) > 0L
+  }
+  vapply(unclass(g), poly, logical(1))
 }
 
 

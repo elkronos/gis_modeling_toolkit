@@ -715,6 +715,11 @@ ensure_stable_poly_id <- function(polygons_sf,
 #'   (or XYM) geometries, or whose geometries carry M (XYM or XYZM), is read
 #'   without Z and M, as in [create_grid_polygons()], and shares its cache
 #'   entry with the same boundary in XY.
+#'   Its rows without a location, and those the repair leaves without a
+#'   polygon, are left out, and a boundary with none left, or in a
+#'   geographic CRS with a latitude beyond 90 degrees, is refused, as in
+#'   [create_grid_polygons()]; a boundary shares its cache entry with its
+#'   rows that have a location.
 #' @param target_cells Approximate desired number of cells. Default `NULL`,
 #'   as in [create_grid_polygons()], so the grid can be sized by `cellsize`
 #'   or `n` passed through `...` instead.
@@ -777,6 +782,13 @@ create_grid_polygons_cached <- function(boundary,
   # nothing is said, and such a boundary shares its key with the same
   # boundary in XY.
   bnd <- .xy_if_mixed_or_m(bnd)
+  # Only the rows with a location, read as given, as create_grid_polygons()
+  # reads them (.boundary_located()), so a square beside an empty row or a
+  # row with a vertex at Inf shares its key with the square alone, and a
+  # boundary with no row left, or in degrees with a latitude beyond 90, is
+  # refused before the projection.
+  nothing <- "no cell can be built in it"
+  bnd <- .boundary_located(bnd, "create_grid_polygons_cached", nothing)
   # The key is taken on the boundary projected as create_grid_polygons()
   # projects it without `crs` (.project_for_grid()).  Without `crs` the grid
   # is built on that copy too, which is the projection the uncached builder
@@ -786,6 +798,8 @@ create_grid_polygons_cached <- function(boundary,
   # differed from the uncached grid's in the last bits.
   own <- bnd
   bnd <- .project_for_grid(bnd, "create_grid_polygons_cached")
+  # The projection empties a row it cannot place.
+  bnd <- .boundary_located(bnd, "create_grid_polygons_cached", nothing, moved = TRUE)
   build_on <- if (is.null(.grid_crs_arg(bnd, target_cells = target_cells,
                                         type = type, ...))) bnd else own
 

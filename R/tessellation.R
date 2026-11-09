@@ -794,6 +794,17 @@
 #'   and XYZ (or XYM) geometries is read without Z and M, since sf reads a
 #'   layer in the dimension of its first geometry. So is one whose
 #'   geometries carry M (XYM or XYZM), which GEOS refuses.
+#'   A row that is empty, or has a coordinate that is not finite or lies
+#'   beyond 1e150 (read as given, and again after any move into another
+#'   CRS), covers no ground and is left out; a boundary with no such row
+#'   left is refused with an error that says so. A boundary in a geographic
+#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+#'   the Earth, is refused with an error of class
+#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
+#'   its CRS.
+#'   A row the repair of `boundary` leaves without a polygon (a ring with no
+#'   height: every vertex on one line, or in degrees on one parallel) is
+#'   left out as well, and a boundary with no polygon left is refused.
 #' @param expand Numeric expansion distance or fraction (0–1 = fraction of
 #'   extent). Absolute values are expressed in the units of the CRS the clip
 #'   target is built in. Because [sf::st_buffer()] interprets `dist` as
@@ -837,6 +848,13 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   # point takes none: at Inf the buffer stopped with GEOS's message, and at
   # 1e200 the target had an infinite area.
   points_sf <- .empty_unlocated(points_sf)
+  # So is a row of `boundary`, which is then left out (.boundary_located()):
+  # an empty row gave a target of area 0 or one with an empty line in it, and
+  # a row with a vertex at 1e200 a target of area 5e204.  A boundary with no
+  # row left, or in degrees with a latitude beyond 90 (a target a few metres
+  # high), is refused.
+  nothing <- "no clip target can be built from it"
+  boundary <- .boundary_located(boundary, "clip_target_for", nothing)
   # .expand_distance() below TOLERATES a malformed `expand` by returning 0,
   # which turned `expand = c(0.05, 0.05)` into a silent no-op -- the returned
   # bbox was byte-identical to expand = 0, with no condition raised -- and a
@@ -884,9 +902,15 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
     if (is.na(sf::st_crs(boundary)) && !is.na(crs_pts))
       boundary <- .transform_or_stamp(boundary, crs_pts, "boundary", "clip_target_for")
     boundary <- .align_crs(boundary, points_sf)
+    # The move empties a row it cannot place.  No move here empties a row
+    # with a location yet (a move into a projected CRS keeps a row at 1e20
+    # as another shape); the test guards a move that empties it.
+    boundary <- .boundary_located(boundary, "clip_target_for", nothing, moved = TRUE)
     if (!any(sf::st_geometry_type(boundary) %in% c("POLYGON", "MULTIPOLYGON")))
       stop("clip_target_for(): `boundary` must be polygonal.")
-    boundary <- .safe_make_valid(boundary)
+    # A row the repair leaves without a polygon (a ring with no height) is
+    # left out (.boundary_repaired()): the target held it as a line.
+    boundary <- .boundary_repaired(boundary, "clip_target_for", nothing)
     dist <- .expand_distance(boundary, expand)
     tgt <- if (dist != 0) suppressWarnings(sf::st_buffer(boundary, dist = dist)) else boundary
     return(sf::st_sf(geometry = sf::st_geometry(tgt)))
@@ -1239,6 +1263,17 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   without Z and M, since sf reads a layer in the dimension of its first
 #'   geometry. So is one whose
 #'   geometries carry M (XYM or XYZM), which GEOS refuses.
+#'   A row that is empty, or has a coordinate that is not finite or lies
+#'   beyond 1e150 (read as given, and again after any move into another
+#'   CRS), covers no ground and is left out; a boundary with no such row
+#'   left is refused with an error that says so. A boundary in a geographic
+#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+#'   the Earth, is refused with an error of class
+#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
+#'   its CRS.
+#'   A row the repair of `boundary` leaves without a polygon (a ring with no
+#'   height: every vertex on one line, or in degrees on one parallel) is
+#'   left out as well, and a boundary with no polygon left is refused.
 #' @param cover Optional sf or sfc layer the cells have to hold, read when
 #'   there is no `boundary`: the observations (points), or a polygon. The
 #'   boundary is then derived from it instead of from `points_sf`: the convex
@@ -1406,6 +1441,12 @@ create_voronoi_polygons <- function(
   # aside ("gives no polygon"), and a polygon with such a vertex was moved
   # into the working CRS as a smaller shape, or one far larger.
   if (!is.null(cover)) cover <- .empty_unlocated(cover)
+  # A row of `boundary` without a location is left out (.boundary_located()):
+  # at Inf its cells moved, at 1e200 GEOS stopped, and with every row empty
+  # the call returned 0 cells and blamed the seeds.  A boundary with no row
+  # left, or in degrees with a latitude beyond 90, is refused.
+  nothing_b <- "no cell can be built in it"
+  boundary <- .boundary_located(boundary, "create_voronoi_polygons", nothing_b)
   if (nrow(points_sf) < 1) stop("create_voronoi_polygons(): `points_sf` has no rows.")
   # No point with a location builds no cell, with a boundary or without one.
   # Unchecked, the call gave zero cells with sf's bare "x contains no
@@ -1578,10 +1619,19 @@ create_voronoi_polygons <- function(
     boundary <- sf::st_sf(geometry = hull_sfc)
     boundary_source <- "points"
   } else {
+    # The moves above empty a row they cannot place.
+    if (identical(boundary_source, "boundary"))
+      boundary <- .boundary_located(boundary, "create_voronoi_polygons", nothing_b,
+                                    moved = TRUE)
     if (!any(sf::st_geometry_type(boundary) %in% c("POLYGON", "MULTIPOLYGON")))
       stop("create_voronoi_polygons(): `boundary` must be polygonal.")
   }
-  boundary <- .safe_make_valid(boundary)
+  # A row of the caller's `boundary` the repair leaves without a polygon (a
+  # ring with no height) is left out (.boundary_repaired()): alone, the
+  # cells were clipped to a line and held none of the seeds.
+  boundary <- if (identical(boundary_source, "boundary"))
+    .boundary_repaired(boundary, "create_voronoi_polygons", nothing_b)
+  else .safe_make_valid(boundary)
 
   # `isTRUE(is.numeric(expand)) && expand > 0` short-circuits to FALSE for a
   # character `expand`, dropping the requested expansion with no condition at
@@ -1851,6 +1901,19 @@ create_voronoi_polygons <- function(
 #'   XYM) geometries is read without Z and M, since sf reads a layer in the
 #'   dimension of its first geometry. So is one whose
 #'   geometries carry M (XYM or XYZM), which GEOS refuses.
+#'   A row that is empty, or has a coordinate that is not finite or lies
+#'   beyond 1e150 (read as given, and again after any move into another
+#'   CRS), covers no ground and is left out; a boundary with no such row
+#'   left is refused with an error that says so. A boundary in a geographic
+#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+#'   the Earth, is refused with an error of class
+#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
+#'   its CRS.
+#'   A row the repair of `boundary` leaves without a polygon (a ring with no
+#'   height: every vertex on one line, or in degrees on one parallel) is
+#'   left out as well, and a boundary with no polygon left is refused.
+#'   A boundary without a CRS that `crs` stamps with a geographic CRS is
+#'   tested for its latitude in the same way.
 #' @param target_cells Optional approximate desired number of cells.  The cell
 #'   \emph{size} is derived from it as \code{sqrt(area / target_cells)}, where
 #'   \code{area} is that of the boundary's bounding box, so square grids get
@@ -1967,6 +2030,13 @@ create_grid_polygons <- function(
   # an XYZ ring among XY ones.  So is a boundary whose polygons carry M, on
   # which GEOS stopped (.xy_if_mixed_or_m()).
   boundary <- .xy_if_mixed_or_m(.as_sf(boundary))
+  # A row of `boundary` without a location (empty, or a vertex at Inf or
+  # beyond 1e150) covers no ground and is left out, read as given
+  # (.boundary_located()): at Inf the grid was laid over a box it moved.  A
+  # boundary with no row left, or in degrees with a latitude beyond 90 (a
+  # grid laid on the far meridian), is refused.
+  nothing <- "no cell can be built in it"
+  boundary <- .boundary_located(boundary, "create_grid_polygons", nothing)
   # A layer as `crs` means its CRS; passed on as it was, it stopped with "the
   # condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
@@ -1976,7 +2046,13 @@ create_grid_polygons <- function(
 
   crs_out <- NULL
   if (!is.null(crs)) {
+    stamped <- is.na(sf::st_crs(boundary))
     boundary <- .transform_or_stamp(boundary, crs, "boundary", "create_grid_polygons")
+    # A boundary without a CRS is stamped with `crs`: its coordinates are
+    # those given, now read in that CRS, so a geographic one is tested for a
+    # latitude beyond 90 here, before any move (.boundary_located()).
+    if (stamped)
+      boundary <- .boundary_located(boundary, "create_grid_polygons", nothing)
     # A geographic `crs` is where the grid is RETURNED.  Laid in degrees the
     # cells were neither square nor equal-area, and clipping them under s2
     # often stopped with "Edge 0 is degenerate" or left points inside the
@@ -1993,7 +2069,11 @@ create_grid_polygons <- function(
       .msg("create_grid_polygons(): projecting `boundary` to a local projected ",
            "CRS; the returned grid uses that CRS. Pass `crs` to control it.")
   }
-  boundary <- .safe_make_valid(boundary)
+  # The moves above empty a row they cannot place.
+  boundary <- .boundary_located(boundary, "create_grid_polygons", nothing, moved = TRUE)
+  # A row the repair leaves without a polygon (a ring with no height) is
+  # left out (.boundary_repaired()): the clip read it as a line.
+  boundary <- .boundary_repaired(boundary, "create_grid_polygons", nothing)
   # A grid sized by `cellsize` with a geographic `crs` is laid in degrees,
   # and its clip to `boundary` and every measure on its cells run with s2.
   # In degrees, with s2 on, .safe_make_valid() is s2's rebuild, which
@@ -2006,7 +2086,8 @@ create_grid_polygons <- function(
   in_degrees <- .is_longlat(boundary)
   if (in_degrees && isTRUE(clip))
     boundary <- .boundary_mend(boundary, refuse = function(...)
-      .grid_refused(..., site = "boundary", caller = "create_grid_polygons"))
+      .grid_refused(..., site = "boundary", caller = "create_grid_polygons"),
+      caller = "create_grid_polygons", nothing = nothing)
 
   bb <- sf::st_bbox(boundary)
   w  <- as.numeric(bb["xmax"] - bb["xmin"])
@@ -2436,6 +2517,19 @@ create_grid_polygons <- function(
 #'   geometries is read without Z and M, since sf reads a layer in the
 #'   dimension of its first geometry. So is one whose
 #'   geometries carry M (XYM or XYZM), which GEOS refuses.
+#'   A row that is empty, or has a coordinate that is not finite or lies
+#'   beyond 1e150 (read as given, and again after any move into another
+#'   CRS), covers no ground and is left out; a boundary with no such row
+#'   left is refused with an error that says so. A boundary in a geographic
+#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+#'   the Earth, is refused with an error of class
+#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
+#'   its CRS.
+#'   A row the repair of `boundary` leaves without a polygon (a ring with no
+#'   height: every vertex on one line, or in degrees on one parallel) is
+#'   left out as well, and a boundary with no polygon left is refused.
+#'   A boundary without a CRS that `crs` stamps with a geographic CRS is
+#'   tested for its latitude in the same way.
 #' @param method One of "voronoi", "triangles", "hex", "square".
 #' @param approx_n_cells Approximate number of cells.  Read by
 #'   \code{method = "hex"} and \code{"square"} only: \code{"voronoi"} grows
@@ -2704,6 +2798,13 @@ build_tessellation <- function(
   # was moved as a smaller shape, or one far larger.
   points_sf <- .empty_unlocated(points_sf)
   if (!is.null(cover)) cover <- .empty_unlocated(cover)
+  # A row of `boundary` without a location is left out (.boundary_located()),
+  # read as given: an empty row came out of the repair below as an empty
+  # line, and the hex and square grids refused a square beside it as "not
+  # polygonal".  A boundary with no row left, or in degrees with a latitude
+  # beyond 90, is refused.
+  nothing_b <- "no cell can be built in it"
+  boundary <- .boundary_located(boundary, "build_tessellation", nothing_b)
   # A layer as `crs` means its CRS (as ensure_projected(target_crs =) reads
   # it); passed on as it was, it stopped with "the condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
@@ -2782,8 +2883,15 @@ build_tessellation <- function(
                 else NULL
   if (!is.null(crs)) {
     points_sf <- .transform_or_stamp(points_sf, crs, "points_sf", "build_tessellation")
-    if (!is.null(boundary))
+    if (!is.null(boundary)) {
+      stamped <- is.na(sf::st_crs(boundary))
       boundary <- .transform_or_stamp(boundary, crs, "boundary", "build_tessellation")
+      # A boundary without a CRS is stamped with `crs`, and a geographic one
+      # is tested for a latitude beyond 90 before it is moved
+      # (.boundary_located()), as a boundary given in it is.
+      if (stamped)
+        boundary <- .boundary_located(boundary, "build_tessellation", nothing_b)
+    }
     # A geographic `crs` names the CRS the result is RETURNED in; the cells
     # are built in metres.  st_voronoi(), st_make_grid() and the hull buffer
     # all work on raw coordinates, so in degrees Voronoi cells stopped being
@@ -2873,9 +2981,14 @@ build_tessellation <- function(
     res
   }
   if (!is.null(boundary)) {
+    # The moves above empty a row they cannot place.
+    boundary <- .boundary_located(boundary, "build_tessellation", nothing_b, moved = TRUE)
     if (!any(sf::st_geometry_type(boundary) %in% c("POLYGON", "MULTIPOLYGON")))
       stop("build_tessellation(): `boundary` must be polygonal.")
-    boundary <- .safe_make_valid(boundary)
+    # A row the repair leaves without a polygon (a ring with no height) is
+    # left out (.boundary_repaired()): the hex and square grids refused a
+    # square beside it as "not polygonal".
+    boundary <- .boundary_repaired(boundary, "build_tessellation", nothing_b)
   }
 
   # A lattice over lon/lat data is laid where create_grid_polygons() would lay
@@ -2976,7 +3089,9 @@ build_tessellation <- function(
         quiet = quiet
       ),
       spatialkit_cells_degenerate = function(e) {
-        if (is.null(e$site)) stop(e)
+        # A refusal of a latitude beyond 90 is not s2's, so it is not raised
+        # again as one.
+        if (is.null(e$site) || identical(e$cause, "latitude")) stop(e)
         .grid_refused(e$parent, e$rows, e$reasons, e$n, isTRUE(e$s2_forced),
                       site = e$site, caller = "build_tessellation",
                       clipped = isTRUE(clip))

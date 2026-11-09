@@ -17,7 +17,12 @@ create_grid_polygons_cached(
 \item{boundary}{An sf or sfc polygonal object. One that mixes XY and XYZ
 (or XYM) geometries, or whose geometries carry M (XYM or XYZM), is read
 without Z and M, as in \code{\link[=create_grid_polygons]{create_grid_polygons()}}, and shares its cache
-entry with the same boundary in XY.}
+entry with the same boundary in XY.
+Its rows without a location, and those the repair leaves without a
+polygon, are left out, and a boundary with none left, or in a
+geographic CRS with a latitude beyond 90 degrees, is refused, as in
+\code{\link[=create_grid_polygons]{create_grid_polygons()}}; a boundary shares its cache entry with its
+rows that have a location.}
 
 \item{target_cells}{Approximate desired number of cells. Default \code{NULL},
 as in \code{\link[=create_grid_polygons]{create_grid_polygons()}}, so the grid can be sized by \code{cellsize}

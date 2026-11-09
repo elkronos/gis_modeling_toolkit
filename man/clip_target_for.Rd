@@ -20,7 +20,18 @@ points it is read as lon/lat when its coordinates fit the lon/lat
 envelope, and refused with an error otherwise. A boundary that mixes XY
 and XYZ (or XYM) geometries is read without Z and M, since sf reads a
 layer in the dimension of its first geometry. So is one whose
-geometries carry M (XYM or XYZM), which GEOS refuses.}
+geometries carry M (XYM or XYZM), which GEOS refuses.
+A row that is empty, or has a coordinate that is not finite or lies
+beyond 1e150 (read as given, and again after any move into another
+CRS), covers no ground and is left out; a boundary with no such row
+left is refused with an error that says so. A boundary in a geographic
+CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+the Earth, is refused with an error of class
+\code{"spatialkit_cells_degenerate"} that names its rows and says to check
+its CRS.
+A row the repair of \code{boundary} leaves without a polygon (a ring with no
+height: every vertex on one line, or in degrees on one parallel) is
+left out as well, and a boundary with no polygon left is refused.}
 
 \item{expand}{Numeric expansion distance or fraction (0–1 = fraction of
 extent). Absolute values are expressed in the units of the CRS the clip
