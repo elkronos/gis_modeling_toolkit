@@ -1030,11 +1030,15 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
 #' spsample(type = "regular") lays its grid over the feature's bounding box
 #' and keeps the points inside, as sp computes it (the box of all parts
 #' together, holes subtracted from the area).  Inf for a cell with no area.
+#' The area is in the CRS's unit squared, as the box is (\code{.planar_area()}):
+#' sf gives square metres for a unit it has no name for, and a square cell
+#' came out at a ratio of 4e6 in a unit of 0.5 mm and of 1e-12 in a unit of
+#' 1000 km.
 #' @keywords internal
 #' @noRd
 .cell_box_ratio <- function(cells) {
   g <- sf::st_geometry(cells)
-  a <- suppressWarnings(as.numeric(sf::st_area(g)))
+  a <- suppressWarnings(.planar_area(g))
   box <- vapply(g, function(x) {
     b <- sf::st_bbox(x)
     as.numeric((b[["xmax"]] - b[["xmin"]]) * (b[["ymax"]] - b[["ymin"]]))

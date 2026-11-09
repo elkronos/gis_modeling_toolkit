@@ -239,7 +239,11 @@ sf needs the lwgeom package for that area and the request is refused
 without it.  The measured spread is attached as \code{attr(, "area_error")}.
 Cells that mix XY and XYZ (or XYM) geometries are measured, and their
 spread taken, without Z and M, since sf reads a layer in the dimension
-of its first geometry; the cells are returned with their own geometry.}
+of its first geometry; so are cells that carry M throughout, which GEOS
+does not read.  The cells are returned with their own geometry.  In a
+projected CRS whose unit sf has no name for (a \code{+to_meter} such as
+1e6), \code{sf::st_area()} gives square metres; \code{cell_area} is the planar
+area in that CRS's unit squared all the same.}
 
 \item{estimate}{Which value of a cell the frame reports: \code{"pooled"}
 (default) or \code{"mean"}. With \code{"mean"} the frame is the one described

@@ -6621,11 +6621,14 @@ make_folds <- function(points_sf, k,
 
     # Leakage diagnostic for supplied blocks, the counterpart of the grid
     # branches above: the scale of a polygon is the side of the square with
-    # its area, taken over the blocks that hold points.
+    # its area, taken over the blocks that hold points.  The area is in the
+    # CRS's unit squared, as the range is (.planar_area()): sf gives square
+    # metres for a unit it has no name for, and in a unit of 1000 km blocks
+    # 0.0014 units across were read as 1414 and never warned of.
     block_scale <- NA_real_
     if (blocks_supplied) {
       block_scale <- stats::median(
-        sqrt(as.numeric(sf::st_area(sf::st_geometry(grid_sf)[which(blk_sizes > 0L)]))),
+        sqrt(.planar_area(sf::st_geometry(grid_sf)[which(blk_sizes > 0L)])),
         na.rm = TRUE)
       if (is.finite(sac_range) && sac_range > 0 && is.finite(block_scale) &&
           block_scale < sac_range) {

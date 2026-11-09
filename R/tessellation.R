@@ -2351,7 +2351,10 @@ create_grid_polygons <- function(
   bb  <- sf::st_bbox(sf::st_geometry(lattice)[1L])
   per <- 2 * (as.numeric(bb[["xmax"]] - bb[["xmin"]]) +
                 as.numeric(bb[["ymax"]] - bb[["ymin"]]))
-  a <- suppressWarnings(as.numeric(sf::st_area(parts)))
+  # In the CRS's unit squared, as the bound is: sf::st_area() gives square
+  # metres for a unit it has no name for, and a strip was kept in a unit of
+  # 3.28 m that was dropped in metres (.planar_area()).
+  a <- suppressWarnings(.planar_area(parts))
   cand <- which(is.finite(a) & a <= 1.01 * per * tol)
   if (!length(cand)) return(parts)
   cells <- sf::st_geometry(lattice)[match(parts$poly_id[cand], lattice$poly_id)]

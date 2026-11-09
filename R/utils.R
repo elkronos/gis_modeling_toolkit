@@ -109,6 +109,33 @@
   isTRUE(tryCatch(sf::st_is_longlat(cr), error = function(e) FALSE))
 }
 
+#' Areas in the squared unit of the layer's CRS
+#'
+#' \code{sf::st_area()} gives a projected layer's area in its CRS's unit
+#' squared when sf can name that unit (\code{st_crs()$ud_unit}), and in
+#' square metres when it cannot and the CRS carries a \code{+to_meter}
+#' (a unit of 1000 km, or of 3.28 m): there it multiplies GEOS's area by
+#' \code{to_meter^2}.  The package reads areas beside lengths in the CRS's
+#' unit, so such an area is taken as GEOS gives it, in that unit squared.
+#' Every other layer gets \code{sf::st_area()}'s numbers as they are: lon/lat
+#' layers their geodesic square metres, and layers in metres, in a named
+#' unit or with no CRS their planar areas.
+#'
+#' @param x An sf or sfc object.
+#' @return A plain numeric vector, one area per geometry.
+#' @keywords internal
+#' @noRd
+.planar_area <- function(x) {
+  g  <- sf::st_geometry(x)
+  cr <- sf::st_crs(g)
+  if (!is.na(cr) && !.is_longlat(g) && is.null(cr$ud_unit)) {
+    to_m <- cr$to_meter
+    if (!is.null(to_m) && length(to_m) == 1L && !is.na(to_m) && to_m != 1)
+      return(as.numeric(sf::st_area(sf::st_set_crs(g, NA))))
+  }
+  as.numeric(sf::st_area(g))
+}
+
 
 # The one place the package hands a line to logger.  Every helper formats its
 # message with sprintf() first, so it is marked skip_formatter(): no formatter

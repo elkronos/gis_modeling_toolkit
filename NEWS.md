@@ -1743,6 +1743,36 @@ old behaviour where there is a way.
 
 ## Bug fixes
 
+* **Areas in a CRS whose unit sf has no name for were read in square
+  metres.**  For a projected CRS whose `+to_meter` unit sf has no name for
+  (a unit of 1000 km, of 3.28 m or of 0.5 mm), `sf::st_area()` converts to
+  square metres.  `summarize_by_cell(area = TRUE)` returned that as
+  `cell_area`, which its help gives in the CRS's unit squared, so a square
+  of 1000 m in units of 1000 km got 1e6 where its area is 1e-6, and
+  `n_per_area` was a count per square metre.  `resolution_profile()`
+  divided the hull's area in square metres by the square of a range in CRS
+  units, so a range floor of 3 came out as 31 in units of 3.28 m, and in
+  units of 1000 km the floor was not finite or the profile stopped with
+  "wrong sign in 'by' argument".  Three checks read such an area beside
+  lengths in the CRS's unit as well.  `kriging_adequacy()` left out every
+  square cell as a sliver in units of 0.5 mm (a box 4e6 times its area)
+  and let a real sliver through in units of 1000 km.  `make_folds()` with
+  supplied `blocks` read their scale in metres against a range in CRS
+  units, so in units of 1000 km it gave no warning for blocks smaller
+  than the range, and in units of 0.5 mm it quoted the wrong scale.
+  `create_grid_polygons()` chose the edge strips to drop after its clip by
+  comparing such an area with a bound in the CRS's unit squared.  All of
+  them now take the planar area in the CRS's unit squared.  Layers in
+  metres, in a unit sf names (such as US survey feet or kilometres) and in
+  lon/lat, whose cells keep their geodesic square metres, give the same
+  results as before.
+
+* **`summarize_by_cell(area = TRUE)` stopped on cells that carry M.**  Cells
+  that are XYM or XYZM throughout reached GEOS, which does not read M, and
+  the call stopped with GEOS's "GEOS does not support XYM or XYZM
+  geometries".  The cells are now checked and measured in x and y, as cells
+  that mix dimensions were, and are returned with their own geometry.
+
 * **`estimate_sac_range()` drew its `n_max` subsample over rows with nothing
   to model.**  300 valued rows among 20,300 were estimated from the 74 that
   fell in the draw, and 100 among 20,100 came back `NA`.  Rows with a missing

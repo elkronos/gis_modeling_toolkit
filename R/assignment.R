@@ -953,7 +953,7 @@ assign_features_to_polygons <- function(
 #' the first, and the remedy, \code{sf::st_make_valid()}.
 #'
 #' @param cells The cells as they are measured (in XY when they mix
-#'   dimensions), row for row with \code{cells_sf}.
+#'   dimensions or carry M), row for row with \code{cells_sf}.
 #' @param cells_sf The cells as passed, for their ID column.
 #' @param id_col,assigned_points_sf As passed to \code{summarize_by_cell()}:
 #'   the ID column is found as the join finds it.
@@ -2750,7 +2750,11 @@ assign_features_to_polygons <- function(
 #'   without it.  The measured spread is attached as `attr(, "area_error")`.
 #'   Cells that mix XY and XYZ (or XYM) geometries are measured, and their
 #'   spread taken, without Z and M, since sf reads a layer in the dimension
-#'   of its first geometry; the cells are returned with their own geometry.
+#'   of its first geometry; so are cells that carry M throughout, which GEOS
+#'   does not read.  The cells are returned with their own geometry.  In a
+#'   projected CRS whose unit sf has no name for (a `+to_meter` such as
+#'   1e6), `sf::st_area()` gives square metres; `cell_area` is the planar
+#'   area in that CRS's unit squared all the same.
 #' @param conf_level Optional confidence level in (0, 1), such as `0.95`.
 #'   When given, every numeric response and predictor column also gets
 #'   `..neff_*`, `..df_*`, `..ci_lo_*` and `..ci_hi_*` (see "Confidence
@@ -3142,8 +3146,9 @@ summarize_by_cell <- function(assigned_points_sf,
     # Measured on the cells in XY when they mix XY and XYZ (or XYM)
     # geometries: GEOS and s2 read such a layer in the dimension of its first
     # geometry, and the area of an XYZ cell among XY ones came out wrong or
-    # could not be taken.
-    cells_xy <- .xy_if_mixed(cells_sf)
+    # could not be taken.  So are cells that carry M throughout, which GEOS
+    # does not read: the validity check stopped on them with GEOS's message.
+    cells_xy <- .xy_if_mixed_or_m(cells_sf)
     if (isTRUE(sf::st_is_longlat(cells_sf))) {
       # Lon/lat cells: their cell_area below is s2's area of every cell, and
       # the check that follows takes s2's area for the planar one too.  s2
@@ -4447,10 +4452,14 @@ summarize_by_cell <- function(assigned_points_sf,
           # join and get a density of NA, not 0: no point was counted there
           # because the layer had none, which is not the same finding.
           # Taken on the cells in XY when they mix dimensions (an XYZ cell
-          # among XY ones measured 1.6e14 square metres for 95 square km);
-          # `out` keeps the cells' own geometry.
-          cell_area <- suppressWarnings(as.numeric(
-            sf::st_area(.xy_if_mixed(sf::st_geometry(out)))))
+          # among XY ones measured 1.6e14 square metres for 95 square km)
+          # or carry M, which GEOS does not read and stopped on; `out` keeps
+          # the cells' own geometry.  .planar_area() keeps the CRS's unit
+          # where sf has no name for it: sf::st_area() gave square metres
+          # there (1e6 for a square of 1000 m, which is 1e-6 in units of
+          # 1000 km).
+          cell_area <- suppressWarnings(
+            .planar_area(.xy_if_mixed_or_m(sf::st_geometry(out))))
           cell_area[!is.finite(cell_area) | cell_area <= 0] <- NA_real_
           out$cell_area  <- cell_area
           out$n_per_area <- as.numeric(out$n) / cell_area

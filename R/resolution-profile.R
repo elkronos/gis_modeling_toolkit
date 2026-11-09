@@ -2117,7 +2117,11 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   n_resp_only <- if (has_resp) as.integer(sum(is.finite(resp))) else NA_integer_
   no_complete <- has_resp && has_pred && n_resp == 0L && n_resp_only > 0L
   hull <- sf::st_convex_hull(sf::st_union(sf::st_geometry(data_sf)))
-  area <- suppressWarnings(as.numeric(sf::st_area(hull)))
+  # In the CRS's unit squared, as the range and every distance below are in
+  # its unit: sf::st_area() gives square metres for a unit it has no name
+  # for (a +to_meter of 1e6, or 3.28), which put a floor of 3 at 31 in units
+  # of 3.28 m and stopped the profile in units of 1000 km (.planar_area()).
+  area <- suppressWarnings(.planar_area(hull))
   bb   <- sf::st_bbox(data_sf)
   bbw  <- as.numeric(bb["xmax"] - bb["xmin"]); bbh <- as.numeric(bb["ymax"] - bb["ymin"])
   if (!is.finite(area) || area <= 0) area <- bbw * bbh
