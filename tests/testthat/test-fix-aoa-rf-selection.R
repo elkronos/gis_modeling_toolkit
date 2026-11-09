@@ -499,7 +499,8 @@ test_that("a first variable that cannot be told apart from the rest is kept and 
     if (!length(v)) stop("this backend needs at least one predictor", call. = FALSE)
     new_spatial_fit("sel_oracle_fit",
                     engine = list(set = paste(sort(v), collapse = "+")),
-                    formula = z ~ 1, response_var = "z", predictor_vars = v,
+                    formula = stats::reformulate(v, "z"), response_var = "z",
+                    predictor_vars = v,
                     data_sf = tr)
   }
   registerS3method("predict", "sel_oracle_fit", function(object, newdata = NULL, ...) {

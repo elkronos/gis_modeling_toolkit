@@ -231,6 +231,30 @@
 }
 
 
+#' The record of a count, as a layer of seeds carries it
+#'
+#' Seeds fewer or more than the record's count are not the centres the
+#' profile scored, whatever the record they carry says: a caller who cuts a
+#' selection's seeds down (`sel$seeds[1:16, ]`) keeps its record, which
+#' survives row subsetting.  Their record is read with `scored_cells =
+#' FALSE`, as [get_voronoi_seeds()] (`method = "provided"`) marks such seeds,
+#' so their cells are built as other seeds' are and do not claim to be the
+#' cells the profile scored.
+#'
+#' @param x The seeds, as given.
+#' @return The record (\code{.count_rule_get()}), with \code{scored_cells}
+#'   \code{FALSE} when the number of rows of \code{x} differs from its
+#'   \code{cells}; \code{NULL} when \code{x} carries none.
+#' @keywords internal
+#' @noRd
+.seeds_count_rule <- function(x) {
+  rec <- .count_rule_get(x)
+  if (!is.null(rec) && !identical(nrow(x), as.integer(rec$cells)))
+    rec$scored_cells <- FALSE
+  rec
+}
+
+
 #' Keep the polygonal part of each clipped cell
 #'
 #' \code{st_intersection()} returns a GEOMETRYCOLLECTION for a cell whose
@@ -1285,7 +1309,12 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' centres in the CRS the profile worked in. (On a profile without an
 #' estimate fitted to a subsample the seeds are those centres refitted to
 #' every point, which carry `attr(, "refit")`; their record says
-#' `scored_cells = FALSE`, and their cells are built as other seeds' are.)
+#' `scored_cells = FALSE`, and their cells are built as other seeds' are.
+#' So are seeds fewer or more than the record's count, such as a
+#' selection's seeds cut down to some of its rows: they are not the centres
+#' the profile scored, and their record is handed on with
+#' `scored_cells = FALSE`, as [get_voronoi_seeds()] (`method = "provided"`)
+#' marks such seeds.)
 #' Unless a projected `crs` is
 #' given, their cells are built in that CRS, whatever CRS the seeds arrive
 #' in (degrees, or the CRS of a boundary they were placed in), and returned
@@ -1327,8 +1356,9 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   \code{params$count_rule} is present when \code{points_sf} carries the
 #'   record of how its count was set (\code{attr(points_sf, "count_rule")}:
 #'   the seeds of a \code{\link{select_resolution}()} result, or seeds a
-#'   seeding function placed from one): the same list, which the cells carry
-#'   too as \code{attr(cells, "count_rule")}.
+#'   seeding function placed from one): the same list, with
+#'   \code{scored_cells = FALSE} when the seeds are fewer or more than its
+#'   count, which the cells carry too as \code{attr(cells, "count_rule")}.
 #'   \code{\link{assign_features_to_polygons}()} copies it to the rows it
 #'   assigns, and \code{\link{summarize_by_cell}()} checks its result
 #'   against it.
@@ -1419,8 +1449,10 @@ create_voronoi_polygons <- function(
   # The record of how the seeds' count was set, when they carry one (a
   # selection's seeds, or seeds placed from a selection or a profile): handed
   # on in `params` and on the cells, so the summary can check that it is
-  # given the cells and rows the count was scored on.
-  seed_rule <- .count_rule_get(points_sf)
+  # given the cells and rows the count was scored on.  Seeds fewer or more
+  # than the record's count are not the centres it scored, and the record
+  # handed on says so (.seeds_count_rule()).
+  seed_rule <- .seeds_count_rule(points_sf)
   # A layer as `crs` means its CRS (as ensure_projected(target_crs =) reads
   # it); passed on as it was, it stopped with "the condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
@@ -2600,7 +2632,8 @@ create_grid_polygons <- function(
 #'       [select_resolution()] result, or seeds [get_voronoi_seeds()] or
 #'       [voronoi_seeds_kmeans()] placed from one): the record as the seeds
 #'       carry it, whose `scored_cells` says whether these are the cells the
-#'       profile scored. For `"hex"` and `"square"`, when `approx_n_cells`
+#'       profile scored, and `FALSE` when the seeds are fewer or more than
+#'       its count. For `"hex"` and `"square"`, when `approx_n_cells`
 #'       is a selection that carries a record, or a profile built with an
 #'       `estimate`, and no `cellsize` is given: that record with
 #'       `scored_cells` `FALSE`, since a lattice at that count is not the
@@ -2742,7 +2775,7 @@ build_tessellation <- function(
   # ensure_projected() picks a CRS for the seeds' own extent, which on a
   # wide lon/lat layer is not the one it picked for the points profiled, and
   # seeds placed in a boundary's CRS arrive in that one.
-  scored_crs <- if (identical(method, "voronoi")) .scored_crs(.count_rule_get(points_sf))
+  scored_crs <- if (identical(method, "voronoi")) .scored_crs(.seeds_count_rule(points_sf))
                 else NULL
   if (!is.null(crs)) {
     points_sf <- .transform_or_stamp(points_sf, crs, "points_sf", "build_tessellation")

@@ -37,7 +37,10 @@ cv_spatial(
 training rows only, so anything done inside it (scaling, tuning, an inner
 variable sweep) is already nested and leak-free.  The \code{subclass} it
 stamps must have a \code{predict.<subclass>()} method registered, because
-that is how each fold is scored.}
+that is how each fold is scored.  The fit models \code{response_var}
+(its \code{response_var} is the call's): a fold whose fit models
+another column fails, with the two names in \code{fold_status}, since
+its predictions are scored against \code{response_var}.}
 
 \item{folds}{Optional fold definitions, in any of three shapes: a
 \code{\link{make_folds}()} return value; a bare list of

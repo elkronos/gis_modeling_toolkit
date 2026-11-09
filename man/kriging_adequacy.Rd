@@ -56,12 +56,16 @@ warning.  Default \code{"poly_id"}.}
 \item{sac}{Optional \code{sac_range} carrying a variogram model.}
 
 \item{folds}{Optional \code{\link{make_folds}()} result on
-\code{assigned_points_sf} for the cross-validation statistic; built here
-with \code{block_kfold} when \code{NULL}.  As in \code{cv_*()}, folds
+\code{assigned_points_sf} for the cross-validation statistic, or a
+vector of fold labels, one per row of \code{assigned_points_sf} (the
+labels of rows dropped for a missing response or location are not
+used; one label per row kept is read as well); built here with
+\code{block_kfold} when \code{NULL}.  As in \code{cv_*()}, folds
 whose recorded rows sit at other locations in
 \code{assigned_points_sf} (built on another layer, such as the points
 before \code{\link{assign_features_to_polygons}()} dropped some) are
-refused.}
+refused.  So are folds whose test sets share a location: each location
+is kriged once, under one fold.}
 
 \item{k, seed}{Folds and seed for that construction.}
 

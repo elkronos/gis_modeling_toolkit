@@ -30,14 +30,27 @@ except your own methods.}
 
 \item{formula}{A formula: the model, as \code{print()} and
 \code{summary()} show it.  Its left side, when it has one, holds
-\code{response_var} (\code{log(price) ~ elev} for \code{"price"}).}
+\code{response_var} (\code{log(price) ~ elev} for \code{"price"}).  Its
+right side uses the columns \code{predictor_vars} names and no other
+attribute column of \code{data_sf} than these and the response, read
+by \code{all.vars()}, so \code{log(elev)} and \code{elev * slope}
+count as their columns, and so do the columns of an \code{offset()} or
+a grouping term; names that are not columns of \code{data_sf} and the
+reserved names \code{..x} and \code{..y} are not checked, and a right
+side with \code{.} is not read.  A column a \code{fit_fn} derives
+itself and keeps out of \code{predictor_vars}, such as coordinates
+\code{x} and \code{y} for a trend surface, needs a name that is not a
+column of \code{data_sf}: on a layer that keeps its coordinates as
+columns \code{x} and \code{y}, derive them as \code{cx} and
+\code{cy}, or drop those columns first.}
 
 \item{response_var}{Character(1): the name of the response column of
 \code{data_sf}, an attribute column (not the geometry).}
 
 \item{predictor_vars}{Character vector of attribute column names of
-\code{data_sf}, not including \code{response_var};
-\code{character(0)} for a model without predictors.}
+\code{data_sf}, not including \code{response_var}: the columns the right
+side of \code{formula} uses.  \code{character(0)} for a model without
+predictors.}
 
 \item{data_sf}{An sf object with its geometry column: the rows the model
 was fitted on, with their geometry, in the order \code{fitted()}
@@ -80,7 +93,8 @@ one class name, \code{data_sf} an sf object with its geometry column,
 response, \code{response_var} the name of one attribute column of
 \code{data_sf} (a column other than its geometry),
 \code{predictor_vars} a character vector of its attribute columns other
-than the response, and \code{info} a list.  It does not check the
+than the response, the columns the right side of \code{formula} uses, and
+\code{info} a list.  It does not check the
 response's type (a Bayesian fit can have a factor or ordinal response);
 \code{summary()} and \code{model_metrics()} refuse a response
 that is not numeric or logical.

@@ -358,15 +358,16 @@ test_that("the selection's seeds, tessellated as they are, lead to a summary tha
   r <- .cr_sum(asg, tess$cells, "pooled")
   expect_identical(.cr_check(r), list(estimate = "match", cells = "match"))
   expect_identical(.cr_classes(r), character(0))
-  # Twenty of them are other cells, and the check says so.
+  # Twenty of them are other cells, and the check says so: their record says
+  # they are not the cells the profile scored, as get_voronoi_seeds(method =
+  # "provided") marks the same seeds, so no warning names rows dropped or
+  # moved, which none were.
   tess <- build_tessellation(sel$seeds[1:20, ], method = "voronoi", quiet = TRUE)
+  expect_identical(attr(tess$cells, "count_rule")$scored_cells, FALSE)
   asg <- assign_features_to_polygons(pts, tess$cells, polygon_id_col = "cell_id", quiet = TRUE)
   r <- .cr_sum(asg, tess$cells, "pooled")
-  expect_identical(.cr_check(r)$cells, "differ")
-  w <- .cr_of(r, "spatialkit_cells_differ")
-  expect_length(w, 1L)
-  expect_identical(w[[1L]]$what, "cells")
-  expect_identical(w[[1L]]$found$cells, 20L)
+  expect_identical(.cr_check(r)$cells, "not checked: other cells were built from this count")
+  expect_length(.cr_of(r, "spatialkit_cells_differ"), 0L)
 })
 
 

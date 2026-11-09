@@ -31,7 +31,8 @@
 #' response, \code{response_var} the name of one attribute column of
 #' \code{data_sf} (a column other than its geometry),
 #' \code{predictor_vars} a character vector of its attribute columns other
-#' than the response, and \code{info} a list.  It does not check the
+#' than the response, the columns the right side of \code{formula} uses, and
+#' \code{info} a list.  It does not check the
 #' response's type (a Bayesian fit can have a factor or ordinal response);
 #' \code{summary()} and \code{model_metrics()} refuse a response
 #' that is not numeric or logical.
@@ -64,12 +65,25 @@
 #'   except your own methods.
 #' @param formula  A formula: the model, as \code{print()} and
 #'   \code{summary()} show it.  Its left side, when it has one, holds
-#'   \code{response_var} (\code{log(price) ~ elev} for \code{"price"}).
+#'   \code{response_var} (\code{log(price) ~ elev} for \code{"price"}).  Its
+#'   right side uses the columns \code{predictor_vars} names and no other
+#'   attribute column of \code{data_sf} than these and the response, read
+#'   by \code{all.vars()}, so \code{log(elev)} and \code{elev * slope}
+#'   count as their columns, and so do the columns of an \code{offset()} or
+#'   a grouping term; names that are not columns of \code{data_sf} and the
+#'   reserved names \code{..x} and \code{..y} are not checked, and a right
+#'   side with \code{.} is not read.  A column a \code{fit_fn} derives
+#'   itself and keeps out of \code{predictor_vars}, such as coordinates
+#'   \code{x} and \code{y} for a trend surface, needs a name that is not a
+#'   column of \code{data_sf}: on a layer that keeps its coordinates as
+#'   columns \code{x} and \code{y}, derive them as \code{cx} and
+#'   \code{cy}, or drop those columns first.
 #' @param response_var  Character(1): the name of the response column of
 #'   \code{data_sf}, an attribute column (not the geometry).
 #' @param predictor_vars Character vector of attribute column names of
-#'   \code{data_sf}, not including \code{response_var};
-#'   \code{character(0)} for a model without predictors.
+#'   \code{data_sf}, not including \code{response_var}: the columns the right
+#'   side of \code{formula} uses.  \code{character(0)} for a model without
+#'   predictors.
 #' @param data_sf  An sf object with its geometry column: the rows the model
 #'   was fitted on, with their geometry, in the order \code{fitted()}
 #'   returns its values.
@@ -205,6 +219,41 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
     stop("new_spatial_fit(): `predictor_vars` names '", response_var, "', the ",
          "response (`response_var`); a model cannot use its own response as a ",
          "predictor.", call. = FALSE)
+  # The right side of `formula` and `predictor_vars` name the same columns.
+  # print() shows the formula, while area_of_applicability() measures
+  # distances in `predictor_vars`, residual_morans_i() rebuilds the OLS
+  # design from them and predict_surface() asks for them in the covariates.
+  # Read by all.vars(), so transforms (log(elev)), interactions and
+  # backticked names build; a name on the right that is not a column of
+  # `data_sf` is not checked, and a formula with `.` is not read.  `..x` and
+  # `..y` are the package's reserved names for the coordinates a built-in
+  # fitter derives from the geometry (fit_rf_model(include_coords = TRUE)
+  # writes them over a column of the same name), so they are not checked
+  # either, even when `data_sf` has such a column.
+  rhs <- formula[[length(formula)]]
+  rhs_vars <- all.vars(rhs)
+  if (!("." %in% rhs_vars)) {
+    rhs_text <- paste(deparse(rhs), collapse = " ")
+    unused <- setdiff(predictor_vars, rhs_vars)
+    if (length(unused))
+      stop("new_spatial_fit(): `predictor_vars` names ",
+           paste(sprintf("'%s'", unused), collapse = ", "), ", which the right ",
+           "side of `formula` (", rhs_text, ") does not use; print() shows the ",
+           "formula, while area_of_applicability(), residual_morans_i() and ",
+           "predict_surface() read `predictor_vars`.", call. = FALSE)
+    unnamed <- setdiff(intersect(rhs_vars, setdiff(cols, c(response_var, "..x", "..y"))),
+                       predictor_vars)
+    if (length(unnamed))
+      stop("new_spatial_fit(): the right side of `formula` (", rhs_text,
+           ") uses ", paste(sprintf("'%s'", unnamed), collapse = ", "),
+           ", which `predictor_vars` does not name; print() shows the ",
+           "formula, while area_of_applicability(), residual_morans_i() and ",
+           "predict_surface() read `predictor_vars`. Name ",
+           if (length(unnamed) == 1L) "it" else "them",
+           " in `predictor_vars`, or give a column the fit derives itself ",
+           "(such as its coordinates) a name that is not a column of `data_sf`.",
+           call. = FALSE)
+  }
   # `info` is a list the methods read extras from and the cache is added to:
   # a data.frame stopped below with "replacement has 0 rows", and a vector
   # was coerced to a list with a warning.  NULL is no extras.

@@ -522,6 +522,26 @@ old behaviour where there is a way.
   mean, as for any learner that cannot fit the empty set, and
   `baseline$type` says `"fold mean"`.
 
+* `new_spatial_fit()` stops when the right side of `formula` and
+  `predictor_vars` disagree: when `predictor_vars` names a column the right
+  side does not use, or the right side uses an attribute column of
+  `data_sf`, other than the response, that `predictor_vars` does not name.
+  Both are read by `all.vars()`, so transforms (`log(elev)`), interactions,
+  `.`, names that are not columns of `data_sf` and the reserved coordinate
+  names `..x` and `..y` build; the columns of an `offset()` or a grouping
+  term count as used.  A `fit_fn` that derives coordinates `x` and `y` for
+  a trend surface, on a layer that keeps its coordinates as columns `x` and
+  `y`, is refused: the error says to name such columns in `predictor_vars`
+  or to derive them under names that are not columns of `data_sf`.  It
+  built such a fit, whose `print()` showed
+  one model while `area_of_applicability()` measured distances in other
+  predictors and `residual_morans_i()` rebuilt the OLS design from them: a
+  fit of `price ~ elev` with `predictor_vars = "slope"` put rows 10 standard
+  deviations outside the training range of `elev` inside the area of
+  applicability, and its Moran test switched to the randomisation null in
+  silence.  A `fit_fn` whose formula and `predictor_vars` disagree fails
+  every fold of `cv_spatial()`, with the message in `fold_status`.
+
 ## New features
 
 * `resolution_profile()`, `get_voronoi_seeds(method = "kmeans")` and
@@ -2506,6 +2526,22 @@ old behaviour where there is a way.
   a word when `folds` was supplied.**  They raise a warning of class
   `spatialkit_fold_args_ignored`.
 
+* **`cv_spatial()` scored a fold's predictions against `response_var`
+  without checking that the fold's fit models it.**  A `fit_fn` that fits
+  `price`, called with `response_var = "slope"`, had its predictions of
+  `price` scored against `slope` on every fold, and the result was reported
+  as the cross-validated score of a model of `slope`, with every fold
+  `ok`.  A fold whose fit's `response_var` is not the call's now fails,
+  with both names in `fold_status`, as a fold whose `fit_fn` returns no
+  `spatial_fit` does; when every fold fails so, the all-folds-failed
+  warning gives that cause.  The same holds in `cv_block_size_sweep()` and
+  `select_features_forward()`, which run their `fit_fn` through the same
+  folds; the hold-out score of `select_features_forward(select_on =
+  "split")` is `NA` for such a fit, with a warning that gives both names.
+  A named `response_var`, such as `c(r = "price")`, is compared by the
+  column it names.
+  The package's own fitters fit the call's response and are unchanged.
+
 * **`compare_models(fits, newdata = )` labelled training-residual Moran's I
   as a `newdata` metric.**  A new column `resid_morans_basis` says
   `"in-sample"`, or `"out-of-bag"` for a forest.
@@ -3384,6 +3420,19 @@ old behaviour where there is a way.
   such as the cells of centres refitted to every point).  s2 can still
   refuse them, as it refuses `sf::st_area()` and `sf::st_union()` on such
   cells: transform them to a projected CRS first.
+
+* **`create_voronoi_polygons()` and `build_tessellation(method = "voronoi")`
+  handed on a seeds layer's record of its count unchanged when the seeds
+  were fewer or more than that count.**  The record survives row
+  subsetting, so a selection's 32 seeds cut down to 16 gave 16 cells whose
+  record said they were the 32 cells the profile scored, and
+  `summarize_by_cell()` warned that rows were dropped or moved between
+  cells, by points outside every cell, a clipping boundary, a subset of the
+  rows or another layer, when every row was assigned.  Such seeds now carry
+  the record with `scored_cells = FALSE`, as `get_voronoi_seeds(method =
+  "provided")` marks them, so their cells are built as other seeds' are and
+  the summary reads "not checked: other cells were built from this count".
+  A selection's seeds as they come are unchanged.
 
 * **`assign_features_to_polygons()` stopped with s2's bare message on
   polygons in lon/lat that s2 refuses.**  A join in longitude and latitude
@@ -4556,6 +4605,29 @@ old behaviour where there is a way.
   nothing is drawn and the results are those of before.  Above it the
   subsample is another one, so the figures differ from before for the rows
   as given.
+
+* **`kriging_adequacy()` kept the last fold's prediction for a location held
+  out by several folds.**  Each location is kriged once, so a hand-built
+  `folds` whose test sets shared rows wrote over a location's prediction
+  with each fold that held it out, and the cross-validation statistic moved
+  with the order of the folds: 200 points with rows 1 to 50 in every test
+  set gave a variance of the z-scores of 0.978 and 0.989 with the folds in
+  the two orders.  Such folds are now refused before anything is fitted,
+  with an error that names the location's row and the two folds, as
+  `area_of_applicability()` refuses them.  `make_folds()` results and
+  vectors of fold labels never share a test row.
+
+* **`kriging_adequacy(folds =)` refused a vector of fold labels with one per
+  row of `assigned_points_sf` once a row was dropped for a missing response
+  or no location.**  The labels were read against the rows kept, and the
+  call stopped, after the variogram fit, with a message saying the labels
+  must have one entry per row, which they had.  A vector of labels is now
+  read as every `cv_*()` reads one: one label per row of
+  `assigned_points_sf`, the i-th for the i-th row, the labels of dropped
+  rows unused.  One label per row kept is read as before.  A vector of any
+  other length stops before anything is fitted, with an error that gives
+  its length, the number of rows and, when rows were dropped, the number
+  kept.
 
 * **`residual_morans_i()` read its response, design and residuals at their
   origin and unit.**  It rebuilt the design and regressed the response on

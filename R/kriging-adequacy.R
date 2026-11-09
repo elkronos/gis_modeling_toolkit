@@ -294,12 +294,16 @@
 #'   warning.  Default \code{"poly_id"}.
 #' @param sac Optional \code{sac_range} carrying a variogram model.
 #' @param folds Optional \code{\link{make_folds}()} result on
-#'   \code{assigned_points_sf} for the cross-validation statistic; built here
-#'   with \code{block_kfold} when \code{NULL}.  As in \code{cv_*()}, folds
+#'   \code{assigned_points_sf} for the cross-validation statistic, or a
+#'   vector of fold labels, one per row of \code{assigned_points_sf} (the
+#'   labels of rows dropped for a missing response or location are not
+#'   used; one label per row kept is read as well); built here with
+#'   \code{block_kfold} when \code{NULL}.  As in \code{cv_*()}, folds
 #'   whose recorded rows sit at other locations in
 #'   \code{assigned_points_sf} (built on another layer, such as the points
 #'   before \code{\link{assign_features_to_polygons}()} dropped some) are
-#'   refused.
+#'   refused.  So are folds whose test sets share a location: each location
+#'   is kriged once, under one fold.
 #' @param k,seed Folds and seed for that construction.
 #' @param nmax The number of neighbours each kriging system uses
 #'   (\code{gstat}'s \code{nmax}): the locations nearest the cell's centre,
@@ -546,6 +550,44 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   z_centre <- .regression_centre(zk, bounded = FALSE)
   kp$..z <- zk - z_centre
 
+  # --- the locations, and the folds supplied ---
+  # The distinct locations, numbered in the order of the rows; each is kriged
+  # from the mean of its rows (see below).
+  xy  <- sf::st_coordinates(kp)[, 1:2, drop = FALSE]
+  key <- paste(xy[, 1], xy[, 2])
+  loc <- match(key, unique(key))
+  first <- !duplicated(loc)
+  # For each location, in the order of its first rows here, its first row in
+  # the layer as given: the row whose fold the location is held out under.
+  by_given <- order(loc, ord)
+  fold_row <- by_given[!duplicated(loc[by_given])]
+  # Folds supplied are read here, before anything is fitted, so a refusal
+  # comes before the variogram's warnings and the kriging.  A vector of fold
+  # labels has one label per row of `assigned_points_sf`, the i-th for the
+  # i-th row, as every cv_*() reads one (.folds_from_labels()); the labels of
+  # the rows dropped above are not used.  One label per row kept is read as
+  # well, as area_of_applicability() reads both lengths.  Read only against
+  # the kept rows, one per row of the layer was refused as soon as a row was
+  # dropped, with a message saying the labels must have one entry per row.
+  lab_at <- ord
+  if (!is.null(folds) && is.atomic(folds)) {
+    n_all <- length(ok)
+    if (length(folds) == n_all) {
+      lab_at <- which(ok)[ord]
+    } else if (length(folds) != nrow(kp)) {
+      stop(sprintf("kriging_adequacy(): `folds` has %d label%s; give one per row of ",
+                   length(folds), if (length(folds) == 1L) "" else "s"),
+           sprintf("`assigned_points_sf` (%d), ", n_all),
+           if (nrow(kp) < n_all)
+             sprintf(paste0("or one per row kept (%d, after dropping %d with a ",
+                            "missing response or no location), "),
+                     nrow(kp), n_all - nrow(kp)),
+           "or a make_folds() result.", call. = FALSE)
+    }
+  }
+  splits <- if (!is.null(folds))
+    .location_splits(folds, kp, fold_row, lab_at, n_given = length(ok))
+
   # --- the variogram model ---
   sac_supplied <- !is.null(sac)
   if (!sac_supplied) {
@@ -631,15 +673,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # replicate variance, when that is the larger); replicates differing only
   # by measurement error give the kriging of every observation; identical
   # replicates give the kriging of one.
-  xy  <- sf::st_coordinates(kp)[, 1:2, drop = FALSE]
-  key <- paste(xy[, 1], xy[, 2])
-  loc <- match(key, unique(key))
-  first <- !duplicated(loc)
   kk <- kp[first, , drop = FALSE]
-  # For each location, in the order of kk, its first row in the layer as
-  # given: the row whose fold the location is held out under.
-  by_given <- order(loc, ord)
-  fold_row <- by_given[!duplicated(loc[by_given])]
   vk <- vm
   w <- NULL
   err_var <- rep(0, nrow(kk))    # already in vk's nugget when w is NULL
@@ -908,7 +942,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # reduced to fold labels, as they were, both ran as plain leave-one-out
   # (a 250 m buffer: variance 1.02 and RMSE 0.757, identical to 1:n, against
   # 0.873 and 0.944 with the buffer kept).
-  splits <- .location_splits(folds, kp, fold_row, ord)
+  if (is.null(splits)) splits <- .location_splits(folds, kp, fold_row, ord)
   held <- sort(unique(unlist(lapply(splits, `[[`, "test"), use.names = FALSE)))
   cv <- list(zscore_var = NA_real_, zscore_mean = NA_real_, rmse = NA_real_,
              n_pred = 0L, k = length(splits), method = method)
@@ -1143,21 +1177,41 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
 #' labels become k-fold splits.  A location is held out under that row and
 #' never trains the split it is held out in.  Splits with nothing held out
 #' are dropped.
-#' @param given For each row of `pts`, its position among the rows as given,
-#'   by which a vector of fold labels is read.
+#' @param given For each row of `pts`, the position of its label in a vector
+#'   of fold labels.  Splits whose test sets share a location are refused.
+#' @param n_given The number of rows of the layer as given: a vector of
+#'   labels has this length or one per row of `pts`.
 #' @keywords internal
 #' @noRd
-.location_splits <- function(folds, pts, rows, given = seq_len(nrow(pts))) {
+.location_splits <- function(folds, pts, rows, given = seq_len(nrow(pts)),
+                             n_given = nrow(pts)) {
   rid <- pts$..row_id[rows]
   is_split <- function(s) is.list(s) && !is.null(s$train) && !is.null(s$test)
   sp <- if (is.list(folds) && is.list(folds$folds) && length(folds$folds) &&
             all(vapply(folds$folds, is_split, logical(1)))) {
-    lapply(folds$folds, function(s) {
+    by_fold <- lapply(folds$folds, function(s) {
       te <- which(rid %in% s$test)
       list(train = setdiff(which(rid %in% s$train), te), test = te)
     })
+    # Each location is kriged once and read once, so a location held out by
+    # two folds kept the last fold's prediction, and the statistic moved with
+    # the order of the folds.
+    te_all <- unlist(lapply(by_fold, `[[`, "test"), use.names = FALSE)
+    fold_of <- rep(seq_along(by_fold), lengths(lapply(by_fold, `[[`, "test")))
+    twice <- which(duplicated(te_all))
+    if (length(twice)) {
+      l <- te_all[twice[1L]]
+      stop(sprintf(paste0("kriging_adequacy(): the location of row %s is held out ",
+                          "by both fold %d and fold %d of `folds`; each location ",
+                          "is kriged once, so a location held out twice would keep ",
+                          "the last fold's prediction. Pass folds whose test sets ",
+                          "are disjoint, such as a make_folds() result."),
+                   format(rid[l]), fold_of[match(l, te_all)], fold_of[twice[1L]]),
+           call. = FALSE)
+    }
+    by_fold
   } else {
-    lab <- .fold_labels_for(folds, pts, given)[rows]
+    lab <- .fold_labels_for(folds, pts, given, n_given)[rows]
     ok <- which(is.finite(lab))
     lapply(unique(lab[ok]), function(f)
       list(train = ok[lab[ok] != f], test = ok[lab[ok] == f]))
@@ -1251,11 +1305,16 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
 
 #' Fold labels for a layer, from any of the fold shapes the package accepts
 #'
-#' @param given For each row of `pts`, its position among the rows as given:
-#'   a vector of labels has one per row in that order.
+#' @param given For each row of `pts`, the position of its label in a vector
+#'   of labels: its position in `assigned_points_sf` (or among the rows
+#'   kept, for a vector of one label per row kept).
+#' @param n_given The number of rows of `assigned_points_sf`: a vector of
+#'   labels has this length or one per row of `pts`, and any other is
+#'   refused.
 #' @keywords internal
 #' @noRd
-.fold_labels_for <- function(folds, pts, given = seq_len(nrow(pts))) {
+.fold_labels_for <- function(folds, pts, given = seq_len(nrow(pts)),
+                             n_given = n) {
   n <- nrow(pts)
   if (is.list(folds) && !is.null(folds$assignment)) {
     a <- folds$assignment
@@ -1263,9 +1322,11 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
       return(a$fold[match(pts$..row_id, a$row_id)])
     return(a$fold[match(seq_len(n), a$row_id)])
   }
-  if (is.atomic(folds) && length(folds) == n) return(as.integer(as.factor(folds))[given])
+  if (is.atomic(folds) && !is.null(folds) && length(folds) %in% c(n, n_given))
+    return(as.integer(as.factor(folds))[given])
   stop("kriging_adequacy(): `folds` must be a make_folds() result on the same ",
-       "layer, or a vector of fold labels with one entry per row.", call. = FALSE)
+       "layer, or a vector of fold labels with one per row of ",
+       "`assigned_points_sf`.", call. = FALSE)
 }
 
 

@@ -1022,6 +1022,15 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   if (!is.null(holdout_sf) && length(selected) > 0L) {
     score_holdout <- tryCatch({
       fit <- fit_fn(train_sf, selected)
+      # Scored against `response_var`, as each fold of the sweep is
+      # (.cv_fit_one_fold()): a fit of another response is not scored.
+      if (!identical(unname(fit$response_var), unname(response_var)))
+        stop(sprintf("fit_fn() returned a fit %s, where the call's `response_var` is '%s'",
+                     if (is.character(fit$response_var) && length(fit$response_var) == 1L &&
+                         !is.na(fit$response_var))
+                       sprintf("of '%s' (its `response_var`)", fit$response_var)
+                     else "whose `response_var` is not one column name",
+                     response_var))
       # A GWR whose response the fit took about a centre is scored on the
       # values less that centre (.scored_predictions()).
       sp  <- .scored_predictions(fit, holdout_sf)

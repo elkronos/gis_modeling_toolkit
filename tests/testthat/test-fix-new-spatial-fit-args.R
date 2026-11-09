@@ -26,6 +26,11 @@
 # naming a column that is not an sfc) made summary(), model_metrics() and
 # area_of_applicability() stop with "missing value where TRUE/FALSE needed".
 #
+# The right side of `formula` and `predictor_vars` could disagree as well:
+# `price ~ elev` with `predictor_vars = "slope"` printed a model of elev
+# while area_of_applicability() measured distances in slope and
+# residual_morans_i() rebuilt the OLS design from it.
+#
 # What the constructor still accepts is pinned too: no predictors, a factor
 # or character response (a Bayesian fit can be ordinal; summary() refuses a
 # non-numeric response itself), any engine, `info = NULL`, a zero-row layer,
@@ -184,9 +189,12 @@ test_that("new_spatial_fit() refuses a formula whose left side does not hold res
                fixed = TRUE)
   # A left side that holds the response, transformed or beside another
   # column, builds; so does a one-sided formula, which has no left side.
-  for (fml in list(log(price) ~ elev, cbind(price, elev) ~ 1,
-                   price ~ elev + gp(..x, ..y, k = 5), ~ elev))
+  for (fml in list(log(price) ~ elev, price ~ elev + gp(..x, ..y, k = 5), ~ elev))
     expect_identical(.nsf_build(site, formula = fml)$formula, fml)
+  # Its right side uses no predictor, so `predictor_vars` names none.
+  expect_identical(.nsf_build(site, formula = cbind(price, elev) ~ 1,
+                              predictor_vars = character(0))$formula,
+                   cbind(price, elev) ~ 1)
   expect_s3_class(.nsf_build(site, formula = price ~ 1,
                              predictor_vars = character(0)), "spatial_fit")
 })
@@ -390,4 +398,141 @@ test_that("select_features_forward() takes the fold mean as the baseline when th
                             k = 3, method = "random_kfold", seed = 1)))
   expect_identical(run(character(0))$baseline$type, "null model")
   expect_identical(run(NULL)$baseline$type, "fold mean")
+})
+
+test_that("new_spatial_fit() refuses a right side of formula that disagrees with predictor_vars", {
+  site <- .nsf_site()
+  site$slope <- stats::rnorm(40, sd = 5)
+  d0 <- sf::st_drop_geometry(site)
+  # print() showed "price ~ elev" while area_of_applicability() measured its
+  # distances in slope and residual_morans_i() rebuilt the design from it.
+  expect_error(.nsf_build(site, formula = price ~ elev, predictor_vars = "slope"),
+               paste0("new_spatial_fit(): `predictor_vars` names 'slope', which the ",
+                      "right side of `formula` (elev) does not use; print() shows ",
+                      "the formula, while area_of_applicability(), ",
+                      "residual_morans_i() and predict_surface() read ",
+                      "`predictor_vars`."), fixed = TRUE)
+  # The model used slope, and the area of applicability did not read it.
+  expect_error(.nsf_build(site, engine = stats::lm(price ~ elev + slope, d0),
+                          formula = price ~ elev + slope, predictor_vars = "elev"),
+               paste0("new_spatial_fit(): the right side of `formula` (elev + ",
+                      "slope) uses 'slope', which `predictor_vars` does not name; ",
+                      "print() shows the formula, while area_of_applicability(), ",
+                      "residual_morans_i() and predict_surface() read ",
+                      "`predictor_vars`. Name it in `predictor_vars`, or give a ",
+                      "column the fit derives itself (such as its coordinates) a ",
+                      "name that is not a column of `data_sf`."), fixed = TRUE)
+  expect_error(.nsf_build(site, formula = ~ elev, predictor_vars = "slope"),
+               "`predictor_vars` names 'slope', which the right side of `formula` (elev) does not use",
+               fixed = TRUE)
+  expect_error(.nsf_build(site, formula = price ~ 1),
+               "`predictor_vars` names 'elev', which the right side of `formula` (1) does not use",
+               fixed = TRUE)
+  expect_error(.nsf_build(site, formula = price ~ log(elev) * slope),
+               "the right side of `formula` (log(elev) * slope) uses 'slope'",
+               fixed = TRUE)
+  expect_error(.nsf_build(site, formula = price ~ elev + slope,
+                          predictor_vars = character(0)),
+               "uses 'elev', 'slope', which `predictor_vars` does not name",
+               fixed = TRUE)
+  expect_error(.nsf_build(site, formula = price ~ elev + slope,
+                          predictor_vars = character(0)),
+               "Name them in `predictor_vars`", fixed = TRUE)
+  # Read by all.vars(): transforms, interactions, backticked names, `.`,
+  # names that are not columns of data_sf (the built-in fitters' ..x and
+  # ..y) and a one-sided formula build.
+  site$`my var` <- stats::rnorm(40)
+  ok <- list(
+    list(price ~ log(elev), "elev"),
+    list(price ~ elev * slope, c("elev", "slope")),
+    list(price ~ poly(elev, 2) + I(slope^2), c("slope", "elev")),
+    list(price ~ `my var`, "my var"),
+    list(price ~ ., "elev"),
+    list(price ~ elev + ..x + ..y, "elev"),
+    list(price ~ elev + gp(..x, ..y, k = 5), "elev"),
+    list(~ elev + slope, c("elev", "slope")),
+    list(log(price) ~ elev, "elev"),
+    # The response on the right side is not a predictor.
+    list(price ~ elev + lag(price), "elev"))
+  for (a in ok)
+    expect_identical(.nsf_build(site, formula = a[[1L]],
+                                predictor_vars = a[[2L]])$predictor_vars, a[[2L]])
+  # The fit of a forest with the coordinates as predictors shows them in its
+  # formula, beside predictor_vars, and builds.
+  skip_if_not_installed("ranger")
+  rfc <- suppressWarnings(suppressMessages(
+    fit_rf_model(site, "price", c("elev", "slope"), num_trees = 20, seed = 1,
+                 include_coords = TRUE)))
+  expect_setequal(all.vars(rfc$formula[[3L]]), c("elev", "slope", "..x", "..y"))
+  expect_identical(rfc$predictor_vars, c("elev", "slope"))
+})
+
+test_that("new_spatial_fit() does not check the reserved names ..x and ..y, even as columns", {
+  site <- .nsf_site()
+  site$slope <- stats::rnorm(40, sd = 5)
+  # A layer with a column named ..x: the forest writes the coordinates over
+  # it (.rf_frame()), and fitted it before the right-side check; the check
+  # then refused it, naming `formula` and `predictor_vars`, which the caller
+  # never wrote, and cv_rf() fitted no fold.
+  s2 <- site
+  s2$..x <- 1
+  s2$..y <- 2
+  expect_identical(.nsf_build(s2, formula = price ~ elev + ..x + ..y)$predictor_vars, "elev")
+  skip_if_not_installed("ranger")
+  q <- function(e) suppressWarnings(suppressMessages(e))
+  a <- q(fit_rf_model(site, "price", c("elev", "slope"), num_trees = 20, seed = 1,
+                      include_coords = TRUE))
+  b <- q(fit_rf_model(s2, "price", c("elev", "slope"), num_trees = 20, seed = 1,
+                      include_coords = TRUE))
+  expect_identical(fitted(b), fitted(a))
+  expect_identical(b$formula, a$formula)
+  cv <- q(logger::with_log_threshold(
+    cv_rf(s2, "price", c("elev", "slope"), k = 3, seed = 1, num_trees = 20,
+          include_coords = TRUE),
+    threshold = logger::FATAL, namespace = "spatialkit", index = 2))
+  expect_identical(as.integer(cv$n_folds_succeeded), 3L)
+})
+
+test_that("a trend surface fit_fn on a layer that keeps x and y as columns is refused, saying what to do", {
+  # The documented trend-surface fit_fn (README, vignette("reporting")):
+  # coordinates derived as x and y, kept out of predictor_vars.
+  site <- .nsf_site()
+  xy <- sf::st_coordinates(site)
+  trend <- function(train_sf, nx = "x", ny = "y") {
+    d <- sf::st_drop_geometry(train_sf)
+    d[[nx]] <- sf::st_coordinates(train_sf)[, 1]
+    d[[ny]] <- sf::st_coordinates(train_sf)[, 2]
+    f <- stats::as.formula(sprintf("price ~ elev + %s + %s", nx, ny))
+    new_spatial_fit("nsf_fit", stats::lm(f, d), f, "price", "elev", train_sf)
+  }
+  expect_s3_class(trend(site), "spatial_fit")
+  # A layer built with sf::st_as_sf(remove = FALSE) keeps them as columns,
+  # which the right side then uses without `predictor_vars` naming them.
+  kept <- site
+  kept$x <- xy[, 1]
+  kept$y <- xy[, 2]
+  expect_error(trend(kept),
+               paste0("the right side of `formula` (elev + x + y) uses 'x', 'y', which ",
+                      "`predictor_vars` does not name; print() shows the formula, while ",
+                      "area_of_applicability(), residual_morans_i() and ",
+                      "predict_surface() read `predictor_vars`. Name them in ",
+                      "`predictor_vars`, or give a column the fit derives itself (such ",
+                      "as its coordinates) a name that is not a column of `data_sf`."),
+               fixed = TRUE)
+  # Derived under names that are not columns, the same fit builds.
+  expect_s3_class(trend(kept, "cx", "cy"), "spatial_fit")
+  expect_equal(unname(stats::coef(trend(kept, "cx", "cy")$engine)),
+               unname(stats::coef(trend(site)$engine)))
+})
+
+test_that("?new_spatial_fit says how a fit_fn names columns it derives", {
+  file <- test_path("..", "..", "man", "new_spatial_fit.Rd")
+  rd <- if (file.exists(file)) tools::parse_Rd(file)
+        else tools::Rd_db("spatialkit")[["new_spatial_fit.Rd"]]
+  txt <- gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
+  for (s in c(
+    "no other attribute column of data_sf than these and the response",
+    "the reserved names ..x and ..y are not checked",
+    "needs a name that is not a column of data_sf"))
+    expect_match(txt, s, fixed = TRUE)
 })

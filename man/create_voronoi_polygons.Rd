@@ -138,8 +138,9 @@ then has no such element; neither has it for points that are not seeds.
 \code{params$count_rule} is present when \code{points_sf} carries the
 record of how its count was set (\code{attr(points_sf, "count_rule")}:
 the seeds of a \code{\link{select_resolution}()} result, or seeds a
-seeding function placed from one): the same list, which the cells carry
-too as \code{attr(cells, "count_rule")}.
+seeding function placed from one): the same list, with
+\code{scored_cells = FALSE} when the seeds are fewer or more than its
+count, which the cells carry too as \code{attr(cells, "count_rule")}.
 \code{\link{assign_features_to_polygons}()} copies it to the rows it
 assigns, and \code{\link{summarize_by_cell}()} checks its result
 against it.
@@ -213,7 +214,12 @@ centres \code{\link[=resolution_profile]{resolution_profile()}} scored, and thei
 centres in the CRS the profile worked in. (On a profile without an
 estimate fitted to a subsample the seeds are those centres refitted to
 every point, which carry \code{attr(, "refit")}; their record says
-\code{scored_cells = FALSE}, and their cells are built as other seeds' are.)
+\code{scored_cells = FALSE}, and their cells are built as other seeds' are.
+So are seeds fewer or more than the record's count, such as a
+selection's seeds cut down to some of its rows: they are not the centres
+the profile scored, and their record is handed on with
+\code{scored_cells = FALSE}, as \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} (\code{method = "provided"})
+marks such seeds.)
 Unless a projected \code{crs} is
 given, their cells are built in that CRS, whatever CRS the seeds arrive
 in (degrees, or the CRS of a boundary they were placed in), and returned

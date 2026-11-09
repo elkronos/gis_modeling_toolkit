@@ -958,6 +958,23 @@
     .log_warn("cross-validation: fold %d did not return a spatial_fit; skipping.", fold_lab)
     return(list(error = msg))
   }
+  # The fold's predictions are scored against the call's `response_var`, so
+  # a fit of another response is not scored: its predictions of one column
+  # were read as the cross-validated score of a model of another.  The names
+  # are compared without a names attribute: cv_spatial() takes a named
+  # `response_var` such as c(r = "price"), whose fit records "price".
+  if (!identical(unname(fit_obj$response_var), unname(response_var))) {
+    fit_resp <- fit_obj$response_var
+    msg <- if (is.character(fit_resp) && length(fit_resp) == 1L && !is.na(fit_resp))
+      sprintf(paste0("fit_fn() returned a fit of '%s' (its `response_var`), ",
+                     "where the call's `response_var` is '%s'"), fit_resp, response_var)
+    else
+      sprintf(paste0("fit_fn() returned a fit whose `response_var` is not one ",
+                     "column name, where the call's `response_var` is '%s'"),
+              response_var)
+    .log_warn("cross-validation: fold %d %s; skipping.", fold_lab, msg)
+    return(list(error = msg))
+  }
 
   # Predict on test fold via the S3 generic
   y_true <- test_df[[response_var]]
@@ -9334,7 +9351,10 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'   training rows only, so anything done inside it (scaling, tuning, an inner
 #'   variable sweep) is already nested and leak-free.  The \code{subclass} it
 #'   stamps must have a \code{predict.<subclass>()} method registered, because
-#'   that is how each fold is scored.
+#'   that is how each fold is scored.  The fit models \code{response_var}
+#'   (its \code{response_var} is the call's): a fold whose fit models
+#'   another column fails, with the two names in \code{fold_status}, since
+#'   its predictions are scored against \code{response_var}.
 #' @param folds Optional fold definitions, in any of three shapes: a
 #'   \code{\link{make_folds}()} return value; a bare list of
 #'   \code{list(train =, test =)} pairs of \code{..row_id} values; or a vector

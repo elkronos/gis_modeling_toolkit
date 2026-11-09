@@ -258,7 +258,8 @@ carries one (\code{attr(points_sf, "count_rule")}: the seeds of a
 \code{\link[=select_resolution]{select_resolution()}} result, or seeds \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} or
 \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}} placed from one): the record as the seeds
 carry it, whose \code{scored_cells} says whether these are the cells the
-profile scored. For \code{"hex"} and \code{"square"}, when \code{approx_n_cells}
+profile scored, and \code{FALSE} when the seeds are fewer or more than
+its count. For \code{"hex"} and \code{"square"}, when \code{approx_n_cells}
 is a selection that carries a record, or a profile built with an
 \code{estimate}, and no \code{cellsize} is given: that record with
 \code{scored_cells} \code{FALSE}, since a lattice at that count is not the
