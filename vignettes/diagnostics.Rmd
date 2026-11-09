@@ -314,11 +314,12 @@ selection stopped at `a`. A candidate is added when its pooled `gain` exceeds
 error of that mean (`fold_gain_se`), from step 1 on; `rule = "tol"` tests the
 pooled gain alone.
 
-Its inner folds default to the scheme you pass. Passing `random_kfold` there
-logs a caution: random inner folds choose the variables that predict best among
-the samples, where one that only tracks nearby values of the response can win,
-and a blocked outer loop then scores the chosen set at the blocks' distance,
-for which it was not chosen.
+Its inner folds are `block_kfold` unless `method` names another scheme,
+whatever folds the outer loop uses. Passing `random_kfold` there logs a
+caution: random inner folds choose the variables that predict best among the
+samples, where one that only tracks nearby values of the response can win, and
+a blocked outer loop then scores the chosen set at the blocks' distance, for
+which it was not chosen.
 
 ## 6. Warnings about pooled cell values
 
@@ -405,9 +406,15 @@ distance from two centres, on the boundary between their cells (distances
 whose squares agree to one part in ten million count as the same). The
 profile scores it in the cell of the lower-numbered centre, and
 `assign_features_to_polygons()` gives a point there the same cell when the
-cells carry the record of the centres scored, so a lattice passes the check.
-`build_tessellation()` draws those cells in the profile's CRS whatever CRS
-the seeds come back in. Cells built in another projected CRS, named with its
+cells carry the record of the centres scored, for rows that have a CRS exactly
+when the record names one, so a lattice passes the check. Rows without a CRS
+beside a record that names one, rows with a CRS beside a record that names
+none, rows assigned to the cells after they lost the record (written to a file
+and read back, say) and summarised with `cells_sf` set to the cells that carry
+it, and rows given their cells by another join are placed by the polygons
+alone, so a row on a boundary can sit in either cell. `build_tessellation()` draws the
+scored centres' cells in the profile's CRS whatever CRS the seeds come back
+in. Cells built in another projected CRS, named with its
 `crs`, are the nearest-centre cells of that CRS, so rows near a boundary, on
 it or not, can sit in another cell, and the warning then speaks of them. The
 values returned describe the cells as given, and

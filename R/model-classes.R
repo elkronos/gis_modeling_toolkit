@@ -393,14 +393,18 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
 #' custom subclass: backend, formula, number of observations, CRS, and the few
 #' backend-specific numbers worth seeing immediately (GWR bandwidth; for a
 #' \code{bayesian_fit} the GP basis size, the smallest effective range that
-#' basis resolves in map units, the slope prior, and a flagged line when the
-#' sampler's diagnostics or the basis-adequacy check failed).  An
+#' basis resolves in map units, the LOOIC when the fit computed it
+#' (\code{compute_loo = TRUE}, the default of
+#' \code{\link{fit_bayesian_spatial_model}()}), the slope prior, and a flagged
+#' line when the sampler's diagnostics or the basis-adequacy check failed).  An
 #' \code{rf_fit} has its own method (see
 #' \code{\link{print.rf_fit}}), which shows the same header plus the forest
 #' settings.  It is what you get by typing the object's name, and the quickest
 #' way to confirm a fit used the data, predictors and CRS you meant.  For fit
 #' quality use \code{\link{model_metrics}()} or \code{\link{summary}()}
-#' instead.  Nothing printed here is an out-of-sample score.
+#' instead.  Apart from a \code{bayesian_fit}'s LOOIC, an approximate
+#' leave-one-out score of single rows rather than a spatial one, nothing
+#' printed here is an out-of-sample score.
 #'
 #' For a \code{gwr_fit} the bandwidth and AICc are followed by the effective
 #' number of parameters and, when any local window is of deficient rank, by

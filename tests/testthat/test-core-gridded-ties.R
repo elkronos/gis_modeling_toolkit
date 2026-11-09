@@ -626,15 +626,16 @@ test_that("cells drawn in a projected CRS the caller names are its nearest-seed 
 
 test_that("rows the polygons alone place beside the record are reported, and the warning names that cause", {
   # The edge rule of assign_features_to_polygons() runs on cells that carry
-  # the record, for rows with a CRS.  Rows without a CRS, rows assigned to
-  # the cells after they lost the record (a file written and read back) and
-  # rows given their cells by sf::st_join() are placed by the polygons
-  # alone.  Summarised with the scored cells as `cells_sf`, they are still
+  # the record, for rows that have a CRS exactly when the record names one.
+  # Rows without a CRS beside a record in EPSG:32615, rows assigned to the
+  # cells after they lost the record (a file written and read back) and rows
+  # given their cells by sf::st_join() are placed by the polygons alone.  Summarised with the scored cells as `cells_sf`, they are still
   # checked against the record, and a row on a boundary the polygons put in
   # the other cell is reported.
   clause <- paste0("A row on or near a boundary can sit in the neighbouring cell when the ",
-                   "polygons alone placed it (as for rows without a CRS, rows assigned to ",
-                   "cells without their count record, such as cells read back from a file, ",
+                   "polygons alone placed it (as for rows without a CRS beside a count ",
+                   "record that names one or the reverse, rows assigned to cells without ",
+                   "their count record, such as cells read back from a file, ",
                    "and rows given their cells by another join than ",
                    "assign_features_to_polygons())")
   n_elsewhere <- integer(0)
@@ -740,23 +741,56 @@ test_that("the help and NEWS name rows the polygons alone place among the causes
                              paste(readLines(file.path(root, ...), warn = FALSE), collapse = " "))
   rd <- read("man", "summarize_by_cell.Rd")
   expect_match(rd, paste0("It does so on cells that carry the record, for rows that have a CRS ",
-                          "when the record names one. Rows without a CRS, rows assigned to the ",
-                          "cells after they lost the record (written to a file and read back, ",
-                          "say) and summarised with \\code{cells_sf} set to the cells that carry ",
-                          "it, and rows given their cells by another join are placed by the ",
-                          "polygons alone, so a row on a boundary can sit in either cell."),
+                          "exactly when the record names one. Rows without a CRS beside a record ",
+                          "that names one, rows with a CRS beside a record that names none, rows ",
+                          "assigned to the cells after they lost the record (written to a file ",
+                          "and read back, say) and summarised with \\code{cells_sf} set to the ",
+                          "cells that carry it, and rows given their cells by another join are ",
+                          "placed by the polygons alone, so a row on a boundary can sit in ",
+                          "either cell."),
                fixed = TRUE)
   expect_match(rd, paste0("cells transformed to another projected CRS are joined there, so a row ",
                           "near a boundary, on it or not, can sit in another cell than the ",
                           "profile put it in."), fixed = TRUE)
   expect_match(rd, "and the warning names these cases.", fixed = TRUE)
   news <- read("NEWS.md")
-  expect_match(news, paste0("for rows that have a CRS when the record names one. The warning now ",
-                            "names the cases that remain: rows the polygons alone placed (rows ",
-                            "without a CRS, rows assigned to cells without their count record, ",
+  expect_match(news, paste0("for rows that have a CRS exactly when the record names one. The ",
+                            "warning now names the cases that remain: rows the polygons alone ",
+                            "placed (rows without a CRS beside a count record that names one or ",
+                            "the reverse, rows assigned to cells without their count record, ",
                             "such as cells read back from a file, and rows given their cells by ",
                             "another join), cells built in, or transformed to, another CRS than ",
                             "the one the profile measured the rows in,"), fixed = TRUE)
+})
+
+test_that("on cells whose record names no CRS, rows without a CRS take the profile's cell and rows with one are placed by the polygons alone", {
+  # The edge rule runs for rows that have a CRS exactly when the record
+  # names one.  A profile on rows without a CRS records none, and its cells
+  # carry none: rows without a CRS on them take the cell the profile scored
+  # them in, and the summary's check reads "match".  The same rows with a
+  # CRS beside that record are placed as the cells without the record place
+  # them.
+  pts <- sf::st_set_crs(.gt_lattice(30L, 20L, 30), NA)
+  P <- .gt_keep("30x20-30-density-nocrs", .gt_path(pts, "density"))
+  cells <- P$tess$cells
+  rec <- attr(cells, "count_rule")
+  expect_identical(rec$scored_cells, TRUE)
+  expect_true(is.na(rec$crs))
+  expect_true(is.na(sf::st_crs(cells)))
+  # The profile's rule, on the coordinates as they are.
+  cen <- rec$scored$centres
+  xy  <- unname(sf::st_coordinates(pts)[, 1:2])
+  profile <- P$tess$index[.nearest_exact(xy[, 1L], xy[, 2L], cen[, 1L], cen[, 2L])]
+  expect_identical(.gt_cell_of(P$asg, pts), profile)
+  expect_identical(attr(P$out, "count_rule")$check$cells, "match")
+  expect_length(.gt_of(list(warnings = P$warnings), "spatialkit_cells_differ"), 0L)
+  with_crs <- sf::st_set_crs(pts, 32615)
+  placed <- .gt_cell_of(suppressWarnings(assign_features_to_polygons(
+    with_crs, cells, polygon_id_col = "cell_id", quiet = TRUE)), pts)
+  alone <- .gt_cell_of(suppressWarnings(assign_features_to_polygons(
+    with_crs, .gt_bare(cells), polygon_id_col = "cell_id", quiet = TRUE)), pts)
+  expect_false(anyNA(placed))
+  expect_identical(placed, alone)
 })
 
 test_that("on a ladder of sizes the record holds the centres of the level chosen, and the rows are placed by them", {

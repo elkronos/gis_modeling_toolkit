@@ -154,8 +154,12 @@ st_crs(counties)$units_gdal
 
 `nc.shp` arrives in NAD27, a geographic CRS in degrees.
 `ensure_projected()` chose a local Albers equal-area projection and logged why:
-across this extent the UTM zone distorts distances by 0.20 percent at worst and
-the Albers projection by 0.01 percent. Pass `target_crs` to override the choice.
+across this extent the UTM zone distorts distances by
+`r with(attr(counties, "crs_choice"), sprintf("%.2f", 100 * distance_error[startsWith(name, "UTM zone")]))`
+percent at worst and the Albers projection by
+`r with(attr(counties, "crs_choice"), sprintf("%.2f", 100 * distance_error[chosen]))`
+percent. `attr(counties, "crs_choice")` holds the figures the log gives.
+Pass `target_crs` to override the choice.
 
 A layer with no CRS at all is decided by a documented heuristic. If the bounding
 box fits the lon/lat envelope and the coordinates look like degrees, the layer

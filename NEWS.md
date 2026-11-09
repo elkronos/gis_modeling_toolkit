@@ -5181,10 +5181,11 @@ old behaviour where there is a way.
   other cell.  `assign_features_to_polygons()` gives such a row the cell
   the profile scored it in on the cells the profile scored, kept in the
   CRS it measured the rows in and carrying the record of their count, for
-  rows that have a CRS when the record names one.  The warning now names
-  the cases that remain: rows the polygons alone placed (rows without a
-  CRS, rows assigned to cells without their count record, such as cells
-  read back from a file, and rows given their cells by another join),
+  rows that have a CRS exactly when the record names one.  The warning now
+  names the cases that remain: rows the polygons alone placed (rows without
+  a CRS beside a count record that names one or the reverse, rows assigned
+  to cells without their count record, such as cells read back from a
+  file, and rows given their cells by another join),
   cells built in, or transformed to, another CRS than the one the profile
   measured the rows in, cells that are not the Voronoi cells of the
   centres the profile scored (seeds moved, cells edited), and coordinates
@@ -7651,6 +7652,35 @@ old behaviour where there is a way.
   `area_of_applicability(weights = pmax(fit$info$importance, 0))` without
   condition.  It now says this works only when that importance is finite,
   which it is not when no row is out of bag.
+
+* `vignette("diagnostics")` said that `assign_features_to_polygons()`
+  gives a point on the boundary between two scored cells the cell the
+  profile scored it in whenever the cells carry the record of the centres
+  scored.  It does so for rows that have a CRS exactly when the record
+  names one.  The vignette now says so and, as `?summarize_by_cell` does,
+  names the rows the polygons alone place: rows without a CRS beside a
+  record that names one, rows with a CRS beside a record that names none,
+  rows assigned to the cells after they lost the record, and rows given
+  their cells by another join.  `?summarize_by_cell` and the
+  `spatialkit_cells_differ` warning said the polygons alone place every row
+  without a CRS; rows without a CRS on cells whose record names none take
+  the profile's cell, and the help and the warning now give the condition.
+
+* `vignette("diagnostics")` said the inner folds of
+  `select_features_forward()` "default to the scheme you pass".  They are
+  `block_kfold` unless the function's `method` names another scheme,
+  whatever folds the outer loop uses, and the vignette now says so.
+
+* `?print.spatial_fit` said that nothing the print shows is an
+  out-of-sample score, and did not list the LOOIC a `bayesian_fit` prints
+  when the fit computed it (`compute_loo = TRUE`, the default).  It now
+  lists the LOOIC and says it is an approximate leave-one-out score of
+  single rows, not a spatial one.
+
+* `vignette("getting-started")` said the UTM zone distorts the distances of
+  `nc.shp` by 0.20 percent at worst, where `ensure_projected()` measures
+  and logs 0.21 percent.  The vignette now writes both figures from
+  `attr(counties, "crs_choice")`, rounded as the log rounds them.
 
 # spatialkit 2.0.0
 

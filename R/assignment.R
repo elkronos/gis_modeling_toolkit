@@ -268,7 +268,8 @@
 #'   polygon that holds it, and the summary's check then reads `"differ"`. A
 #'   point farther from its nearest centre's cell keeps the polygon that
 #'   holds it, and so do features that are not points, points without a CRS
-#'   beside a record with one, and a join in longitude and latitude (polygons
+#'   beside a record with one or with a CRS beside a record without one, and
+#'   a join in longitude and latitude (polygons
 #'   in degrees beside a record in degrees). A centre's cell
 #'   is the one cell that holds it and no other centre; a centre outside a
 #'   boundary that clipped its cell away from it has the cell, among those
@@ -2957,12 +2958,13 @@ assign_features_to_polygons <- function(
 #'   built from the centres the profile scored, gives a point on that boundary
 #'   the same cell, measured in the CRS the record names, so the comparison
 #'   reads `"match"` on gridded locations too. It does so on cells that carry
-#'   the record, for rows that have a CRS when the record names one. Rows
-#'   without a CRS, rows assigned to the cells after they lost the record
-#'   (written to a file and read back, say) and summarised with `cells_sf` set
-#'   to the cells that carry it, and rows given their cells by another join are
-#'   placed by the polygons alone, so a row on a boundary can sit in either
-#'   cell.
+#'   the record, for rows that have a CRS exactly when the record names one.
+#'   Rows without a CRS beside a record that names one, rows with a CRS beside
+#'   a record that names none, rows assigned to the cells after they lost the
+#'   record (written to a file and read back, say) and summarised with
+#'   `cells_sf` set to the cells that carry it, and rows given their cells by
+#'   another join are placed by the polygons alone, so a row on a boundary can
+#'   sit in either cell.
 #'   [build_tessellation()] draws those cells in the CRS the record names,
 #'   whatever CRS the seeds arrive in, unless its `crs` names another
 #'   projected CRS. Cells built in another projected CRS are the

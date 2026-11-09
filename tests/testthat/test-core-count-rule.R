@@ -608,8 +608,9 @@ test_that("two rows exchanged between neighbouring cells are told from rows drop
   expect_match(text, paste0(
     "The same number of rows and cells was found, so rows sit in other cells than the ",
     "profile put them in, or values changed. A row on or near a boundary can sit in the ",
-    "neighbouring cell when the polygons alone placed it (as for rows without a CRS, rows ",
-    "assigned to cells without their count record, such as cells read back from a file, ",
+    "neighbouring cell when the polygons alone placed it (as for rows without a CRS beside ",
+    "a count record that names one or the reverse, rows assigned to cells without their ",
+    "count record, such as cells read back from a file, ",
     "and rows given their cells by another join than assign_features_to_polygons()), ",
     "when the cells were built in, or transformed to, another CRS than the one the ",
     "profile measured the rows in (crs in the count record), or when they are not the ",

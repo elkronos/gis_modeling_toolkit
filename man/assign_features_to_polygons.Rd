@@ -224,7 +224,8 @@ depends on the PROJ build), so a point on such an edge can keep the
 polygon that holds it, and the summary's check then reads \code{"differ"}. A
 point farther from its nearest centre's cell keeps the polygon that
 holds it, and so do features that are not points, points without a CRS
-beside a record with one, and a join in longitude and latitude (polygons
+beside a record with one or with a CRS beside a record without one, and
+a join in longitude and latitude (polygons
 in degrees beside a record in degrees). A centre's cell
 is the one cell that holds it and no other centre; a centre outside a
 boundary that clipped its cell away from it has the cell, among those

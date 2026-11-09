@@ -1348,3 +1348,124 @@ test_that("a text that says how a number tends to behave quotes a figure of the 
     "vignette resolution: Setting a size"                        = c("tends", "tends"),
     "vignette diagnostics: 6. Warnings about pooled cell values" = "mostly"))
 })
+
+
+# ---- Sentences that stated something false about the code -------------------------------
+# Each test reads one sentence that described a branch or a figure the code
+# does not have, pins the sentence that replaced it, and checks the code it
+# describes.
+
+test_that("the vignette gives the edge rule for gridded locations with its condition on the rows' CRS, as the help does", {
+  prose <- .docs_vignette_texts(code = FALSE)
+  if (is.null(prose)) skip("the vignettes' sources are not installed")
+  vd <- prose[["vignette diagnostics: 6. Warnings about pooled cell values"]]
+  expect_identical(.docs_count(vd, paste0(
+    "assign_features_to_polygons() gives a point there the same cell when the cells carry ",
+    "the record of the centres scored, for rows that have a CRS exactly when the record ",
+    "names one, so a lattice passes the check. Rows without a CRS beside a record that ",
+    "names one, rows with a CRS beside a record that names none, rows assigned to the cells ",
+    "after they lost the record (written to a file and read back, say) and summarised with ",
+    "cells_sf set to the cells that carry it, and rows given their cells by another join ",
+    "are placed by the polygons alone, so a row on a boundary can sit in either cell.")), 1L)
+  # The sentence without its condition is gone, and so is the one that gave
+  # every row without a CRS to the polygons: rows without a CRS on cells
+  # whose record names none take the profile's cell (test-core-gridded-ties.R).
+  expect_identical(.docs_count(vd, "centres scored, so a lattice passes the check"), 0L)
+  expect_identical(.docs_count(vd, "Rows without a CRS, rows assigned"), 0L)
+  # The help states the same condition in the same words.
+  help <- .docs_squash(.docs_flat(.docs_rd("summarize_by_cell")))
+  expect_identical(.docs_count(help, paste0(
+    "for rows that have a CRS exactly when the record names one. Rows without a CRS beside ",
+    "a record that names one, rows with a CRS beside a record that names none, rows assigned ",
+    "to the cells after they lost the record (written to a file and read back, say) and ",
+    "summarised with cells_sf set to the cells that carry it, and rows given their cells by ",
+    "another join are placed by the polygons alone")), 1L)
+})
+
+test_that("the vignette says the inner folds of forward selection are block_kfold unless `method` names another scheme", {
+  expect_identical(eval(formals(select_features_forward)$method)[1L], "block_kfold")
+  lines <- .docs_vignette("diagnostics")
+  if (is.null(lines)) skip("the vignettes' sources are not installed")
+  sec <- .docs_md_sections(lines, depth = 2L, code = FALSE)[[
+    "5. Coordinates as predictors, and selection inside the folds"]]
+  expect_false(is.null(sec))
+  expect_identical(.docs_count(sec, "default to the scheme you pass"), 0L)
+  expect_identical(.docs_count(sec, paste0(
+    "Its inner folds are block_kfold unless method names another scheme, whatever folds ",
+    "the outer loop uses. Passing random_kfold there logs a caution:")), 1L)
+
+  # The code: random outer folds handed to cv_spatial() leave the inner
+  # folds of a selection that names no `method` at block_kfold.
+  set.seed(11)
+  n  <- 90
+  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+  xy$a <- rnorm(n); xy$b <- rnorm(n)
+  xy$z <- 1.5 * xy$a + rnorm(n, sd = 0.3)
+  pts <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  lm_fit <- function(train_sf, vars) lm_spatial_fit(train_sf, "z", vars)
+  inner <- character(0)
+  fit_sel <- function(train_sf) {
+    s <- select_features_forward(train_sf, "z", c("a", "b"), fit_fn = lm_fit, k = 3,
+                                 block_size = 400, seed = 1, quiet = TRUE)
+    inner <<- c(inner, s$params$method)
+    lm_fit(train_sf, s$selected)
+  }
+  outer <- make_folds(pts, k = 3, method = "random_kfold", seed = 2)
+  suppressWarnings(cv_spatial(pts, "z", c("a", "b"), fit_fn = fit_sel, folds = outer))
+  expect_identical(inner, rep("block_kfold", 3L))
+})
+
+test_that("?print.spatial_fit names the LOOIC a bayesian_fit prints and does not call it in-sample", {
+  rd <- .docs_rd("print.spatial_fit")
+  desc <- .docs_squash(.docs_flat(.docs_rd_part(rd, "\\description")))
+  expect_identical(.docs_count(desc, "Nothing printed here is an out-of-sample score."), 0L)
+  expect_identical(.docs_count(desc, paste0(
+    "the LOOIC when the fit computed it (compute_loo = TRUE, the default of ",
+    "fit_bayesian_spatial_model()), the slope prior")), 1L)
+  expect_identical(.docs_count(desc, paste0(
+    "Apart from a bayesian_fit's LOOIC, an approximate leave-one-out score of single rows ",
+    "rather than a spatial one, nothing printed here is an out-of-sample score.")), 1L)
+
+  # The code: the print shows the LOOIC when the fit holds one, and no LOOIC
+  # line when it does not.
+  pts <- sf::st_as_sf(data.frame(x = 5e5 + 1:10, y = 4e6 + (1:10)^2, a = 1:10,
+                                 z = sin(1:10)), coords = c("x", "y"), crs = 32617)
+  fit <- function(looic) new_spatial_fit("bayesian_fit", list(), z ~ a, "z", "a", pts,
+                                         info = list(gp_k = 5L, gp_n_basis = 25L, looic = looic))
+  expect_true(any(grepl("^  LOOIC   : 81\\.23$", capture.output(print(fit(81.23))))))
+  expect_false(any(grepl("LOOIC", capture.output(print(fit(NA_real_))), fixed = TRUE)))
+})
+
+test_that("the getting-started vignette gives the distance errors nc.shp's projection log gives", {
+  lines <- .docs_vignette("getting-started")
+  if (is.null(lines)) skip("the vignettes' sources are not installed")
+  text <- paste(lines, collapse = "\n")
+  at <- regexpr("(?s)chose a local Albers equal-area projection and logged why:.*?Pass `target_crs`",
+                text, perl = TRUE)
+  expect_gt(at, 0L)
+  para <- if (at > 0L) regmatches(text, at) else ""
+  # The figures are written from the object the chunk above builds, not as
+  # literals: the measured error moves with the PROJ build.
+  expect_false(grepl("0.20 percent", para, fixed = TRUE))
+  code <- sub("^`r ", "", sub("`$", "", regmatches(para, gregexpr("`r [^`]+`", para))[[1L]]))
+  expect_length(code, 2L)
+
+  nc <- sf::st_read(system.file("shape/nc.shp", package = "sf"), quiet = TRUE)
+  env <- new.env()
+  log <- capture_spatialkit_log(
+    env$counties <- ensure_projected(nc[, c("BIR74", "SID74", "NWBIR74")]),
+    level = logger::WARN)
+  line <- grep("against the zone's", log, value = TRUE, fixed = TRUE)
+  expect_length(line, 1L)
+  logged <- regmatches(line, regexec(
+    "worst-case distance error ([0-9.]+)% against the zone's ([0-9.]+)%", line))[[1L]]
+  # The sentence names the projection chosen as a local Albers equal-area
+  # one and the UTM zone as the other candidate quoted: a build that chose
+  # another would leave the words false while the figures followed it.
+  choice <- attr(env$counties, "crs_choice")
+  expect_true(startsWith(choice$name[choice$chosen], "Albers equal-area"))
+  expect_identical(sum(startsWith(choice$name, "UTM zone")), 1L)
+  shown <- vapply(code, function(cd) as.character(eval(parse(text = cd), env)), "")
+  # The zone first, then the projection chosen, as the sentence reads.
+  expect_identical(unname(shown), logged[c(3L, 2L)])
+})
