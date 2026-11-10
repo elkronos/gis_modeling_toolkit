@@ -527,6 +527,25 @@
 }
 
 
+#' The margin a Voronoi frame grows by
+#'
+#' 2 percent of the diagonal of the generators' hull or of the cover, with
+#' no floor in the units of the CRS (as \code{.edge_tol()}): a floor of 1
+#' unit grew a 500 m layer in a kilometre CRS by 20 m where it grows by
+#' 15.9 m in metres, and its edge cells took another shape.  A diagonal of
+#' 0 (one location) has no size to take 2 percent of; its hull, a point,
+#' is grown by 0.02 units as before, so the cells keep an area.
+#'
+#' @param diag The diagonal, in the units of the CRS.
+#' @return A distance in the units of the CRS; not finite when \code{diag}
+#'   is not.
+#' @keywords internal
+#' @noRd
+.voronoi_grow <- function(diag) {
+  if (isTRUE(diag == 0)) 0.02 else 0.02 * diag
+}
+
+
 #' The boundary a cover gives, in the working CRS
 #'
 #' The cover's convex hull (points) or its polygons, grown by 2 percent of
@@ -553,10 +572,11 @@
     u <- if (all(types %in% c("POLYGON", "MULTIPOLYGON")))
       sf::st_union(.safe_make_valid(g))
     else sf::st_convex_hull(sf::st_combine(g))
+    # 2% of the diagonal with no floor in the units of the CRS (.voronoi_grow()).
     grow_of <- function(x) {
       bb <- sf::st_bbox(x)
-      0.02 * max(sqrt(as.numeric(bb[["xmax"]] - bb[["xmin"]])^2 +
-                      as.numeric(bb[["ymax"]] - bb[["ymin"]])^2), 1)
+      .voronoi_grow(sqrt(as.numeric(bb[["xmax"]] - bb[["xmin"]])^2 +
+                         as.numeric(bb[["ymax"]] - bb[["ymin"]])^2))
     }
     grow <- grow_of(u)
     if (!is.finite(grow)) return(NULL)
@@ -784,6 +804,11 @@
 #' @param points_sf An sf object with POINT/MULTIPOINT geometry. Points that
 #'   mix XY and XYZ (or XYM), or that carry M, are read in x and y, since sf
 #'   reads a layer in the dimension of its first geometry and GEOS refuses M.
+#'   A point that is empty, or has a coordinate that is not finite or lies
+#'   beyond 1e150, has no location and takes no part in the bounding box.
+#'   With no `boundary`, points none of which has a location (as given, or
+#'   after the move of lon/lat points into a projected CRS) are refused with
+#'   an error that says so.
 #' @param boundary Optional polygonal sf object. One with no CRS, given with
 #'   points that have one, is interpreted in the points' own CRS, with a
 #'   warning. With points in a projected CRS it is read as [harmonize_crs()]
@@ -848,6 +873,18 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   # point takes none: at Inf the buffer stopped with GEOS's message, and at
   # 1e200 the target had an infinite area.
   points_sf <- .empty_unlocated(points_sf)
+  # With no `boundary` the target is built from the points alone, so points
+  # none of which has a location are refused by name, as given here and
+  # again after the move below, which empties a point it cannot place (a
+  # latitude beyond 90): their box is NA, and the call stopped with R's
+  # "missing value where TRUE/FALSE needed".
+  no_point <- function(why)
+    stop(sprintf(paste0("clip_target_for(): no point in `points_sf` has a location (%s), ",
+                        "and with no `boundary` no clip target can be built from them."),
+                 .BOUNDARY_UNLOCATED_WHY[[why]]), call. = FALSE)
+  if (is.null(boundary) && nrow(points_sf) > 0L &&
+      all(sf::st_is_empty(sf::st_geometry(points_sf))))
+    no_point("given")
   # So is a row of `boundary`, which is then left out (.boundary_located()):
   # an empty row gave a target of area 0 or one with an empty line in it, and
   # a row with a vertex at 1e200 a target of area 5e204.  A boundary with no
@@ -918,19 +955,23 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 
   pts_geom <- sf::st_geometry(points_sf)
   if (length(pts_geom) == 0) stop("clip_target_for(): `points_sf` is empty.")
+  if (all(sf::st_is_empty(pts_geom))) no_point("moved")
 
   bb <- sf::st_bbox(pts_geom)
-  # Degenerate RELATIVE to the extent, not only when all.equal() calls the two
-  # ends equal: points on a transect with sub-millimetre numerical scatter
-  # gave a 1000 x 1e-6 sliver, over which a hex or square grid sized by a
-  # count needed 166,536 cells for 25, or stopped at `max_cells`.
+  # Degenerate RELATIVE to the extent: points on a transect with
+  # sub-millimetre numerical scatter gave a 1000 x 1e-6 sliver, over which a
+  # hex or square grid sized by a count needed 166,536 cells for 25, or
+  # stopped at `max_cells`.  The side is read against the span only.
+  # all.equal() of its two ends compared them relative to their size, which
+  # reads the origin: a 3 km x 2 km box at x = 1e12, or a 5 cm x 3 cm one at
+  # y = 4e6, was called degenerate and got disks around the points.  A box
+  # with no extent (span 0) is degenerate; points none of which has a
+  # location never reach here (refused above).
   dx <- as.numeric(bb$xmax - bb$xmin)
   dy <- as.numeric(bb$ymax - bb$ymin)
   span <- max(dx, dy)
-  zero_w <- isTRUE(all.equal(as.numeric(bb$xmin), as.numeric(bb$xmax))) ||
-    isTRUE(dx <= 1e-6 * span)
-  zero_h <- isTRUE(all.equal(as.numeric(bb$ymin), as.numeric(bb$ymax))) ||
-    isTRUE(dy <= 1e-6 * span)
+  zero_w <- !isTRUE(dx > 1e-6 * span)
+  zero_h <- !isTRUE(dy > 1e-6 * span)
 
   if (zero_w || zero_h) {
     .msg("clip_target_for(): degenerate bbox; using small buffer around points.")
@@ -1614,7 +1655,7 @@ create_voronoi_polygons <- function(
                          "on a line): the cells are a sliver")
         else "")
     }
-    hull <- suppressWarnings(sf::st_buffer(hull, dist = 0.02 * max(diag, 1)))
+    hull <- suppressWarnings(sf::st_buffer(hull, dist = .voronoi_grow(as.numeric(diag))))
     hull_sfc <- sf::st_sfc(hull, crs = sf::st_crs(pts))
     boundary <- sf::st_sf(geometry = hull_sfc)
     boundary_source <- "points"

@@ -9,7 +9,12 @@ clip_target_for(points_sf, boundary = NULL, expand = 0, quiet = FALSE)
 \arguments{
 \item{points_sf}{An sf object with POINT/MULTIPOINT geometry. Points that
 mix XY and XYZ (or XYM), or that carry M, are read in x and y, since sf
-reads a layer in the dimension of its first geometry and GEOS refuses M.}
+reads a layer in the dimension of its first geometry and GEOS refuses M.
+A point that is empty, or has a coordinate that is not finite or lies
+beyond 1e150, has no location and takes no part in the bounding box.
+With no \code{boundary}, points none of which has a location (as given, or
+after the move of lon/lat points into a projected CRS) are refused with
+an error that says so.}
 
 \item{boundary}{Optional polygonal sf object. One with no CRS, given with
 points that have one, is interpreted in the points' own CRS, with a

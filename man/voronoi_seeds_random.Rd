@@ -31,7 +31,17 @@ is sampled piece by piece, the points shared among the pieces in
 proportion to their areas; a piece whose own box is over 10,000 times
 its area stops the call with an error that says to transform
 \code{boundary} to a projected CRS. A boundary whose bounding box has no
-height or no width (three vertices on one parallel) is refused.}
+height or no width (three vertices on one parallel) is refused.
+sf draws the points in the bounding box and keeps those inside, so it
+draws \code{k} times the ratio of the box to the area. In any CRS, a
+boundary that would take more than 10^6 points drawn in its box, or
+10 \code{k} if more (small pieces far apart, a thin strip at a slant), is
+sampled piece by piece in the same way (or whole, in draws of at most
+10^6 points in its box, where that takes less time), and a piece that
+would still take more is drawn in such draws. Where the points drawn
+in all would exceed 2e7 (or 10 \code{k}, if more), the call stops before
+any draw with an error that gives the ratio and says to ask for fewer
+seeds.}
 
 \item{k}{Integer; number of random seeds.}
 

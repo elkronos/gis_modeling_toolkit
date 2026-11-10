@@ -1811,6 +1811,50 @@ old behaviour where there is a way.
   lon/lat, whose cells keep their geodesic square metres, give the same
   results as before.
 
+* **Line midpoints in a CRS whose unit sf has no name for were off the
+  middle.**  `coerce_to_points()` modes `"auto"` and `"line_midpoint"`, and
+  so `prep_model_data()` and the fits that pointize lines, took a line's
+  midpoint with `sf::st_line_sample()`, which measures the line in metres
+  for such a CRS and reads half that length as a distance along the line
+  in the CRS's unit.  A straight line from x = 0 to x = 20 got its point at
+  x = 20, its end, in a unit of 2 m, and at x = 5 in a unit of 0.5 m; a
+  MULTILINESTRING's longest part the same.  The midpoint is now taken at
+  half the planar length in the CRS's own unit, at x = 10 in every unit.
+  Lines in metres, in a unit sf names (such as US survey feet or
+  kilometres) and in lon/lat with `tmp_project = TRUE` get the same points
+  as before.
+
+* **Voronoi cells with no boundary changed with the unit of the
+  coordinates.**  `create_voronoi_polygons()` and
+  `build_tessellation(method = "voronoi")` clip the cells to the points'
+  convex hull, or to the cover, grown by 2 percent of its diagonal, as
+  their help says; the margin was floored at 1 unit of the CRS.  A layer
+  whose diagonal is under 1 unit, such as a 500 m layer in a kilometre CRS,
+  grew by 0.02 units (20 m) where in metres it grows by 15.9 m, and its
+  edge cells covered 2.9 percent more ground.  The margin is now 2 percent
+  of the diagonal in every unit.  A layer whose diagonal is 1 unit or more
+  gets the same cells as before, and one location still grows by 0.02
+  units.
+
+* **`clip_target_for()` returned disks around points whose box it should
+  return, depending on where they lie.**  With no `boundary`, the points'
+  bounding box is the target, and a buffer around the points only when
+  the short side of the box is under a millionth of the long side.  A
+  side whose two ends `all.equal()` called equal also took the buffer, and
+  that test compares the ends relative to their size, so it read the
+  origin: a 3 km x 2 km box at x = 1e12 got three disks of 150 m (an area
+  of 211,961 for 6,000,000), and a 5 cm x 3 cm box at y = 4,000,000 got
+  disks too.  The sides are now read against the span only, so the box
+  comes back at any offset.
+
+* **`clip_target_for()` stopped with R's "missing value where TRUE/FALSE
+  needed" on points none of which has a location.**  With no `boundary`,
+  points that are all empty, or all have a coordinate that is not finite or
+  lies beyond 1e150, or that the move of lon/lat points into a projected
+  CRS empties (a latitude beyond 90), have no bounding box.  The call now
+  refuses them with an error that says no point has a location.  With a
+  `boundary`, such points still get the boundary as their target.
+
 * **`summarize_by_cell(area = TRUE)` stopped on cells that carry M.**  Cells
   that are XYM or XYZM throughout reached GEOS, which does not read M, and
   the call stopped with GEOS's "GEOS does not support XYM or XYZM
@@ -3783,6 +3827,26 @@ old behaviour where there is a way.
   its area stops the call with an error that names `boundary` and says to
   transform it to a projected CRS.  A boundary sf samples whole gives the
   seeds it gave.
+
+* **`voronoi_seeds_random()` and `get_voronoi_seeds(method = "random")` and
+  `"kmeans"` exhausted memory on a boundary whose bounding box is far larger
+  than its area.**  sf draws the points asked for times the ratio of the box
+  to the area in the box and keeps those inside, and the package passed that
+  draw on without a bound.  The k-means cloud of two small squares on two
+  continents in a projected CRS, or of a strip 50 km long and 1 m wide at a
+  slant, stopped with R's "vector memory limit ... reached", and a few
+  random seeds there took most of a minute.  A boundary that would take more
+  than 10^6 points drawn in its box (or 10 times the points asked for, if
+  more) is now sampled piece by piece in any CRS, the points shared among
+  its polygons by their areas (or whole, in draws of at most 10^6 points in
+  its box, where that takes less time), and a polygon that would still take
+  more is drawn in such draws.  Where the points drawn in all would exceed
+  2e7 (or 10 times the points asked for, if more), the call stops before
+  any draw with an error that names `boundary`, the ratio of its box to its
+  area and the points it would take, and says to pass `sample_points` or
+  ask for fewer seeds.  The cloud of the 1 m strip (5e7 points in its box)
+  is refused in this way; the squares on two continents are sampled.  A
+  boundary within the first of these limits gives the seeds it gave.
 
 * **A lon/lat `boundary` with a vertex at a latitude beyond 90 was read as a
   shape folded over the pole.**  `voronoi_seeds_random()` and

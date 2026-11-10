@@ -91,24 +91,35 @@ test_that("a boundary sf refuses even piece by piece stops in the caller's name"
 
 test_that("a boundary sf samples whole never takes the piece-by-piece path", {
   # The boundaries sampled before keep their seeds: the new path runs only
-  # where sf refused, so it is mocked to fail here.
+  # where sf refused, or where sf's draw in the box is above 10^6 points
+  # (test-fix-sample-draw-size.R), so it is mocked to fail here.
   testthat::local_mocked_bindings(
     .sample_by_piece = function(...) stop("the piece-by-piece path ran"),
     .package = "spatialkit")
   hawaii <- layer(sq(-160, 22, 0.05), sq(-157, 21, 0.05), sq(-155.5, 19.5, 0.05))
   near   <- layer(sq(10, 45, 0.05), sq(11, 45, 0.05))
+  # The box of `proj` is 1.8e5 times its area: 5 seeds take 9.2e5 points in
+  # the box, under the cap, and 10 seeds take 1.8e6, above it.
   proj   <- sf::st_transform(far2, 3857)
-  for (b in list(hawaii, near, proj)) {
+  for (b in list(hawaii, near)) {
     expect_identical(nrow(quiet(voronoi_seeds_random(b, 10, set_seed = 1))), 10L)
     expect_identical(nrow(quiet(get_voronoi_seeds(b, n = 10, method = "random",
                                                   set_seed = 1))), 10L)
   }
-  # The k-means cloud (2000 points) on the lon/lat boundaries only: sf sizes
-  # a projected draw by the ratio of the box to the area, which for `proj`
-  # asks for billions of points.
-  for (b in list(hawaii, near))
-    expect_identical(nrow(quiet(get_voronoi_seeds(b, n = 5, method = "kmeans",
-                                                  set_seed = 1))), 5L)
+  expect_identical(nrow(quiet(voronoi_seeds_random(proj, 5, set_seed = 1))), 5L)
+  expect_identical(nrow(quiet(get_voronoi_seeds(proj, n = 5, method = "random",
+                                                set_seed = 1))), 5L)
+  expect_error(quiet(voronoi_seeds_random(proj, 10, set_seed = 1)),
+               "the piece-by-piece path ran", fixed = TRUE)
+  # The k-means cloud (2000 points): on `near` it is drawn whole.  The box
+  # of `hawaii` is 1548 times its area, so its cloud takes 3.1e6 points in
+  # the box, and the cloud on `proj` 3.7e8: both are above the cap and go
+  # piece by piece.
+  expect_identical(nrow(quiet(get_voronoi_seeds(near, n = 5, method = "kmeans",
+                                                set_seed = 1))), 5L)
+  for (b in list(hawaii, proj))
+    expect_error(quiet(get_voronoi_seeds(b, n = 5, method = "kmeans", set_seed = 1)),
+                 "the piece-by-piece path ran", fixed = TRUE)
 })
 
 # A row past latitude 90, alone and beside a valid row, and points inside the

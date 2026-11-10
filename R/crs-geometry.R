@@ -2733,6 +2733,38 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   x
 }
 
+#' Planar lengths and midpoints of lines, in the unit of their CRS
+#'
+#' \code{sf::st_length()} gives a projected line's length in its CRS's unit
+#' when sf can name that unit (\code{st_crs()$ud_unit}), and in metres when
+#' it cannot and the CRS carries a \code{+to_meter} (a unit of 1000 km, or
+#' of 3.28 m).  \code{sf::st_line_sample()} hands that length to GDAL as a
+#' distance along the line in the CRS's unit, so a line in a unit of 2 m got
+#' its "midpoint" at its end, and one in a unit of 0.5 m a quarter of the way
+#' along.  Both are taken here with the CRS set aside, so GEOS measures and
+#' GDAL samples the planar line in the CRS's own unit, and the CRS is put
+#' back on the points.  Lines in metres, in a named unit or with no CRS get
+#' the numbers \code{sf::st_length()} and \code{sf::st_line_sample()} give
+#' them, to the bit.
+#'
+#' @param x An sfc of non-empty LINESTRINGs in a projected CRS or none.
+#' @return \code{.planar_line_lengths()}: a plain numeric vector, one length
+#'   per line.  \code{.planar_line_midpoints()}: an sfc of POINTs in the CRS
+#'   of \code{x}, one per line.
+#' @keywords internal
+#' @noRd
+.planar_line_lengths <- function(x) {
+  if (.is_longlat(x)) stop(".planar_line_lengths(): lines in degrees.", call. = FALSE)
+  as.numeric(sf::st_length(sf::st_set_crs(x, NA)))
+}
+
+# The midpoints of .planar_line_lengths(): see there.
+.planar_line_midpoints <- function(x) {
+  if (.is_longlat(x)) stop(".planar_line_midpoints(): lines in degrees.", call. = FALSE)
+  mp <- sf::st_line_sample(sf::st_set_crs(x, NA), sample = 0.5)
+  sf::st_set_crs(sf::st_cast(mp, "POINT"), sf::st_crs(x))
+}
+
 # -----------------------------------------------------------------------------
 # Point Coercion
 # -----------------------------------------------------------------------------
@@ -3022,8 +3054,7 @@ coerce_to_points <- function(
     if (!length(full)) return(res)
     g_ls_sf   <- sf::st_sf(geometry = g[idx_ls[full]])
     g_ls_proj <- if (tmp_project) projected_lines(g_ls_sf, idx_ls[full]) else g_ls_sf
-    midps     <- sf::st_line_sample(sf::st_geometry(g_ls_proj), sample = 0.5)
-    midps     <- sf::st_cast(midps, "POINT")
+    midps     <- .planar_line_midpoints(sf::st_geometry(g_ls_proj))
     midps     <- .back_to_input_crs(midps, g_ls_proj, crs)
     .check_midpoint_alignment(midps, full)
     res[full] <- as.list(midps)
@@ -3128,7 +3159,7 @@ coerce_to_points <- function(
           out[[idx_mls[j]]] <- sf::st_point()
         } else {
           parts <- sf::st_sfc(lapply(mats, sf::st_linestring), crs = proj_crs)
-          lens <- as.numeric(sf::st_length(parts))
+          lens <- .planar_line_lengths(parts)
           k    <- if (length(lens)) which.max(lens) else 1L
           # Parts of equal greatest length are all sampled, and the midpoint
           # lowest in x, then in y, is kept: which.max() alone took the first
@@ -3140,8 +3171,7 @@ coerce_to_points <- function(
           # .TIE_TOL of the diagonal of the midpoints' box are one column
           # (.near_columns()), so y decides between them.
           k    <- if (length(k)) which(lens >= lens[k] * (1 - .TIE_TOL)) else k
-          mp   <- sf::st_line_sample(parts[k], sample = 0.5)
-          mp   <- sf::st_cast(mp, "POINT")
+          mp   <- .planar_line_midpoints(parts[k])
           mp   <- .back_to_input_crs(mp, g_mls_proj, crs)
           if (length(mp) > 1L) {
             # The column of x, then y, then Z or M where the parts carry

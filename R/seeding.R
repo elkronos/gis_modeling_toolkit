@@ -66,6 +66,18 @@
 #'   its area stops the call with an error that says to transform
 #'   `boundary` to a projected CRS. A boundary whose bounding box has no
 #'   height or no width (three vertices on one parallel) is refused.
+#'   sf draws the points in the bounding box and keeps those inside, so it
+#'   draws the number asked for times the ratio of the box to the area. In
+#'   any CRS, a boundary that would take more than 10^6 points drawn in its
+#'   box, or 10 times the points asked for if more (small pieces far apart,
+#'   a thin strip at a slant), is sampled piece by piece in the same way
+#'   (or whole, in draws of at most 10^6 points in its box, where that takes
+#'   less time), and a piece that would still take more is drawn in such
+#'   draws. Where the points drawn in all would exceed 2e7 (or 10 times the
+#'   points asked for, if more), the call stops before any draw with an
+#'   error that gives the ratio and says to pass `sample_points`
+#'   (`method = "kmeans"`, whose cloud is `max(2000, 50 * n)` points) or to
+#'   ask for fewer seeds.
 #' @param method One of "kmeans", "random", "provided".
 #' @param n Integer; number of seeds to return. Required for
 #'   `method = "kmeans"` and `method = "random"`. **Ignored** for
@@ -516,7 +528,8 @@ get_voronoi_seeds <- function(boundary = NULL,
         stop("get_voronoi_seeds(): random seeds require 'boundary'.", call. = FALSE)
       boundary <- located(boundary)
       b <- boundary_union(boundary)
-      pts <- .robust_st_sample(b, n, "get_voronoi_seeds", nothing)
+      pts <- .robust_st_sample(b, n, "get_voronoi_seeds", nothing,
+                                remedy = .sample_remedy("random"))
       pts_sfc <- sf::st_sfc(pts, crs = sf::st_crs(boundary))
       sf::st_sf(seed_id = seq_along(pts_sfc), method = "random",
                 geometry = pts_sfc)
@@ -532,7 +545,8 @@ get_voronoi_seeds <- function(boundary = NULL,
         boundary <- located(boundary)
         b <- boundary_union(boundary)
         cloud_n <- .kmeans_cloud_size(n)
-        cloud_geom <- .robust_st_sample(b, cloud_n, "get_voronoi_seeds", nothing)
+        cloud_geom <- .robust_st_sample(b, cloud_n, "get_voronoi_seeds", nothing,
+                                        remedy = .sample_remedy("kmeans"))
         cloud_sfc <- sf::st_sfc(cloud_geom, crs = sf::st_crs(boundary))
         cloud <- sf::st_sf(geometry = cloud_sfc)
       }
@@ -709,63 +723,79 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' which s2 reads as a sliver with an area) \code{sf::st_sample()} drew in
 #' it without end, so the call stops in the caller's name instead.
 #'
+#' \code{sf::st_sample()} draws \code{n} times the ratio of the bounding box
+#' to the area of points in the box and keeps those inside, at about 470
+#' bytes of memory per point drawn.  The size of that draw is read first
+#' (\code{.sample_draw_plan()}), without touching the random stream.  Where
+#' it is at most \code{.sample_draw_cap(n)} points (10^6, or 10 \code{n} if
+#' larger), the geometry is sampled whole, as before, to the bit.  Above
+#' that, as for small pieces far apart or a thin strip at a slant, in any
+#' CRS, the geometry is sampled piece by piece (\code{.sample_by_piece()}),
+#' and a piece whose own draw is still above the cap is drawn in successive
+#' draws of at most 10^6 points in its box (\code{.sample_bounded()}).
+#' Where the whole takes fewer points in its box than its pieces would in
+#' theirs, with each call of sf counted as 5000 points, the whole is drawn
+#' in those bounded draws instead (many small pieces whose draw is just
+#' above the cap).  sf's draw of 2.8e9 points stopped the call with R's
+#' "vector memory limit ... reached", which names no cause.
+#'
 #' In longitude and latitude sf refuses to sample a region whose bounding
 #' box is over 10^4 times its area ("sampling box is N times larger than
-#' sampling region"), as for small pieces far apart.  Only that refusal is
-#' caught: the geometry is then cast to its polygons, \code{n} is shared
-#' among them by their areas on the sphere in one multinomial draw from the
-#' stream, so the points stay uniform over the whole, and each piece is
-#' sampled as above, in the order of the pieces.  A piece sf still refuses
-#' stops the call with an error in the caller's name that gives the cause
-#' and says to transform `boundary` to a projected CRS.  Every geometry sf
-#' samples whole is sampled as before, to the bit.
+#' sampling region").  Only that refusal is caught: the geometry is then
+#' sampled piece by piece as above.  A piece sf still refuses stops the call
+#' with an error in the caller's name that gives the cause and says to
+#' transform `boundary` to a projected CRS.
 #'
 #' @param geom An sfc geometry to sample within.
 #' @param n Integer; desired number of sample points.
 #' @param caller Name of the exported function, for the errors.
 #' @param nothing What cannot be drawn ("no seed can be drawn in it").
 #' @param by_piece \code{FALSE} for a piece of the piece-by-piece draw,
-#'   which stops where sf refuses it.
+#'   which stops where sf refuses it and is drawn in bounded draws where its
+#'   own draw is above the cap.
+#' @param remedy The sentence that ends the refusal of a draw above
+#'   \code{.sample_total_cap()}: what the caller can change.
+#' @param plan The draw plan of \code{geom} for \code{n}, where the caller
+#'   has it (a piece of \code{.sample_by_piece()}); \code{NULL} to read it
+#'   here.
 #' @return An sfc_POINT of length n.
 #' @keywords internal
 #' @noRd
 .robust_st_sample <- function(geom, n, caller = "spatialkit",
-                              nothing = "no point can be drawn in it", by_piece = TRUE) {
+                              nothing = "no point can be drawn in it", by_piece = TRUE,
+                              remedy = .sample_remedy("random"), plan = NULL) {
   # st_sample() sizes its draw from st_area(), which on lon/lat input needs
   # lwgeom (not a dependency) when sf_use_s2() is FALSE: random and k-means
   # seeding on a lon/lat boundary failed with "package lwgeom required".
   if (.is_longlat(geom) && !isTRUE(sf::sf_use_s2()))
-    return(.with_s2(.robust_st_sample(geom, n, caller, nothing, by_piece)))
+    return(.with_s2(.robust_st_sample(geom, n, caller, nothing, by_piece, remedy, plan)))
   .sample_box_check(geom, caller, nothing)
-  # Without lwgeom (not a dependency) sf warns "coordinate ranges not computed
-  # along great circles; install package lwgeom to get rid of this warning"
-  # on every lon/lat draw, so every random or k-means seeding on a lon/lat
-  # boundary raised it, once or twice, in the ordinary case.  Only that
-  # warning is muffled; the draw is the same.
-  st_sample_quiet <- function(...) withCallingHandlers(
-    sf::st_sample(...),
-    warning = function(w)
-      if (grepl("coordinate ranges not computed along great circles",
-                conditionMessage(w), fixed = TRUE))
-        invokeRestart("muffleWarning"))
+  # The draw sf makes is bounded: above the cap the geometry goes piece by
+  # piece, and a piece in bounded draws.  A lon/lat region sf refuses is left
+  # to sf's refusal below, which draws nothing.
+  if (is.null(plan)) plan <- .sample_draw_plan(geom, n)
+  if (isTRUE(plan$draws > .sample_draw_cap(n)) && !any(plan$sf_refuses))
+    return(if (isTRUE(by_piece))
+             .sample_by_piece(geom, n, NULL, caller, nothing, by_piece, remedy, whole = plan)
+           else .sample_bounded(geom, n, plan$ratio, caller))
   # sf's refusal of a lon/lat region whose box is over 10^4 times its area.
   # It stops before any number is drawn, so the stream is where it was.
   box_refused <- function(e)
     grepl("sampling box is .* times larger than sampling region", conditionMessage(e))
-  pts <- try(st_sample_quiet(geom, size = n, type = "random", exact = TRUE),
+  pts <- try(.st_sample_quiet(geom, size = n, type = "random", exact = TRUE),
              silent = TRUE)
   if (inherits(pts, "try-error")) {
-    pts <- tryCatch(st_sample_quiet(geom, size = n, type = "random"),
+    pts <- tryCatch(.st_sample_quiet(geom, size = n, type = "random"),
                     error = function(e) if (box_refused(e)) e else stop(e))
     if (inherits(pts, "error"))
-      return(.sample_by_piece(geom, n, pts, caller, nothing, by_piece))
+      return(.sample_by_piece(geom, n, pts, caller, nothing, by_piece, remedy))
   }
   # Pad or trim to exactly n
   max_attempts <- 10L
   attempt <- 0L
   while (length(pts) < n && attempt < max_attempts) {
     attempt <- attempt + 1L
-    extra <- st_sample_quiet(geom, size = n - length(pts), type = "random")
+    extra <- .st_sample_quiet(geom, size = n - length(pts), type = "random")
     pts <- c(pts, extra)
   }
   if (length(pts) > n) pts <- pts[seq_len(n)]
@@ -773,6 +803,129 @@ get_voronoi_seeds <- function(boundary = NULL,
     .log_warn(".robust_st_sample(): could only generate %d of %d requested points.",
               length(pts), n)
   pts
+}
+
+#' sf::st_sample() without sf's lwgeom warning
+#'
+#' Without lwgeom (not a dependency) sf warns "coordinate ranges not
+#' computed along great circles; install package lwgeom to get rid of this
+#' warning" on every lon/lat draw, so every random or k-means seeding on a
+#' lon/lat boundary raised it, once or twice, in the ordinary case.  Only
+#' that warning is muffled; the draw is the same.
+#'
+#' @param ... Passed to \code{sf::st_sample()}.
+#' @return What \code{sf::st_sample()} returns.
+#' @keywords internal
+#' @noRd
+.st_sample_quiet <- function(...) withCallingHandlers(
+  sf::st_sample(...),
+  warning = function(w)
+    if (grepl("coordinate ranges not computed along great circles",
+              conditionMessage(w), fixed = TRUE))
+      invokeRestart("muffleWarning"))
+
+#' Points sf may draw in a bounding box in one draw, and in all
+#'
+#' One draw of 10^6 points in the box takes about 0.5 GB of points (1.3 GB
+#' at peak) and two to four seconds; 2e7 in all take about a minute.  The
+#' 10 \code{n} keeps a large \code{n} on a region that fills its box as it
+#' was.
+#'
+#' @param n Number of points asked for.
+#' @return A single number.
+#' @keywords internal
+#' @noRd
+.sample_draw_cap  <- function(n) max(1e6, 10 * as.numeric(n))
+.sample_total_cap <- function(n) max(2e7, 10 * as.numeric(n))
+
+#' The cost of a draw, in points drawn in the box
+#'
+#' One call of \code{sf::st_sample()} costs about as much time as 5000
+#' points drawn in the box (16 ms against 3.5 microseconds a point,
+#' measured on a projected square).  \code{.sample_by_piece()} compares
+#' the whole with its pieces by this.
+#'
+#' @param points Points drawn in the box.
+#' @param calls Calls of \code{sf::st_sample()}.
+#' @return A single number.
+#' @keywords internal
+#' @noRd
+.sample_cost <- function(points, calls) as.numeric(points) + 5000 * as.numeric(calls)
+
+#' The last sentence of the refusal of a draw above the cap
+#'
+#' @param what \code{"kmeans"} for the k-means cloud of
+#'   \code{get_voronoi_seeds()}, \code{"random"} for the seeds of
+#'   \code{get_voronoi_seeds()}, \code{"k"} for those of
+#'   \code{voronoi_seeds_random()}.
+#' @return A sentence.
+#' @keywords internal
+#' @noRd
+.sample_remedy <- function(what) {
+  fill <- "give a boundary whose polygons fill more of their bounding boxes"
+  switch(what,
+    kmeans = paste0("Pass `sample_points` (points inside `boundary`, clustered in ",
+                    "place of a cloud drawn in it), or ", fill, "."),
+    random = paste0("Ask for fewer seeds (`n`), or ", fill, "."),
+    k      = paste0("Ask for fewer seeds (`k`), or ", fill, "."))
+}
+
+#' The draw sf::st_sample() makes to sample a region
+#'
+#' sf draws \code{round(n * a0 / a1)} points in the bounding box and keeps
+#' those inside.  Here a0 and a1 are as sf takes them: in a projected CRS
+#' (or none) the area of the box over the planar area, with the ratio 1
+#' where either is not finite and positive (sf then draws \code{n});
+#' in longitude and latitude the area of the band between the box's
+#' parallels and meridians on the sphere over the s2 area, and sf refuses
+#' the region when the ratio is over 10^4 (or not a number).  Nothing is
+#' drawn from the random stream.
+#'
+#' @param geom An sfc.
+#' @param n Number of points asked for.
+#' @param each \code{TRUE} to read each element of \code{geom} on its own
+#'   (the pieces of \code{.sample_by_piece()}); \code{FALSE} for the whole.
+#' @return A list: \code{longlat}; \code{a0}, \code{a1} and \code{ratio}
+#'   (one per element with \code{each}, else one); \code{draws}, \code{n}
+#'   times the ratio (the whole only, else \code{NA}); \code{sf_refuses}, per
+#'   ratio, \code{TRUE} where sf refuses the lon/lat region.
+#' @keywords internal
+#' @noRd
+.sample_draw_plan <- function(geom, n, each = FALSE) {
+  geom <- sf::st_geometry(geom)
+  longlat <- isTRUE(sf::st_is_longlat(geom))
+  bbs <- if (isTRUE(each)) lapply(geom, sf::st_bbox) else list(sf::st_bbox(geom))
+  if (longlat) {
+    # sf's own expression, so that the ratio, and its refusal over 10^4,
+    # match sf's to the bit; R is s2::s2_earth_radius_meters().  With lwgeom
+    # (not a dependency) sf takes the box of the geometry segmentized along
+    # great circles instead, which this does not follow.
+    R <- 6371010
+    toRad <- pi / 180
+    a0 <- vapply(bbs, function(bb) {
+      h1 <- sin(bb["ymax"] * toRad)
+      h2 <- sin(bb["ymin"] * toRad)
+      as.numeric(2 * pi * R^2 * (h1 - h2) * (bb["xmax"] - bb["xmin"]) / 360)
+    }, numeric(1))
+    a1 <- as.numeric(.with_s2(sf::st_area(geom)))
+    if (!isTRUE(each)) a1 <- sum(a1)
+    ratio <- a0 / a1
+    sf_refuses <- !(ratio <= 1e4)
+  } else {
+    # The box polygons as sf::st_as_sfc() builds them, all in one sfc, so
+    # their areas are sf's and are read in one call.
+    boxes <- lapply(bbs, function(bb)
+      sf::st_polygon(list(matrix(as.double(bb)[c(1, 2, 3, 2, 3, 4, 1, 4, 1, 2)],
+                                 ncol = 2, byrow = TRUE))))
+    a0 <- as.numeric(sf::st_area(sf::st_sfc(boxes, crs = sf::st_crs(geom))))
+    a1 <- as.numeric(sf::st_area(geom))
+    if (!isTRUE(each)) a1 <- sum(a1)
+    ratio <- ifelse(is.finite(a0) & is.finite(a1) & a0 > 0 & a1 > 0, a0 / a1, 1)
+    sf_refuses <- rep(FALSE, length(ratio))
+  }
+  list(longlat = longlat, a0 = a0, a1 = a1, ratio = ratio,
+       draws = if (isTRUE(each)) NA_real_ else as.numeric(n) * ratio,
+       sf_refuses = sf_refuses)
 }
 
 #' Refuse a region whose bounding box has no width or no height
@@ -802,19 +955,46 @@ get_voronoi_seeds <- function(boundary = NULL,
   invisible(NULL)
 }
 
-#' Sample a lon/lat region piece by piece, where sf refuses it whole
+#' Sample a region piece by piece
 #'
-#' See \code{.robust_st_sample()}.
+#' See \code{.robust_st_sample()}.  It runs where sf refuses a lon/lat
+#' region whole (\code{parent} is that refusal), and where sf's draw for the
+#' whole region is above \code{.sample_draw_cap()} (\code{parent} is
+#' \code{NULL}), in any CRS.  The geometry is cast to its polygons, and
+#' \code{n} is shared among them by their areas (on the sphere in
+#' longitude and latitude, planar otherwise) in one multinomial draw from
+#' the stream, so the points stay uniform over the whole; a single polygon
+#' takes all \code{n} with no draw.  Each piece is then sampled by
+#' \code{.robust_st_sample()}, in the order of the pieces.
 #'
-#' @param geom,n,caller,nothing,by_piece As \code{.robust_st_sample()}.
-#' @param parent sf's refusal of the box of \code{geom}.
+#' Before any draw, the points to be drawn in the boxes of the pieces are
+#' added up from their areas: \code{n} times the sum of the box areas over
+#' the area of the whole.  Above \code{.sample_total_cap(n)} the call stops
+#' in the caller's name with the box-to-area ratio, the draws needed and
+#' \code{remedy}.  A lon/lat piece sf refuses is left out of that sum: if
+#' it is drawn, it stops the call with sf's refusal, as before.
+#'
+#' Where the draw for the whole is above the cap (\code{whole} given), the
+#' whole is drawn in bounded draws (\code{.sample_bounded()}) instead of
+#' piece by piece when its points in the box are within
+#' \code{.sample_total_cap(n)} and cost less (\code{.sample_cost()}) than
+#' the pieces' points and one call of sf for each piece that takes a point,
+#' or when the pieces' points are above that cap: many small pieces whose
+#' whole draw is just above the cap take a few draws, not one call each.
+#'
+#' @param geom,n,caller,nothing,by_piece,remedy As
+#'   \code{.robust_st_sample()}.
+#' @param parent sf's refusal of the box of \code{geom}, or \code{NULL}.
+#' @param whole \code{.sample_draw_plan(geom, n)}, where \code{parent} is
+#'   \code{NULL}.
 #' @return An sfc_POINT of length n.
 #' @keywords internal
 #' @noRd
-.sample_by_piece <- function(geom, n, parent, caller, nothing, by_piece) {
+.sample_by_piece <- function(geom, n, parent, caller, nothing, by_piece,
+                             remedy = .sample_remedy("random"), whole = NULL) {
   pieces <- if (isTRUE(by_piece)) suppressWarnings(sf::st_cast(
     sf::st_collection_extract(geom, "POLYGON", warn = FALSE), "POLYGON"))
-  if (!isTRUE(by_piece) || length(pieces) < 2L) {
+  if (!is.null(parent) && (!isTRUE(by_piece) || length(pieces) < 2L)) {
     said <- sub(";$", "", trimws(strsplit(conditionMessage(parent), "\n",
                                          fixed = TRUE)[[1L]][1L]))
     stop(sprintf(paste0(
@@ -826,11 +1006,132 @@ get_voronoi_seeds <- function(boundary = NULL,
       if (isTRUE(by_piece)) "its" else "that polygon's", said, nothing, caller),
       call. = FALSE)
   }
-  area <- as.numeric(.with_s2(sf::st_area(pieces)))
-  take <- as.vector(stats::rmultinom(1L, n, area / sum(area)))
+  plan <- .sample_draw_plan(pieces, n, each = TRUE)
+  area <- plan$a1
+  if (is.null(parent) && !is.null(whole) &&
+      .sample_whole_bounded(whole, plan, n))
+    return(.sample_bounded(geom, n, whole$ratio, caller))
+  .sample_total_check(plan, n, length(pieces), caller, nothing, remedy)
+  take <- if (length(pieces) == 1L) as.numeric(n)
+          else as.vector(stats::rmultinom(1L, n, area / sum(area)))
+  # Each piece's plan is read from the plan of all pieces.
   got  <- lapply(which(take > 0L), function(i)
-    .robust_st_sample(pieces[i], take[i], caller, nothing, by_piece = FALSE))
+    .robust_st_sample(pieces[i], take[i], caller, nothing, by_piece = FALSE,
+                      remedy = remedy,
+                      plan = list(longlat = plan$longlat, a0 = plan$a0[i], a1 = plan$a1[i],
+                                  ratio = plan$ratio[i],
+                                  draws = as.numeric(take[i]) * plan$ratio[i],
+                                  sf_refuses = plan$sf_refuses[i])))
   do.call(c, got)
+}
+
+#' Points the pieces of a region take in their boxes, in expectation
+#'
+#' Each piece takes \code{n a1 / sum(a1)} points in expectation and draws
+#' its ratio times that in its box.  A lon/lat piece sf refuses is left out.
+#'
+#' @param plan \code{.sample_draw_plan(pieces, n, each = TRUE)}.
+#' @param n Number of points asked for.
+#' @return A single number; \code{NA} where the area is not finite and
+#'   positive.
+#' @keywords internal
+#' @noRd
+.sample_pieces_need <- function(plan, n) {
+  total_area <- sum(plan$a1)
+  if (!(is.finite(total_area) && total_area > 0)) return(NA_real_)
+  drawn <- !plan$sf_refuses
+  as.numeric(n) * sum((plan$a1 * plan$ratio)[drawn]) / total_area
+}
+
+#' Whether to draw the whole in bounded draws rather than piece by piece
+#'
+#' See \code{.sample_by_piece()}.
+#'
+#' @param whole \code{.sample_draw_plan(geom, n)}.
+#' @param plan \code{.sample_draw_plan(pieces, n, each = TRUE)}.
+#' @param n Number of points asked for.
+#' @return \code{TRUE} or \code{FALSE}.
+#' @keywords internal
+#' @noRd
+.sample_whole_bounded <- function(whole, plan, n) {
+  if (isTRUE(any(whole$sf_refuses)) || !isTRUE(whole$draws <= .sample_total_cap(n)))
+    return(FALSE)
+  need <- .sample_pieces_need(plan, n)
+  if (!isTRUE(need <= .sample_total_cap(n))) return(TRUE)
+  calls <- min(length(plan$ratio), as.numeric(n))
+  .sample_cost(whole$draws, ceiling(whole$draws / 1e6)) <= .sample_cost(need, calls)
+}
+
+#' Refuse a piece-by-piece draw whose points in all are above the cap
+#'
+#' See \code{.sample_by_piece()}.
+#'
+#' @param plan \code{.sample_draw_plan(pieces, n, each = TRUE)}.
+#' @param n Number of points asked for.
+#' @param n_pieces Number of pieces.
+#' @param caller,nothing,remedy As \code{.robust_st_sample()}.
+#' @return \code{NULL}, invisibly, at or under the cap; otherwise it stops.
+#' @keywords internal
+#' @noRd
+.sample_total_check <- function(plan, n, n_pieces, caller, nothing, remedy) {
+  need <- .sample_pieces_need(plan, n)
+  cap  <- .sample_total_cap(n)
+  if (!isTRUE(need > cap)) return(invisible(NULL))
+  drawn <- !plan$sf_refuses
+  big <- which(drawn)[which.max((plan$a1 * plan$ratio)[drawn])]
+  num <- function(x) format(signif(x, 3), big.mark = ",", scientific = FALSE, trim = TRUE)
+  one <- n_pieces == 1L
+  stop(sprintf(paste0(
+    "%s(): `boundary` cannot be sampled: the bounding box of %s is %s times %s area, ",
+    "so drawing %s points inside %s takes about %s points drawn in %s, more than the ",
+    "%s drawn at most, so %s. %s"),
+    caller, if (one) "`boundary`" else "one of its polygons", num(plan$ratio[big]),
+    if (one) "its" else "that polygon's", num(n), if (one) "it" else "`boundary`",
+    num(need), if (one) "the box" else "the boxes of its polygons", num(cap),
+    nothing, remedy), call. = FALSE)
+}
+
+#' Sample a region in draws of at most 10^6 points in its box
+#'
+#' sf draws \code{size} times the box-to-area ratio of points in the box, so
+#' each draw asks for at most 10^6 / ratio points (a fraction where the
+#' ratio is above 10^6, which sf rounds to that many points in the box),
+#' with \code{exact = FALSE}; the points are kept in the order drawn until
+#' \code{n} are taken.  \code{.sample_by_piece()} has checked the points in
+#' all against \code{.sample_total_cap()} first.  A ratio that is not
+#' finite and at least 1 is refused: a region with no area would draw
+#' without end.
+#'
+#' @param geom An sfc of one polygon, or the region whole.
+#' @param n Number of points.
+#' @param ratio Its box-to-area ratio, from \code{.sample_draw_plan()}.
+#' @param caller Name for the log line.
+#' @return An sfc_POINT of length n (fewer, with a log line, if the draws
+#'   fall short).
+#' @keywords internal
+#' @noRd
+.sample_bounded <- function(geom, n, ratio, caller) {
+  if (!(length(ratio) == 1L && is.finite(ratio) && ratio >= 1))
+    stop(sprintf("%s(): internal error: a bounded draw needs a box-to-area ratio of at least 1, not %s.",
+                 caller, format(ratio)), call. = FALSE)
+  per_draw <- 1e6 / ratio
+  got <- list()
+  have <- 0
+  calls <- 0
+  max_calls <- 4 * ceiling(as.numeric(n) / per_draw) + 10
+  while (have < n && calls < max_calls) {
+    calls <- calls + 1
+    p <- .st_sample_quiet(geom, size = min(as.numeric(n) - have, per_draw),
+                          type = "random", exact = FALSE, warn_if_not_integer = FALSE)
+    got[[length(got) + 1L]] <- p
+    have <- have + length(p)
+  }
+  pts <- do.call(c, got)
+  if (length(pts) > n) pts <- pts[seq_len(n)]
+  if (length(pts) < n)
+    .log_warn("%s(): could only generate %d of %d requested points.",
+              caller, length(pts), n)
+  pts
 }
 
 
@@ -1222,6 +1523,16 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
 #'   its area stops the call with an error that says to transform
 #'   `boundary` to a projected CRS. A boundary whose bounding box has no
 #'   height or no width (three vertices on one parallel) is refused.
+#'   sf draws the points in the bounding box and keeps those inside, so it
+#'   draws `k` times the ratio of the box to the area. In any CRS, a
+#'   boundary that would take more than 10^6 points drawn in its box, or
+#'   10 `k` if more (small pieces far apart, a thin strip at a slant), is
+#'   sampled piece by piece in the same way (or whole, in draws of at most
+#'   10^6 points in its box, where that takes less time), and a piece that
+#'   would still take more is drawn in such draws. Where the points drawn
+#'   in all would exceed 2e7 (or 10 `k`, if more), the call stops before
+#'   any draw with an error that gives the ratio and says to ask for fewer
+#'   seeds.
 #' @param k Integer; number of random seeds.
 #' @param set_seed Optional integer RNG seed. Default `NULL`: the seeds are
 #'   drawn from the session's random-number stream, so consecutive calls give
@@ -1289,7 +1600,8 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   boundary <- .boundary_located(boundary, "voronoi_seeds_random", nothing)
   geom <- .boundary_union(boundary, caller = "voronoi_seeds_random", task = task,
                           nothing = nothing)
-  pts <- .robust_st_sample(geom, k, "voronoi_seeds_random", nothing)
+  pts <- .robust_st_sample(geom, k, "voronoi_seeds_random", nothing,
+                           remedy = .sample_remedy("k"))
   out <- sf::st_sf(geometry = pts) |> sf::st_set_crs(sf::st_crs(boundary))
   # Same output contract as get_voronoi_seeds(), so the three seeding
   # functions are drop-in interchangeable.
