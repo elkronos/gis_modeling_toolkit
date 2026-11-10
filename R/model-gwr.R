@@ -432,7 +432,13 @@
 #'   observations is capped at it, with a warning (a distance meant for
 #'   \code{adaptive = FALSE}, most often).
 #' @param kernel Kernel function type. One of "bisquare" (default),
-#'   "gaussian", "tricube", "boxcar", "exponential".
+#'   "gaussian", "tricube", "boxcar", "exponential".  The boxcar gives weight
+#'   1 to every observation within the bandwidth's distance (with an adaptive
+#'   bandwidth, the distance to the \code{bandwidth}-th nearest neighbour)
+#'   and 0 to the others; an observation whose squared distance is within
+#'   one part in ten million of the edge counts as at the edge, and inside,
+#'   so on a regular grid every neighbour tied with the last one is in the
+#'   window whatever the unit or origin of the coordinates.
 #' @param .already_prepped Logical (internal). If \code{TRUE}, skip the
 #'   \code{prep_model_data()} call because the caller has already projected,
 #'   coerced, and filtered the data.  Used by the CV internals to avoid a
@@ -470,6 +476,22 @@
 #' the predictions less the response's centre, so their RMSE, MAE and
 #' R-squared are those of the same values at 0 too.  Every other predictor
 #' and response is used as it is.
+#'
+#' A response whose values, less any centre, reach beyond 1e100, or whose
+#' spread is below 1e-100, is divided by a power of two, which rounds
+#' nothing: the residual sum of squares, AICc and the bandwidth search
+#' square the residuals, and at 1e160 those squares overflow and at 1e-160
+#' they lose their bits.  The bandwidth is then that of the same values in
+#' ordinary units, and the fitted values, the residuals, the coefficients,
+#' their standard errors and \code{$engine$lm} are those of the same values
+#' times the factor; AICc, the AICc of \code{info$bandwidth_search} among
+#' them, gains \eqn{2 n \log} of the factor, and a cross-validation score
+#' of the search is multiplied by its square.  The residual sum of
+#' squares, \code{info$sigma2} and such a score are in the response's units
+#' squared, and are \code{NA}, with a warning, where a double cannot hold
+#' them there;
+#' \code{predict(se.fit = TRUE)} then takes its standard errors from the
+#' residual standard deviation, which it can hold.
 #'
 #' One tolerance, \code{1e-7}, decides what a window can estimate:
 #' \itemize{
@@ -1080,6 +1102,8 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # A predictor or a response at a large offset is taken about its centre
   # for the bandwidth search, the local solves and the global regression
   # (.gwr_centre()); every other design and response is used as it is.
+  # A response whose squares overflow or lose their bits is divided by a
+  # power of two as well, and the scale is put back on what is returned.
   cen    <- .gwr_centre(dsn$X, dsn$y)
   X      <- cen$X
   y      <- cen$y
@@ -1094,6 +1118,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   bandwidth_is_fallback <- FALSE
   bw_fallback_raw       <- NA_real_
   bw_search             <- NULL
+  bw_search_fit         <- NULL
   bw_none_defined       <- FALSE
   # A fixed bandwidth is a length in the CRS the fit runs in, and that is not
   # necessarily the CRS the caller was looking at: prep_model_data() projects
@@ -1116,6 +1141,10 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
         NULL
       }
     )
+    # What the search scored, put back in the response's units where the
+    # response was divided by a power of two (.gwr_centre()).
+    bw_search_fit <- bw_search
+    bw_search <- .gwr_bw_search_unscaled(bw_search, cen$y_scale, length(y))
     bw <- if (is.null(bw_search)) NA_real_ else bw_search$bandwidth
 
     # Anything that is not one usable positive number takes the fallback.
@@ -1262,9 +1291,12 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # estimate are NA, and its fitted value is returned when it is estimable,
   # which at a training point it always is.
   sv <- .gwr_local_solve(X, y, coords, bw, kernel, adaptive, what = "fit")
-  dg <- .gwr_diagnostics(y, sv$fitted, sv$leverage, sv$var_fit)
-  fit <- .gwr_engine(sv, dg, fml, sp_dat, dsn$X, dsn$y, bw, kernel, adaptive,
-                     cen = cen)
+  # The diagnostics of the response as fitted (`dg_fit`), which the engine
+  # reads, and in the response's units (`dg`), which are reported.
+  dg_fit <- .gwr_diagnostics(y, sv$fitted, sv$leverage, sv$var_fit)
+  fit <- .gwr_engine(sv, dg_fit, fml, sp_dat, dsn$X, dsn$y, bw, kernel,
+                     adaptive, cen = cen)
+  dg <- .gwr_diagnostics_unscaled(dg_fit, cen$y_scale, n_obs)
 
   # The per-row, per-term mask of local coefficients that are not estimates
   # (`info$nonfinite_coef`), not only its row count: the count says how many
@@ -1415,14 +1447,45 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # same rows, scored by the same AICc formula (its hat-matrix trace is its
   # rank).  A GWR whose AICc is no lower has not shown that its coefficients
   # vary.
-  ols_rss  <- sum(stats::residuals(fit$lm)^2)
+  # Read on the response as fitted, divided by the power of two of
+  # .gwr_centre() where there is one, and put back in the response's units.
+  ys       <- cen$y_scale
+  ols_res  <- stats::residuals(fit$lm)
+  if (ys != 1) ols_res <- ols_res / ys
+  ols_rss  <- sum(ols_res^2)
   ols_rank <- fit$lm$rank
   global_ols <- list(
-    RSS  = ols_rss,
+    RSS  = .gwr_unscale_ss(ols_rss, ys),
     RMSE = sqrt(ols_rss / n_obs),
     AICc = if (isTRUE(ols_rss > 0) && n_obs - 2 - ols_rank > 0)
       n_obs * log(ols_rss / n_obs) + n_obs * log(2 * pi) +
         n_obs * ((n_obs + ols_rank) / (n_obs - 2 - ols_rank)) else NA_real_)
+  if (ys != 1) {
+    global_ols$RMSE <- global_ols$RMSE * ys
+    global_ols$AICc <- global_ols$AICc + 2 * n_obs * log(ys)
+  }
+  # The sums of squares a double cannot hold in the response's units.
+  lost <- c(`the residual sum of squares (engine$GW.diagnostic$RSS.gw)` =
+              is.na(dg$RSS) && !is.na(dg_fit$RSS),
+            `the residual variance (info$sigma2)` =
+              is.na(dg$sigma2) && !is.na(dg_fit$sigma2),
+            `the global regression's residual sum of squares (info$global_ols$RSS)` =
+              is.na(global_ols$RSS) && !is.na(ols_rss),
+            `the cross-validation scores of the bandwidth search (info$bandwidth_search)` =
+              .gwr_bw_search_lost(bw_search_fit, bw_search))
+  if (any(lost)) {
+    nm  <- names(lost)[lost]
+    msg <- .gwr_ss_range_msg(
+      "fit_gwr_model", ys,
+      sprintf("So %s, in the response's units squared, %s",
+              if (length(nm) == 1L) nm
+              else paste(paste(nm[-length(nm)], collapse = ", "), "and",
+                         nm[length(nm)]),
+              if (length(nm) == 1L) "is" else "are"))
+    # A fold of a cross-validation reports none of them; the trace has it.
+    if (isTRUE(.already_prepped)) .log_info("%s", msg)
+    else .warn_and_log("%s", msg)
+  }
 
   # The survey and the solve, side by side for each window: the condition
   # indices, then the rank the solve found and the leverage of the window's
@@ -1520,18 +1583,30 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 #' The same definitions, written the same way, as \code{GWmodel::gw.weight()}
 #' (its C++ \code{gw_weight_*()}), so a window of the local solve, and of the
 #' collinearity survey, is the window \code{GWmodel::gwr.basic()} would
-#' weight.  For an adaptive bandwidth \code{bw}
+#' weight, except at the boxcar's edge, which follows the package's tie rule
+#' (below).  For an adaptive bandwidth \code{bw}
 #' is a neighbour count and the kernel's distance parameter is the distance to
 #' the \code{bw}-th nearest point; a count above \code{length(d)} widens the
 #' kernel to \code{bw / length(d)} times the largest distance, as GWmodel does.
 #'
-#' Two details are GWmodel's and matter.  The truncated kernels test
-#' \code{d > h}, so a point exactly at the kernel's edge is inside a boxcar
-#' window (weight 1) and on the rim of a bisquare or tricube one (weight 0).
+#' Two details are GWmodel's and matter.  The bisquare and tricube kernels
+#' test \code{d > h}, so a point exactly at the kernel's edge is on the rim
+#' of their window (weight 0); a point there is inside a boxcar window
+#' (weight 1).
 #' And a zero-width kernel (\code{h = 0}: the \code{bw} nearest points share
 #' one location) is not an indicator of those points: every kernel but the
 #' boxcar gives them \code{0/0 = NaN}, and a window whose weights are
 #' undefined has no weighted row and no local regression.
+#'
+#' The boxcar's edge is read with the package's one tie rule: a point whose
+#' squared distance is within \code{.TIE_TOL} of \code{h^2} is at the edge,
+#' and inside (\code{.gw_boxcar_inside()}).  On a regular grid many points
+#' tie with the \code{bw}-th neighbour; computed from coordinates in another
+#' unit (US survey feet, a millionth of a metre) their distances and
+#' \code{h} round apart by a unit in the last place, and \code{d > h} put
+#' some of them outside.  The other kernels give a point at their edge
+#' weight 0 (bisquare, tricube) or are continuous there (Gaussian,
+#' exponential), so their weights move with that rounding by no more than it.
 #'
 #' @param d Numeric vector of distances from the regression point.
 #' @param bw Bandwidth: a distance, or a neighbour count when adaptive.
@@ -1551,9 +1626,28 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
          gaussian    = exp(d^2 / (-2 * h^2)),
          exponential = exp(-d / h),
          tricube     = ifelse(d > h, 0, (1 - d^3 / h^3)^3),
-         boxcar      = ifelse(d > h, 0, 1),
+         boxcar      = ifelse(.gw_boxcar_inside(d, h), 1, 0),
          ifelse(d > h, 0, (1 - d^2 / h^2)^2))       # bisquare
 }
+
+
+#' Whether a point is inside a boxcar window
+#'
+#' \code{d^2 <= h^2 (1 + .TIE_TOL)}: a squared distance within one part in
+#' ten million of the kernel's edge is at the edge, the tie rule of the
+#' package's other nearest-point searches, so the points tied with the
+#' \code{bw}-th neighbour on a regular grid are all inside whatever the
+#' unit or origin of the coordinates.  Compared as \code{d <= h sqrt(1 +
+#' .TIE_TOL)}, the same test, so that no square overflows or vanishes.  A
+#' zero-width kernel (\code{h = 0}) keeps the points at distance 0, as
+#' \code{!(d > h)} does.
+#'
+#' @param d Numeric vector of distances from the regression point.
+#' @param h The kernel's distance parameter.
+#' @return Logical vector, \code{NA} where \code{d} or \code{h} is.
+#' @keywords internal
+#' @noRd
+.gw_boxcar_inside <- function(d, h) d <= h * sqrt(1 + .TIE_TOL)
 
 
 #' The rows of a window and their kernel weights
@@ -1579,7 +1673,8 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     rows <- which(w > 0)
     return(list(rows = rows, w = w[rows]))
   }
-  inside <- which(!(d > h))
+  inside <- if (kernel == "boxcar") which(.gw_boxcar_inside(d, h))
+            else which(!(d > h))
   di <- d[inside]
   w <- switch(kernel,
               tricube = (1 - di^3 / h^3)^3,
@@ -2191,18 +2286,28 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 #'     deviation of at most 1e-12 of the largest absolute value, as in
 #'     \code{estimate_sac_range()}), less \code{.residual_centre()}.
 #' }
+#' Then the response, less its centre, is divided by the power of two
+#' \code{.spread_scaled()} gives where its spread is below \code{.GWR_Y_MIN}
+#' or its largest absolute value above \code{.GWR_Y_MAX}: the residual sum
+#' of squares, the bandwidth search and AICc square the residuals, and at
+#' 1e160 those squares overflow and at 1e-160 they lose their bits.  The
+#' local regressions are linear in the response, so the division changes no
+#' fitted value but by its factor.
+#'
 #' Every other design and response is returned as it is, so a fit on them
-#' gives what it gave to the last bit.  The centres are added back only to
-#' returned values (\code{.gwr_engine()}, \code{.gwr_predict_at()}).
+#' gives what it gave to the last bit.  The centres and the scale are put
+#' back only on returned values (\code{.gwr_engine()},
+#' \code{.gwr_predict_at()}, \code{.gwr_ms_engine()}).
 #'
 #' @param X The design matrix, the intercept's column of ones first.
 #' @param y The response, one value per row of \code{X}.
 #' @return A list: \code{X}, the design as fitted, which carries
 #'   \code{attr(, "centres")} (the centre taken off each column, 0 for the
 #'   intercept and for a column left as it is) where a column is centred,
-#'   for the local solve's intercept; \code{y}, the response as fitted;
-#'   \code{x_centres}, those centres or \code{NULL}; \code{y_centre}, the
-#'   response's centre or 0.
+#'   for the local solve's intercept; \code{y}, the response as fitted,
+#'   \code{(y - y_centre) / y_scale}; \code{x_centres}, those centres or
+#'   \code{NULL}; \code{y_centre}, the response's centre or 0;
+#'   \code{y_scale}, the power of two it was divided by, or 1.
 #' @keywords internal
 #' @noRd
 .gwr_centre <- function(X, y) {
@@ -2245,7 +2350,156 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     }
   }
   if (yc != 0) y <- y - yc
-  list(X = X, y = y, x_centres = xc, y_centre = yc)
+  # A response whose squares overflow or lose their bits (1e160 or 1e-160
+  # times a spread of 1) is divided by a power of two, which rounds nothing.
+  ys <- 1
+  fy <- y[is.finite(y)]
+  if (length(fy) >= 2L && max(abs(fy)) > 0) {
+    sy <- .spread_scaled(fy)
+    if (sy$spread > 0 && is.finite(sy$scale) && sy$scale > 0 &&
+        (sy$spread < .GWR_Y_MIN || max(abs(fy)) > .GWR_Y_MAX))
+      ys <- sy$scale
+  }
+  if (ys != 1) y <- y / ys
+  list(X = X, y = y, x_centres = xc, y_centre = yc, y_scale = ys)
+}
+
+
+# Bounds of a response (less its centre) that the bandwidth search, the
+# local regressions and the diagnostics read as it is given.  They square
+# the residuals and sum the squares: values up to 1e100 square far below the
+# largest double on any number of rows, and a spread down to 1e-100 leaves
+# the squares of residuals many orders of magnitude below it well above the
+# smallest normal double.  Beyond them the response is divided by a power
+# of two (.gwr_centre()).  The bounds of fit_rf_model()'s response.
+.GWR_Y_MAX <- 1e100
+.GWR_Y_MIN <- 1e-100
+
+
+#' A sum of squares of the scaled response, in the response's units squared
+#'
+#' \code{s^2 ss}, where \code{.gwr_centre()} divided the response by
+#' \code{s}.  Taken as \code{s * (s * ss)}, since \code{s^2} alone can
+#' overflow or vanish where the product does not.  A double cannot hold the
+#' product where it overflows or falls below the smallest normal double,
+#' where it keeps only some of its bits: it is \code{NA} there.  0 stays 0,
+#' and with \code{s = 1} \code{ss} is returned as it is.
+#'
+#' @param ss Numeric vector of sums of squares (or variances) of the scaled
+#'   response.
+#' @param s The scale, a power of two.
+#' @return Numeric vector like \code{ss}.
+#' @keywords internal
+#' @noRd
+.gwr_unscale_ss <- function(ss, s) {
+  if (s == 1) return(ss)
+  v <- s * (s * ss)
+  held <- is.finite(v) & (v >= .Machine$double.xmin | (!is.na(ss) & ss == 0))
+  v[!held] <- NA_real_
+  v
+}
+
+
+#' The diagnostics of a fit to the scaled response, in the response's units
+#'
+#' What \code{.gwr_diagnostics()} returned for the response divided by
+#' \code{s}: the residual sum of squares and variance are multiplied by
+#' \code{s^2} (\code{.gwr_unscale_ss()}, \code{NA} where a double cannot
+#' hold them), and AIC, AICc and BIC, which hold \code{n log(RSS / n)}, gain
+#' \code{2 n log(s)}.  The traces, the degrees of freedom and R-squared do
+#' not depend on the unit.
+#'
+#' @param dg What \code{.gwr_diagnostics()} returned.
+#' @param s The scale, a power of two.
+#' @param n The number of observations.
+#' @return \code{dg} in the response's units.
+#' @keywords internal
+#' @noRd
+.gwr_diagnostics_unscaled <- function(dg, s, n) {
+  if (is.null(s) || s == 1) return(dg)
+  shift <- 2 * n * log(s)
+  dg$RSS    <- .gwr_unscale_ss(dg$RSS, s)
+  dg$sigma2 <- .gwr_unscale_ss(dg$sigma2, s)
+  dg$AIC    <- dg$AIC + shift
+  dg$AICc   <- dg$AICc + shift
+  dg$BIC    <- dg$BIC + shift
+  dg
+}
+
+
+#' What a bandwidth search scored, in the response's units
+#'
+#' \code{.gwr_bw_search()} ran on the response divided by \code{s}
+#' (\code{.gwr_centre()}).  Its AICc, \code{$criterion} and
+#' \code{$curve$criterion}, gains \code{2 n log(s)}; its cross-validation
+#' score, a sum of squares, is multiplied by \code{s^2}
+#' (\code{.gwr_unscale_ss()}), and is \code{NA} where a double cannot hold
+#' that.  A bandwidth without a criterion keeps \code{Inf}.  The margins of
+#' \code{within}, \code{flat} and \code{near_global} (2 for AICc, 1
+#' percent for the score) and everything else in the list do not depend on
+#' the unit.
+#'
+#' @param bs What \code{.gwr_bw_search()} returned, or \code{NULL}.
+#' @param s The scale, a power of two.
+#' @param n The number of observations.
+#' @return \code{bs} in the response's units.
+#' @keywords internal
+#' @noRd
+.gwr_bw_search_unscaled <- function(bs, s, n) {
+  if (is.null(bs) || is.null(s) || s == 1) return(bs)
+  put <- function(v) {
+    if (is.null(v)) return(v)
+    fin <- is.finite(v)
+    if (identical(bs$approach, "CV")) v[fin] <- .gwr_unscale_ss(v[fin], s)
+    else v[fin] <- v[fin] + 2 * n * log(s)
+    v
+  }
+  bs$criterion <- put(bs$criterion)
+  if (is.data.frame(bs$curve)) bs$curve$criterion <- put(bs$curve$criterion)
+  bs
+}
+
+
+#' Whether putting a search's scores in the response's units lost any
+#'
+#' @param fit,out A bandwidth search before and after
+#'   \code{.gwr_bw_search_unscaled()}.
+#' @return \code{TRUE} where a finite score became \code{NA}.
+#' @keywords internal
+#' @noRd
+.gwr_bw_search_lost <- function(fit, out) {
+  if (is.null(fit) || is.null(out)) return(FALSE)
+  a <- c(fit$criterion, if (is.data.frame(fit$curve)) fit$curve$criterion)
+  b <- c(out$criterion, if (is.data.frame(out$curve)) out$curve$criterion)
+  length(a) == length(b) && any(is.finite(a) & is.na(b))
+}
+
+
+#' The warning for sums of squares a double cannot hold
+#'
+#' Raised where \code{.gwr_unscale_ss()} returns \code{NA} for a sum of
+#' squares that is finite on the scaled response.
+#'
+#' @param caller Name of the function the message is from.
+#' @param s The scale the response was divided by.
+#' @param what What is \code{NA}, as the sentence names it, up to its verb.
+#' @param kept What is computed on the scaled response and returned in the
+#'   response's units, as the sentence names it.
+#' @return The message.
+#' @keywords internal
+#' @noRd
+.gwr_ss_range_msg <- function(caller, s, what,
+                              kept = paste0("The bandwidth search, AICc, the ",
+                                            "fitted values, the residuals ",
+                                            "and the standard errors are")) {
+  k <- as.integer(round(log2(s)))
+  sprintf(paste0("%s(): the spread of the response about its median is of ",
+                 "the order of 2^%d, so the squares of its residuals lie ",
+                 "beyond what a double holds (they overflow or lose their ",
+                 "precision). %s NA. %s computed on ",
+                 "the response divided by 2^%d, which rounds nothing, and ",
+                 "are not affected."),
+          caller, k, what, kept, k)
 }
 
 
@@ -2296,17 +2550,26 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   residual <- y - yhat
   xc <- if (is.null(cen)) NULL else cen$x_centres
   yc <- if (is.null(cen)) 0 else cen$y_centre
+  # The power of two the response less its centre was divided by; `sv` and
+  # `dg` are those of the response so divided.
+  ys <- if (is.null(cen) || is.null(cen$y_scale)) 1 else cen$y_scale
+  # Both about the centre, so the residuals keep the spread the raw values
+  # round away; the centre goes back on what is returned in the data's
+  # units.
+  if (yc != 0 || ys != 1) residual <- cen$y - yhat
+  stud  <- residual / sqrt(dg$sigma2 * sv$q_diag)
+  se    <- sqrt(dg$sigma2 * sv$coef_var)
+  if (ys != 1) {
+    residual <- residual * ys
+    yhat     <- yhat * ys
+    betas    <- betas * ys
+    se       <- se * ys
+  }
   if (yc != 0) {
-    # Both about the centre, so the residuals keep the spread the raw values
-    # round away; the centre goes back on what is returned in the data's
-    # units.
-    residual <- cen$y - yhat
     yhat <- yhat + yc
     if (ncol(betas) >= 1L && identical(colnames(betas)[1L], "Intercept"))
       betas[, 1L] <- betas[, 1L] + yc
   }
-  stud  <- residual / sqrt(dg$sigma2 * sv$q_diag)
-  se    <- sqrt(dg$sigma2 * sv$coef_var)
   tv    <- betas / se
   gwres <- data.frame(betas, y, yhat, residual, numeric(n), stud, se, tv,
                       sv$local_r2)
@@ -2324,7 +2587,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   vars <- all.vars(formula)
   # The centre of each term's column, the intercept's (0) first.
   xl <- if (!is.null(xc) && length(xc) == length(vars)) xc else NULL
-  centred <- !is.null(xl) || yc != 0
+  centred <- !is.null(xl) || yc != 0 || ys != 1
   if (centred) {
     # The global regression on the columns as the local solves have them:
     # on the raw columns a predictor at an offset is dropped as collinear
@@ -2336,9 +2599,18 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       for (j in seq_along(vars)[-1L])
         if (xl[j] != 0) sp_dat@data[[vars[j]]] <- sp_dat@data[[vars[j]]] - xl[j]
     if (yc != 0) sp_dat@data[[vars[1L]]] <- sp_dat@data[[vars[1L]]] - yc
+    if (ys != 1) sp_dat@data[[vars[1L]]] <- sp_dat@data[[vars[1L]]] / ys
   }
   lms <- stats::lm(formula, data = sp_dat@data)
   if (centred) {
+    # A fit to the response over `ys` is the fit to the response with its
+    # coefficients, fitted values, residuals and effects times `ys`.
+    if (ys != 1) {
+      lms$coefficients  <- lms$coefficients * ys
+      lms$fitted.values <- lms$fitted.values * ys
+      lms$residuals     <- lms$residuals * ys
+      lms$effects       <- lms$effects * ys
+    }
     # The fit put back at the data's origin as one least-squares fit, so
     # that summary(), vcov(), confint(), anova() and predict() on it agree
     # with its coefficients.  The raw design is the centred one times T,
@@ -2377,22 +2649,26 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   }
   lms$x <- X
   lms$y <- y
+  # The diagnostics in the response's units.
+  du <- .gwr_diagnostics_unscaled(dg, ys, n)
   list(
     GW.arguments = list(formula = formula, rp.given = FALSE, hatmatrix = TRUE,
                         bw = bw, kernel = kernel, adaptive = adaptive, p = 2,
                         theta = 0, longlat = FALSE, DM.given = FALSE,
                         F123.test = FALSE),
-    GW.diagnostic = list(RSS.gw = dg$RSS, AIC = dg$AIC, AICc = dg$AICc,
-                         enp = dg$enp, edf = dg$edf, gw.R2 = dg$R2,
-                         gwR2.adj = dg$R2_adj, BIC = dg$BIC),
+    GW.diagnostic = list(RSS.gw = du$RSS, AIC = du$AIC, AICc = du$AICc,
+                         enp = du$enp, edf = du$edf, gw.R2 = du$R2,
+                         gwR2.adj = du$R2_adj, BIC = du$BIC),
     lm = lms,
     SDF = sdf,
     fitted = yhat,
     solver = list(method = "pivoted Householder QR per window (LAPACK dgeqp3)",
                   tolerance = .gwr_rank_tol()),
     # What .gwr_centre() took off: the centre of each column of the design
-    # (NULL where none was) and of the response (0 where none was).
-    centres = list(predictors = xc, response = yc)
+    # (NULL where none was) and of the response (0 where none was), and the
+    # power of two the response less its centre was divided by (1 where it
+    # was not).
+    centres = list(predictors = xc, response = yc, scale = ys)
   )
 }
 
@@ -3535,6 +3811,9 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
                          adaptive, rp = rp, X_rp = X_new,
                          what = "predict", se = se)
   sv$fitted <- unname(sv$fitted)
+  # In the response's units, less its centre, where the response was
+  # divided by a power of two.
+  if (cen$y_scale != 1) sv$fitted <- sv$fitted * cen$y_scale
   sv$fitted[!is.finite(sv$fitted)] <- NA_real_
   sv$centre <- cen$y_centre
   sv

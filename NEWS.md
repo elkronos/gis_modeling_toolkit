@@ -7411,6 +7411,61 @@ old behaviour where there is a way.
   predicts the response less the centre over the scale; `?fit_rf_model`
   (Value) and `?predict.rf_fit` say so.
 
+* **`fit_gwr_model()`, `gwr_model_selection()` and `cv_gwr()` squared a
+  response whose squares overflow or underflow.**  The local regressions
+  are linear in the response, so the fitted values of a response times
+  1e160 or 1e-160 were those of the response times the factor, but the
+  residual sum of squares, AICc and the bandwidth search squared the raw
+  residuals. On 50 rows times 2^-530, AICc was -36665.629 where -36665.615
+  is right, and `gwr_model_selection()`'s second gap was 6.509 where 6.484
+  is right. Times 2^530, AICc was `NA`, the search took 50 neighbours where
+  the unscaled response gets 23, the fitted values moved by up to 1.01
+  times the factor, `cv_gwr()` searched each fold the same way, and
+  `gwr_model_selection()` stopped with "no model produced a finite
+  criterion". The response, less any centre, is now divided by a power of
+  two where its values reach beyond 1e100 or its spread is below 1e-100,
+  and the factor is put back on what is returned: the bandwidth is that of
+  the unscaled response, the fitted values, residuals, coefficients,
+  standard errors, `$engine$lm` and the predictions are those of the
+  unscaled response times the factor, AICc (that of `$bandwidth_search`
+  too) gains 2 n log of it, and a cross-validation score of the search is
+  multiplied by its square. The residual sum of squares, `info$sigma2` and
+  such a score, in the response's units squared, are `NA` with a warning
+  where a double cannot hold them, and `predict(se.fit = TRUE)` then takes
+  its standard errors from the residual standard deviation.
+  `fit$engine$centres$scale` gives the factor. Any other response is
+  fitted as it was, to the last bit; `?fit_gwr_model` (The local solve)
+  says so.
+
+* **`gwr_model_selection()` on a layer with no rows stopped with sp's
+  "error in evaluating the argument 'x' in selecting a method for function
+  'addAttrToGeom': subscript out of bounds".**  Its own check of the
+  number of rows ran after the rows were converted, and only with
+  `adaptive = TRUE`: with a fixed bandwidth one or three rows ended in "no
+  model produced a finite criterion". The check now runs first, at any
+  bandwidth, and gives "0 observations cannot support a local fit of 2
+  candidate predictors plus an intercept." With a fixed bandwidth it now
+  refuses, as with an adaptive one, any layer with no more rows than the
+  model with every candidate has parameters. A constant response, which
+  ended in the same "no model produced a finite criterion; nothing can be
+  selected.", is refused in the words of `fit_gwr_model()` ("response 'y'
+  is constant"), and where no model has a criterion the refusal now names
+  the bandwidth and the reason.
+
+* **The boxcar kernel's window moved with the unit of the coordinates on a
+  regular grid.**  With an adaptive bandwidth a boxcar window holds every
+  observation up to the distance of the k-th nearest, and on a lattice
+  many tie with it. Computed from coordinates in US survey feet or in
+  millionths of a metre, their distances and the k-th round apart by a
+  unit in the last place, and the test `d <= h` left some of them out: on
+  a 7 x 7 lattice with 12 neighbours, 16 of 49 fitted values moved, by up
+  to 0.026, between metres and US survey feet. A squared distance within
+  one part in ten million of the edge now counts as at the edge, the
+  package's tie rule, in the local regressions, the bandwidth search and
+  the local collinearity survey of `fit_gwr_model()`,
+  `gwr_model_selection()`, `cv_gwr()` and `predict()`. The other kernels
+  are unchanged.
+
 ## Documentation
 
 * The README, the vignettes, the help's examples, the scripts in

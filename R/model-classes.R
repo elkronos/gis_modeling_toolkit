@@ -1351,14 +1351,28 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
   if (!se.fit) return(fit_vals)
 
   sigma2 <- suppressWarnings(as.numeric(object$info$sigma2 %||% NA_real_))[1L]
-  if (!is.finite(sigma2))
+  vf <- res$var_fit
+  vf[is.na(preds_clean)] <- NA_real_
+  # A residual variance a double cannot hold in the response's units squared
+  # (a response near 1e160 or 1e-160, which fit_gwr_model() divided by a
+  # power of two) is NA in the fit; its square root is held, and the
+  # standard errors are taken from it.
+  sigma <- if (is.finite(sigma2)) NA_real_ else .gwr_residual_sd(object)
+  if (!is.finite(sigma2) && !is.finite(sigma))
     .warn_and_log(paste0("predict.gwr_fit(): the fit carries no residual ",
                          "variance (it has no effective residual degrees of ",
                          "freedom, a fitted value of its own is NA, or it was ",
                          "not made by fit_gwr_model()), so `se.fit` and ",
                          "`se.pred` are NA."))
-  vf <- res$var_fit
-  vf[is.na(preds_clean)] <- NA_real_
+  if (is.finite(sigma))
+    return(list(fit            = fit_vals,
+                se.fit         = .expand_predictions(sigma * sqrt(vf),
+                                                     clean_idx, n_orig),
+                se.pred        = .expand_predictions(sigma * sqrt(1 + vf),
+                                                     clean_idx, n_orig),
+                residual.scale = sigma,
+                df             = suppressWarnings(
+                  as.numeric(object$info$edf %||% NA_real_))[1L]))
   list(fit            = fit_vals,
        se.fit         = .expand_predictions(sqrt(sigma2 * vf), clean_idx, n_orig),
        se.pred        = .expand_predictions(sqrt(sigma2 * (1 + vf)), clean_idx,
@@ -1366,6 +1380,32 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
        residual.scale = sqrt(sigma2),
        df             = suppressWarnings(
          as.numeric(object$info$edf %||% NA_real_))[1L])
+}
+
+
+#' The residual standard deviation of a GWR fit whose variance is NA
+#'
+#' Where \code{fit_gwr_model()} divided the response by a power of two
+#' (\code{$engine$centres$scale}) and the residual variance in the
+#' response's units squared lies beyond what a double holds, the variance is
+#' \code{NA} in \code{$info$sigma2}.  Its square root is held: it is taken
+#' here from the residuals the fit keeps, divided by the scale, over the
+#' effective residual degrees of freedom, as the variance was, and the
+#' scale is put back on it.
+#'
+#' @param object A \code{gwr_fit}.
+#' @return The standard deviation, or \code{NA} where the fit records no
+#'   scale or does not carry what it needs.
+#' @keywords internal
+#' @noRd
+.gwr_residual_sd <- function(object) {
+  ys  <- tryCatch(object$engine$centres$scale, error = function(e) NULL)
+  edf <- suppressWarnings(as.numeric(object$info$edf %||% NA_real_))[1L]
+  r   <- tryCatch(object$engine$SDF@data$residual, error = function(e) NULL)
+  if (!(is.numeric(ys) && length(ys) == 1L && is.finite(ys) && ys > 0 &&
+        ys != 1 && isTRUE(edf > 0) && is.numeric(r) && !anyNA(r)))
+    return(NA_real_)
+  ys * sqrt(sum((r / ys)^2) / edf)
 }
 
 

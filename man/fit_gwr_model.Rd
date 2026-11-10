@@ -56,7 +56,13 @@ observations is capped at it, with a warning (a distance meant for
 \code{adaptive = FALSE}, most often).}
 
 \item{kernel}{Kernel function type. One of "bisquare" (default),
-"gaussian", "tricube", "boxcar", "exponential".}
+"gaussian", "tricube", "boxcar", "exponential".  The boxcar gives weight
+1 to every observation within the bandwidth's distance (with an adaptive
+bandwidth, the distance to the \code{bandwidth}-th nearest neighbour)
+and 0 to the others; an observation whose squared distance is within
+one part in ten million of the edge counts as at the edge, and inside,
+so on a regular grid every neighbour tied with the last one is in the
+window whatever the unit or origin of the coordinates.}
 
 \item{.already_prepped}{Logical (internal). If \code{TRUE}, skip the
 \code{prep_model_data()} call because the caller has already projected,
@@ -174,6 +180,22 @@ cross-validations score the fit on the response, the fitted values and
 the predictions less the response's centre, so their RMSE, MAE and
 R-squared are those of the same values at 0 too.  Every other predictor
 and response is used as it is.
+
+A response whose values, less any centre, reach beyond 1e100, or whose
+spread is below 1e-100, is divided by a power of two, which rounds
+nothing: the residual sum of squares, AICc and the bandwidth search
+square the residuals, and at 1e160 those squares overflow and at 1e-160
+they lose their bits.  The bandwidth is then that of the same values in
+ordinary units, and the fitted values, the residuals, the coefficients,
+their standard errors and \code{$engine$lm} are those of the same values
+times the factor; AICc, the AICc of \code{info$bandwidth_search} among
+them, gains \eqn{2 n \log} of the factor, and a cross-validation score
+of the search is multiplied by its square.  The residual sum of
+squares, \code{info$sigma2} and such a score are in the response's units
+squared, and are \code{NA}, with a warning, where a double cannot hold
+them there;
+\code{predict(se.fit = TRUE)} then takes its standard errors from the
+residual standard deviation, which it can hold.
 
 One tolerance, \code{1e-7}, decides what a window can estimate:
 \itemize{
