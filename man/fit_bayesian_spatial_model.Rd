@@ -98,8 +98,9 @@ thousands of dollars and shrank the same slope to nothing when it was in
 dollars.  The prior brms used is stored as \code{$info$b_prior} and shown
 by \code{print()}.  When \code{prior} is given, no slope prior is added.
 A prior given here on a class that lives on the response's scale
-(\code{b}, \code{Intercept}, \code{sigma}, \code{sdgp}) keeps the
-response as it is; see "The response's centre and scale".
+(\code{b}, \code{Intercept}, \code{sigma}, \code{sdgp}, and
+\code{beta} of \code{exgaussian()}) keeps the response as it is; see
+"The response's centre and scale".
 A data-informed GP length-scale prior is always appended
 automatically unless \code{prior} already contains an entry with
 \code{class = "lscale"}.}
@@ -594,7 +595,10 @@ short range (\code{"unresolved_short_range"}).}
 }
 A response that takes a single value is an error, raised before anything
 is compiled, and so is one whose values differ only by rounding (1e15 and
-the next double).  The convergence warning carries the checks that failed as
+the next double).  A fit that comes back from brms with no posterior
+draws, as when Stan rejects every starting value, is an error that names
+the response's size as brms was given it.  The convergence warning
+carries the checks that failed as
 \code{failed} (\code{"divergent"}, \code{"ebfmi"}, \code{"rhat"},
 \code{"ess"}).  \code{\link{cv_bayes}()} fits once per fold; it collects
 the last four classes from its folds and raises each once for the run,
@@ -609,12 +613,25 @@ priors for the intercept, the residual standard deviation and the
 Gaussian process's standard deviation from the response it is given, with
 scales of at least 2.5 in its units.  A response at 1e8 plus a spread of 1,
 or in units of 1e-20, lies far from both, and its fit missed the data by
-orders of magnitude.  So under the gaussian, student and skew_normal
-families with an identity link, a response whose centre is more than
-1,000 times its spread from zero is handed to brms less that centre, and
-one whose standard deviation lies outside \eqn{2^{-20}} to \eqn{2^{20}} is
-divided by the power of two nearest that standard deviation.  Both steps
-are exact.  Every other response, and every response under another
+orders of magnitude.  So under the gaussian, student, skew_normal,
+exgaussian and asym_laplace families with an identity link, a response
+whose centre is more than 1,000 times its spread from zero is handed to
+brms less that centre, and one whose standard deviation lies outside
+\eqn{2^{-20}} to \eqn{2^{20}} is divided by the power of two nearest that
+standard deviation.  Under exgaussian and asym_laplace the rule is
+narrower: a centre more than 4 times the spread from zero is taken off,
+and a standard deviation outside \eqn{2^{-2}} to \eqn{2^{2}} is divided
+out.  brms's default prior on exgaussian's \code{beta} and Stan's
+starting values do not follow the response, so an exgaussian fit at a
+standard deviation near 1,000, or 300 standard deviations from zero, had
+no draws, and an asym_laplace fit 300 standard deviations from zero, or
+at a standard deviation near 1e-4, came back with \code{sigma} at twice
+its value or more.  Both steps are exact, and the model is the same
+model of the response: the shift moves the location only, and the scale
+multiplies the location, \code{sigma} and the mean \code{beta} of
+exgaussian's exponential part, and leaves the degrees of freedom of
+student, the skewness of skew_normal and the quantile of asym_laplace as
+they are.  Every other response, and every response under another
 family, is handed over as it is.
 
 \code{fitted()}, \code{predict()} and its draws, \code{residuals()},
@@ -628,9 +645,10 @@ brms was given, so brms's own functions on it (\code{brms::fixef()},
 \code{brms::posterior_epred()}) answer on that scale.
 
 A prior given in \code{prior} on a class on the response's scale
-(\code{b}, \code{Intercept}, \code{sigma}, \code{sdgp}) is read by brms on
-the response it is given.  With such a prior the response is handed over
-as it is, and the warning \code{spatialkit_response_scale} says so.
+(\code{b}, \code{Intercept}, \code{sigma}, \code{sdgp}, and \code{beta}
+of exgaussian) is read by brms on the response it is given.  With such a
+prior the response is handed over as it is, and the warning
+\code{spatialkit_response_scale} says so.
 }
 
 \section{Non-Gaussian responses}{

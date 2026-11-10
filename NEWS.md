@@ -2772,10 +2772,17 @@ old behaviour where there is a way.
   missed the response by the offset; in units of 1e-20 they were 1e15
   response SDs off, after divergent transitions; near 1e160 the fit had no
   draws and said nothing; and `cv_bayes()` folds failed or scored the same
-  way.  Under the gaussian, student and skew_normal families with an
-  identity link, a response whose centre is more than 1,000 times its
-  spread from zero is now handed to brms less that centre, and one whose SD
-  lies outside 2^-20 to 2^20 is divided by the power of two nearest it.
+  way.  Under the gaussian, student, skew_normal, exgaussian and
+  asym_laplace families with an identity link, a response whose centre is
+  more than 1,000 times its spread from zero is now handed to brms less
+  that centre, and one whose SD lies outside 2^-20 to 2^20 is divided by
+  the power of two nearest it.  Under exgaussian and asym_laplace the rule
+  is narrower, a centre more than 4 times the spread and an SD outside 2^-2
+  to 2^2, because brms's default prior on exgaussian's `beta` and Stan's
+  starting values do not follow the response: an exgaussian fit at an SD
+  near 1,000, or 300 SDs from zero, had no draws, and an asym_laplace fit
+  300 SDs from zero or at an SD near 1e-4 came back with `sigma` at twice
+  its value or more.
   `fitted()`, `predict()` and its draws, `residuals()`, `coef()`,
   `$info$loo`, `$info$looic`, `$info$gp_adequacy$sdgp` and `$info$b_prior`
   are given in the response's units, and `$info$response_scaling` records
@@ -2789,6 +2796,13 @@ old behaviour where there is a way.
   is taken at any size of the response: its squares overflowed near 1e160
   and underflowed below about 1e-162, so the share was `NA` and the
   length-scale rule decided whether the GP is identified in its place.
+
+* **`fit_bayesian_spatial_model()` returned a fit with no posterior draws
+  and said nothing.**  When Stan rejected every starting value, rstan
+  returned an empty fit, `$info$convergence_ok` was `NA`, `$info$looic`
+  was `NA`, no warning was raised, and `fitted()` stopped later.  Such a
+  fit is now an error that gives the response's median and SD as brms was
+  given it and the family.
 
 * **`summarize_by_cell()` let one infinite value through.**  An `Inf` in a
   response or predictor column made its cell's mean `Inf` and, under

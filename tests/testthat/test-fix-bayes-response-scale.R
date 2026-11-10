@@ -333,6 +333,238 @@ test_that("predictions, fitted values, coefficients and LOO come back in the res
 })
 
 
+# ---- exgaussian() and asym_laplace() -----------------------------------------
+#
+# Both are location-scale families on the response's own scale under their
+# identity link: a shift of the response moves mu only, and a scale
+# multiplies mu, sigma and the exponential mean beta of exgaussian() and
+# leaves the quantile of asym_laplace() as it is.  They were handed to brms
+# as given, so they met the offsets and units the three families above were
+# taken out of.
+
+.frs_ls_families <- function() {
+  list(exgaussian = brms::exgaussian(), asym_laplace = brms::asym_laplace())
+}
+
+test_that("exgaussian() and asym_laplace() hand brms the response centred and scaled", {
+  skip_if_not_installed("brms")
+  d <- .frs_pts()
+  for (nm in names(.frs_ls_families())) {
+    fam <- .frs_ls_families()[[nm]]
+    # Far from zero: less its centre, exactly.
+    r8 <- .frs_capture(.frs_with_y(d, d$y + 1e8), family = fam)
+    rs <- r8$fit$info$response_scaling
+    expect_false(is.null(rs), info = nm)
+    expect_identical(rs$scale, 1, info = nm)
+    expect_identical(r8$args$data$y, (d$y + 1e8) - rs$centre, info = nm)
+    expect_lt(abs(mean(r8$args$data$y)), 10, label = paste("mean,", nm))
+    # In tiny or huge units: divided by the power of two nearest the SD.
+    for (a in c(1e-20, 2^530)) {
+      ra <- .frs_capture(.frs_with_y(d, d$y * a), family = fam)
+      rs <- ra$fit$info$response_scaling
+      lab <- paste(nm, format(a))
+      expect_false(is.null(rs), info = lab)
+      expect_identical(rs$centre, 0, info = lab)
+      expect_identical(log2(rs$scale), round(log2(rs$scale)), info = lab)
+      expect_identical(ra$args$data$y * rs$scale, d$y * a, info = lab)
+    }
+    # A response of ordinary size is handed over as it is.
+    r1 <- .frs_capture(d, family = fam)
+    expect_identical(r1$args$data$y, d$y, info = nm)
+    expect_null(r1$fit$info$response_scaling, info = nm)
+  }
+  # Named as a string, as brms takes it.
+  rs <- .frs_capture(.frs_with_y(d, d$y + 1e8), family = "exgaussian")
+  expect_false(is.null(rs$fit$info$response_scaling))
+})
+
+
+test_that("a prior on the quantile keeps the transform and a prior on beta does not", {
+  skip_if_not_installed("brms")
+  d  <- .frs_pts()
+  y8 <- d$y + 1e8
+  # The quantile does not change under a shift or a scale of the response,
+  # so its prior reaches brms as it was given and the response is centred.
+  pq <- brms::set_prior("beta(2, 2)", class = "quantile")
+  r  <- .frs_capture(.frs_with_y(d, y8), family = brms::asym_laplace(), prior = pq)
+  expect_false("spatialkit_response_scale" %in% r$classes)
+  expect_false(is.null(r$fit$info$response_scaling))
+  pr <- as.data.frame(r$args$prior)
+  expect_identical(pr$prior[pr$class == "quantile"], "beta(2, 2)")
+  # beta, the mean of exgaussian()'s exponential part, is in the response's
+  # units, so brms reads its prior on the response it is given.
+  pb <- brms::set_prior("gamma(1, 1e-8)", class = "beta")
+  r2 <- .frs_capture(.frs_with_y(d, y8), family = brms::exgaussian(), prior = pb)
+  expect_true("spatialkit_response_scale" %in% r2$classes)
+  expect_identical(r2$args$data$y, y8)
+  expect_null(r2$fit$info$response_scaling)
+})
+
+
+test_that("exgaussian() and asym_laplace() take a response off its centre and scale at moderate sizes", {
+  skip_if_not_installed("brms")
+  # brms's default prior on exgaussian()'s beta, gamma(1, 0.1), and Stan's
+  # starting values do not follow the response.  Handed over as given, an
+  # exgaussian fit of SD 136 came back with beta at a twentieth of its
+  # value, one of SD 1,360 or 300 SDs from zero had no draws, and an
+  # asym_laplace fit 300 SDs from zero or of SD 1e-4 had sigma at twice its
+  # value or more.  So these two families are centred at more than 4
+  # spreads from zero and scaled outside an SD of 2^-2 to 2^2.
+  d <- .frs_pts()
+  s <- stats::sd(d$y)                        # 1.28; spread 3.42, centre 2.09
+  for (nm in names(.frs_ls_families())) {
+    fam <- .frs_ls_families()[[nm]]
+    for (a in c(8, 100, 1e3, 1e-4, 0.15)) {
+      ya <- d$y * a
+      r  <- .frs_capture(.frs_with_y(d, ya), family = fam)
+      rs <- r$fit$info$response_scaling
+      lab <- paste(nm, format(a))
+      expect_false(is.null(rs), info = lab)
+      expect_identical(rs$centre, 0, info = lab)
+      expect_identical(log2(rs$scale), round(log2(rs$scale)), info = lab)
+      expect_identical(r$args$data$y * rs$scale, ya, info = lab)
+      # The power of two nearest the SD.
+      expect_lt(abs(log2(stats::sd(r$args$data$y))), 0.5 + 1e-9, label = lab)
+    }
+    for (b in c(-300, 20)) {
+      yb <- d$y + b
+      r  <- .frs_capture(.frs_with_y(d, yb), family = fam)
+      rs <- r$fit$info$response_scaling
+      lab <- paste(nm, "+", format(b))
+      expect_false(is.null(rs), info = lab)
+      expect_identical(rs$scale, 1, info = lab)
+      # Exact: every value lies within a factor of two of the centre.
+      expect_identical(r$args$data$y + rs$centre, yb, info = lab)
+      expect_lt(abs(stats::median(r$args$data$y)), 1e-9, label = lab)
+    }
+    # Within 4 spreads of zero and an SD of 2^-2 to 2^2: as given.
+    for (yi in list(d$y * 2, d$y + 10, d$y * 0.5)) {
+      r <- .frs_capture(.frs_with_y(d, yi), family = fam)
+      expect_identical(r$args$data$y, yi, info = nm)
+      expect_null(r$fit$info$response_scaling, info = nm)
+    }
+  }
+  # The rule of the other families does not change: in band, as given.
+  for (yi in list(d$y * 100, d$y + 300, d$y * 1e-4)) {
+    r <- .frs_capture(.frs_with_y(d, yi))
+    expect_identical(r$args$data$y, yi)
+    expect_null(r$fit$info$response_scaling)
+  }
+  # The message names the rule that applied.
+  rs <- .bayes_response_scaling(d$y * 1e3, brms::exgaussian())
+  expect_match(.bayes_response_scaling_text(rs), "outside 2^-2 to 2^2", fixed = TRUE)
+  rs <- .bayes_response_scaling(d$y - 300, brms::asym_laplace())
+  expect_match(.bayes_response_scaling_text(rs), "more than 4 times its spread",
+               fixed = TRUE)
+  rs <- .bayes_response_scaling(d$y * 1e30, stats::gaussian())
+  expect_match(.bayes_response_scaling_text(rs), "outside 2^-20 to 2^20", fixed = TRUE)
+})
+
+
+test_that("a prior on sigma keeps the response as given, with a warning", {
+  skip_if_not_installed("brms")
+  d  <- .frs_pts()
+  y8 <- d$y + 1e8
+  # sigma is in the response's units under every one of these families, so
+  # brms reads its prior on the response it is given.
+  ps <- brms::set_prior("student_t(3, 0, 2.5)", class = "sigma")
+  fams <- c(list(gaussian = stats::gaussian()), .frs_ls_families())
+  for (nm in names(fams)) {
+    r <- .frs_capture(.frs_with_y(d, y8), family = fams[[nm]], prior = ps)
+    expect_true("spatialkit_response_scale" %in% r$classes, info = nm)
+    expect_identical(r$args$data$y, y8, info = nm)
+    expect_null(r$fit$info$response_scaling, info = nm)
+  }
+})
+
+
+test_that("lognormal() and zero_inflated_asym_laplace are never centred or scaled", {
+  skip_if_not_installed("brms")
+  d <- .frs_pts()
+  # lognormal() reports an identity link, but its mu is on the log scale,
+  # so y - c is another model; a shift moves the zero mass of the
+  # zero-inflated family.
+  fams <- list(lognormal = brms::lognormal(),
+               zi_asym_laplace = brms::brmsfamily("zero_inflated_asym_laplace"))
+  for (nm in names(fams)) {
+    for (yi in list(d$y + 1e8, (d$y + 1) * 1e-20)) {
+      r <- .frs_capture(.frs_with_y(d, yi), family = fams[[nm]])
+      expect_identical(r$args$data$y, yi, info = nm)
+      expect_null(r$fit$info$response_scaling, info = nm)
+    }
+  }
+})
+
+
+test_that("a Stan fit with no posterior draws is refused", {
+  skip_if_not_installed("brms")
+  skip_if_not_installed("rstan")
+  # rstan returns an empty stanfit when it rejects every starting value.
+  # The fit was returned with convergence_ok NA and no warning, and
+  # fitted() stopped later.
+  empty <- methods::new(methods::getClass("stanfit", where = asNamespace("rstan")))
+  local_mocked_bindings(
+    brm = function(...) structure(list(fit = empty), class = "brmsfit"),
+    .package = "brms")
+  d <- .frs_pts()
+  for (chk in c(TRUE, FALSE)) {
+    expect_error(suppressWarnings(suppressMessages(fit_bayesian_spatial_model(
+      .frs_with_y(d, d$y * 1e3), "y", "x1", family = brms::exgaussian(),
+      gp_k = 5L, compute_loo = TRUE, check_convergence = chk))),
+      "no posterior draws.*less 0 and divided by 1024, with median 2\\.037.*'exgaussian'")
+  }
+  expect_error(suppressWarnings(suppressMessages(fit_bayesian_spatial_model(
+    d, "y", "x1", gp_k = 5L, compute_loo = FALSE))),
+    "response 'y' as it is, with median 2\\.086 and standard deviation 1\\.279")
+})
+
+
+test_that("exgaussian() and asym_laplace() fits come back in the response's units", {
+  skip_if_not_installed("brms")
+  skip_if_not_installed("loo")
+  d <- .frs_pts()
+  n <- nrow(d)
+  ep <- function(object, newdata, ...)
+    matrix(rep(seq_len(nrow(newdata)) / 10, each = 4), 4)
+  fx <- rbind(Intercept = c(0.5, 0.1, 0.3, 0.7), x1 = c(-1, 0.2, -1.4, -0.6))
+  colnames(fx) <- c("Estimate", "Est.Error", "Q2.5", "Q97.5")
+  set.seed(8)
+  ll <- matrix(stats::dnorm(rnorm(200 * n), log = TRUE), 200, n)
+  lo <- suppressWarnings(loo::loo(ll, r_eff = rep(1, n)))
+  local_mocked_bindings(
+    brm = function(...) structure(list(), class = "brmsfit"),
+    posterior_epred = ep, posterior_predict = ep,
+    fixef = function(x, ...) fx,
+    loo = function(x, ...) lo,
+    .package = "brms")
+  for (nm in names(.frs_ls_families())) {
+    for (cs in list(list(a = 1e-20, b = 0), list(a = 1, b = 1e8))) {
+      lab <- sprintf("%s, y * %s + %s", nm, format(cs$a), format(cs$b))
+      yg  <- d$y * cs$a + cs$b
+      fit <- suppressWarnings(suppressMessages(fit_bayesian_spatial_model(
+        .frs_with_y(d, yg), "y", "x1", gp_k = 5L,
+        family = .frs_ls_families()[[nm]],
+        compute_loo = TRUE, check_convergence = FALSE)))
+      rs <- fit$info$response_scaling
+      expect_false(is.null(rs), info = lab)
+      want <- rs$centre + rs$scale * seq_len(n) / 10
+      expect_identical(fitted(fit), want, info = lab)
+      expect_identical(predict(fit, newdata = d), want, info = lab)
+      expect_identical(predict(fit, newdata = d, type = "predict"), want, info = lab)
+      expect_identical(predict(fit, newdata = d, draws = TRUE)[1L, ], want, info = lab)
+      expect_identical(unname(residuals(fit)), unname(yg - want), info = lab)
+      cf <- coef(fit)
+      expect_identical(cf["x1", ], fx["x1", ] * rs$scale, info = lab)
+      expect_identical(cf["Intercept", "Estimate"], 0.5 * rs$scale + rs$centre,
+                       info = lab)
+      expect_equal(fit$info$looic,
+                   lo$estimates["looic", "Estimate"] + 2 * n * log(rs$scale),
+                   tolerance = 1e-12, info = lab)
+    }
+  }
+})
+
+
 # ---- Sampling (opt-in) -------------------------------------------------------
 
 .frs_fit <- function(d) {
@@ -438,4 +670,108 @@ test_that("cv_bayes() scores the same in any unit of the response", {
     expect_true(all(is.finite(cov)), info = format(a))
     expect_true(all(is.finite(ra$predictions$yhat_sd)), info = format(a))
   }
+})
+
+
+# The data each family fits: an exponential part of mean 0.5 for
+# exgaussian(), whose beta has nothing to hold on Gaussian noise (its looic
+# then moved by 28 between seeds of the same fit), and Gaussian noise for
+# asym_laplace().  Multiples of 2^-13, so y + 1e8 and y - 300 are exact.
+.frs_ls_data <- function() {
+  d0 <- .frs_pts()
+  set.seed(20261110)
+  e  <- round(stats::rexp(nrow(d0), rate = 2) * 2^13) / 2^13
+  list(exgaussian = .frs_with_y(d0, d0$y + e), asym_laplace = d0)
+}
+
+.frs_ls_fit <- function(dd, fam, seed, prior = NULL) {
+  fit <- NULL
+  utils::capture.output(suppressWarnings(suppressMessages(
+    fit <- fit_bayesian_spatial_model(
+      dd, "y", "x1", family = fam, prior = prior, chains = 1, iter = 400,
+      warmup = 200, gp_k = 5L, cores = 1, compute_loo = TRUE,
+      check_convergence = TRUE, backend = "rstan", seed = seed))),
+    type = "output")
+  fit
+}
+
+# Posterior mean of a distributional parameter in the response's units.
+.frs_dpar <- function(fit, nm) {
+  dr <- posterior::as_draws_df(fit$engine)
+  s  <- fit$info$response_scaling$scale %||% 1
+  mean(dr[[nm]]) * s
+}
+
+test_that("exgaussian() and asym_laplace() fits are the same from any origin and in any unit", {
+  skip_on_cran()
+  skip_if(!nzchar(Sys.getenv("SPATIALKIT_TEST_BRMS")),
+          "set SPATIALKIT_TEST_BRMS=true to run the Stan tests")
+  skip_if_not_installed("brms")
+  skip_if_not_installed("rstan")
+  dd <- .frs_ls_data()
+  # One chain of 400 iterations.  Under seed 11 the exgaussian fit of y
+  # itself settles 0.17 response SDs (mean) from the fits of seed 12 and of
+  # the transformed responses under either seed, which agree within 0.01,
+  # at 400 and at 1000 iterations alike.  So the fitted values are held to
+  # 0.25 SDs of the base fit on average: a seed that moves the base chain
+  # as far as seed 11 still passes, and the misses this test is there for
+  # (1.6 SDs at y + 300, 4e5 to 2e15 SDs at y + 1e8 and y * 1e-20) do not.
+  seeds <- c(exgaussian = 12, asym_laplace = 11)
+  # Response sizes: far offsets and units (1e8, 1e-20), and moderate ones
+  # inside 2^-20 to 2^20 where these two families failed as given.  Under
+  # exgaussian, y * 1e3 and y - 300 had no draws and y * 100 gave beta at a
+  # twentieth of its value; under asym_laplace, y - 300 and y * 1e-4 gave
+  # sigma at twice its value or more and looic 40 to 150 higher.
+  cases <- list(list(a = 1, b = 1e8), list(a = 1e-20, b = 0),
+                list(a = 100, b = 0), list(a = 1e3, b = 0),
+                list(a = 1e-4, b = 0), list(a = 1, b = -300))
+  dpars <- list(exgaussian = c("sigma", "beta"), asym_laplace = "sigma")
+  for (nm in names(.frs_ls_families())) {
+    fam <- .frs_ls_families()[[nm]]
+    d   <- dd[[nm]]
+    f0  <- .frs_ls_fit(d, fam, seeds[[nm]])
+    z0  <- .frs_z(fitted(f0), d$y)
+    p0  <- vapply(dpars[[nm]], function(p) .frs_dpar(f0, p), numeric(1))
+    for (cs in cases) {
+      lab <- sprintf("%s, y * %s + %s", nm, format(cs$a), format(cs$b))
+      yg  <- d$y * cs$a + cs$b
+      fg  <- .frs_ls_fit(.frs_with_y(d, yg), fam, seeds[[nm]])
+      fv  <- fitted(fg)
+      expect_true(all(is.finite(fv)), info = lab)
+      dz <- abs(.frs_z(fv, yg) - z0)
+      expect_lt(max(dz), 0.75, label = paste("max |dz|,", lab))
+      expect_lt(mean(dz), 0.25, label = paste("mean |dz|,", lab))
+      expect_lt(abs(coef(fg)["x1", "Estimate"] / cs$a - coef(f0)["x1", "Estimate"]),
+                0.25 * stats::sd(d$y), label = paste("slope,", lab))
+      # sigma and beta in the response's units, within 30% of the base fit's:
+      # over the transformed fits they ranged 0.16 to 0.18 and 0.45 to 0.46
+      # for exgaussian, 0.11 to 0.12 for asym_laplace's sigma.
+      pg <- vapply(dpars[[nm]], function(p) .frs_dpar(fg, p) / cs$a, numeric(1))
+      expect_lt(max(abs(pg / p0 - 1)), 0.3,
+                label = paste(paste(dpars[[nm]], collapse = " and "), lab))
+      # looic moves by 2 n log(a).  Allowance 30: the exgaussian fit of one
+      # response gave looic from 69 to 88 over three seeds of this sampler
+      # (Pareto k up to 1.1 on 200 draws).  It was off by 5e4 at an offset
+      # of 1e8 and by 4e3 in units of 1e-20.
+      expect_lt(abs(fg$info$looic - 2 * nrow(d) * log(cs$a) - f0$info$looic), 30,
+                label = paste("looic,", lab))
+    }
+  }
+})
+
+
+test_that("a sampler that rejects every starting value is an error", {
+  skip_on_cran()
+  skip_if(!nzchar(Sys.getenv("SPATIALKIT_TEST_BRMS")),
+          "set SPATIALKIT_TEST_BRMS=true to run the Stan tests")
+  skip_if_not_installed("brms")
+  skip_if_not_installed("rstan")
+  # A prior on beta keeps the response as given.  At y * 1e3 the
+  # exgaussian density is zero at every starting value Stan tries, and the
+  # empty fit was returned with convergence_ok NA and no warning.
+  d  <- .frs_ls_data()$exgaussian
+  pb <- brms::set_prior("gamma(1, 0.1)", class = "beta")
+  expect_error(.frs_ls_fit(.frs_with_y(d, d$y * 1e3), brms::exgaussian(), 12,
+                           prior = pb),
+               "no posterior draws")
 })

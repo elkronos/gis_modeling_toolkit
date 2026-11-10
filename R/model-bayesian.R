@@ -367,18 +367,38 @@
 
 # Families whose model does not change when the response is taken less a
 # centre and divided by a scale: a location on the response's own scale
-# (identity link), a scale parameter, and shape parameters free of both.
-.bayes_location_scale_families <- c("gaussian", "student", "skew_normal")
+# (identity link), parameters in the response's units (sigma, and the mean
+# beta of exgaussian()'s exponential part), and shape parameters free of
+# both.
+.bayes_location_scale_families <- c("gaussian", "student", "skew_normal",
+                                    "exgaussian", "asym_laplace")
 
 # Prior classes whose parameters do not change under a shift and a scale of
 # the response: the GP's length-scales (on the scaled coordinates), the
-# degrees of freedom of student() and the skewness of skew_normal().
-.bayes_scale_free_classes <- c("lscale", "nu", "alpha")
+# degrees of freedom of student(), the skewness of skew_normal() and the
+# quantile of asym_laplace().
+.bayes_scale_free_classes <- c("lscale", "nu", "alpha", "quantile")
 
 # The standard deviations of the response that are handed to brms as they
 # are.  Outside this range the response is divided by a power of two.
 .BAYES_SD_MIN <- 2^-20
 .BAYES_SD_MAX <- 2^20
+
+# The families under a narrower rule: a response is centred where its
+# centre is more than 4 times its spread from zero, and divided where its
+# SD lies outside 2^-2 to 2^2.  Under exgaussian(), brms's default prior on
+# beta, gamma(1, 0.1), and Stan's starting values are fixed in the units
+# brms is given, and the density underflows to zero where a value lies far
+# below mu: a response of SD 136 came back with beta at a twentieth of its
+# value (R-hat 2.1), and one of SD 1,360, or one 300 SDs from zero, had no
+# draws, as Stan rejected every starting value.  Under asym_laplace(), a
+# response 300 SDs from zero or of SD 1e-4 came back with sigma at twice
+# its value or more and looic 40 to 150 higher.  Within the narrower rule the fits
+# agree.
+.bayes_narrow_families <- c("exgaussian", "asym_laplace")
+.BAYES_NARROW_SD_MIN <- 2^-2
+.BAYES_NARROW_SD_MAX <- 2^2
+.BAYES_NARROW_CENTRE_RATIO <- 4
 
 #' The centre and scale the response is handed to brms with
 #'
@@ -398,18 +418,23 @@
 #' steps are exact: the subtraction because every value lies within a
 #' factor of two of the centre, and the division because the divisor is a
 #' power of two.  Every other response is handed over as it is, so its
-#' draws do not change.
+#' draws do not change.  Under exgaussian and asym_laplace
+#' (\code{.bayes_narrow_families}) the centre is taken off at more than 4
+#' times the spread, where every value still lies within a factor of two of
+#' it, and the range is \code{[2^-2, 2^2]}.
 #'
 #' Only for a family whose model is unchanged by the transform: gaussian,
-#' student and skew_normal with an identity link, not mixtures.  A count, a
-#' proportion or a log-scale family is never transformed.
+#' student, skew_normal, exgaussian and asym_laplace with an identity link,
+#' not mixtures.  A count, a proportion or a log-scale family is never
+#' transformed.
 #'
 #' @param y The response on the training rows.
 #' @param family As handed to \code{brms::brm()}.
 #' @return \code{NULL} where the response is handed over as it is; otherwise
 #'   a list with \code{centre} (0 where it is not taken about a centre),
-#'   \code{scale} (1 where it is not divided) and \code{sd} (its standard
-#'   deviation in its own units).
+#'   \code{scale} (1 where it is not divided), \code{sd} (its standard
+#'   deviation in its own units), and the rule that applied: \code{ratio},
+#'   \code{sd_min} and \code{sd_max}.
 #' @keywords internal
 #' @noRd
 .bayes_response_scaling <- function(y, family) {
@@ -428,17 +453,22 @@
       !identical(one("link"), "identity"))
     return(NULL)
   if (!is.numeric(y) || length(y) < 2L || !all(is.finite(y))) return(NULL)
+  narrow <- one("family") %in% .bayes_narrow_families
+  ratio  <- if (narrow) .BAYES_NARROW_CENTRE_RATIO else .PRED_CENTRE_RATIO
+  sd_min <- if (narrow) .BAYES_NARROW_SD_MIN else .BAYES_SD_MIN
+  sd_max <- if (narrow) .BAYES_NARROW_SD_MAX else .BAYES_SD_MAX
   y  <- as.numeric(y)
   sc <- .spread_scaled(y)
   if (!(sc$spread > 0)) return(NULL)
-  centre <- if (abs(sc$centre) > .PRED_CENTRE_RATIO * sc$spread) sc$centre else 0
+  centre <- if (abs(sc$centre) > ratio * sc$spread) sc$centre else 0
   r <- if (centre != 0) y - centre else y
   s <- .cell_sd(r)
   if (!is.finite(s) || !(s > 0)) s <- .spread_scaled(r)$spread
-  scale <- if (s < .BAYES_SD_MIN || s > .BAYES_SD_MAX)
+  scale <- if (s < sd_min || s > sd_max)
     2^max(min(round(log2(s)), 1023), -1022) else 1
   if (centre == 0 && scale == 1) return(NULL)
-  list(centre = centre, scale = scale, sd = s)
+  list(centre = centre, scale = scale, sd = s, ratio = ratio,
+       sd_min = sd_min, sd_max = sd_max)
 }
 
 
@@ -452,10 +482,13 @@
   paste(c(
     if (rs$centre != 0)
       sprintf("is centred at %s, more than %s times its spread from zero",
-              format(signif(rs$centre, 6)), format(.PRED_CENTRE_RATIO)),
+              format(signif(rs$centre, 6)),
+              format(rs$ratio %||% .PRED_CENTRE_RATIO)),
     if (rs$scale != 1)
-      sprintf("has a standard deviation of %s, outside 2^-20 to 2^20",
-              format(signif(rs$sd, 3)))),
+      sprintf("has a standard deviation of %s, outside 2^%d to 2^%d",
+              format(signif(rs$sd, 3)),
+              as.integer(log2(rs$sd_min %||% .BAYES_SD_MIN)),
+              as.integer(log2(rs$sd_max %||% .BAYES_SD_MAX)))),
     collapse = " and ")
 }
 
@@ -1411,8 +1444,9 @@
 #'   dollars.  The prior brms used is stored as \code{$info$b_prior} and shown
 #'   by \code{print()}.  When \code{prior} is given, no slope prior is added.
 #'   A prior given here on a class that lives on the response's scale
-#'   (\code{b}, \code{Intercept}, \code{sigma}, \code{sdgp}) keeps the
-#'   response as it is; see "The response's centre and scale".
+#'   (\code{b}, \code{Intercept}, \code{sigma}, \code{sdgp}, and
+#'   \code{beta} of \code{exgaussian()}) keeps the response as it is; see
+#'   "The response's centre and scale".
 #'   A data-informed GP length-scale prior is always appended
 #'   automatically unless \code{prior} already contains an entry with
 #'   \code{class = "lscale"}.
@@ -1842,7 +1876,10 @@
 #' }
 #' A response that takes a single value is an error, raised before anything
 #' is compiled, and so is one whose values differ only by rounding (1e15 and
-#' the next double).  The convergence warning carries the checks that failed as
+#' the next double).  A fit that comes back from brms with no posterior
+#' draws, as when Stan rejects every starting value, is an error that names
+#' the response's size as brms was given it.  The convergence warning
+#' carries the checks that failed as
 #' \code{failed} (\code{"divergent"}, \code{"ebfmi"}, \code{"rhat"},
 #' \code{"ess"}).  \code{\link{cv_bayes}()} fits once per fold; it collects
 #' the last four classes from its folds and raises each once for the run,
@@ -1854,12 +1891,25 @@
 #' Gaussian process's standard deviation from the response it is given, with
 #' scales of at least 2.5 in its units.  A response at 1e8 plus a spread of 1,
 #' or in units of 1e-20, lies far from both, and its fit missed the data by
-#' orders of magnitude.  So under the gaussian, student and skew_normal
-#' families with an identity link, a response whose centre is more than
-#' 1,000 times its spread from zero is handed to brms less that centre, and
-#' one whose standard deviation lies outside \eqn{2^{-20}} to \eqn{2^{20}} is
-#' divided by the power of two nearest that standard deviation.  Both steps
-#' are exact.  Every other response, and every response under another
+#' orders of magnitude.  So under the gaussian, student, skew_normal,
+#' exgaussian and asym_laplace families with an identity link, a response
+#' whose centre is more than 1,000 times its spread from zero is handed to
+#' brms less that centre, and one whose standard deviation lies outside
+#' \eqn{2^{-20}} to \eqn{2^{20}} is divided by the power of two nearest that
+#' standard deviation.  Under exgaussian and asym_laplace the rule is
+#' narrower: a centre more than 4 times the spread from zero is taken off,
+#' and a standard deviation outside \eqn{2^{-2}} to \eqn{2^{2}} is divided
+#' out.  brms's default prior on exgaussian's \code{beta} and Stan's
+#' starting values do not follow the response, so an exgaussian fit at a
+#' standard deviation near 1,000, or 300 standard deviations from zero, had
+#' no draws, and an asym_laplace fit 300 standard deviations from zero, or
+#' at a standard deviation near 1e-4, came back with \code{sigma} at twice
+#' its value or more.  Both steps are exact, and the model is the same
+#' model of the response: the shift moves the location only, and the scale
+#' multiplies the location, \code{sigma} and the mean \code{beta} of
+#' exgaussian's exponential part, and leaves the degrees of freedom of
+#' student, the skewness of skew_normal and the quantile of asym_laplace as
+#' they are.  Every other response, and every response under another
 #' family, is handed over as it is.
 #'
 #' \code{fitted()}, \code{predict()} and its draws, \code{residuals()},
@@ -1873,9 +1923,10 @@
 #' \code{brms::posterior_epred()}) answer on that scale.
 #'
 #' A prior given in \code{prior} on a class on the response's scale
-#' (\code{b}, \code{Intercept}, \code{sigma}, \code{sdgp}) is read by brms on
-#' the response it is given.  With such a prior the response is handed over
-#' as it is, and the warning \code{spatialkit_response_scale} says so.
+#' (\code{b}, \code{Intercept}, \code{sigma}, \code{sdgp}, and \code{beta}
+#' of exgaussian) is read by brms on the response it is given.  With such a
+#' prior the response is handed over as it is, and the warning
+#' \code{spatialkit_response_scale} says so.
 #'
 #' @section Non-Gaussian responses:
 #' Nothing in this function is Gaussian-specific except its default.  A
@@ -2890,6 +2941,40 @@ fit_bayesian_spatial_model <- function(
   fit <- try(do.call(brms::brm, brm_args), silent = TRUE)
   if (inherits(fit, "try-error"))
     stop(sprintf("fit_bayesian_spatial_model(): brms fit failed: %s", as.character(fit)))
+
+  # A Stan fit with no posterior draws is refused.  rstan returns one when
+  # it rejects every starting value, and it was returned with
+  # convergence_ok NA, no warning and a looic of NA, so the first sign was
+  # fitted() stopping later.  A fit that is not a Stan fit (a test's stand-in
+  # for brms::brm()) has no draws to count and is left alone.
+  if (inherits(fit, "brmsfit") && inherits(fit$fit, "stanfit")) {
+    n_draws_fit <- tryCatch(as.numeric(brms::ndraws(fit)),
+                            error = function(e) NA_real_)
+    if (length(n_draws_fit) == 1L && isTRUE(n_draws_fit == 0)) {
+      y_num <- if (is.numeric(y_fit) && sum(is.finite(y_fit)) >= 2L)
+        as.numeric(y_fit[is.finite(y_fit)]) else NULL
+      stop(sprintf(paste0(
+        "fit_bayesian_spatial_model(): brms returned a fit with no posterior ",
+        "draws, so nothing can be estimated or predicted from it. Stan stops ",
+        "this way when it rejects every starting value it tries, or when no ",
+        "iterations follow the warmup (iter = %s, warmup = %s). brms was ",
+        "given response '%s' %s%s under the %s family, and Stan starts every ",
+        "parameter between -2 and 2 in those units. Check the Stan output, ",
+        "the response's origin and units, and any `prior` that kept the ",
+        "response as given."),
+        format(iter), format(warmup), response_var,
+        if (is.null(resp_scaling)) "as it is"
+        else sprintf("less %s and divided by %s",
+                     format(resp_scaling$centre, digits = 17),
+                     format(resp_scaling$scale)),
+        if (is.null(y_num)) ","
+        else sprintf(", with median %s and standard deviation %s,",
+                     format(signif(stats::median(y_num), 4)),
+                     format(signif(.cell_sd(y_num), 4))),
+        if (is.na(fam_name)) "given" else sQuote(fam_name, q = FALSE)),
+        call. = FALSE)
+    }
+  }
 
   # ---- Convergence diagnostics ----
   # NA until a check has actually run.  It was TRUE from the start, so
