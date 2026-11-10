@@ -5130,6 +5130,27 @@ old behaviour where there is a way.
   fitted values.  A response whose centre is within 1000 times its spread
   is fitted as it was, to the last bit.
 
+* **`select_features_forward()`'s training-fold-mean baseline read the
+  rounding of a response at a large offset.**  Where the learner cannot
+  fit a model with no predictors (a forest, or a GWR `fit_fn` that refuses
+  `character(0)`) and no `null_fn` is given, the baseline is the mean
+  response of each fold's training rows.  It was scored on the response
+  and those means in the response's units, which a double holds at 1e15
+  to an eighth.  On 300 points with a GWR learner the baseline's RMSE was
+  2.4737792 at 1e15 and 2.4701674 at 1e12, where the same values at 0
+  give 2.4701727, so `baseline$score`, the step-0 rows of `history` and
+  of `fold_scores`, which the "se" rule reads, and the figure in the
+  message "the baseline is the training-fold mean" moved with the
+  response's origin (2.4521 at 1e15 against 2.4480 at 0), while every
+  candidate set scored the same at both.  The baseline is now scored on
+  the response less a centre, with each fold's training mean taken about
+  the same centre: the centre of the GWR fit where a fold's fit took the
+  response about one, and otherwise, where a fold's raw training response
+  loses its spread to rounding, the centre `estimate_sac_range()` takes.
+  Its RMSE and MAE are then those of the values at 0.  Where no fold has
+  a centre the baseline is scored as before, to the last bit, and
+  `cv_spatial()` returns what it returned for every call.
+
 * **`fit_gwr_model()` logged "predictor has near-zero variance; GWR may be
   unstable" for a predictor in small units.**  The test was a standard
   deviation under 100 times `.Machine$double.eps`, so a predictor of unit

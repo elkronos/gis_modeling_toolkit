@@ -618,6 +618,12 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
     }
     # cv_spatial()'s own partial-failure warning is muffled: the consequence
     # for the sweep is reported below, once per step, in the sweep's terms.
+    # The folds also record the training mean about a centre where the raw
+    # response loses its spread, for the fold-mean baseline
+    # (.fs_fold_mean_predictions()); cv_spatial() reads the request as it
+    # starts.
+    .cv_request$fold_mean_centre <- TRUE
+    on.exit(.cv_request$fold_mean_centre <- NULL, add = TRUE)
     res <- try(withCallingHandlers(
       suppressMessages(
         cv_spatial(train_sf, response_var, vars, fit_fn = noting_fit,
@@ -1100,6 +1106,18 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
 #' of a model with no predictors, on the same rows and the same folds, at no
 #' further fit.
 #'
+#' A response at a large offset (1e15 plus a spread of a few units) is
+#' held to an eighth, and so is its training mean: scored as it stands, the
+#' baseline would read that rounding and move with the response's origin.
+#' Where a row's fold took the response about a centre, the frame carries
+#' that centre and the training mean less it, and
+#' \code{.cv_overall_metrics()} scores the row on the values less the
+#' centre: a GWR fitted about a centre (\code{y_centre},
+#' \code{y_train_mean_centred}), or a fit with none whose raw training
+#' response loses its spread (\code{.cv_mean_centre_cols}, which the folds
+#' record for this sweep).  Where no row has a centre the frame is the
+#' plain one.
+#'
 #' @param runs A list of prediction frames (or \code{NULL}s) from the sweep.
 #' @return A prediction frame with one row per row any run predicted, or
 #'   \code{NULL} when no run predicted anything.
@@ -1110,11 +1128,33 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   ok <- Filter(function(pr) is.data.frame(pr) && nrow(pr) > 0L &&
                  all(need %in% names(pr)), runs)
   if (!length(ok)) return(NULL)
-  bp <- do.call(rbind, lapply(ok, function(pr) pr[, need, drop = FALSE]))
+  # Each row's centre (0 for none) and its fold's training mean less it.
+  about <- function(pr, cols) {
+    ct <- rep(0, nrow(pr)); tm <- pr$y_train_mean
+    for (cn in cols) {
+      if (!all(cn %in% names(pr))) next
+      c0 <- pr[[cn[1L]]]
+      has <- ct == 0 & is.finite(c0) & c0 != 0
+      ct[has] <- c0[has]
+      tm[has] <- pr[[cn[2L]]][has]
+    }
+    out <- pr[, need, drop = FALSE]
+    out$y_centre <- ct
+    out$y_train_mean_centred <- tm
+    out
+  }
+  cols <- list(c("y_centre", "y_train_mean_centred"), .cv_mean_centre_cols)
+  bp <- do.call(rbind, lapply(ok, about, cols = cols))
   bp <- bp[!duplicated(bp[["..row_id"]]), , drop = FALSE]
   bp <- bp[is.finite(bp$y) & is.finite(bp$y_train_mean), , drop = FALSE]
   if (!nrow(bp)) return(NULL)
   bp$yhat <- bp$y_train_mean
+  if (any(bp$y_centre != 0)) {
+    bp$yhat_centred <- bp$y_train_mean_centred
+  } else {
+    bp$y_centre <- NULL
+    bp$y_train_mean_centred <- NULL
+  }
   rownames(bp) <- NULL
   bp
 }

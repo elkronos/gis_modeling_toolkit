@@ -917,11 +917,16 @@
 #' \code{list(error = <message>)} when the fit or the prediction threw, so the
 #' caller can report the cause as well as the count.
 #'
+#' @param fold_mean_centre \code{TRUE} to record, where the fold's fit has
+#'   no centre and its training response's raw values lose their spread,
+#'   that response's centre and its training mean less it
+#'   (\code{.cv_mean_centre_cols}), for \code{select_features_forward()}'s
+#'   fold-mean baseline (\code{.fs_fold_mean_predictions()}).
 #' @keywords internal
 #' @noRd
 .cv_fit_one_fold <- function(i, dat_sf, response_var, remapped_fold,
                              keep_idx, fit_one, fold_info_fn, predict_args,
-                             p, metrics = NULL) {
+                             p, metrics = NULL, fold_mean_centre = FALSE) {
   # The label to report: the fold's index in the ORIGINAL fold object, so that
   # dropping an unusable fold in .remap_folds() does not renumber the rest.
   # Falls back to the loop position for hand-built folds carrying no fold_id.
@@ -1122,6 +1127,18 @@
     pr$yhat_centred <- as.numeric(scored$yhat_centred)
     pr$y_train_mean_centred <- y_train_mean_centred
   }
+  # The training mean about a centre, where the fit took none and the raw
+  # training response loses its spread (1e15 plus a spread of 1, held to an
+  # eighth): select_features_forward() scores its fold-mean baseline on it,
+  # as a fit about a centre is scored (.fs_fold_mean_predictions()).  Only
+  # when that caller asks, so every other run's rows are as they were.
+  if (isTRUE(fold_mean_centre) && yc == 0) {
+    ct <- .regression_centre(y_train, bounded = FALSE)
+    if (ct != 0) {
+      pr[[.cv_mean_centre_cols[1L]]] <- ct
+      pr[[.cv_mean_centre_cols[2L]]] <- mean(y_train[is.finite(y_train)] - ct)
+    }
+  }
   if (!is.null(per_row)) {
     clash <- intersect(names(per_row), names(pr))
     if (length(clash))
@@ -1176,6 +1193,20 @@
 # about a centre (a gwr_fit of a response at a large offset): that centre,
 # the prediction less it and the training mean less it.
 .cv_centred_cols <- c("y_centre", "yhat_centred", "y_train_mean_centred")
+
+
+# The columns a fold's prediction rows add, when select_features_forward()
+# asks (.cv_request), where the fit took no centre and the raw training
+# response loses its spread: the centre of that response
+# (.regression_centre(bounded = FALSE)) and the training mean less it.
+.cv_mean_centre_cols <- c("..y_mean_centre", "..y_train_mean_about")
+
+
+# A request to the next cv_spatial() call from inside the package, read and
+# cleared as that call starts, so a cv_spatial() that a learner runs inside
+# a fold does not see it.  `fold_mean_centre`: TRUE to have the folds record
+# .cv_mean_centre_cols (select_features_forward()'s run_set()).
+.cv_request <- new.env(parent = emptyenv())
 
 
 #' Give every fold's prediction rows the centred columns where one has them
@@ -1384,6 +1415,7 @@
 #'   before the call makes both reproducible.
 #' @param metrics Optional user scoring function, already validated by
 #'   \code{.check_metrics_fn()}; applied per fold here.
+#' @param fold_mean_centre Passed to \code{.cv_fit_one_fold()}.
 #' @return List with pred_rows and fold_stats.
 #' @keywords internal
 #' @noRd
@@ -1391,7 +1423,8 @@
                           remapped_folds, keep_idx, fit_one,
                           fold_info_fn = NULL, predict_args = list(),
                           p = NULL, parallel = FALSE, n_cores = NULL,
-                          seed = NULL, metrics = NULL) {
+                          seed = NULL, metrics = NULL,
+                          fold_mean_centre = FALSE) {
   cores   <- .resolve_n_cores(parallel, n_cores)
   n_folds <- length(remapped_folds)
 
@@ -1438,7 +1471,8 @@
       i = i, dat_sf = dat_sf, response_var = response_var,
       remapped_fold = remapped_folds[[i]], keep_idx = keep_idx,
       fit_one = fit_one, fold_info_fn = fold_info_fn,
-      predict_args = predict_args, p = p, metrics = metrics
+      predict_args = predict_args, p = p, metrics = metrics,
+      fold_mean_centre = fold_mean_centre
     )
   }
 
@@ -9679,6 +9713,9 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
                        p = NULL, block_size = NULL,
                        auto_range = FALSE, parallel = FALSE,
                        metrics = NULL, .caller = "cv_spatial") {
+  # Read and cleared before anything else (.cv_request).
+  fold_mean_centre <- isTRUE(.cv_request$fold_mean_centre)
+  .cv_request$fold_mean_centre <- NULL
   if (!inherits(data_sf, "sf")) stop(.caller, "(): `data_sf` must be an sf object.", call. = FALSE)
   if (!is.function(fit_fn)) stop(.caller, "(): `fit_fn` must be a function.", call. = FALSE)
   metrics <- .check_metrics_fn(metrics, .caller)
@@ -9725,7 +9762,8 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
       remapped_folds = remapped_folds, keep_idx = keep_idx,
       fit_one = fit_fn, fold_info_fn = fold_info_fn,
       predict_args = predict_args, p = p,
-      parallel = parallel, seed = seed, metrics = metrics
+      parallel = parallel, seed = seed, metrics = metrics,
+      fold_mean_centre = fold_mean_centre
     ),
     caller = .caller))
   res <- collected$value
