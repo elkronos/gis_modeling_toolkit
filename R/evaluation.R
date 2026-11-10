@@ -137,6 +137,14 @@
 #' invariant to row order, to which backend found the neighbours, and to
 #' translation, rotation and rescaling of the coordinates.  Co-located twins
 #' are the \eqn{d = 0} case of the same rule and need no special handling.
+#' A candidate is tied at the k-th distance when the squares of the two
+#' distances lie within \code{.TIE_TOL} (one part in ten million) of each
+#' other, the package's one tie rule.  The rule reads the distances alone,
+#' with no term in the size of the coordinates, so the weights are the same
+#' at any origin and in any unit wherever the doubles hold the coordinates
+#' to better than about one part in 1e8 of the distances between
+#' neighbours.  At an offset whose rounding is coarser than that, a lattice
+#' can lose its ties.
 #'
 #' The kd-tree path asks \pkg{FNN} for more than \code{k} neighbours, drops
 #' any self-match (FNN returns a point's own index among exact duplicates),
@@ -159,20 +167,20 @@
   n <- nrow(coords)
   k <- as.integer(k)
 
-  # Floating-point ties.  Two distances that differ by less than the rounding
-  # error of the coordinates themselves are one distance: coordinates near
-  # 1e7 (state-plane feet) carry ~1e-9 of absolute noise, and a grid
-  # translated there must still tie the way it does at the origin.  The
-  # tolerance is a part of the coordinates' size and has no floor in map
-  # units: a floor of 1 tied every distance difference under 1e-9 map units,
-  # so a layer whose coordinates span less than about 1e-5 units got other
-  # neighbours, up to every other point, than the same layer in metres.
-  # Coordinates all at 0 give 0, and their distances, all 0, still tie.
-  cscale  <- max(0, abs(coords), na.rm = TRUE)
-  tol_abs <- 1e-9 * cscale
+  # Floating-point ties, by the package's one tie rule (.TIE_TOL): two
+  # distances whose squares lie within .TIE_TOL of each other are one
+  # distance.  Distances computed from coordinates that differ only by their
+  # rounding differ by far less than that, so a lattice ties the same way in
+  # any unit and at any origin the doubles hold.  The rule reads the
+  # distances alone.  A term in the coordinates' size tied distances up to
+  # 1e-9 of the largest coordinate apart: 4 mm at a UTM northing, 1000 m at
+  # an offset of 1e12, every distance at 1e15, so the neighbours moved with
+  # the origin.  Compared as distances, against sqrt(1 + .TIE_TOL), so that
+  # no square overflows.  Distances of 0 tie only with each other.
+  tie_r  <- sqrt(1 + .TIE_TOL)
   # "within tolerance of dk" -- used both to extend the candidate set past the
   # k-th slot and to decide which candidates share it.
-  tie_of  <- function(d, dk) abs(d - dk) <= dk * 1e-9 + tol_abs
+  tie_of <- function(d, dk) d <= dk * tie_r & dk <= d * tie_r
 
   # Weights for one row from its candidate distances/indices (any order).
   row_weights <- function(js, ds) {
@@ -224,7 +232,7 @@
     #
     # "%.17g" round-trips a double exactly, so two rows share a location iff
     # they are bit-identical; `+ 0` folds -0 into 0.  Points a few ulps apart
-    # are distinct locations here and become ties through `tie_of` instead.
+    # are distinct locations here, as they are in the dense path.
     key     <- paste(sprintf("%.17g", coords[, 1L] + 0),
                      sprintf("%.17g", coords[, 2L] + 0), sep = "\r")
     gid     <- match(key, unique(key))            # 1..G
@@ -795,7 +803,10 @@
 #'   at the k-th distance (every regular grid, every site with repeat
 #'   visits) share that slot's weight equally, with no tie-break by
 #'   row order or by which backend found them, so the matrix is a function
-#'   of the geometry alone; on distinct, untied coordinates it equals
+#'   of the geometry alone.  A distance is tied with the k-th when their
+#'   squares are within one part in ten million of each other, whatever
+#'   the unit and the origin of the coordinates.  On distinct, untied
+#'   coordinates it equals
 #'   \code{spdep}'s \code{knearneigh()} + \code{nb2listw(style = "W")}
 #'   exactly.
 #'   If a non-row-standardised matrix is supplied (i.e. rows do not all sum
@@ -1852,23 +1863,52 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' @keywords internal
 #' @noRd
 .same_rowset <- function(a, b) {
-  # The tolerance is a part of the response's size, with no floor in its
-  # units: a floor of 1 read two responses below 1e-10 as one.
+  # The tolerance is a part of the response's spread plus its rounding
+  # (.same_values_tol()), with no floor in its units: a floor of 1 read two
+  # responses below 1e-10 as one, and a part of the response's size read a
+  # response at 1e12 and the same plus 50 as one.
   .same_rowset_xy(a, b) &&
-    .rowset_close(a$y, b$y, 1e-10 * max(0, abs(a$y), na.rm = TRUE))
+    .rowset_close(a$y, b$y, .same_values_tol(a$y, rel = 1e-10))
 }
 
 #' Do two \code{.fit_rowset()} fingerprints sit at the same locations?
 #'
 #' Within 1e-6 degrees when the data has a CRS (the fingerprint is then in
-#' EPSG:4326), otherwise within 1e-9 of the coordinates' size, in any unit.
+#' EPSG:4326), otherwise within 1e-9 of the coordinates' spread plus their
+#' rounding (\code{.same_values_tol()}), in any unit and at any origin.
 #' @keywords internal
 #' @noRd
 .same_rowset_xy <- function(a, b) {
   if (a$n != b$n || !identical(a$lonlat, b$lonlat)) return(FALSE)
   tol_xy <- if (a$lonlat) 1e-6
-            else 1e-9 * max(0, abs(c(a$x1, a$x2)), na.rm = TRUE)
+            else .same_values_tol(a$x1, a$x2, rel = 1e-9)
   .rowset_close(a$x1, b$x1, tol_xy) && .rowset_close(a$x2, b$x2, tol_xy)
+}
+
+#' A margin for reading two copies of the same values as one
+#'
+#' \code{rel} of the values' spread (the largest range of the vectors given)
+#' plus eight units in the last place of their largest size.  The second term
+#' covers the rounding of values held at a large offset; the margin does not
+#' grow with the origin otherwise.  A part of the values' size was 1000 units
+#' at an offset of 1e12, so data moved by 500 units passed as the same.
+#' Values all equal give their rounding alone, and values all 0 give 0.
+#'
+#' @param ... Numeric vectors; values that are not finite are left out.
+#' @param rel The part of the spread.
+#' @return A single non-negative number.
+#' @keywords internal
+#' @noRd
+.same_values_tol <- function(..., rel) {
+  vs <- lapply(list(...), function(v) {
+    v <- as.numeric(v)
+    v[is.finite(v)]
+  })
+  vs <- vs[lengths(vs) > 0L]
+  if (!length(vs)) return(0)
+  # Halves first, so a spread near the largest double does not overflow.
+  half <- max(vapply(vs, function(v) max(v) / 2 - min(v) / 2, numeric(1)))
+  2 * rel * half + 8 * .Machine$double.eps * max(abs(unlist(vs)))
 }
 
 #' Two sorted margins equal within \code{tol}, \code{NA} matching \code{NA}

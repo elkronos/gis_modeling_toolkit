@@ -102,7 +102,10 @@ distance, where this sets it from a count.}
 precedence over \code{block_nx}/\code{block_ny} and
 \code{block_multiplier}.  When supplied, a whole number of blocks is
 fitted across each axis of the extent: as many as leave every block at
-least this long on that axis.  On an axis at least as long as
+least this long on that axis, a block shorter by no more than one part
+in ten million counting as this long, so that a size of exactly the
+axis over a whole number gives that number of blocks in any unit.  On
+an axis at least as long as
 \code{block_size} the blocks built are therefore from one to just under
 two times this size.  An axis shorter than \code{block_size} cannot
 hold a block that long: a single row or column spans it, and its blocks

@@ -31,7 +31,10 @@ weight matrix (k = 8) is built from the observation coordinates.  Ties
 at the k-th distance (every regular grid, every site with repeat
 visits) share that slot's weight equally, with no tie-break by
 row order or by which backend found them, so the matrix is a function
-of the geometry alone; on distinct, untied coordinates it equals
+of the geometry alone.  A distance is tied with the k-th when their
+squares are within one part in ten million of each other, whatever
+the unit and the origin of the coordinates.  On distinct, untied
+coordinates it equals
 \code{spdep}'s \code{knearneigh()} + \code{nb2listw(style = "W")}
 exactly.
 If a non-row-standardised matrix is supplied (i.e. rows do not all sum

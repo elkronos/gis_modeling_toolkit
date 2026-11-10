@@ -396,7 +396,13 @@ finite range for a large share of draws.  So Moran's I of the modelled
 variable is computed on its 2, 4, 8 and 16 nearest neighbours, each
 standardised with the moments that fit the variable (those of regression
 residuals when \code{predictor_vars} are given), and the smallest
-one-sided p-value is multiplied by four.  When that adjusted p-value is
+one-sided p-value is multiplied by four.  Neighbours tied at the k-th
+distance, those whose squared distances are within one part in ten
+million of the k-th's, share its slot's weight equally, as in
+\code{\link{residual_morans_i}()}, so the graphs do not depend on the
+unit or the origin of the coordinates wherever the doubles hold them to
+better than about one part in 1e8 of the distances between neighbours.
+When that adjusted p-value is
 not below \code{structure_alpha}, the result is \code{NA} with
 \code{rejected_reason} \code{"no spatial structure detected at the
 nearest-neighbour scale"}, a pure-nugget model and no fitted range.  The

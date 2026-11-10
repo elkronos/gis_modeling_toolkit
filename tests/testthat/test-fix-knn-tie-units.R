@@ -14,6 +14,12 @@
 # and on the response, as had the check that folds were built on the data
 # (.check_fold_probe()) and the edge margin .edge_tol(), by which seeds are
 # read as the centres a count record holds.
+#
+# The kNN tolerance has since lost its term in the coordinates' size, which
+# moved the weights with the origin (test-fix-knn-tie-offset.R): squared
+# distances within .TIE_TOL of each other are a tie.  Power-of-two rescales
+# keep it exact, and on the layers below it gives the weights the rule
+# before gave, except at k = 1 for near twins.
 
 # Registered at top level: a method registered inside test_that() is
 # dropped, by testthat's withr scoping, before the next test runs.
@@ -190,8 +196,10 @@ test_that("compare_models() tells different rows and responses apart in small un
 })
 
 # Sites in metres, each with an exact twin and a twin two ulps away in
-# northing.  At k = 1 the near twin ties with the exact one only through the
-# absolute part of the tolerance, 1e-9 of the coordinates' size.
+# northing.  The near twin tied with the exact one only through an absolute
+# part of the tolerance, 1e-9 of the coordinates' size, which also tied
+# distances up to 1000 m apart at an offset of 1e12 (test-fix-knn-tie-offset.R).
+# Ties now read the distances alone: a distance of 0 ties only with 0.
 .kt_twins <- function(n = 30) {
   lay <- .kt_layer()
   x <- 5e5 + lay$xy[seq_len(n), 1]
@@ -200,15 +208,33 @@ test_that("compare_models() tells different rows and responses apart in small un
   cbind(c(x, x, x), c(y, y, y + 2 * ulp))
 }
 
-test_that("near twins in metres share a slot as they did, and at every scale", {
+# The rule now: squared distances within .TIE_TOL of each other are a tie.
+.kt_new_rule <- function(coords, k) {
+  n <- nrow(coords)
+  r <- sqrt(1 + .TIE_TOL)
+  W <- matrix(0, n, n)
+  for (i in seq_len(n)) {
+    d <- sqrt((coords[, 1L] - coords[i, 1L])^2 + (coords[, 2L] - coords[i, 2L])^2)
+    d[i] <- Inf
+    dk <- sort(d, partial = k)[k]
+    tied <- d <= dk * r & dk <= d * r
+    close <- !tied & d < dk
+    m <- sum(close); t <- sum(tied)
+    W[i, close] <- 1 / k
+    W[i, tied] <- (k - m) / (t * k)
+  }
+  W
+}
+
+test_that("near twins in metres follow the rule on distances alone, at every scale", {
   tw <- .kt_twins()
   n <- nrow(tw) %/% 3L
   for (k in c(1L, 2L, 4L)) {
-    old <- .kt_old_rule(tw, k)
+    want <- .kt_new_rule(tw, k)
     ref <- as.matrix(.build_knn_weights(tw, k = k))
-    expect_identical(ref, old, info = sprintf("twins, k = %d", k))
+    expect_identical(ref, want, info = sprintf("twins, k = %d", k))
     expect_identical(.build_knn_weights(tw, k = k, use_fnn = FALSE, use_matrix = FALSE),
-                     old, info = sprintf("twins, dense, k = %d", k))
+                     want, info = sprintf("twins, dense, k = %d", k))
     for (p in c(-50, -60)) {
       expect_identical(as.matrix(.build_knn_weights(tw * 2^p, k = k)), ref,
                        info = sprintf("twins * 2^%d, k = %d", p, k))
@@ -217,10 +243,14 @@ test_that("near twins in metres share a slot as they did, and at every scale", {
                        ref, info = sprintf("twins * 2^%d, dense, k = %d", p, k))
     }
   }
-  # Row 1 at k = 1: its exact twin and its near twin share the one slot.
+  # Row 1 at k = 1: its exact twin, at distance 0, takes the one slot; the
+  # near twin, 2 ulps away, is the next distance and not a tie with 0.
   W1 <- as.matrix(.build_knn_weights(tw, k = 1))
-  expect_identical(which(W1[1, ] > 0), c(n + 1L, 2L * n + 1L))
-  expect_identical(W1[1, c(n + 1L, 2L * n + 1L)], c(0.5, 0.5))
+  expect_identical(which(W1[1, ] > 0), n + 1L)
+  expect_identical(W1[1, n + 1L], 1)
+  # At k = 2 the exact and the near twin take one slot each, as before.
+  W2 <- as.matrix(.build_knn_weights(tw, k = 2))
+  expect_identical(W2[1, c(n + 1L, 2L * n + 1L)], c(0.5, 0.5))
 })
 
 test_that("rows and responses that differ in their last bit are the same in small units", {

@@ -207,6 +207,11 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
     if (!is.finite(top)) top <- side / 2 * (1 - 1e-9)
     block_sizes <- exp(seq(log(side / 25), log(top),
                            length.out = as.integer(n_sizes)))
+    # exp(log(x)) is not x to the bit.  The bottom rung divides the shorter
+    # side into exactly 25, so its last bits decided between 24 and 25 blocks
+    # and moved with the unit; the ends are set exactly.
+    block_sizes[1L] <- side / 25
+    if (length(block_sizes) > 1L) block_sizes[length(block_sizes)] <- top
   } else {
     # A `units` object passes is.numeric() and then fails the comparison
     # inside the units package with a message that names no argument.
@@ -475,15 +480,18 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
 #' The largest block size whose grid still holds k cells
 #'
 #' The number of cells \code{.block_dims_from_size()} gives,
-#' \code{max(1, floor(w / b)) * max(1, floor(h / b))}, only falls as \code{b}
-#' grows, and changes only at \code{b = w / i} or \code{b = h / j}.  So the
+#' \code{max(1, floor(w / b * (1 + .TIE_TOL))) * max(1, floor(h / b * (1 +
+#' .TIE_TOL)))}, only falls as \code{b}
+#' grows, and changes only just above \code{b = w / i} or \code{b = h / j}
+#' (at \code{w (1 + .TIE_TOL) / i}): a size at a breakpoint, or within
+#' \code{.TIE_TOL} above it, gives \code{i} cells.  So the
 #' largest \code{b <= cap} with at least \code{k} cells is \code{cap} itself or
 #' one of those breakpoints.  Only \code{i} from \code{ceiling(w / cap)} to
 #' \code{max(that, k)} can matter (at \code{b = w / i} there are at least
 #' \code{i} cells, so \code{w / max(i0, k)} always qualifies), and likewise
 #' for \code{j}.  Each candidate is taken a hair (\code{1e-9}) under its
-#' breakpoint, so that \code{floor()} lands on the intended count rather than
-#' one below it.
+#' breakpoint, which lands on the same count and keeps the size returned
+#' below the breakpoint.
 #'
 #' @param bb A bbox.
 #' @param k Required number of cells.

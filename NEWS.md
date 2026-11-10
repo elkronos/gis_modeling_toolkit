@@ -2622,6 +2622,20 @@ old behaviour where there is a way.
   the reductions of its sizes into one warning, and its table gains the
   columns `block_width` and `block_height`.
 
+* **The default ladder of `cv_block_size_sweep()` gave other blocks in
+  another unit.**  Its bottom rung is a twenty-fifth of the shorter side,
+  which that side holds exactly 25 times.  The rung was computed as
+  `exp(log(side / 25))`, a hair above or below it, and the blocks per side
+  as `floor(side / size)`, so the last bits of the unit decided between 24
+  and 25 blocks.  On an 8 x 8 lattice at 250 m the bottom rung's blocks
+  were 72.9 m wide in metres and 70 m in units of 1e-6 m, and
+  `blocks_used` changed with the unit on other layers.  The ladder now
+  starts at `side / 25` and ends at its top exactly.
+  `make_folds(block_size = )`, which builds each rung's grid, now reads a
+  block size within one part in ten million above an extent over a whole
+  number as that number of blocks, called from the sweep or directly.  The
+  bottom rung gives 25 blocks along the shorter side in every unit.
+
 * **`cv_block_size_sweep()` stated its fits wrongly in four texts.**  With
   `block_sizes` supplied, the refusal over `max_fits` advised lowering
   `n_sizes`, which only the default ladder reads; it now advises fewer
@@ -4966,7 +4980,7 @@ old behaviour where there is a way.
   map units on any layer.**  The weights behind `residual_morans_i()`,
   `estimate_sac_range()`, the Moran tests of `determine_optimal_levels()`
   and `resolution_profile()` and the range check of
-  `fit_bayesian_spatial_model()` take two distances as one when they differ
+  `fit_bayesian_spatial_model()` took two distances as one when they differed
   by less than 1e-9 of the coordinates' size, and that size was floored at
   1 map unit.  A layer whose coordinates span less than about 1e-5 map
   units therefore got other neighbours than the same layer in metres, more
@@ -4974,10 +4988,9 @@ old behaviour where there is a way.
   on 120 points in a 5 km square scaled by 2^-50, Moran's I of the
   residuals was -0.008 with p 1 where the layer in metres gives 0.277, and
   `estimate_sac_range()` returned `NA` with "no spatial structure detected
-  at the nearest-neighbour scale" where it finds a range.  Ties are now
-  taken within 1e-9 of the coordinates' size in any unit, so the weights,
-  I, z, p and the range scale with the coordinates.  A layer whose
-  coordinates reach 1 map unit gets the weights it got.  `compare_models()`
+  at the nearest-neighbour scale" where it finds a range.  Ties now read
+  the distances alone (see the next entry), so the weights, I, z, p and the
+  range scale with the coordinates.  `compare_models()`
   had the same floor where it checks that fits with an information
   criterion share their rows, on the coordinates of a layer with no CRS and
   on the response: rows whose coordinates differ by less than 1e-9 units,
@@ -4987,8 +5000,9 @@ old behaviour where there is a way.
   `area_of_applicability()`, `fold_separation()` or `kriging_adequacy()`
   were built on the data had the same floor on a layer with no CRS: folds
   built on other data whose rows sit less than 1e-9 units from this data's
-  rows were applied in silence.  Both checks now read the coordinates, and
-  `compare_models()` the response, at their own size.  The margin of one part in 1e10 of the
+  rows were applied in silence.  Both checks dropped the floor (their
+  margin is now a part of the spread; see the entry on these checks at a
+  large offset).  The margin of one part in 1e10 of the
   coordinates, by which `build_tessellation()` and `cell_values_at()` read
   seeds as the centres a count record holds and
   `assign_features_to_polygons()` reads a point as on the edge between
@@ -4998,6 +5012,46 @@ old behaviour where there is a way.
   drawn around the centres in place of the seeds.  The margin is now one
   part in 1e10 of the coordinates in any unit, as the help of
   `assign_features_to_polygons()` says.
+
+* **The k-nearest-neighbour weights moved with the origin of the
+  coordinates.**  The weights behind `residual_morans_i()`, the residual
+  Moran's I of `compare_models()`, the structure test of
+  `estimate_sac_range()` and `sac_nugget()`, the Moran tests of
+  `determine_optimal_levels()`, `resolution_profile()` and
+  `select_resolution(criterion = "moran_z")`, and the range check of
+  `fit_bayesian_spatial_model()` took two neighbour distances as
+  one when they differed by less than 1e-9 of the largest coordinate: 4 mm
+  at a UTM northing, 1000 m at an offset of 1e12 and 1e6 m at 1e15.  The
+  same points moved by a whole number of map units therefore got other
+  neighbours.  On 80 points 2 km across, each point had 46 to 79 neighbours
+  in place of 8 at an offset of 1e12; at 1e15 every point was every other
+  point's neighbour, Moran's I was exactly -1 / (n - 1), and
+  `estimate_sac_range()` returned `NA` with "no spatial structure detected
+  at the nearest-neighbour scale".  Two distances are now tied when their
+  squares are within one part in ten million of each other, the rule of the
+  package's other neighbour searches, with no term in the size of the
+  coordinates.  The weights, and every I, z and p read from them, are the
+  same at any origin and in any unit wherever the doubles hold the
+  coordinates to better than about one part in 1e8 of the distances
+  between neighbours.  A lattice ties as before.  On a layer in UTM metres,
+  distances less than 4 mm apart but more than that part apart no longer
+  share a slot, and a point a few units in the last place from two
+  co-located points no longer shares their slot at k = 1.
+
+* **The checks that folds and fits describe the same data passed other data
+  at a large offset.**  On a layer with no CRS, the check that `folds`
+  passed to a `cv_*()` function, `area_of_applicability()`,
+  `fold_separation()` or `kriging_adequacy()` were built on the data, and
+  the check by which `compare_models()` keeps AICc or LOOIC only for fits
+  of the same rows, took two locations as one when they differed by less
+  than 1e-9 of the largest coordinate, and `compare_models()` took two
+  responses as one when they differed by less than 1e-10 of the largest
+  response.  At an offset of 1e12 that is 1000 units: folds built on a
+  layer were applied to the same layer moved by 500 units, which offset 0
+  refuses, and a response near 1e12 and the same plus 50 were read as one
+  response.  The margins are now a part of the spread of the values plus
+  eight units in the last place of their size, so they cover the rounding
+  of the values and do not grow with the origin.
 
 * **`fit_gwr_model()` read a predictor or a response at a large offset on
   the rounding of the offset.**  The global least-squares fit the GWR is

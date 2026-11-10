@@ -810,11 +810,14 @@
                         "dataset; rebuild them with make_folds() on this one."),
                  caller), call. = FALSE)
   }
-  # Without a CRS the margin is 1e-9 of the coordinates' size, with no floor
-  # in map units: a floor of 1e-9 units passed folds built on other data on a
-  # layer whose coordinates span less than about 1e-9 units.
+  # Without a CRS the margin is 1e-9 of the coordinates' spread plus their
+  # rounding (.same_values_tol()), with no floor in map units: a floor of
+  # 1e-9 units passed folds built on other data on a layer whose coordinates
+  # span less than about 1e-9 units, and a part of the coordinates' size,
+  # 1000 units at an offset of 1e12, passed folds built on the same layer
+  # moved by 500 units.
   tol <- if (isTRUE(probe$lonlat)) 1e-6
-         else 1e-9 * max(0, abs(c(now$x, now$y)), na.rm = TRUE)
+         else .same_values_tol(now$x, now$y, rel = 1e-9)
   dx  <- abs(probe$x[ok] - now$x[m[ok]])
   dy  <- abs(probe$y[ok] - now$y[m[ok]])
   # An empty or non-finite geometry gives NaN on both sides, and NaN <= tol is
@@ -2767,18 +2770,20 @@
   # at a graph's edge: the k nearest then get 1 / k each, which is what
   # .build_knn_weights() returns.  Ties (a regular grid) go to
   # .build_knn_weights(), whose tie rule does not depend on the order of the
-  # rows.  The locations are distinct by now.
+  # rows.  A tie is the rule of .knn_pairs(): the (k+1)-th squared distance
+  # within .TIE_TOL of the k-th, with no term in the size of the
+  # coordinates, which moved the graphs with their origin.  The locations
+  # are distinct by now.
   nn <- NULL
   if (requireNamespace("FNN", quietly = TRUE) &&
       requireNamespace("Matrix", quietly = TRUE)) {
     kq <- min(max(ks) + 1L, n - 1L)
     nn <- FNN::get.knn(xy, k = kq)
-    nn$tol <- 1e-9 * max(1, max(abs(xy)))
   }
+  tie_r <- sqrt(1 + .TIE_TOL)
   weights_for <- function(k) {
     if (!is.null(nn) && k < ncol(nn$nn.dist) &&
-        !any(nn$nn.dist[, k + 1L] - nn$nn.dist[, k] <=
-               nn$nn.dist[, k] * 1e-9 + nn$tol))
+        !any(nn$nn.dist[, k + 1L] <= nn$nn.dist[, k] * tie_r))
       return(Matrix::sparseMatrix(i = rep(seq_len(n), k),
                                   j = as.integer(nn$nn.index[, seq_len(k)]),
                                   x = 1 / k, dims = c(n, n), repr = "C"))
@@ -3084,7 +3089,13 @@ sac_nugget <- function(x) {
 #' variable is computed on its 2, 4, 8 and 16 nearest neighbours, each
 #' standardised with the moments that fit the variable (those of regression
 #' residuals when \code{predictor_vars} are given), and the smallest
-#' one-sided p-value is multiplied by four.  When that adjusted p-value is
+#' one-sided p-value is multiplied by four.  Neighbours tied at the k-th
+#' distance, those whose squared distances are within one part in ten
+#' million of the k-th's, share its slot's weight equally, as in
+#' \code{\link{residual_morans_i}()}, so the graphs do not depend on the
+#' unit or the origin of the coordinates wherever the doubles hold them to
+#' better than about one part in 1e8 of the distances between neighbours.
+#' When that adjusted p-value is
 #' not below \code{structure_alpha}, the result is \code{NA} with
 #' \code{rejected_reason} \code{"no spatial structure detected at the
 #' nearest-neighbour scale"}, a pure-nugget model and no fitted range.  The
@@ -4914,7 +4925,10 @@ print.sac_range <- function(x, ...) {
 #' Given a bounding box and a minimum block edge length, returns nx/ny
 #' values such that each cell is at least \code{block_size} long on every
 #' axis of the extent that is at least that long; a shorter axis gets one
-#' row or column, whose cells are as long as the extent there.
+#' row or column, whose cells are as long as the extent there.  A cell
+#' shorter than \code{block_size} by no more than \code{.TIE_TOL} of it
+#' counts as that long, so that a size of exactly the extent over a whole
+#' number gives that number of cells in every unit.
 #'
 #' @param bb An sf bbox.
 #' @param block_size Positive numeric minimum block edge length (CRS units).
@@ -4931,8 +4945,11 @@ print.sac_range <- function(x, ...) {
 .block_dims_from_size <- function(bb, block_size) {
   w <- as.numeric(bb["xmax"] - bb["xmin"])
   h <- as.numeric(bb["ymax"] - bb["ymin"])
-  nx <- max(1L, floor(w / block_size))
-  ny <- max(1L, floor(h / block_size))
+  # A quotient within .TIE_TOL below a whole number is that number: a size
+  # of exactly w / i otherwise gave i or i - 1 blocks by the last bits of
+  # the division, which move with the unit of the coordinates.
+  nx <- max(1L, floor(w / block_size * (1 + .TIE_TOL)))
+  ny <- max(1L, floor(h / block_size * (1 + .TIE_TOL)))
   list(nx = nx, ny = ny)
 }
 
@@ -5121,7 +5138,10 @@ print.sac_range <- function(x, ...) {
 #'   precedence over \code{block_nx}/\code{block_ny} and
 #'   \code{block_multiplier}.  When supplied, a whole number of blocks is
 #'   fitted across each axis of the extent: as many as leave every block at
-#'   least this long on that axis.  On an axis at least as long as
+#'   least this long on that axis, a block shorter by no more than one part
+#'   in ten million counting as this long, so that a size of exactly the
+#'   axis over a whole number gives that number of blocks in any unit.  On
+#'   an axis at least as long as
 #'   \code{block_size} the blocks built are therefore from one to just under
 #'   two times this size.  An axis shorter than \code{block_size} cannot
 #'   hold a block that long: a single row or column spans it, and its blocks
@@ -8408,9 +8428,10 @@ make_folds <- function(points_sf, k,
 
 #' The largest block size, below a bound, that gives k blocks holding points
 #'
-#' The grid \code{.block_dims_from_size()} builds changes only at sizes
-#' \code{w / i} and \code{h / j}, so those (a hair under each, down to a
-#' two-hundredth of the extent) are the candidates, largest first.  A
+#' The grid \code{.block_dims_from_size()} builds changes only just above
+#' the sizes \code{w / i} and \code{h / j} (at \code{w (1 + .TIE_TOL) / i}),
+#' so those (a hair under each, down to a two-hundredth of the extent) are
+#' the candidates, largest first.  A
 #' candidate whose grid has at least \code{k} occupied cells is rounded down
 #' to three significant figures, as it will be quoted, and the grid at that
 #' quoted number is then built and counted for real: the size returned is one
