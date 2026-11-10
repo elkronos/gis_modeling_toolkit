@@ -51,6 +51,9 @@
 
 .gcp_quiet <- function(expr) suppressWarnings(suppressMessages(expr))
 
+# ranger, sp, gstat and ggplot2 are in Suggests: each block that reaches one
+# (a forest, a GWR fit, kriging_adequacy(), a plot) skips where it is missing,
+# and the checks that reach none of them sit in blocks of their own.
 .gcp_rf <- function(d, vars = c("x1", "x2"))
   fit_rf_model(d, "y", vars, num_trees = 20, num_threads = 1, seed = 1)
 
@@ -119,21 +122,30 @@ test_that("prep_model_data() reads the points as in sfc_POINT", {
 })
 
 
-test_that("the fits give the sfc_POINT layer's answer", {
+test_that("the forest gives the sfc_POINT layer's answer", {
+  skip_if_not_installed("ranger")
   L <- .gcp_layers()
   # A fit records its run time and its engine's environment, so two fits of
   # one layer are not identical(); what they compute is compared.
   rf_ref  <- .gcp_rf(L$pts)
+  for (d in .gcp_forms()) {
+    r <- .gcp_rf(d)
+    expect_identical(fitted(r), fitted(rf_ref))
+    expect_identical(predict(r, newdata = L$pts), predict(rf_ref, newdata = L$pts))
+    expect_equal(r, rf_ref)
+  }
+})
+
+
+test_that("the GWR fit and its selection give the sfc_POINT layer's answer", {
+  skip_if_not_installed("sp")
+  L <- .gcp_layers()
   gwr_ref <- .gcp_quiet(fit_gwr_model(L$pts, "y", c("x1", "x2"),
                                       bandwidth = 20, adaptive = TRUE))
   sel_ref <- .gcp_quiet(gwr_model_selection(L$pts, "y", c("x1", "x2"),
                                             bandwidth = 20, adaptive = TRUE,
                                             quiet = TRUE))
   for (d in .gcp_forms()) {
-    r <- .gcp_rf(d)
-    expect_identical(fitted(r), fitted(rf_ref))
-    expect_identical(predict(r, newdata = L$pts), predict(rf_ref, newdata = L$pts))
-    expect_equal(r, rf_ref)
     g <- .gcp_quiet(fit_gwr_model(d, "y", c("x1", "x2"), bandwidth = 20,
                                   adaptive = TRUE))
     expect_identical(fitted(g), fitted(gwr_ref))
@@ -170,6 +182,7 @@ test_that("fit_bayesian_spatial_model() hands brms the sfc_POINT layer's data", 
 
 
 test_that("the metrics and the residual Moran's I give the sfc_POINT layer's answer", {
+  skip_if_not_installed("ranger")
   L <- .gcp_layers()
   rf_ref <- .gcp_rf(L$pts)
   mm_ref  <- .gcp_quiet(model_metrics(rf_ref, newdata = L$pts))
@@ -199,6 +212,8 @@ test_that("make_folds() gives the sfc_POINT layer's folds", {
 
 
 test_that("the cross-validations give the sfc_POINT layer's answer", {
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("sp")
   L <- .gcp_layers()
   folds <- make_folds(L$pts, k = 4, method = "block_kfold", seed = 1)
   cvs <- function(d, ...)
@@ -206,25 +221,33 @@ test_that("the cross-validations give the sfc_POINT layer's answer", {
                           seed = 1, ...))
   cvr <- function(d) .gcp_quiet(cv_rf(d, "y", c("x1", "x2"), k = 4, seed = 1,
                                       num_trees = 20, num_threads = 1))
-  cvg <- function(d) .gcp_quiet(cv_gwr(d, "y", c("x1", "x2"), k = 4, seed = 1,
-                                       bandwidth = 20, adaptive = TRUE))
   cmp <- function(d) .gcp_quiet(compare_models_cv(
     d, "y", c("x1", "x2"), models = c("GWR", "RF"), k = 4, seed = 1,
     gwr_args = list(bandwidth = 20, adaptive = TRUE),
     rf_args = list(num_trees = 20, num_threads = 1), quiet = TRUE))
   ref <- list(cvs(L$pts, k = 4), cvs(L$pts, folds = folds), cvr(L$pts),
-              cvg(L$pts), cmp(L$pts))
+              cmp(L$pts))
   for (d in .gcp_forms()) {
     expect_identical(cvs(d, k = 4), ref[[1]])
     expect_identical(cvs(d, folds = folds), ref[[2]])
     expect_identical(cvr(d), ref[[3]])
-    expect_identical(cvg(d), ref[[4]])
-    expect_identical(cmp(d), ref[[5]])
+    expect_identical(cmp(d), ref[[4]])
   }
 })
 
 
+test_that("cv_gwr() gives the sfc_POINT layer's answer", {
+  skip_if_not_installed("sp")
+  L <- .gcp_layers()
+  cvg <- function(d) .gcp_quiet(cv_gwr(d, "y", c("x1", "x2"), k = 4, seed = 1,
+                                       bandwidth = 20, adaptive = TRUE))
+  ref <- cvg(L$pts)
+  for (d in .gcp_forms()) expect_identical(cvg(d), ref)
+})
+
+
 test_that("select_features_forward() selects as on the sfc_POINT layer", {
+  skip_if_not_installed("ranger")
   L <- .gcp_layers()
   sff <- function(d, ...) .gcp_quiet(select_features_forward(
     d, "y", c("x1", "x2", "x3"), fit_fn = function(tr, vars) .gcp_rf(tr, vars),
@@ -240,6 +263,7 @@ test_that("select_features_forward() selects as on the sfc_POINT layer", {
 
 
 test_that("cv_block_size_sweep() gives the sfc_POINT layer's sweep", {
+  skip_if_not_installed("ranger")
   L <- .gcp_layers()
   sw <- function(d) .gcp_quiet(cv_block_size_sweep(
     d, "y", c("x1", "x2"), fit_fn = function(tr) .gcp_rf(tr),
@@ -267,6 +291,7 @@ test_that("area_of_applicability() reads either layer as in sfc_POINT", {
 
 
 test_that("area_of_applicability() reads either layer for a forest fitted on its coordinates", {
+  skip_if_not_installed("ranger")
   L <- .gcp_layers()
   # A forest fitted with include_coords = TRUE: area_of_applicability()
   # reads the coordinates as the forest's predictors ..x and ..y
@@ -341,38 +366,58 @@ test_that("a layer that mixes points and a polygon is read as before", {
 })
 
 
-test_that("a layer in an sfc_GEOMETRY column is moved to another CRS as in sfc_POINT", {
+# The same 60 points in degrees, as sf::st_sfc() builds them (sfc_POINT)
+# and in the two sfc_GEOMETRY forms.
+.gcp_ll <- function() {
   L <- .gcp_layers()
-  # The same 60 points in degrees.  sf::st_transform() stops on the column
-  # sf::st_cast() returns, so every move of a caller's layer
-  # (.transform_keep_unlocated()) casts it first, and the layer comes back
-  # in sfc_POINT.
   ll <- sf::st_transform(L$pts, 4326)
   ll_cast <- sf::st_cast(ll, "GEOMETRY")
   gl <- sf::st_geometry(ll_cast)
   attr(gl, "classes") <- rep("POINT", length(gl))
   ll_classed <- ll_cast
   suppressWarnings(sf::st_geometry(ll_classed) <- gl)
-  forms <- list(ll_cast, ll_classed)
-  rf_ll <- .gcp_rf(ll)
-  rf_utm <- .gcp_rf(L$pts)
+  list(ll = ll, forms = list(ll_cast, ll_classed))
+}
+
+
+test_that("a layer in an sfc_GEOMETRY column is moved to another CRS as in sfc_POINT", {
+  L <- .gcp_layers()
+  # sf::st_transform() stops on the column sf::st_cast() returns, so every
+  # move of a caller's layer (.transform_keep_unlocated()) casts it first,
+  # and the layer comes back in sfc_POINT.  These moves need no Suggests
+  # package; the forests below need ranger.
+  G <- .gcp_ll()
+  ll <- G$ll
   folds <- make_folds(L$pts, k = 4, method = "block_kfold", seed = 1)
   ref <- list(
     ep    = .gcp_quiet(ensure_projected(ll)),
     ep_t  = .gcp_quiet(ensure_projected(ll, target_crs = 32616)),
     hc    = .gcp_quiet(harmonize_crs(ll, L$pts, prefer = "b")),
-    mm    = .gcp_quiet(model_metrics(rf_ll, newdata = ll)),
-    mm_u  = .gcp_quiet(model_metrics(rf_utm, newdata = ll)),
-    pr    = .gcp_quiet(predict(rf_utm, newdata = ll)),
     fs    = .gcp_quiet(fold_separation(folds, ll)))
-  for (d in forms) {
+  for (d in G$forms) {
     expect_identical(.gcp_quiet(ensure_projected(d)), ref$ep)
     expect_identical(.gcp_quiet(ensure_projected(d, target_crs = 32616)), ref$ep_t)
     expect_identical(.gcp_quiet(harmonize_crs(d, L$pts, prefer = "b")), ref$hc)
+    expect_identical(.gcp_quiet(fold_separation(folds, d)), ref$fs)
+  }
+})
+
+
+test_that("a forest reads a layer in another CRS in an sfc_GEOMETRY column as in sfc_POINT", {
+  skip_if_not_installed("ranger")
+  L <- .gcp_layers()
+  G <- .gcp_ll()
+  ll <- G$ll
+  rf_ll <- .gcp_rf(ll)
+  rf_utm <- .gcp_rf(L$pts)
+  ref <- list(
+    mm    = .gcp_quiet(model_metrics(rf_ll, newdata = ll)),
+    mm_u  = .gcp_quiet(model_metrics(rf_utm, newdata = ll)),
+    pr    = .gcp_quiet(predict(rf_utm, newdata = ll)))
+  for (d in G$forms) {
     expect_identical(.gcp_quiet(model_metrics(rf_ll, newdata = d)), ref$mm)
     expect_identical(.gcp_quiet(model_metrics(rf_utm, newdata = d)), ref$mm_u)
     expect_identical(.gcp_quiet(predict(rf_utm, newdata = d)), ref$pr)
-    expect_identical(.gcp_quiet(fold_separation(folds, d)), ref$fs)
   }
 })
 
@@ -514,25 +559,34 @@ test_that("the k-means seeders read the points as in sfc_POINT", {
 })
 
 
-test_that("predict_surface() reads `grid` and `covariates` as in sfc_POINT", {
+# predict_surface() on the layer and on its grid in each sfc_GEOMETRY form.
+.gcp_check_surface <- function(fit) {
   L <- .gcp_layers()
   C <- .gcp_cells()
-  rf  <- .gcp_rf(L$pts)
-  gwr <- .gcp_quiet(fit_gwr_model(L$pts, "y", c("x1", "x2"), bandwidth = 20,
-                                  adaptive = TRUE))
-  ps <- function(fit, g, cv) .gcp_quiet(predict_surface(fit, grid = g, covariates = cv))
-  for (fit in list(rf, gwr)) {
-    ref <- ps(fit, C$locs, L$pts)
-    for (d in .gcp_forms()) expect_identical(ps(fit, C$locs, d), ref)
-    # The surface is the grid's rows as given, in their own class; what is
-    # predicted on them is the sfc_POINT grid's.
-    for (g in .gcp_forms_of(C$locs)) {
-      got <- ps(fit, g, L$pts)
-      expect_identical(sf::st_geometry(got), sf::st_geometry(g))
-      sf::st_geometry(got) <- sf::st_geometry(C$locs)
-      expect_identical(got, ref)
-    }
+  ps <- function(g, cv) .gcp_quiet(predict_surface(fit, grid = g, covariates = cv))
+  ref <- ps(C$locs, L$pts)
+  for (d in .gcp_forms()) expect_identical(ps(C$locs, d), ref)
+  # The surface is the grid's rows as given, in their own class; what is
+  # predicted on them is the sfc_POINT grid's.
+  for (g in .gcp_forms_of(C$locs)) {
+    got <- ps(g, L$pts)
+    expect_identical(sf::st_geometry(got), sf::st_geometry(g))
+    sf::st_geometry(got) <- sf::st_geometry(C$locs)
+    expect_identical(got, ref)
   }
+}
+
+
+test_that("predict_surface() reads `grid` and `covariates` as in sfc_POINT for a forest", {
+  skip_if_not_installed("ranger")
+  .gcp_check_surface(.gcp_rf(.gcp_layers()$pts))
+})
+
+
+test_that("predict_surface() reads `grid` and `covariates` as in sfc_POINT for a GWR fit", {
+  skip_if_not_installed("sp")
+  .gcp_check_surface(.gcp_quiet(fit_gwr_model(.gcp_layers()$pts, "y", c("x1", "x2"),
+                                              bandwidth = 20, adaptive = TRUE)))
 })
 
 
@@ -599,20 +653,37 @@ test_that("the maps draw the points as in sfc_POINT", {
     expect_identical(pf(d), ref[[5]])
     expect_identical(pf(L$pts, boundary = d), ref[[6]])
   }
-  # A fit whose layer is in that class, as a custom fit may carry it.
+})
+
+
+# A fit whose layer is in that class, as a custom fit may carry it.
+.gcp_plot_fit <- function(fit, ...) .gcp_quiet(.gcp_built(plot(fit, ...)))
+.gcp_with_layer <- function(fit, d) {
+  fit$data_sf <- d
+  fit
+}
+
+
+test_that("plot() draws a forest whose layer is in an sfc_GEOMETRY column as in sfc_POINT", {
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("ranger")
+  L <- .gcp_layers()
   rf  <- .gcp_rf(L$pts)
+  ref <- .gcp_plot_fit(rf)
+  for (d in .gcp_forms())
+    expect_identical(.gcp_plot_fit(.gcp_with_layer(rf, d)), ref)
+})
+
+
+test_that("plot() draws a GWR fit whose layer is in an sfc_GEOMETRY column as in sfc_POINT", {
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("sp")
+  L <- .gcp_layers()
   gwr <- .gcp_quiet(fit_gwr_model(L$pts, "y", c("x1", "x2"), bandwidth = 20,
                                   adaptive = TRUE))
-  pl <- function(fit, ...) .gcp_quiet(.gcp_built(plot(fit, ...)))
-  ref_f <- list(pl(rf), pl(gwr, type = "coefficients"))
-  for (d in .gcp_forms()) {
-    rf_d <- rf
-    rf_d$data_sf <- d
-    gwr_d <- gwr
-    gwr_d$data_sf <- d
-    expect_identical(pl(rf_d), ref_f[[1]])
-    expect_identical(pl(gwr_d, type = "coefficients"), ref_f[[2]])
-  }
+  ref <- .gcp_plot_fit(gwr, type = "coefficients")
+  for (d in .gcp_forms())
+    expect_identical(.gcp_plot_fit(.gcp_with_layer(gwr, d), type = "coefficients"), ref)
 })
 
 
@@ -627,26 +698,32 @@ test_that("create_grid_polygons_cached() refuses such points as `boundary` as in
 })
 
 
+# The 60 points as MULTIPOINT features, in sfc_MULTIPOINT and in the two
+# sfc_GEOMETRY forms.
+.gcp_multi <- function() {
+  M <- sf::st_cast(.gcp_layers()$pts, "MULTIPOINT")
+  list(M = M, forms = .gcp_forms_typed(M, "MULTIPOINT"))
+}
+.gcp_afp <- function(d)
+  .gcp_quiet(assign_features_to_polygons(d, .gcp_cells()$cells, quiet = TRUE))
+
+
 test_that("MULTIPOINT features in an sfc_GEOMETRY column are read as in sfc_MULTIPOINT", {
-  L <- .gcp_layers()
   C <- .gcp_cells()
-  M <- sf::st_cast(L$pts, "MULTIPOINT")
-  forms <- .gcp_forms_typed(M, "MULTIPOINT")
+  P <- .gcp_multi()
+  M <- P$M
+  forms <- P$forms
   for (d in forms) {
     expect_s3_class(sf::st_geometry(d), "sfc_GEOMETRY")
     expect_true(all(sf::st_geometry_type(d, by_geometry = TRUE) == "MULTIPOINT"))
   }
   cvp <- function(d, ...) .gcp_quiet(create_voronoi_polygons(d, quiet = TRUE, ...))
   bt  <- function(d, ...) .gcp_quiet(build_tessellation(d, quiet = TRUE, ...))
-  afp <- function(d) .gcp_quiet(assign_features_to_polygons(d, C$cells, quiet = TRUE))
-  sbc <- function(d) .gcp_quiet(summarize_by_cell(afp(d), "y", cells_sf = C$cells))
-  ka  <- function(d) .gcp_quiet(kriging_adequacy(afp(d), "y", C$cells))
-  rf  <- .gcp_rf(L$pts)
-  ps  <- function(d) .gcp_quiet(predict_surface(rf, grid = C$locs, covariates = d))
+  sbc <- function(d) .gcp_quiet(summarize_by_cell(.gcp_afp(d), "y", cells_sf = C$cells))
   ref <- list(cvp(M), cvp(M, boundary = C$boundary), cvp(M, keep_duplicates = TRUE),
               bt(M), bt(M, method = "triangles"),
               bt(M, method = "triangles", keep_duplicates = TRUE),
-              afp(M), sbc(M), ka(M), ps(M))
+              .gcp_afp(M), sbc(M))
   for (d in forms) {
     expect_identical(cvp(d), ref[[1]])
     expect_identical(cvp(d, boundary = C$boundary), ref[[2]])
@@ -654,11 +731,31 @@ test_that("MULTIPOINT features in an sfc_GEOMETRY column are read as in sfc_MULT
     expect_identical(bt(d), ref[[4]])
     expect_identical(bt(d, method = "triangles"), ref[[5]])
     expect_identical(bt(d, method = "triangles", keep_duplicates = TRUE), ref[[6]])
-    expect_identical(afp(d), ref[[7]])
+    expect_identical(.gcp_afp(d), ref[[7]])
     expect_identical(sbc(d), ref[[8]])
-    expect_identical(ka(d), ref[[9]])
-    expect_identical(ps(d), ref[[10]])
   }
+})
+
+
+test_that("kriging_adequacy() reads MULTIPOINT features in an sfc_GEOMETRY column as in sfc_MULTIPOINT", {
+  skip_if_not_installed("gstat")
+  C <- .gcp_cells()
+  P <- .gcp_multi()
+  ka  <- function(d) .gcp_quiet(kriging_adequacy(.gcp_afp(d), "y", C$cells))
+  ref <- ka(P$M)
+  for (d in P$forms) expect_identical(ka(d), ref)
+})
+
+
+test_that("predict_surface() reads MULTIPOINT covariates in an sfc_GEOMETRY column as in sfc_MULTIPOINT", {
+  skip_if_not_installed("ranger")
+  L <- .gcp_layers()
+  C <- .gcp_cells()
+  P <- .gcp_multi()
+  rf  <- .gcp_rf(L$pts)
+  ps  <- function(d) .gcp_quiet(predict_surface(rf, grid = C$locs, covariates = d))
+  ref <- ps(P$M)
+  for (d in P$forms) expect_identical(ps(d), ref)
 })
 
 

@@ -670,8 +670,11 @@ test_that("residual_morans_i() returns its weights, the kurtosis, the design ran
   expect_lt(as.numeric(object.size(lite)), as.numeric(object.size(mi)) / 4)
   expect_identical(lite$weights_summary[c("n", "storage", "neighbours")],
                    mi$weights_summary[c("n", "storage", "neighbours")])
-  expect_true(all(abs(Matrix::rowSums(mi$weights) - 1) < 1e-8) ||
-              all(abs(rowSums(as.matrix(mi$weights)) - 1) < 1e-8))
+  # The weights are a sparse Matrix where Matrix is installed and a base
+  # matrix where it is not (Matrix is in Suggests).
+  rs <- if (inherits(mi$weights, "Matrix")) Matrix::rowSums(mi$weights) else
+    rowSums(mi$weights)
+  expect_true(all(abs(rs - 1) < 1e-8))
   e <- stats::residuals(fit); ec <- e - mean(e)
   expect_equal(mi$kurtosis, mean(ec^4) / mean(ec^2)^2)
   # OLS residuals on the rebuilt design: the residual null, exact, rank 2.

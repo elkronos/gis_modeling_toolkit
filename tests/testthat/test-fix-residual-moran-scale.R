@@ -276,6 +276,7 @@ test_that("a GWR at a global window keeps the residual null with a predictor at 
 
 
 test_that("a backend that regressed the raw columns passes on 10,000 rows", {
+  skip_if_not_installed("Matrix")
   # lm() leaves rounding on the raw columns that grows with the rows: 18 to
   # 30 eps times the size of the fit's terms on 10,000 rows at a response
   # offset of 1e6 to 1e10, above the bound of a regression's rounding.

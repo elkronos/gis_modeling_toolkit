@@ -29,7 +29,17 @@
                coords = c("x", "y"), crs = 4326)
 
 # Run `code` in a fresh R process that loads this same copy of spatialkit,
-# and return its exit status, its output and what it saved as `res`.
+# and return its exit status, its output, what it saved as `res`, and the
+# steps it reached.  Before each top-level expression of its script the
+# child appends that expression's text to a progress file, so a child that
+# dies without output (on Windows an access violation ends it with status 5,
+# the low bits of 0xC0000005) still names the call it died in.
+#
+# R CMD check points R_TESTS at a startup file relative to the tests
+# directory, which the child would fail to source, so it is cleared for the
+# child.  It is cleared in this process around system2() and not through
+# system2(env =), since on Windows system2() pastes `env` into the command
+# line.
 .cpr_child <- function(code) {
   ns_path   <- getNamespaceInfo(asNamespace("spatialkit"), "path")
   installed <- file.exists(file.path(ns_path, "Meta", "package.rds"))
@@ -39,33 +49,54 @@
   } else {
     sprintf("suppressMessages(pkgload::load_all(%s, quiet = TRUE))", deparse(ns_path))
   }
-  script <- tempfile(fileext = ".R")
-  out    <- tempfile(fileext = ".rds")
-  on.exit(unlink(c(script, out)), add = TRUE)
+  script   <- tempfile(fileext = ".R")
+  progress <- tempfile(fileext = ".txt")
+  out      <- tempfile(fileext = ".rds")
+  on.exit(unlink(c(script, progress, out)), add = TRUE)
+  steps <- parse(text = c(load_line,
+                          "suppressMessages(sf::sf_use_s2(TRUE))",
+                          "q <- function(e) suppressWarnings(suppressMessages(e))",
+                          "try_ <- function(expr) tryCatch(expr, error = function(e) e)",
+                          "line <- sf::st_sf(v = 1, geometry = sf::st_sfc(",
+                          "  sf::st_linestring(rbind(c(0, 0), c(180, 0))), crs = 4326))",
+                          "res <- list()",
+                          code,
+                          sprintf("saveRDS(res, %s)", deparse(out))),
+                 keep.source = TRUE)
+  src  <- lapply(attr(steps, "srcref"), as.character)
+  text <- vapply(src, function(l) paste(trimws(l), collapse = " "), "")
+  # Each expression stays at the top level of the script, as written, so
+  # that what it sets up (a mocked binding among them) lasts to the end.
+  # cat() to a file name opens, writes and closes the file, so each line is
+  # on disk before its expression runs.
   writeLines(c(sprintf(".libPaths(%s)", paste(deparse(.libPaths()), collapse = "")),
-               load_line,
-               "suppressMessages(sf::sf_use_s2(TRUE))",
-               "q <- function(e) suppressWarnings(suppressMessages(e))",
-               "try_ <- function(expr) tryCatch(expr, error = function(e) e)",
-               "line <- sf::st_sf(v = 1, geometry = sf::st_sfc(",
-               "  sf::st_linestring(rbind(c(0, 0), c(180, 0))), crs = 4326))",
-               "res <- list()",
-               code,
-               sprintf("saveRDS(res, %s)", deparse(out))),
+               unlist(Map(function(t, l) c(
+                 sprintf("cat(%s, file = %s, append = TRUE)", deparse(paste0(t, "\n")),
+                         deparse(progress)), l), text, src))),
              script)
+  withr::local_envvar(c(R_TESTS = ""))
   output <- suppressWarnings(system2(file.path(R.home("bin"), "Rscript"),
                                      c("--vanilla", shQuote(script)),
-                                     stdout = TRUE, stderr = TRUE, env = "R_TESTS="))
+                                     stdout = TRUE, stderr = TRUE))
   status <- attr(output, "status")
-  list(status = if (is.null(status)) 0L else as.integer(status),
-       output = output,
-       res    = if (file.exists(out)) readRDS(out) else NULL)
+  list(status   = if (is.null(status)) 0L else as.integer(status),
+       output   = output,
+       res      = if (file.exists(out)) readRDS(out) else NULL,
+       progress = if (file.exists(progress)) readLines(progress, warn = FALSE) else character())
+}
+# What a failure of the child says: its status, also in hexadecimal (on
+# Windows only the low 16 bits of an exit code reach system2()), the last
+# step it reached, and the end of its output.
+.cpr_report <- function(child) {
+  last <- if (length(child$progress)) utils::tail(child$progress, 1L) else "(none)"
+  paste0("child R exit status ", child$status,
+         if (!is.na(child$status)) sprintf(" (0x%X)", child$status),
+         "; last step reached: ", last, "; output:\n",
+         paste(utils::tail(child$output, 15L), collapse = "\n"))
 }
 .cpr_expect_ran <- function(child) {
-  expect_identical(child$status, 0L,
-                   label = paste0("child R exit status; output:\n",
-                                  paste(utils::tail(child$output, 15L), collapse = "\n")))
-  expect_false(is.null(child$res))
+  expect_identical(child$status, 0L, label = .cpr_report(child))
+  expect_false(is.null(child$res), label = .cpr_report(child))
 }
 .cpr_xy <- function(p) unname(sf::st_coordinates(p)[1L, 1:2])
 
@@ -417,4 +448,51 @@ test_that("?ensure_projected and ?coerce_to_points state the placement rule", {
   cp <- gsub("\\s+", " ", rd("coerce_to_points"))
   expect_match(cp, "site = \"projection\"", fixed = TRUE)
   expect_match(cp, "tmp_project = FALSE", fixed = TRUE)
+})
+
+test_that("the child runner clears R_TESTS without system2(env =) and names the step a child ended in", {
+  skip_on_cran()
+  # system2() is called without `env`, which Windows pastes into the command
+  # line.
+  sys2 <- list()
+  walk <- function(e) if (is.call(e)) {
+    if (identical(e[[1L]], quote(system2))) sys2[[length(sys2) + 1L]] <<- e
+    args <- as.list(e)[-1L]
+    for (i in seq_along(args)) if (!identical(args[[i]], quote(expr = ))) walk(args[[i]])
+  }
+  walk(body(.cpr_child))
+  expect_length(sys2, 1L)
+  expect_false("env" %in% names(sys2[[1L]]))
+  # A startup file R CMD check would name in R_TESTS is not sourced by the
+  # child, and this process keeps its own R_TESTS.
+  withr::local_envvar(c(R_TESTS = file.path(tempdir(), "no-such-startup-file.R")))
+  child <- .cpr_child(c("res$a <- 1", "res$tests <- Sys.getenv('R_TESTS')"))
+  .cpr_expect_ran(child)
+  expect_identical(child$res, list(a = 1, tests = ""))
+  expect_identical(Sys.getenv("R_TESTS"), file.path(tempdir(), "no-such-startup-file.R"))
+  # Each step is on file before it runs, a step over several lines on one.
+  expect_true(all(c("res$a <- 1", "res$tests <- Sys.getenv('R_TESTS')",
+                    "line <- sf::st_sf(v = 1, geometry = sf::st_sfc( sf::st_linestring(rbind(c(0, 0), c(180, 0))), crs = 4326))")
+                  %in% child$progress))
+  expect_match(utils::tail(child$progress, 1L), "^saveRDS\\(res, ")
+  # A child that ends with status 5 and no output: the report gives the
+  # status, also in hexadecimal, and the step it ended in.
+  dead <- .cpr_child(c("res$a <- 1", "quit(save = 'no', status = 5L)", "res$b <- 2"))
+  expect_identical(dead$status, 5L)
+  expect_null(dead$res)
+  expect_identical(utils::tail(dead$progress, 1L), "quit(save = 'no', status = 5L)")
+  expect_match(.cpr_report(dead),
+               "child R exit status 5 (0x5); last step reached: quit(save = 'no', status = 5L); output:",
+               fixed = TRUE)
+  # .cpr_expect_ran() fails on that child, and each of its failures names
+  # the status and the step.  The failures are caught here and not reported.
+  msgs <- character()
+  withCallingHandlers(.cpr_expect_ran(dead), expectation = function(e) {
+    if (inherits(e, "expectation_failure")) msgs <<- c(msgs, conditionMessage(e))
+    invokeRestart("muffle_expectation")
+  })
+  expect_length(msgs, 2L)
+  for (m in msgs)
+    expect_match(m, "child R exit status 5 (0x5); last step reached: quit(save = 'no', status = 5L)",
+                 fixed = TRUE)
 })

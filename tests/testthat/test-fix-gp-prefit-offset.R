@@ -88,6 +88,7 @@ test_that("a predictor or a response at an offset gives the Moran's I of the sam
 })
 
 test_that("the pre-fit check's status and tests do not move with a column's origin (BUG-94)", {
+  skip_if_not_installed("gstat")
   # A layer whose variogram range (about 1,435) is below the floor (3,000).
   L <- .fgpo_layer(seed = 5, wave = c(300, 300))
   chk <- function(p, z) {
@@ -163,6 +164,7 @@ test_that("columns below the centring gate are tested as before, to the last bit
 }
 
 test_that("the residuals of an exact fit give no Moran test, at any scale (BUG-92)", {
+  skip_if_not_installed("gstat")
   E <- .fgpo_exact()
   X <- cbind(w = E$w, w2 = E$w2)
   for (i in c(1:20, 384)) {
@@ -229,6 +231,7 @@ test_that("an exact fit at an offset, or with terms larger than the response, gi
 
 test_that("the log says nothing about autocorrelation of an exact fit's rounding (BUG-92)", {
   skip_if_not_installed("brms")
+  skip_if_not_installed("gstat")
   E <- .fgpo_exact()
   cf <- E$cfs[384, ]
   logged <- capture_spatialkit_log(

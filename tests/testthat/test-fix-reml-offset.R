@@ -33,6 +33,7 @@
 
 test_that("REML detrending on a predictor at a large offset gives the fit of the predictor at 0", {
   skip_if_not_installed("nlme")
+  skip_if_not_installed("gstat")
   lay <- .ro_layer()
   d <- lay$sf; d$p <- lay$wq
   ref <- .ro_run(estimate_sac_range(d, "z", predictor_vars = "p", detrend = "reml",
@@ -59,6 +60,7 @@ test_that("REML detrending on a predictor at a large offset gives the fit of the
 })
 
 test_that("the REML fit is given predictors at an offset about their centres, and the rest as they are", {
+  skip_if_not_installed("gstat")
   lay <- .ro_layer()
   d <- lay$sf
   seen <- NULL
@@ -85,6 +87,7 @@ test_that("the REML fit is given predictors at an offset about their centres, an
 })
 
 test_that("an exact REML fit on a northing fitted about its centre is still constant", {
+  skip_if_not_installed("gstat")
   # The northing 4.5e6 plus a span of 4,000 is centred before the REML fit,
   # and a response computed from it carries the rounding of 4.317 times
   # 4.5e6: the test for an exact fit reads the terms of the predictor as
@@ -143,6 +146,7 @@ test_that("an exact REML fit on a northing fitted about its centre is still cons
 })
 
 test_that("REML detrending of a response at a large offset gives the fit of the response at 0", {
+  skip_if_not_installed("gstat")
   # gls() failed on a response at 1e8 plus a spread of about 2 as it did on
   # such a predictor, and moved in the fifth digit at 1e7.  The response is
   # stored at 1e12, so that every offset below holds the same values.
@@ -213,6 +217,7 @@ test_that("REML detrending of a response at a large offset gives the fit of the 
 
 test_that("the REML subsample of a lattice is the same rows after a move of the origin", {
   skip_if_not_installed("nlme")
+  skip_if_not_installed("gstat")
   L <- .ro_lattice()
   xy <- lapply(L, function(l) sf::st_coordinates(l))
   # The exact order of the moved lattice is not that of the lattice, so the
@@ -283,6 +288,7 @@ test_that(".reml_trend() orders a lattice's rows by columns, and other layers as
   "+datum=NAD83 +units=m +no_defs")))
 
 test_that("an identified REML range on a lattice is the same after a move of the origin", {
+  skip_if_not_installed("gstat")
   # Test 4's range is refused as NA in both frames; here it is a number.
   skip_if_not_installed("nlme")
   m <- .ro_grid(40, 30); m$zz <- m$z2 + 0.5 * m$w
@@ -326,6 +332,7 @@ test_that("the one-row-a-location draw of a lattice with repeat visits takes the
 })
 
 test_that("the n_max subsample of a lattice is the same rows after a move of the origin", {
+  skip_if_not_installed("gstat")
   # The variogram's own subsample, drawn by position from the rows in the
   # order of their coordinates.
   m <- .ro_grid(40, 30)

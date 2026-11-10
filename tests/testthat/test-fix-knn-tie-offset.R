@@ -162,6 +162,9 @@ test_that("residual_morans_i() is the same at 0, 1e12 and 1e15", {
 })
 
 test_that("estimate_sac_range() reads the same structure at 0 and 1e12", {
+  # Without gstat, estimate_sac_range() returns NA before its structure
+  # test (gstat is in Suggests).
+  skip_if_not_installed("gstat")
   L <- .ko_points()
   run <- function(xy) suppressWarnings(suppressMessages(
     estimate_sac_range(.ko_sf(L, xy), "y")))

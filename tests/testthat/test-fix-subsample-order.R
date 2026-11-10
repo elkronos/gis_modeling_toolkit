@@ -6,7 +6,18 @@
 # normalizer_max_n, the distances of gp_lengthscale_bounds() above max_n,
 # and Moran's I at the GP basis floor of the pre-fit check above max_n.
 # Under each cap nothing is drawn, and the results are those the package
-# gave before (the figures below were taken on the code before the change).
+# gave before (the figures below were taken on the code before the change)
+# and those of the same call with no cap at all.
+#
+# The responses of the figures are drawn through chol() of a dense
+# covariance matrix (.fso_layer()), whose last bits follow the BLAS and
+# LAPACK in use and the CPU's fused multiply-add, and the design effect
+# passes through a variogram fit: GitHub's x86-64 runners give figures up to
+# about 1.4e-8 relative off those taken on macOS arm64.  So each figure read
+# off a response is held within 1e-6 relative, and each result is held
+# exactly to the uncapped call in the same process.  The bounds of
+# gp_lengthscale_bounds() read the coordinates alone (runif()) and keep their
+# tolerance.
 
 .fso_quiet <- function(expr) suppressWarnings(suppressMessages(expr))
 
@@ -28,6 +39,7 @@
 }
 
 test_that("the variogram design effect of a cell above deff_max_n does not depend on the row order (BUG-116)", {
+  skip_if_not_installed("gstat")
   d <- .fso_layer(1500, 5000, 800, seed = 7)
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32617)
   pts$cell_id <- 1L
@@ -50,21 +62,27 @@ test_that("the variogram design effect of a cell above deff_max_n does not depen
 })
 
 test_that("summarize_by_cell(deff = 'variogram') gives what it gave on cells under deff_max_n (BUG-116)", {
+  skip_if_not_installed("gstat")
   d <- .fso_layer(300, 3000, 600, seed = 3)
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32617)
   pts$cell_id <- rep(1:2, each = 150)
-  r <- sf::st_drop_geometry(.fso_quiet(summarize_by_cell(
-    pts, "z", id_col = "cell_id", deff = "variogram", estimate = "mean")))
-  r <- r[order(r$cell_id), ]
-  # The field is drawn through chol() of a dense covariance matrix
-  # (.fso_layer()), whose last bits follow the BLAS and LAPACK in use, and
-  # the variogram fit carries them into the design effect: Linux x86-64 and
-  # macOS arm64 differ by up to 1.4e-11 relative here.  So the figures are
-  # compared within 1e-9 relative.
+  sbc <- function(...) {
+    r <- sf::st_drop_geometry(.fso_quiet(summarize_by_cell(
+      pts, "z", id_col = "cell_id", deff = "variogram", estimate = "mean", ...)))
+    r[order(r$cell_id), ]
+  }
+  r <- sbc()
+  # Each cell holds 150 rows, under the default deff_max_n of 500: the
+  # result is that of a cap no cell reaches, but for the cap it records.
+  u <- sbc(deff_max_n = .Machine$integer.max)
+  expect_equal(attr(r, "deff_applied")$max_n, 500)
+  attr(u, "deff_applied")$max_n <- attr(r, "deff_applied")$max_n
+  expect_identical(r, u)
+  # The figures within 1e-6 relative: chol() and the variogram fit (above).
   expect_equal(r$..se_resp_z, c(0.28584766841440995, 0.27506304572341911),
-               tolerance = 1e-9)
+               tolerance = 1e-6)
   expect_equal(r$cell_weight, c(8.8204054172786872, 8.8864136640242126),
-               tolerance = 1e-9)
+               tolerance = 1e-6)
 })
 
 test_that("the DI normaliser above normalizer_max_n does not depend on the order of the training rows (BUG-117)", {
@@ -95,11 +113,22 @@ test_that("the DI normaliser above normalizer_max_n does not depend on the order
 test_that("area_of_applicability() gives what it gave under normalizer_max_n (BUG-117)", {
   d   <- .fso_layer(300, 3000, 600, seed = 3)
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32617)
-  r <- .fso_quiet(area_of_applicability(pts[201:300, ], train_sf = pts[1:200, ],
-                                        predictor_vars = c("w", "z"), coords = "yes"))
-  expect_equal(r$normalizer, 1.759075277957445, tolerance = 1e-12)
-  expect_equal(r$threshold, 0.19877958966738746, tolerance = 1e-12)
-  expect_equal(r$location$normalizer, 1549.3091158202399, tolerance = 1e-12)
+  aoa <- function(...) .fso_quiet(area_of_applicability(
+    pts[201:300, ], train_sf = pts[1:200, ], predictor_vars = c("w", "z"),
+    coords = "yes", ...))
+  r <- aoa()
+  # 200 training rows, under the default normalizer_max_n of 5000: what is
+  # computed is that of no cap.
+  u <- aoa(normalizer_max_n = Inf)
+  expect_identical(r$normalizer, u$normalizer)
+  expect_identical(r$threshold, u$threshold)
+  expect_identical(r$location$normalizer, u$location$normalizer)
+  expect_identical(r$aoa, u$aoa)
+  # The figures within 1e-6 relative: the predictor z comes through chol()
+  # (above).
+  expect_equal(r$normalizer, 1.759075277957445, tolerance = 1e-6)
+  expect_equal(r$threshold, 0.19877958966738746, tolerance = 1e-6)
+  expect_equal(r$location$normalizer, 1549.3091158202399, tolerance = 1e-6)
 })
 
 test_that("gp_lengthscale_bounds() above max_n does not depend on the row order (BUG-118)", {
@@ -187,9 +216,14 @@ test_that("Moran's I at the basis floor is what it was under max_n (BUG-119)", {
   d  <- .fso_layer(600, 3000, 300, seed = 4)
   xy <- as.matrix(d[, c("x", "y")])
   r  <- spatialkit:::.gp_floor_moran(xy, d$z, NULL, floor = 400)
-  expect_equal(c(r$I, r$z, r$n_pairs),
-               c(0.16499522067636652, 15.714371587441171, 8407),
-               tolerance = 1e-12)
+  # 600 rows, under the default max_n of 1500: the result is that of no cap.
+  expect_identical(r, spatialkit:::.gp_floor_moran(xy, d$z, NULL, floor = 400,
+                                                   max_n = Inf))
+  # The pair count is exact (it reads the coordinates alone); I and its z
+  # within 1e-6 relative, since the response comes through chol() (above).
+  expect_identical(r$n_pairs, 8407)
+  expect_equal(c(r$I, r$z), c(0.16499522067636652, 15.714371587441171),
+               tolerance = 1e-6)
 })
 
 # Inputs on which one key does not decide the order: a regular grid (ties in
@@ -211,6 +245,7 @@ test_that("Moran's I at the basis floor is what it was under max_n (BUG-119)", {
 }
 
 test_that("a gridded cell above deff_max_n gives one design effect in every row order (BUG-116)", {
+  skip_if_not_installed("gstat")
   g <- .fso_grid(30, 30)
   d <- data.frame(g, z = .fso_field(g, 300, 10) +
                     withr::with_seed(11, rnorm(nrow(g), sd = 0.3)), cell_id = 1L)

@@ -72,6 +72,7 @@
   .zs_catch(kriging_adequacy(a, "z", cells, id_col = "cell_id", sac = sac, seed = 1))
 
 test_that("the premise: a mixed point layer stops sf::st_transform() or garbles its coordinates", {
+  skip_if_not_installed("gstat")
   L <- .zs_layer()
   expect_error(sf::st_transform(.zs_row(L$asg, 1L), 4326), "OGR error")
   expect_error(suppressWarnings(sf::st_coordinates(.zs_row(L$asg, 5L))), "dimnames")
@@ -103,6 +104,7 @@ test_that("summarize_by_cell(deff = \"variogram\") reads mixed polygon features 
 })
 
 test_that("kriging_adequacy() reads mixed points as the same points in XY", {
+  skip_if_not_installed("gstat")
   L <- .zs_layer()
   for (sac in list(L$sac, NULL)) {
     ref <- .zs_krige(L$asg, L$cells, sac)
@@ -115,6 +117,7 @@ test_that("kriging_adequacy() reads mixed points as the same points in XY", {
 })
 
 test_that("kriging_adequacy() reads mixed multipoints with no warning about Z", {
+  skip_if_not_installed("gstat")
   L <- .zs_layer()
   mp <- sf::st_cast(L$asg, "MULTIPOINT")
   ref <- .zs_krige(mp, L$cells, L$sac)
@@ -126,6 +129,7 @@ test_that("kriging_adequacy() reads mixed multipoints with no warning about Z", 
 })
 
 test_that("kriging_adequacy() reads cells_sf that mixes XY and XYZ as the same cells in XY", {
+  skip_if_not_installed("gstat")
   L <- .zs_layer()
   for (cells in list(L$cells, sf::st_transform(L$cells, 4326))) {
     ref <- .zs_krige(L$asg, cells)
@@ -138,6 +142,7 @@ test_that("kriging_adequacy() reads cells_sf that mixes XY and XYZ as the same c
 })
 
 test_that("layers in one dimension take the path they took", {
+  skip_if_not_installed("gstat")
   L <- .zs_layer()
   # The flattening hands a layer in one dimension back as it came.
   expect_identical(.xy_if_mixed(.zs_all(L$asg)), .zs_all(L$asg))
@@ -165,6 +170,7 @@ test_that("layers in one dimension take the path they took", {
 }
 
 test_that("a layer XYZ throughout whose multipoints or polygons give XY points is read in x and y", {
+  skip_if_not_installed("gstat")
   L <- .zs_layer()
   allz <- .zs_all(L$asg)
   mpz <- .zs_retype(allz, c(2L, 7L, 11L), "MULTIPOINT")
@@ -191,6 +197,7 @@ test_that("a layer XYZ throughout whose multipoints or polygons give XY points i
 })
 
 test_that("kriging_adequacy() kriges points XYZ throughout in x and y, as their XY copy", {
+  skip_if_not_installed("gstat")
   # gstat::krige() kriged these points in three dimensions with a variogram
   # fitted in x and y, so the heights moved the result.  The points are now
   # read in x and y on every layer, Z and M dropped, as the variogram is

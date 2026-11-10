@@ -67,6 +67,7 @@
 
 test_that("a REML range that runs off gives the same detrend_method, warning and nugget in every unit and origin", {
   skip_if_not_installed("nlme")
+  skip_if_not_installed("gstat")
   # (nx, ny, noise sd, reml_max_n).  Before, the three frames gave
   # reml/ols/ols, ols/ols/reml and ols/reml/reml on the first three, and the
   # fourth's nugget moved in the seventh digit.
@@ -95,6 +96,7 @@ test_that("a REML range that runs off gives the same detrend_method, warning and
 
 test_that("gls() is given the same coordinates and starting ranges in every unit and origin", {
   skip_if_not_installed("nlme")
+  skip_if_not_installed("gstat")
   L <- .rf_frames(.rf_lattice(20, 15, 0.5))
   seen <- function(l) {
     got <- list()
@@ -122,6 +124,7 @@ test_that("gls() is given the same coordinates and starting ranges in every unit
 
 test_that(".reml_trend() returns the range and pair_floor in the caller's unit", {
   skip_if_not_installed("nlme")
+  skip_if_not_installed("gstat")
   L <- .rf_frames(.rf_grid(40, 30))
   ext <- c(m = 9750, usft = 9750 * 3937 / 1200, m01 = 9750)
   r <- lapply(names(L), function(nm) {
@@ -156,6 +159,7 @@ test_that("a jittered lattice keeps its REML range", {
   # The control: no ties, an identified range, and the same answer as
   # before the change to rounding (632.98363 m before it).
   skip_if_not_installed("nlme")
+  skip_if_not_installed("gstat")
   j <- .rf_grid(40, 30, jitter = 60)
   e <- suppressWarnings(estimate_sac_range(j, "zz", predictor_vars = "w",
                                            detrend = "reml", reml_max_n = 150L))
@@ -192,6 +196,7 @@ test_that("a layer under 1 km across gives the same REML outcome in metres and i
   # caller's unit: 475 in metres and 1 (for 0.475) in km.  The first
   # lattice gave ols / reml and the fourth reml / ols.
   skip_if_not_installed("nlme")
+  skip_if_not_installed("gstat")
   km <- sf::st_crs("+proj=utm +zone=15 +datum=NAD83 +units=km +no_defs")
   for (cfg in .rf_cfgs) {
     m <- .rf_lattice(cfg[1], cfg[2], cfg[3], s = 0.1)
@@ -205,6 +210,7 @@ test_that("the REML outcome does not move with the unit or the last bits of the 
   # reml on the first lattice, reml / reml / reml / ols on the second and
   # reml / reml / ols / reml on the fifth.
   skip_if_not_installed("nlme")
+  skip_if_not_installed("gstat")
   eps <- .Machine$double.eps
   for (cfg in .rf_cfgs) {
     m <- .rf_lattice(cfg[1], cfg[2], cfg[3])
@@ -220,6 +226,7 @@ test_that("the REML outcome does not move with the unit or the last bits of a pr
   # ols on the second lattice, reml / reml / ols / reml on the fourth and
   # reml / ols / reml / reml on the fifth.
   skip_if_not_installed("nlme")
+  skip_if_not_installed("gstat")
   eps <- .Machine$double.eps
   for (cfg in .rf_cfgs) {
     m <- .rf_lattice(cfg[1], cfg[2], cfg[3])

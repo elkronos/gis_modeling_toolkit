@@ -226,6 +226,7 @@ test_that("make_folds() and estimate_sac_range() on mixed polygons run as on the
 })
 
 test_that("estimate_sac_range() on mixed polygons identifies the range the same polygons in XY give", {
+  skip_if_not_installed("gstat")
   # A surface whose range is identified, so the test does not compare NA
   # with NA.
   d <- local({

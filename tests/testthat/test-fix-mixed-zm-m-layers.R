@@ -321,6 +321,7 @@ test_that("cell_values_at() reads newdata and values that carry M as the same ro
 })
 
 test_that("kriging_adequacy() reads cells_sf that carry M as the same cells in XY", {
+  skip_if_not_installed("gstat")
   L <- .zmm_layer()
   sac <- suppressWarnings(estimate_sac_range(L$asg, "z", cutoff = 1))
   for (cells in list(L$cells, sf::st_transform(L$cells, 4326))) {

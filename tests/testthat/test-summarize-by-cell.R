@@ -637,7 +637,9 @@ test_that("summarize_by_cell falls back to Kish with no fitted variogram", {
   iid <- summarize_by_cell(pts, predictor_vars = "z", deff = 1, estimate = "mean")
   expect_true(all(out[["..se_pred_z"]] > iid[["..se_pred_z"]]))
 
-  # Same when the estimation attempt itself fails (a broken or absent gstat).
+  # Same when the estimation attempt itself fails (a broken gstat).  Where
+  # gstat is not installed the attempt is not made, so this half needs it.
+  skip_if_not_installed("gstat")
   lines2 <- capture_spatialkit_log({
     local_mocked_bindings(
       estimate_sac_range = function(...) stop("gstat unavailable"))

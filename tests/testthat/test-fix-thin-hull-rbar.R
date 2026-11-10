@@ -151,6 +151,7 @@ test_that(".least_area_rect() finds the rectangle of least area over the hull's 
 })
 
 test_that("resolution_profile() with a fitted variogram runs on a thin strip in m and in km", {
+  skip_if_not_installed("gstat")
   s <- .thr_strip_xy(0)
   pts <- sf::st_as_sf(data.frame(x = s$xy[, 1], y = s$xy[, 2], z = s$z),
                       coords = c("x", "y"), crs = 32615)

@@ -667,6 +667,7 @@ test_that("make_folds()'s five warnings on blocks below the range say what the s
 })
 
 test_that("make_folds() logs the check of the blocks against the range as skipped, not a leakage check", {
+  skip_if_not_installed("gstat")
   set.seed(4)
   pts <- sf::st_as_sf(data.frame(x = runif(25, 0, 1000), y = runif(25, 0, 1000), z = rnorm(25)),
                       coords = c("x", "y"), crs = 32632)

@@ -42,6 +42,7 @@
                            "explain the response exactly")
 
 test_that("the exact fit 7 w - 2 w2 is constant to the test for cp and to the estimate", {
+  skip_if_not_installed("gstat")
   L <- .ef_layer()
   d <- L; d$v <- 7 * L$w - 2 * L$w2
   s <- suppressWarnings(estimate_sac_range(d, "v", predictor_vars = c("w", "w2")))
@@ -64,6 +65,7 @@ test_that("the exact fit 7 w - 2 w2 is constant to the test for cp and to the es
 })
 
 test_that("exact fits on one to three predictors are constant in both functions", {
+  skip_if_not_installed("gstat")
   L <- .ef_layer()
   preds <- list("w", c("w", "w2"), c("w", "w2", "w3"))
   .ef_seed(611)
@@ -169,6 +171,7 @@ test_that("Moran's I of the cell means reads the same bound on an exact fit", {
 })
 
 test_that("exact fits on a predictor far from 0 are constant in both functions", {
+  skip_if_not_installed("gstat")
   # A northing (4.5e6 plus the y coordinate) as a predictor: lm() leaves the
   # residuals of an exact fit at about 2 .Machine$double.eps times the size
   # of the fit's terms, thousands of times the response, so a floor of 1e-12
@@ -200,6 +203,7 @@ test_that("exact fits on a predictor far from 0 are constant in both functions",
 })
 
 test_that("the bound is taken on the absolute terms, not on their net sum", {
+  skip_if_not_installed("gstat")
   # 1e-3 (N - 4.5e6) on N, plus 1e-12 of a field: the residuals' spread of
   # about 8e-13 lies below the rounding lm() leaves on the fit (4.3e-12) and
   # below 10 .Machine$double.eps times the absolute terms (2e-11), and far

@@ -101,6 +101,7 @@ test_that(".morans_i_for_k() regresses on a predictor at a large offset, loop an
 })
 
 test_that("estimate_sac_range() detrends on a predictor at a large offset", {
+  skip_if_not_installed("gstat")
   for (lay in list(.po_layer(), .po_clustered())) {
     d <- lay$sf; d$p <- lay$wq
     ref <- suppressWarnings(estimate_sac_range(d, "z", predictor_vars = "p"))
@@ -248,6 +249,7 @@ test_that("a predictor near its centre is fitted on its raw values, to the last 
 })
 
 test_that("estimate_sac_range() detrends on a timestamp in seconds as on the same numbers", {
+  skip_if_not_installed("gstat")
   lay <- .po_clustered()
   d <- lay$sf
   # Tenths of a second, as stored at 1.7e9.
@@ -269,6 +271,7 @@ test_that("estimate_sac_range() detrends on a timestamp in seconds as on the sam
 })
 
 test_that("an exact fit on a northing is still constant where the northing is fitted about its centre", {
+  skip_if_not_installed("gstat")
   # The northing 4.5e6 plus a span of 4,000 is centred before the fits, and
   # a response computed from it carries the rounding of 4.317 times 4.5e6: the
   # test for an exact fit reads the terms of the predictor as given

@@ -155,10 +155,13 @@ test_that("on the jittered lattice the frames agree and the result is what it wa
     expect_equal(.kt_table(got), .kt_table(ref), tolerance = 1e-9)
     expect_equal(.kt_cv(got), .kt_cv(ref), tolerance = 1e-9)
   }
-  expect_equal(sum(ref$kr_pred), 1.8915855223, tolerance = 1e-9)
-  expect_equal(sum(ref$kr_var), 1.6506119569, tolerance = 1e-9)
+  # The figures pass through gstat's variogram fit and the kriging system's
+  # solve, whose last bits follow the BLAS, LAPACK and fused multiply-add of
+  # the platform, so they are held within 1e-6 relative.
+  expect_equal(sum(ref$kr_pred), 1.8915855223, tolerance = 1e-6)
+  expect_equal(sum(ref$kr_var), 1.6506119569, tolerance = 1e-6)
   expect_equal(unname(.kt_cv(ref)[1:3]), c(1.0642127840, -0.0087527581, 0.6619738610),
-               tolerance = 1e-9)
+               tolerance = 1e-6)
 })
 
 test_that("kriging each cell and held-out location on its own from the rule's pick gives what gstat's own search gives where the nmax are one set", {

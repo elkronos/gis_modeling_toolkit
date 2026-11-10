@@ -207,6 +207,7 @@ test_that("the no-structure warning calls a predictor a column, not the response
 })
 
 test_that("the variogram's note after Cp's is a sentence of its own that does not repeat its close", {
+  skip_if_not_installed("gstat")
   pts <- .tm_pts()
   pn <- .tm_quiet(resolution_profile(pts, "noise", estimate = NULL, obs_per_cell = NULL,
                                      sac = NULL, partition = "kmeans"))
@@ -456,6 +457,7 @@ test_that("the sizes held to the same count raise one spatialkit_size_not_reache
 # ---- 8. Older texts ---------------------------------------------------------------------
 
 test_that("at the support ceiling the hint names `levels` past it", {
+  skip_if_not_installed("gstat")
   s <- .tm_quiet(select_resolution(resolution_profile(.tm_pts(), "z", partition = "density",
                                                       estimate = NULL, obs_per_cell = NULL,
                                                       sac = NULL, nstart = 25L), "cp"))
@@ -717,6 +719,7 @@ test_that("the prints of the default path and of one level or one start say what
 })
 
 test_that("a summary whose picks agree names one count", {
+  skip_if_not_installed("gstat")
   # 60 stations visited five times, with a trend: one size, and two criteria
   # that read it.
   v <- withr::with_seed(23, {

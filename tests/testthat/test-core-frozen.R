@@ -570,9 +570,11 @@ test_that("two platform records are the same platform only when every key agrees
     other[[key]] <- if (key == "packages") replace(here$packages, "s2", "0.0.0") else "another"
     expect_false(core_frozen_same_platform(other, here), info = key)
   }
+  # A package installed on one side only; where it is missing here (they
+  # are in Suggests), installed on the other side.
   for (pkg in names(here$packages)) {
     other <- here
-    other$packages[[pkg]] <- NA_character_
+    other$packages[[pkg]] <- if (is.na(here$packages[[pkg]])) "0.0.0" else NA_character_
     expect_false(core_frozen_same_platform(other, here), info = pkg)
   }
   # GDAL reads and writes files; no call of the list does.

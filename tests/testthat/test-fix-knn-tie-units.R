@@ -136,6 +136,7 @@ test_that("residual_morans_i() gives one I, z and p at every scale", {
 })
 
 test_that("estimate_sac_range() finds the range of 2^0 times the scale in small units", {
+  skip_if_not_installed("gstat")
   lay <- .kt_layer()
   run <- function(p) {
     d <- .kt_sf(lay$xy * 2^p, lay$y, lay$w)

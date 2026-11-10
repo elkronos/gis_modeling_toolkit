@@ -98,6 +98,8 @@ test_that("summarize_by_cell(area = TRUE) gives cell_area in the CRS's unit squa
 })
 
 test_that("resolution_profile() measures the hull and the range floor in the CRS's unit", {
+  # The range is a variogram fit's (gstat).
+  skip_if_not_installed("gstat")
   L <- .au_layer()
   run <- function(pts) {
     sac <- suppressWarnings(estimate_sac_range(pts, "z"))
@@ -205,6 +207,8 @@ test_that("kriging_adequacy()'s sliver guard reads the box and the area in one u
 })
 
 test_that("make_folds() compares supplied blocks with the range in the CRS's unit", {
+  # The range is a variogram fit's (gstat).
+  skip_if_not_installed("gstat")
   L <- .au_layer()
   blocks_of <- function(cells) {
     g <- sf::st_geometry(cells)
