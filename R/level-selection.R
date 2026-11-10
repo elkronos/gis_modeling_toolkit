@@ -1221,8 +1221,10 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # finite or lies beyond 1e150) is read on the coordinates as given: it is
   # emptied here, before the coerce and the projection, which could
   # otherwise bring it back finite, and the layer is then read as it is read
-  # with that row empty.
-  data_sf <- .empty_unlocated(.xy_if_mixed_or_m(data_sf))
+  # with that row empty.  Points in an sfc_GEOMETRY column are read as the
+  # same points in sfc_POINT (.typed_points()): sf::st_coordinates() refuses
+  # that class.
+  data_sf <- .empty_unlocated(.xy_if_mixed_or_m(.typed_points(data_sf)))
   if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")) {
     data_sf <- .xy_if_mixed(.pointize_auto(data_sf, "determine_optimal_levels",
                                            "`data_sf`"))

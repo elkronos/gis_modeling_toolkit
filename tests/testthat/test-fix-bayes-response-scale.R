@@ -696,8 +696,10 @@ test_that("cv_bayes() scores the same in any unit of the response", {
 }
 
 # Posterior mean of a distributional parameter in the response's units.
+# brms::as_draws_df() is posterior's, which brms exports: posterior is not
+# among the package's Suggests, and R CMD check warns on a `::` to it.
 .frs_dpar <- function(fit, nm) {
-  dr <- posterior::as_draws_df(fit$engine)
+  dr <- brms::as_draws_df(fit$engine)
   s  <- fit$info$response_scaling$scale %||% 1
   mean(dr[[nm]]) * s
 }

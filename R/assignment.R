@@ -350,6 +350,10 @@ assign_features_to_polygons <- function(
   features_flat <- length(features_dims) > 1L || any(features_dims %in% c("XYM", "XYZM"))
   features_xy <- if (features_flat) sf::st_zm(features_sf, drop = TRUE, what = "ZM")
                  else features_sf
+  # Points in an sfc_GEOMETRY column are joined as the same points in
+  # sfc_POINT (.typed_points()): on the column sf::st_cast() returns, the
+  # join stopped in sf::st_dimension() with "Not compatible with STRSXP".
+  features_xy <- .typed_points(features_xy)
   # A feature with a coordinate that is not finite or lies beyond 1e150 has
   # no location.  It is read as given, before any move, and the join's copy
   # of it is emptied below, so it matches no polygon and is counted with the
@@ -4646,8 +4650,10 @@ summarize_by_cell <- function(assigned_points_sf,
   # geometries carry M, which GEOS does not read (.xy_if_mixed_or_m()).  The
   # points reduced from a layer in one dimension can mix them (the point on
   # the surface of a POLYGON Z is XY beside the POINT Z rows kept), so they
-  # are tested again.
-  layer <- .xy_if_mixed_or_m(layer)
+  # are tested again.  Points in an sfc_GEOMETRY column are read as the same
+  # points in sfc_POINT (.typed_points()): sf::st_coordinates() refuses that
+  # class.
+  layer <- .xy_if_mixed_or_m(.typed_points(layer))
   if (!all(sf::st_geometry_type(layer, by_geometry = TRUE) == "POINT"))
     layer <- .xy_if_mixed(withCallingHandlers(
       if (is.null(caller)) coerce_to_points(layer, "auto")

@@ -2019,7 +2019,9 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # before the coerce and the projection, which could otherwise bring it
   # back finite, and the layer is then read as it is read with that row
   # empty.  A row at 1e200 kept as a point made the WSS NA at every level.
-  data_sf <- .empty_unlocated(.xy_if_mixed_or_m(data_sf))
+  # Points in an sfc_GEOMETRY column are read as the same points in
+  # sfc_POINT (.typed_points()): sf::st_coordinates() refuses that class.
+  data_sf <- .empty_unlocated(.xy_if_mixed_or_m(.typed_points(data_sf)))
   # Whether the layer came as points: a feature that is not one is scored at
   # the point it is reduced to, and the record of an estimate says so.
   was_points <- all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")

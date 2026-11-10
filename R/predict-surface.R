@@ -130,7 +130,10 @@
 #' @keywords internal
 #' @noRd
 .surface_nearest_rows <- function(pts, covariates) {
-  cg <- sf::st_geometry(covariates)
+  # Points in an sfc_GEOMETRY column are read as the same points in
+  # sfc_POINT (.typed_points()): sf::st_coordinates() refuses that class.
+  pts <- .typed_points(pts)
+  cg  <- .typed_points(sf::st_geometry(covariates))
   if (!isTRUE(sf::st_is_longlat(cg)) &&
       !all(sf::st_geometry_type(cg, by_geometry = TRUE) == "POINT"))
     return(.surface_nearest_shapes(pts, cg))

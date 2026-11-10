@@ -1466,10 +1466,14 @@ create_voronoi_polygons <- function(
   # giving no polygon.  The cells are new geometry and none of the three is
   # returned, so nothing is said.  sf::st_zm() keeps the points' attributes,
   # their cover and count record among them.  A layer XY or XYZ throughout
-  # takes its old path.
-  points_sf <- .xy_if_mixed_or_m(points_sf)
+  # takes its old path.  Points in an sfc_GEOMETRY column are read as the
+  # same points in sfc_POINT, or sfc_MULTIPOINT (.typed_points()):
+  # sf::st_union() of the hull stopped with "Not compatible with STRSXP" and
+  # sf::st_coordinates() refuses that class.  A cover of such points is read
+  # the same way.
+  points_sf <- .xy_if_mixed_or_m(.typed_points(points_sf))
   if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
-  if (!is.null(cover)) cover <- .xy_if_mixed_or_m(cover)
+  if (!is.null(cover)) cover <- .xy_if_mixed_or_m(.typed_points(cover))
   # A point with a coordinate that is not finite or lies beyond 1e150 has no
   # location.  It is read as given, before any move, and emptied
   # (.empty_unlocated()), so it takes no part in the hull, the Voronoi
@@ -2825,10 +2829,14 @@ build_tessellation <- function(
   # read of the coordinates stopped with sf's, GEOS's or base R's message,
   # and GEOS stopped on M.  The cells are new geometry and none of the three
   # is returned, so nothing is said.  A layer XY or XYZ throughout takes its
-  # old path.
-  points_sf <- .xy_if_mixed_or_m(points_sf)
+  # old path.  Points in an sfc_GEOMETRY column are read as the same points
+  # in sfc_POINT, or sfc_MULTIPOINT (.typed_points()): sf::st_coordinates()
+  # refuses that class, and on the column sf::st_cast() returns the union
+  # and the joins stop with "Not compatible with STRSXP".  A cover of such
+  # points is read the same way.
+  points_sf <- .xy_if_mixed_or_m(.typed_points(points_sf))
   if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
-  if (!is.null(cover)) cover <- .xy_if_mixed_or_m(cover)
+  if (!is.null(cover)) cover <- .xy_if_mixed_or_m(.typed_points(cover))
   # A point with a coordinate that is not finite or lies beyond 1e150 has no
   # location.  It is read as given, before any move, and emptied
   # (.empty_unlocated()), so every method reads it as an empty point: it
@@ -3221,6 +3229,13 @@ build_tessellation <- function(
   if (identical(method, "triangles")) {
     pts <- if (isTRUE(keep_duplicates)) points_sf else .dedup_points(points_sf)
     if (nrow(pts) < 3L) stop("build_tessellation(triangles): need at least 3 unique points.")
+    # A layer that mixes POINT and MULTIPOINT is held by sf in an
+    # sfc_GEOMETRY column, whose coordinates sf::st_coordinates() refuses
+    # ("not implemented for objects of class sfc_GEOMETRY").  Its vertices
+    # are read from the same features in sfc_MULTIPOINT, as a MULTIPOINT
+    # layer's are: only the coordinates and the CRS of `pts` are read below.
+    if (inherits(sf::st_geometry(pts), "sfc_GEOMETRY"))
+      pts <- sf::st_cast(pts, "MULTIPOINT")
     coords <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
     # An EMPTY point (a null geometry read from a file) is an all-NA row here,
     # and the rank check below stopped on it with R's "NA/NaN/Inf in foreign

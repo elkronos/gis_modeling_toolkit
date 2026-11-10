@@ -174,6 +174,10 @@
 
 #' The coordinates of a point layer
 #'
+#' Points in an \code{sfc_GEOMETRY} column are read as the same points in
+#' \code{sfc_POINT} (\code{.typed_points()}): \code{sf::st_coordinates()}
+#' refuses that class.
+#'
 #' @param pts A layer of points.
 #' @return A two-column matrix, one row per point; \code{NA} for an empty
 #'   point and for one with a coordinate beyond \code{.POOL_XY_MAX}, from
@@ -182,7 +186,7 @@
 #' @noRd
 .values_at_xy <- function(pts) {
   if (nrow(pts) == 0L) return(matrix(numeric(0), 0L, 2L))
-  xy  <- unname(sf::st_coordinates(pts)[, 1:2, drop = FALSE])
+  xy  <- unname(sf::st_coordinates(.typed_points(pts))[, 1:2, drop = FALSE])
   far <- abs(xy[, 1L]) > .POOL_XY_MAX | abs(xy[, 2L]) > .POOL_XY_MAX
   xy[which(far | !is.finite(xy[, 1L]) | !is.finite(xy[, 2L])), ] <- NA_real_
   xy
@@ -800,6 +804,12 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
   if (!is.character(id_col) || length(id_col) != 1L || is.na(id_col) || !nzchar(id_col))
     stop("cell_values_at(): `id_col` must be a single column name (a character string).",
          call. = FALSE)
+  # Points in an sfc_GEOMETRY column are read as the same points in sfc_POINT
+  # (.typed_points()): sf::st_coordinates() and sf::st_transform() stop on
+  # that class.  The result is a frame of values, so no layer is returned.
+  newdata <- .typed_points(newdata)
+  points  <- .typed_points(points)
+  seeds   <- .typed_points(seeds)
 
   # The ID column, found in `points` as summarize_by_cell() finds it; the
   # summary's own ID column carries that name.

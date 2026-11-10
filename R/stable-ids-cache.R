@@ -780,8 +780,12 @@ create_grid_polygons_cached <- function(boundary,
   # the cache key, as create_grid_polygons() reads it: the union the key
   # hashes stopped on it with GEOS's message.  The grid is new geometry, so
   # nothing is said, and such a boundary shares its key with the same
-  # boundary in XY.
-  bnd <- .xy_if_mixed_or_m(bnd)
+  # boundary in XY.  A layer of points in an sfc_GEOMETRY column is read as
+  # the same points in sfc_POINT (.typed_points()), so it gets
+  # create_grid_polygons()'s refusal of a boundary that is not polygonal:
+  # on the column sf::st_cast() returns, the cache key stopped first with
+  # "Not compatible with STRSXP".
+  bnd <- .xy_if_mixed_or_m(.typed_points(bnd))
   # Only the rows with a location, read as given, as create_grid_polygons()
   # reads them (.boundary_located()), so a square beside an empty row or a
   # row with a vertex at Inf shares its key with the square alone, and a

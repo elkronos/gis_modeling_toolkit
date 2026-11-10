@@ -1744,7 +1744,8 @@ old behaviour where there is a way.
 ## Bug fixes
 
 * **A point layer in an `sfc_GEOMETRY` column stopped the fits, the
-  cross-validations and the folds.**  A geometry column of the general
+  cross-validations, the folds, the cell summaries, the tessellations, the
+  seeders and the surface.**  A geometry column of the general
   class `sfc_GEOMETRY` can hold points only: `sf::st_cast(x, "GEOMETRY")`
   builds one, and so do `c()` of such a column with points and a point set
   with `[[<-` in place of the last other geometry of a mixed column.
@@ -1753,22 +1754,42 @@ old behaviour where there is a way.
   `gwr_model_selection()`, `prep_model_data()`, `predict()` of a fit,
   `model_metrics()`, `evaluate_insample()`, `compare_models()`,
   `cv_spatial()`, `cv_gwr()`, `cv_rf()`, `compare_models_cv()`,
-  `cv_block_size_sweep()` and `area_of_applicability()` stopped with sf's
-  "not implemented for objects of class sfc_GEOMETRY".  On the column
-  `sf::st_cast()` returns, `sf::st_dimension()` and `sf::st_transform()`
-  stop with "Not compatible with STRSXP": `make_folds()` stopped with it,
-  as `points_sf` and as `prediction_points`, and so did
-  `fold_separation()`, `ensure_projected()`, `harmonize_crs()` and every
-  call that moves such a layer to another CRS, such as `model_metrics()`
-  with it as `newdata` in another CRS than the fit.
+  `cv_block_size_sweep()`, `area_of_applicability()`,
+  `summarize_by_cell()`, `cell_values_at()` (`newdata`, `points` and
+  `seeds`), `determine_optimal_levels()`, `resolution_profile()` (and so
+  `select_resolution()`), `create_voronoi_polygons()`,
+  `build_tessellation(method = "triangles")`,
+  `get_voronoi_seeds(method = "kmeans")` with `sample_points`,
+  `voronoi_seeds_kmeans()` and `predict_surface()` (`grid` and
+  `covariates`) stopped with sf's "not implemented for objects of class
+  sfc_GEOMETRY".  On the column `sf::st_cast()` returns,
+  `sf::st_dimension()`, `sf::st_union()` and `sf::st_transform()` stop with
+  "Not compatible with STRSXP": `make_folds()` stopped with it, as
+  `points_sf` and as `prediction_points`, and so did `fold_separation()`,
+  `ensure_projected()`, `harmonize_crs()`, `assign_features_to_polygons()`
+  and `create_voronoi_polygons()`, and every call that moves such a layer
+  to another CRS, such as `model_metrics()` with it as `newdata` in another
+  CRS than the fit.  `plot_tessellation_map()` (`features_sf`, `seeds_sf`
+  or `boundary`), `plot_folds()` and `plot()` of a fit whose layer is such
+  a column returned a plot that stopped with that message when it was
+  built or printed, and `create_grid_polygons_cached()` stopped with it on
+  such points as `boundary`, where `create_grid_polygons()` refuses a
+  boundary that is not polygonal.
   `select_features_forward()` reported that stop as a failure to build its
   inner folds, and on the other form of the column it scored no candidate
   and returned an empty selection.  When every geometry of such a column
   is a POINT, these functions now read it as the same points in
-  `sfc_POINT` and give the answer those points give.  A layer moved to
-  another CRS comes back in `sfc_POINT`; `area_of_applicability()` still
-  returns the rows of `newdata` in the class they came in.  A layer that
+  `sfc_POINT` and give the answer those points give, and when every
+  geometry is a MULTIPOINT, as the same features in `sfc_MULTIPOINT`.  A
+  layer moved to another CRS comes back in that class, and so do the rows
+  `assign_features_to_polygons()` returns; `area_of_applicability()` still
+  returns the rows of `newdata`, and `predict_surface()` a `grid` it does
+  not move, in the class they came in.  A layer that
   mixes points with other geometry types is read as before.
+  `build_tessellation(method = "triangles")` also stopped with sf's message
+  on a layer that mixes POINT and MULTIPOINT features, which sf holds in an
+  `sfc_GEOMETRY` column; it now reads their vertices as it reads a
+  MULTIPOINT layer's.
 
 * **`resolution_profile()` with a variogram stopped on a study area much
   longer than wide.**  The mean correlation over the study area, which

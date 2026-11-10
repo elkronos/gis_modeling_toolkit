@@ -400,9 +400,12 @@ get_voronoi_seeds <- function(boundary = NULL,
   # stopped on the boundary or sampled it on other rings.  So is a boundary
   # whose polygons carry M (.xy_if_mixed_or_m()), on which GEOS stopped.  The
   # seeds are new points and the cover is this function's copy, so nothing
-  # is said.
+  # is said.  Sample points in an sfc_GEOMETRY column are read as the same
+  # points in sfc_POINT (.typed_points()): sf::st_coordinates() refuses that
+  # class.
   if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
-  if (!is.null(sample_points)) sample_points <- .xy_if_mixed(sample_points)
+  if (!is.null(sample_points))
+    sample_points <- .xy_if_mixed(.typed_points(sample_points))
   # A sample point with a coordinate that is not finite or lies beyond 1e150
   # has no location.  It is read as given, before any move, and emptied
   # (.empty_unlocated()), so that it is dropped below as an empty point is:
@@ -1320,8 +1323,10 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
   .assert_sf(points_sf, "POINT", "points_sf")
   # Points that mix XY and XYZ (or XYM) are read in XY (.xy_if_mixed()),
   # before the projection and the read of their coordinates, as in
-  # get_voronoi_seeds(); the seeds are new points, so nothing is said.
-  points_sf <- .xy_if_mixed(points_sf)
+  # get_voronoi_seeds(); the seeds are new points, so nothing is said.  So
+  # are points in an sfc_GEOMETRY column, as the same points in sfc_POINT
+  # (.typed_points()): sf::st_coordinates() refuses that class.
+  points_sf <- .xy_if_mixed(.typed_points(points_sf))
   partition_given <- !missing(partition)
   # The density settings the caller supplied (see get_voronoi_seeds()).
   density_given <- c(if (!missing(density_power)) "density_power",

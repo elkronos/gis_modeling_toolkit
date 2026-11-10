@@ -147,23 +147,25 @@
 #' \code{sf::st_transform()} stop with "Not compatible with STRSXP" on the
 #' column \code{sf::st_cast()} returns.  When every geometry is a POINT, empty ones included, the
 #' column is cast to \code{sfc_POINT}, which holds the same geometries; the
-#' layer is then read as the same points in that class are.  Any other
-#' layer, one that mixes points with other types among them, is returned as
-#' it came.
+#' layer is then read as the same points in that class are.  When every
+#' geometry is a MULTIPOINT, the column is cast to \code{sfc_MULTIPOINT} in
+#' the same way.  Any other layer, one that mixes points with other types or
+#' POINT with MULTIPOINT among them, is returned as it came.
 #'
 #' @param x An sf or sfc object.
 #' @return \code{x}, with its geometry column in \code{sfc_POINT} when it
-#'   was an \code{sfc_GEOMETRY} of points.
+#'   was an \code{sfc_GEOMETRY} of points, and in \code{sfc_MULTIPOINT}
+#'   when it was one of multipoints.
 #' @keywords internal
 #' @noRd
 .typed_points <- function(x) {
   is_sf <- inherits(x, "sf")
   if (!is_sf && !inherits(x, "sfc")) return(x)
   g <- if (is_sf) sf::st_geometry(x) else x
-  if (!inherits(g, "sfc_GEOMETRY") || length(g) == 0L ||
-      !all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
-    return(x)
-  g <- sf::st_cast(g, "POINT")
+  if (!inherits(g, "sfc_GEOMETRY") || length(g) == 0L) return(x)
+  types <- unique(as.character(sf::st_geometry_type(g, by_geometry = TRUE)))
+  if (length(types) != 1L || !types %in% c("POINT", "MULTIPOINT")) return(x)
+  g <- sf::st_cast(g, types)
   if (!is_sf) return(g)
   sf::st_geometry(x) <- g
   x
@@ -351,7 +353,9 @@
 #' @keywords internal
 #' @noRd
 .dedup_points <- function(g) {
-  geom <- if (inherits(g, "sfc")) g else sf::st_geometry(g)
+  # Points in an sfc_GEOMETRY column are keyed as the same points in
+  # sfc_POINT (.typed_points()): sf::st_coordinates() refuses that class.
+  geom <- .typed_points(if (inherits(g, "sfc")) g else sf::st_geometry(g))
   n <- length(geom)
   if (n == 0L) {
     if (inherits(g, "sfc")) return(g[integer(0)])

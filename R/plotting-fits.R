@@ -171,8 +171,11 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
   # prep_model_data() read in x and y) is read in XY, since sf reads a layer
   # in the dimension of its first geometry and coord_sf() moved it when the
   # plot was built ("OGR error" with a Z or M row first, an XYZ ring among
-  # XY rows drawn far from its place).
-  dat <- .xy_if_mixed(dat)
+  # XY rows drawn far from its place).  Points in an sfc_GEOMETRY column (a
+  # custom fit's own layer) are drawn as the same points in sfc_POINT
+  # (.typed_points()): on the column sf::st_cast() returns, coord_sf()
+  # stopped with "Not compatible with STRSXP" when the plot was built.
+  dat <- .xy_if_mixed(.typed_points(dat))
   if (length(res) != nrow(dat))
     stop("plot.spatial_fit(): residual length (", length(res),
          ") does not match the training data (", nrow(dat), ").", call. = FALSE)
@@ -266,7 +269,8 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
   dat <- x$data_sf
   if (!inherits(dat, "sf"))
     stop("plot.spatial_fit(): the fit carries no training geometry.", call. = FALSE)
-  dat <- .xy_if_mixed(dat)
+  # Read as plot.spatial_fit()'s residual map reads it.
+  dat <- .xy_if_mixed(.typed_points(dat))
   cf <- stats::coef(x)
   if (!is.data.frame(cf) || !nrow(cf))
     stop("plot.spatial_fit(type = \"coefficients\"): coef() returned no local ",
@@ -720,8 +724,11 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
   # geometry, and coord_sf() moved it into the plot's CRS when the plot was
   # built (an XYZ first row stopped with "OGR error"; an XYZ ring among XY
   # rows was drawn far from its place).  The plot returns no geometry, so
-  # nothing is said.
-  dat <- .xy_if_mixed(points_sf)
+  # nothing is said.  Points in an sfc_GEOMETRY column are drawn as the same
+  # points in sfc_POINT (.typed_points()): on the column sf::st_cast()
+  # returns, coord_sf() stopped with "Not compatible with STRSXP" when the
+  # plot was built.  So is a boundary given as such points.
+  dat <- .xy_if_mixed(.typed_points(points_sf))
   if (!("..row_id" %in% names(dat))) dat$..row_id <- seq_len(nrow(dat))
   dat$.fold <- factor(asg$fold[match(dat$..row_id, asg$row_id)])
 
@@ -743,7 +750,8 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
   blk <- folds$params$blocks
   if (!(isTRUE(blocks) && inherits(blk, "sf") && nrow(blk) > 0L)) blk <- NULL
   if (!is.null(blk)) blk <- .xy_if_mixed(blk)
-  if (inherits(boundary, c("sf", "sfc"))) boundary <- .xy_if_mixed(boundary)
+  if (inherits(boundary, c("sf", "sfc")))
+    boundary <- .xy_if_mixed(.typed_points(boundary))
   plot_crs <- sf::st_crs(dat)
   if (is.na(plot_crs) && is.character(folds$params$crs) &&
       length(folds$params$crs) == 1L && !is.na(folds$params$crs))

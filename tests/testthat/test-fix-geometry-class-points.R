@@ -9,9 +9,11 @@
 # with STRSXP" on the column sf::st_cast() returns when it lacks the
 # "classes" attribute sf::st_sfc() sets.  The fits, predict(), the metrics,
 # the cross-validations, the folds, fold_separation(), the selection, the
-# block-size sweep, area_of_applicability() and every move of such a layer
-# to another CRS stopped with those messages.  Each now reads such a layer as the same
-# points in sfc_POINT, and its answer is held to that layer's.
+# block-size sweep, area_of_applicability(), every move of such a layer to
+# another CRS, and (last section) the cell summaries, the level choice and
+# profile, the tessellations, the seeders and predict_surface() stopped with
+# those messages.  Each now reads such a layer as the same points in
+# sfc_POINT, and its answer is held to that layer's.
 #
 # The layer: 60 synthetic points in EPSG:32616 (seed 42).  It is given in
 # two forms of the sfc_GEOMETRY column: as sf::st_cast() returns it, and with
@@ -372,4 +374,313 @@ test_that("a layer in an sfc_GEOMETRY column is moved to another CRS as in sfc_P
     expect_identical(.gcp_quiet(predict(rf_utm, newdata = d)), ref$pr)
     expect_identical(.gcp_quiet(fold_separation(folds, d)), ref$fs)
   }
+})
+
+
+# ---- the cells, the levels, the tessellations, the seeds, the surface ------
+# summarize_by_cell(), cell_values_at(), determine_optimal_levels(),
+# resolution_profile(), create_voronoi_polygons(), build_tessellation()
+# (voronoi, triangles), the k-means seeders and predict_surface() stopped on
+# such a layer with sf's "not implemented for objects of class
+# sfc_GEOMETRY", create_voronoi_polygons() on the column sf::st_cast()
+# returns with "Not compatible with STRSXP" in the union of the hull, and
+# assign_features_to_polygons() on that column with the same text in the
+# join.  Each now reads the layer as the same points in sfc_POINT.
+
+# Any point layer in the two sfc_GEOMETRY forms .gcp_layers() builds.
+.gcp_forms_of <- function(x) {
+  cast <- sf::st_cast(x, "GEOMETRY")
+  g <- sf::st_geometry(cast)
+  attr(g, "classes") <- rep("POINT", length(g))
+  classed <- cast
+  suppressWarnings(sf::st_geometry(classed) <- g)
+  stopifnot(inherits(sf::st_geometry(cast), "sfc_GEOMETRY"),
+            inherits(sf::st_geometry(classed), "sfc_GEOMETRY"))
+  list(cast = cast, classed = classed)
+}
+
+# Nine square cells over the layer's box, the layer assigned to them, and a
+# 6 x 6 grid of locations over the box.
+.gcp_cells <- function() {
+  if (is.null(.gcp_store$cells)) {
+    L <- .gcp_layers()
+    bnd <- sf::st_sf(geometry = sf::st_as_sfc(sf::st_bbox(L$pts)))
+    cells <- .gcp_quiet(build_tessellation(L$pts, boundary = bnd, method = "square",
+                                           approx_n_cells = 9, quiet = TRUE))$cells
+    assigned <- .gcp_quiet(assign_features_to_polygons(L$pts, cells, quiet = TRUE))
+    locs <- sf::st_as_sf(
+      expand.grid(X = seq(500500, 519500, length.out = 6),
+                  Y = seq(4000500, 4019500, length.out = 6)),
+      coords = c("X", "Y"), crs = 32616)
+    .gcp_store$cells <- list(boundary = bnd, cells = cells, assigned = assigned,
+                             locs = locs)
+  }
+  .gcp_store$cells
+}
+
+
+test_that("assign_features_to_polygons() and summarize_by_cell() read the points as in sfc_POINT", {
+  L <- .gcp_layers()
+  C <- .gcp_cells()
+  for (d in .gcp_forms())
+    expect_identical(.gcp_quiet(assign_features_to_polygons(d, C$cells, quiet = TRUE)),
+                     C$assigned)
+  sbc <- function(d, ...) .gcp_quiet(summarize_by_cell(d, "y", "x1", ...))
+  ref <- list(sbc(C$assigned, cells_sf = C$cells), sbc(C$assigned))
+  for (d in .gcp_forms_of(C$assigned)) {
+    expect_identical(sbc(d, cells_sf = C$cells), ref[[1]])
+    expect_identical(sbc(d), ref[[2]])
+  }
+})
+
+
+test_that("cell_values_at() reads locations, points and seeds as in sfc_POINT", {
+  L <- .gcp_layers()
+  C <- .gcp_cells()
+  vals <- .gcp_quiet(summarize_by_cell(C$assigned, "y", cells_sf = C$cells))
+  cva <- function(nd, pts, v = vals, ...) .gcp_quiet(cell_values_at(nd, v, pts, "y", ...))
+  ref <- cva(C$locs, C$assigned)
+  for (d in .gcp_forms_of(C$locs)) expect_identical(cva(d, C$assigned), ref)
+  for (d in .gcp_forms_of(C$assigned)) expect_identical(cva(C$locs, d), ref)
+  # The cells of seeds, placed by `seeds`: `values` then carries no polygons.
+  seeds <- voronoi_seeds_kmeans(L$pts, k = 6, set_seed = 1)
+  tv <- .gcp_quiet(build_tessellation(seeds, boundary = C$boundary, quiet = TRUE))
+  seeds$poly_id <- tv$index
+  a2 <- .gcp_quiet(assign_features_to_polygons(L$pts, tv$cells, quiet = TRUE))
+  v2 <- sf::st_drop_geometry(.gcp_quiet(summarize_by_cell(a2, "y")))
+  ref2 <- cva(C$locs, a2, v2, seeds = seeds)
+  for (s in .gcp_forms_of(seeds))
+    expect_identical(cva(C$locs, a2, v2, seeds = s), ref2)
+})
+
+
+test_that("the level choice and the profile read the points as in sfc_POINT", {
+  L <- .gcp_layers()
+  dol <- function(d, ...) .gcp_quiet(determine_optimal_levels(d, max_levels = 6L, ...))
+  rp  <- function(d, ...) .gcp_quiet(resolution_profile(d, "y", n_levels = 4L, ...))
+  ref <- list(dol(L$pts), dol(L$pts, response_var = "y", criterion = "combined"),
+              rp(L$pts), rp(L$pts, partition = "kmeans"))
+  ref_sel <- .gcp_quiet(select_resolution(ref[[3]]))
+  for (d in .gcp_forms()) {
+    expect_identical(dol(d), ref[[1]])
+    expect_identical(dol(d, response_var = "y", criterion = "combined"), ref[[2]])
+    p <- rp(d)
+    expect_identical(p, ref[[3]])
+    expect_identical(rp(d, partition = "kmeans"), ref[[4]])
+    expect_identical(.gcp_quiet(select_resolution(p)), ref_sel)
+  }
+})
+
+
+test_that("the Voronoi and triangle builders read the points as in sfc_POINT", {
+  L <- .gcp_layers()
+  C <- .gcp_cells()
+  cvp <- function(d, ...) .gcp_quiet(create_voronoi_polygons(d, quiet = TRUE, ...))
+  bt  <- function(d, ...) .gcp_quiet(build_tessellation(d, quiet = TRUE, ...))
+  ref <- list(cvp(L$pts), cvp(L$pts, boundary = C$boundary),
+              bt(L$pts), bt(L$pts, method = "triangles"),
+              bt(L$pts, boundary = C$boundary, method = "triangles"))
+  for (d in .gcp_forms()) {
+    expect_identical(cvp(d), ref[[1]])
+    expect_identical(cvp(d, boundary = C$boundary), ref[[2]])
+    expect_identical(bt(d), ref[[3]])
+    expect_identical(bt(d, method = "triangles"), ref[[4]])
+    expect_identical(bt(d, boundary = C$boundary, method = "triangles"), ref[[5]])
+  }
+  # Points in that class as the `cover`.
+  some <- L$pts[1:20, ]
+  ref_c <- list(cvp(some, cover = L$pts), bt(some, cover = L$pts))
+  for (d in .gcp_forms()) {
+    expect_identical(cvp(some, cover = d), ref_c[[1]])
+    expect_identical(bt(some, cover = d), ref_c[[2]])
+  }
+})
+
+
+test_that("the k-means seeders read the points as in sfc_POINT", {
+  L <- .gcp_layers()
+  C <- .gcp_cells()
+  gvs <- function(d, ...) .gcp_quiet(get_voronoi_seeds(method = "kmeans", n = 6,
+                                                       sample_points = d, set_seed = 1, ...))
+  vsk <- function(d, ...) .gcp_quiet(voronoi_seeds_kmeans(d, k = 6, set_seed = 1, ...))
+  ref <- list(gvs(L$pts), gvs(L$pts, boundary = C$boundary), vsk(L$pts),
+              vsk(L$pts, partition = "kmeans"))
+  for (d in .gcp_forms()) {
+    expect_identical(gvs(d), ref[[1]])
+    expect_identical(gvs(d, boundary = C$boundary), ref[[2]])
+    expect_identical(vsk(d), ref[[3]])
+    expect_identical(vsk(d, partition = "kmeans"), ref[[4]])
+  }
+})
+
+
+test_that("predict_surface() reads `grid` and `covariates` as in sfc_POINT", {
+  L <- .gcp_layers()
+  C <- .gcp_cells()
+  rf  <- .gcp_rf(L$pts)
+  gwr <- .gcp_quiet(fit_gwr_model(L$pts, "y", c("x1", "x2"), bandwidth = 20,
+                                  adaptive = TRUE))
+  ps <- function(fit, g, cv) .gcp_quiet(predict_surface(fit, grid = g, covariates = cv))
+  for (fit in list(rf, gwr)) {
+    ref <- ps(fit, C$locs, L$pts)
+    for (d in .gcp_forms()) expect_identical(ps(fit, C$locs, d), ref)
+    # The surface is the grid's rows as given, in their own class; what is
+    # predicted on them is the sfc_POINT grid's.
+    for (g in .gcp_forms_of(C$locs)) {
+      got <- ps(fit, g, L$pts)
+      expect_identical(sf::st_geometry(got), sf::st_geometry(g))
+      sf::st_geometry(got) <- sf::st_geometry(C$locs)
+      expect_identical(got, ref)
+    }
+  }
+})
+
+
+# ---- duplicates kept, the plots, the cached grid, multipoints ---------------
+# build_tessellation(method = "triangles", keep_duplicates = TRUE) reads the
+# points without the key of duplicates, which casts them, so it is held here
+# on its own, and so is create_voronoi_polygons(keep_duplicates = TRUE).
+# plot_tessellation_map(), plot_folds() and plot() of a fit returned a plot
+# that stopped with "Not compatible with STRSXP" when it was built, on the
+# column sf::st_cast() returns; create_grid_polygons_cached() stopped with
+# that text on such points as `boundary`, where create_grid_polygons()
+# refuses a boundary that is not polygonal.  A layer of MULTIPOINT features
+# in an sfc_GEOMETRY column stopped the Voronoi builders, the join and what
+# reads it, and a layer that mixes POINT and MULTIPOINT (sf holds it in an
+# sfc_GEOMETRY column) stopped the triangle builder with sf's "not
+# implemented for objects of class sfc_GEOMETRY".
+
+# The two sfc_GEOMETRY forms of a layer of one geometry type.
+.gcp_forms_typed <- function(x, type) {
+  cast <- sf::st_cast(x, "GEOMETRY")
+  g <- sf::st_geometry(cast)
+  attr(g, "classes") <- rep(type, length(g))
+  classed <- cast
+  suppressWarnings(sf::st_geometry(classed) <- g)
+  list(cast = cast, classed = classed)
+}
+
+# What a plot draws: the data of each layer once the plot is built.
+.gcp_built <- function(p) ggplot2::ggplot_build(p)$data
+
+
+test_that("the builders read the points as in sfc_POINT with duplicates kept", {
+  L <- .gcp_layers()
+  C <- .gcp_cells()
+  bt  <- function(d, ...) .gcp_quiet(build_tessellation(d, quiet = TRUE, keep_duplicates = TRUE, ...))
+  cvp <- function(d, ...) .gcp_quiet(create_voronoi_polygons(d, quiet = TRUE, keep_duplicates = TRUE, ...))
+  ref <- list(bt(L$pts, method = "triangles"),
+              bt(L$pts, boundary = C$boundary, method = "triangles"),
+              bt(L$pts), cvp(L$pts))
+  for (d in .gcp_forms()) {
+    expect_identical(bt(d, method = "triangles"), ref[[1]])
+    expect_identical(bt(d, boundary = C$boundary, method = "triangles"), ref[[2]])
+    expect_identical(bt(d), ref[[3]])
+    expect_identical(cvp(d), ref[[4]])
+  }
+})
+
+
+test_that("the maps draw the points as in sfc_POINT", {
+  skip_if_not_installed("ggplot2")
+  L <- .gcp_layers()
+  C <- .gcp_cells()
+  ptm <- function(...) .gcp_quiet(.gcp_built(plot_tessellation_map(C$cells, ...)))
+  folds <- .gcp_quiet(make_folds(L$pts, k = 4, seed = 1))
+  pf <- function(...) .gcp_quiet(.gcp_built(plot_folds(folds, ...)))
+  ref <- list(ptm(features_sf = L$pts), ptm(seeds_sf = L$pts),
+              ptm(features_sf = L$pts, target_crs = 4326),
+              ptm(boundary = L$pts), pf(L$pts), pf(L$pts, boundary = L$pts))
+  for (d in .gcp_forms()) {
+    expect_identical(ptm(features_sf = d), ref[[1]])
+    expect_identical(ptm(seeds_sf = d), ref[[2]])
+    expect_identical(ptm(features_sf = d, target_crs = 4326), ref[[3]])
+    expect_identical(ptm(boundary = d), ref[[4]])
+    expect_identical(pf(d), ref[[5]])
+    expect_identical(pf(L$pts, boundary = d), ref[[6]])
+  }
+  # A fit whose layer is in that class, as a custom fit may carry it.
+  rf  <- .gcp_rf(L$pts)
+  gwr <- .gcp_quiet(fit_gwr_model(L$pts, "y", c("x1", "x2"), bandwidth = 20,
+                                  adaptive = TRUE))
+  pl <- function(fit, ...) .gcp_quiet(.gcp_built(plot(fit, ...)))
+  ref_f <- list(pl(rf), pl(gwr, type = "coefficients"))
+  for (d in .gcp_forms()) {
+    rf_d <- rf
+    rf_d$data_sf <- d
+    gwr_d <- gwr
+    gwr_d$data_sf <- d
+    expect_identical(pl(rf_d), ref_f[[1]])
+    expect_identical(pl(gwr_d, type = "coefficients"), ref_f[[2]])
+  }
+})
+
+
+test_that("create_grid_polygons_cached() refuses such points as `boundary` as in sfc_POINT", {
+  L <- .gcp_layers()
+  cache <- new.env(parent = emptyenv())
+  expect_error(create_grid_polygons_cached(L$pts, target_cells = 9, cache_env = cache),
+               "'boundary' must be polygonal")
+  for (d in .gcp_forms())
+    expect_error(create_grid_polygons_cached(d, target_cells = 9, cache_env = cache),
+                 "'boundary' must be polygonal")
+})
+
+
+test_that("MULTIPOINT features in an sfc_GEOMETRY column are read as in sfc_MULTIPOINT", {
+  L <- .gcp_layers()
+  C <- .gcp_cells()
+  M <- sf::st_cast(L$pts, "MULTIPOINT")
+  forms <- .gcp_forms_typed(M, "MULTIPOINT")
+  for (d in forms) {
+    expect_s3_class(sf::st_geometry(d), "sfc_GEOMETRY")
+    expect_true(all(sf::st_geometry_type(d, by_geometry = TRUE) == "MULTIPOINT"))
+  }
+  cvp <- function(d, ...) .gcp_quiet(create_voronoi_polygons(d, quiet = TRUE, ...))
+  bt  <- function(d, ...) .gcp_quiet(build_tessellation(d, quiet = TRUE, ...))
+  afp <- function(d) .gcp_quiet(assign_features_to_polygons(d, C$cells, quiet = TRUE))
+  sbc <- function(d) .gcp_quiet(summarize_by_cell(afp(d), "y", cells_sf = C$cells))
+  ka  <- function(d) .gcp_quiet(kriging_adequacy(afp(d), "y", C$cells))
+  rf  <- .gcp_rf(L$pts)
+  ps  <- function(d) .gcp_quiet(predict_surface(rf, grid = C$locs, covariates = d))
+  ref <- list(cvp(M), cvp(M, boundary = C$boundary), cvp(M, keep_duplicates = TRUE),
+              bt(M), bt(M, method = "triangles"),
+              bt(M, method = "triangles", keep_duplicates = TRUE),
+              afp(M), sbc(M), ka(M), ps(M))
+  for (d in forms) {
+    expect_identical(cvp(d), ref[[1]])
+    expect_identical(cvp(d, boundary = C$boundary), ref[[2]])
+    expect_identical(cvp(d, keep_duplicates = TRUE), ref[[3]])
+    expect_identical(bt(d), ref[[4]])
+    expect_identical(bt(d, method = "triangles"), ref[[5]])
+    expect_identical(bt(d, method = "triangles", keep_duplicates = TRUE), ref[[6]])
+    expect_identical(afp(d), ref[[7]])
+    expect_identical(sbc(d), ref[[8]])
+    expect_identical(ka(d), ref[[9]])
+    expect_identical(ps(d), ref[[10]])
+  }
+})
+
+
+test_that("the triangles read a layer that mixes POINT and MULTIPOINT as the same features in sfc_MULTIPOINT", {
+  L <- .gcp_layers()
+  C <- .gcp_cells()
+  g <- sf::st_geometry(L$pts)
+  # Two points held as MULTIPOINT features, the rest as POINT: sf::st_sfc()
+  # puts the mix in an sfc_GEOMETRY column.
+  mixed <- sf::st_sfc(c(lapply(1:2, function(i) sf::st_multipoint(
+                          sf::st_coordinates(g[i])[, 1:2, drop = FALSE])),
+                        unclass(g)[-(1:2)]), crs = sf::st_crs(g))
+  mix <- L$pts
+  sf::st_geometry(mix) <- mixed
+  expect_s3_class(sf::st_geometry(mix), "sfc_GEOMETRY")
+  as_multi <- mix
+  sf::st_geometry(as_multi) <- sf::st_cast(mixed, "MULTIPOINT")
+  bt <- function(d, ...) .gcp_quiet(build_tessellation(d, method = "triangles",
+                                                      quiet = TRUE, ...))
+  expect_identical(bt(mix), bt(as_multi))
+  expect_identical(bt(mix, keep_duplicates = TRUE), bt(as_multi, keep_duplicates = TRUE))
+  expect_identical(bt(mix, boundary = C$boundary), bt(as_multi, boundary = C$boundary))
+  # The triangles are those of the same points in sfc_POINT.
+  expect_identical(bt(mix)$cells, bt(L$pts)$cells)
 })

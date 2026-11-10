@@ -172,7 +172,12 @@ plot_tessellation_map <- function(tessellation_sf,
     # into the plot's CRS stopped with "OGR error" (an XYZ first row) or drew
     # an XYZ ring among XY rows far from its place, and GEOS stopped on the
     # labels' points.  The plot returns no geometry, so nothing is said.
-    x <- .xy_if_mixed(x)
+    # Points in an sfc_GEOMETRY column are drawn as the same points in
+    # sfc_POINT, or sfc_MULTIPOINT (.typed_points()): on the column
+    # sf::st_cast() returns, the move into the plot's CRS, here or in
+    # coord_sf() when the plot was built, stopped with "Not compatible with
+    # STRSXP".
+    x <- .xy_if_mixed(.typed_points(x))
     if (is.na(plot_crs)) return(x)
     x_crs <- sf::st_crs(x)
     # Returning a CRS-less overlay untouched was dead code, not a pass-through:
