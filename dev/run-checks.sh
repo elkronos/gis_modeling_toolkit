@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # dev/run-checks.sh -- run the post-edit verification sequence.
 #
-#   cd /Users/appleair/Downloads/gis_modeling_toolkit-main
+#   cd gis_modeling_toolkit    # the package root
 #   bash dev/run-checks.sh
 #
 # Stops at the first failure.  Each stage is cheap-to-expensive, so a problem

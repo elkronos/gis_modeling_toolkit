@@ -5,22 +5,24 @@
 #
 # Runs scripts 01 to 10 in order, reporting how long each took and what it
 # skipped. Scripts 02 (resolution), 09 (GWR) and 10 (Bayesian) need optional
-# packages -- gstat, sp, brms -- and skip themselves cleanly when those
-# are missing; the others skip only the part that needs one.
+# packages (gstat, sp and brms) and skip themselves when those are missing;
+# the others skip only the part that needs one.
 #
-# Scripts 01 to 09 run in about a minute between them. Script 10 takes several
-# more on its own, because Stan compiles the model separately for each of its
-# four fits. Skip it by sourcing 01 to 09 individually if you are in a hurry.
+# Script 10 takes far longer than the others, because Stan compiles the model
+# separately for each of its four fits. Skip it by sourcing 01 to 09
+# individually if you are in a hurry. The table printed at the end gives the
+# seconds each script took.
 #
 # To write every figure to files instead of drawing them:
 #   Sys.setenv(SPATIALKIT_TOUR_OUTPUT = "~/spatialkit-tour")
-# To run one script on its own, source it directly -- each is self-contained.
+# To run one script on its own, source it directly; each is self-contained.
 # =============================================================================
 .tour_dir <- if (nzchar(system.file("scripts", package = "spatialkit")))
   system.file("scripts", package = "spatialkit") else "."
 
 # Non-interactive by default: with ten scripts the per-figure pause is a chore.
-# Unset SPATIALKIT_TOUR_PAUSE before sourcing if you want it back.
+# Set SPATIALKIT_TOUR_PAUSE to any value other than "no" before sourcing to
+# keep the pauses.
 if (!nzchar(Sys.getenv("SPATIALKIT_TOUR_PAUSE")))
   Sys.setenv(SPATIALKIT_TOUR_PAUSE = "no")
 
