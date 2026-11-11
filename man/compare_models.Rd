@@ -2,17 +2,21 @@
 % Please edit documentation in R/evaluation.R
 \name{compare_models}
 \alias{compare_models}
-\title{Side-by-side comparison of fitted spatial models}
+\title{Compare fitted models in sample}
 \usage{
 compare_models(fits, newdata = NULL, ...)
 }
 \arguments{
-\item{fits}{A named list of \code{spatial_fit} objects.  Names must be
-unique; see \code{\link{evaluate_insample}}.}
+\item{fits}{A \code{spatial_fit}, or a named list of them.  The names
+label the rows and must be unique (see \code{\link{evaluate_insample}()});
+a single fit is labelled by its class.}
 
-\item{newdata}{Optional sf for out-of-sample evaluation.}
+\item{newdata}{Optional sf object of held-out rows, carrying the response
+and the predictors.}
 
-\item{...}{Extra arguments passed to predict().}
+\item{...}{Passed to \code{predict()} when \code{newdata} is given.
+Without \code{newdata} nothing reads them, so any argument here is an
+error, which catches a misspelt \code{newdata}.}
 }
 \value{
 A data.frame comparing all models.  Its \code{metric_basis}
@@ -53,102 +57,47 @@ significant p-value is noted in the log (not raised as an R warning):
 positive autocorrelation as structure the model may have missed,
 negative (\code{resid_morans_z < 0}) as the alternating residuals of a
 model that tracks its data closely.  Read the caveats in
-\code{?residual_morans_i} before treating silence as evidence of no
+\code{\link{residual_morans_i}()} before treating silence as evidence of no
 residual structure.
 }
 \description{
-Takes a named list of already-fit \code{spatial_fit} objects and produces
-a tidy comparison table including in-sample (for a forest, out-of-bag)
-metrics and model-specific information criteria (AICc, LOOIC).
+The table from \code{\link{evaluate_insample}()}, plus AICc (GWR), LOOIC
+(Bayesian GP), convergence and GP-adequacy flags and the residual Moran's
+I of each fit.  No model is refitted.  For scores on held-out blocks use
+\code{\link{compare_models_cv}()}.
 }
-\section{What the metrics are computed on}{
-
-With \code{newdata = NULL} the metrics come from \code{fitted(object)}.
-That is \strong{in-sample} for a \code{gwr_fit} or a \code{bayesian_fit},
-but \strong{out-of-bag} for an \code{rf_fit}, whose \code{fitted()} method
-returns out-of-bag predictions (see \code{\link{fit_rf_model}}).  The
-data.frame \code{model_metrics()} returns carries no label distinguishing
-the two, so check \code{object$info$fitted_are_oob} before comparing
-numbers across backends; \code{\link{evaluate_insample}()} and
-\code{\link{compare_models}()} record it per model in a
-\code{metric_basis} column.  \code{\link{compare_models_cv}} scores every
-backend the same way.
-
-\eqn{R^2} is \eqn{1 - RSS/TSS} with the total sum of squares taken about
-the mean of the response the model was \emph{fitted} to.  In sample that
-is the ordinary \eqn{R^2}.  With \code{newdata} it is out-of-sample
-\eqn{R^2}, the convention every \code{cv_*()} function uses: the model is
-measured against the prediction it had to beat, the training mean, not
-against the new rows' own mean, which it could not have known.  It is
-below 0 when the model predicts the new rows worse than the training mean
-does, and it is \code{NA} when the response does not vary about that
-baseline beyond the rounding of its values, whatever its units and
-origin.
-
-A \code{gwr_fit} whose response \code{fit_gwr_model()} took about a
-centre (\code{fit$engine$centres$response}, a response at a large offset)
-is scored on the response and the fitted values or predictions less that
-centre, which keep the spread a double rounds away at the response's
-size: \code{RMSE}, \code{MAE} and \eqn{R^2} are those of the same values
-at 0, and \code{MAPE} and \code{SMAPE} divide the same errors by the
-values in the response's units.  \code{fitted()} and \code{predict()}
-still return values in the response's units.
+\details{
+The metrics are those of \code{\link{model_metrics}()}: see its sections
+"What the metrics are computed on" and "Percentage errors on responses
+with zeros".
 }
-
-\section{Percentage errors on responses with zeros}{
-
-\code{MAPE} divides by the observed value and \code{SMAPE} by
-\eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
-Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
-whose denominator is non-zero, and are \code{NA} when no row qualifies.
-Non-zero is judged at the scale of the data: a denominator no larger
-than 100 machine epsilons times the largest one counts as zero, so the
-rule does not depend on the units of the response.
-The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
-the \code{n} column counts finite observation/prediction pairs.  Read a
-percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
-an average over a subset of the data, whatever its value.
-
-This bites on any response taking exact zeros: counts, rainfall,
-abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
-120, \code{MAPE} is an average over the 58 non-zero rows, which
-\code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
-subtly: it drops the rows where observation and prediction are both near
-zero (which on a well-fitted zero-inflated model are the rows it got
-\emph{right}), so it averages the harder rows only and reads worse than
-the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
-count is only a label, not a repair.
-
-\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row and are
-unaffected; prefer them whenever the response can be zero.  For a Bayesian
-fit, \code{\link{cv_bayes}()} additionally reports CRPS and interval
-coverage, which are proper scoring rules and have no such failure mode.
-}
-
 \examples{
-if (requireNamespace("ranger", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  pts <- st_as_sf(
-    data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
-               a = rnorm(60), b = rnorm(60)),
-    coords = c("x", "y"), crs = 32632
-  )
-  # An offset keeps the response away from zero, where MAPE is undefined.
-  pts$z <- 10 + 2 * pts$a - pts$b + rnorm(60, 0, 0.3)
-  # Two predictor sets for the same learner: the model that leaves `b` out
-  # against the one that has it.  These are in-sample (out-of-bag) numbers;
-  # compare_models_cv() scores the same question on spatial folds.
-  fits <- list(a_only = fit_rf_model(pts, "z", "a", num_trees = 100, seed = 1),
-               a_and_b = fit_rf_model(pts, "z", c("a", "b"), num_trees = 100, seed = 1))
-  compare_models(fits)
-}
+\dontshow{if (requireNamespace("ranger", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+set.seed(1)
+pts <- st_as_sf(
+  data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+             a = rnorm(60), b = rnorm(60)),
+  coords = c("x", "y"), crs = 32632
+)
+# An offset keeps the response away from zero, where MAPE is undefined.
+pts$z <- 10 + 2 * pts$a - pts$b + rnorm(60, 0, 0.3)
+# Two predictor sets for the same learner: the model that leaves `b` out
+# against the one that has it.  These are out-of-bag numbers;
+# compare_models_cv() scores the same question on spatial folds.
+fits <- list(
+  a_only  = fit_rf_model(pts, "z", "a", num_trees = 100, seed = 1),
+  a_and_b = fit_rf_model(pts, "z", c("a", "b"), num_trees = 100, seed = 1))
+cmp <- compare_models(fits)
+cmp[, c("model", "RMSE", "R2", "metric_basis", "resid_morans_I",
+        "resid_morans_p")]
+\dontshow{\}) # examplesIf}
 }
 \seealso{
-Other model evaluation:
-\code{\link[=compare_models_cv]{compare_models_cv()}},
+Other in-sample checks:
 \code{\link[=evaluate_insample]{evaluate_insample()}},
 \code{\link[=model_metrics]{model_metrics()}},
+\code{\link[=print.morans_i]{print.morans_i()}},
 \code{\link[=residual_morans_i]{residual_morans_i()}}
 }
-\concept{model evaluation}
+\concept{in-sample checks}

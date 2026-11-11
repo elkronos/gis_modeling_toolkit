@@ -2,7 +2,7 @@
 % Please edit documentation in R/model-classes.R
 \name{clear_fitted_cache}
 \alias{clear_fitted_cache}
-\title{Clear cached fitted values for a Bayesian spatial model}
+\title{Clear the cached fitted values of a Bayesian GP fit}
 \usage{
 clear_fitted_cache(object)
 }
@@ -10,38 +10,44 @@ clear_fitted_cache(object)
 \item{object}{A \code{bayesian_fit} object.}
 }
 \value{
-\code{object}, invisibly (called for side effect).
+\code{object}, invisibly.
 }
 \description{
-Removes the lazily-cached \code{fitted()} result so that the next call
-recomputes from the posterior.  This is only necessary if the underlying
-\code{brmsfit} engine has been manually mutated after fitting.  A change to
-\code{data_sf} invalidates the entry on its own, because the cached value
-carries a digest of the data it was computed from (see
-\code{\link{fitted.bayesian_fit}}).  Normal usage never requires it.
+Removes the cached \code{fitted()} values of a \code{bayesian_fit}, so the
+next call recomputes them from the posterior.  You need it only after
+editing the \code{brmsfit} engine in place.  A change to \code{data_sf},
+or a refit, invalidates the entry on its own (see "The Bayesian GP cache"
+in \link{spatial_fit-fitted}).  On any other fit it does nothing.
 }
 \details{
-The cache environment is shared by every copy of a fit, so clearing it
-through one copy clears it for all of them.  That is harmless: the others
-recompute.
+Every copy of a fit shares the cache, so clearing it through one copy
+clears it for all of them; the others recompute.
 }
 \examples{
-# Only a bayesian_fit carries the cache; on any other fit this is a no-op.
-if (requireNamespace("ranger", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  pts <- st_as_sf(
-    data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
-               a = rnorm(60)),
-    coords = c("x", "y"), crs = 32632
-  )
-  pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
-  fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
-  clear_fitted_cache(fit)
+\dontrun{
+# Needs brms and a Stan toolchain, and takes minutes.
+library(sf)
+set.seed(1)
+n <- 60
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             elev = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+dat$price <- 10 + 2 * dat$elev + rnorm(n)
+fit <- fit_bayesian_spatial_model(dat, "price", "elev", chains = 2,
+                                  iter = 1000, compute_loo = FALSE)
+f1 <- fitted(fit)          # computed from the posterior and cached
+clear_fitted_cache(fit)
+f2 <- fitted(fit)          # computed again
+all.equal(f1, f2)
 }
 }
 \seealso{
-Other package options and caches:
+Other options and caches:
+\code{\link[=clear_grid_cache]{clear_grid_cache()}},
+\code{\link{spatialkit-conditions}},
+\code{\link{spatialkit-options}},
 \code{\link[=spatialkit_quiet]{spatialkit_quiet()}}
 }
-\concept{package options and caches}
+\concept{options and caches}

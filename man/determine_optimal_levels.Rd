@@ -473,6 +473,7 @@ candidate is used, and the output records that it came from here; an
 that follow.
 
 Other resolution:
+\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
 \code{\link[=resolution_profile]{resolution_profile()}},
 \code{\link[=select_resolution]{select_resolution()}},
 \code{\link[=summary.resolution_profile]{summary.resolution_profile()}}

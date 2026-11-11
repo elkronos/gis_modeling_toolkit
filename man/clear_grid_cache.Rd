@@ -32,7 +32,9 @@ print(clear_grid_cache())                                   # 0: already empty
 \code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}}, which fills the cache.
 
 Other options and caches:
+\code{\link[=clear_fitted_cache]{clear_fitted_cache()}},
 \code{\link{spatialkit-conditions}},
-\code{\link{spatialkit-options}}
+\code{\link{spatialkit-options}},
+\code{\link[=spatialkit_quiet]{spatialkit_quiet()}}
 }
 \concept{options and caches}

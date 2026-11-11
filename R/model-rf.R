@@ -171,10 +171,8 @@
 #' \code{ranger} matches factor predictors by level, so a level that was not
 #' present when the forest was grown has no split to follow.  Depending on the
 #' ranger version this either errors or, as in ranger 0.16, silently returns a
-#' plausible-looking number.  An error there used to reach
-#' \code{predict.rf_fit()}'s \code{tryCatch}, which turned it into an
-#' all-\code{NA} vector plus one log line (it now raises ranger's reason, which
-#' does not name the column).  Both are worse than an error naming the level.
+#' plausible-looking number.  An error from ranger gives its own reason, which
+#' does not name the column.  Both are worse than an error naming the level.
 #'
 #' @param X Prediction frame from \code{.rf_frame()}.
 #' @param train_X Training frame from \code{.rf_frame()}.
@@ -236,47 +234,45 @@
 # Exported
 # -----------------------------------------------------------------------------
 
-#' Fit a random forest via ranger
+#' Fit a random forest with ranger
 #'
-#' Fits a regression random forest on an \code{sf} dataset and returns it as a
-#' \code{spatial_fit}, so it works with \code{\link{cv_spatial}},
-#' \code{\link{predict_surface}}, \code{\link{area_of_applicability}} and the
-#' \code{plot()} method like any other backend.
+#' Fits a regression random forest on an \code{sf} layer and returns it as a
+#' \code{spatial_fit}, so it works with \code{\link{cv_spatial}()},
+#' \code{\link{predict_surface}()}, \code{\link{area_of_applicability}()}
+#' and the \code{plot()} method like any other backend.  A forest suits a
+#' response that is non-linear in its predictors when predictive accuracy
+#' matters more than an interpretable model.
 #'
 #' @section Coordinates as predictors:
 #' \code{include_coords = TRUE} adds the x and y coordinates to the
-#' predictors. They are the only spatial information a forest can be given:
+#' predictors.  They are the only spatial information a forest can be given:
 #' without them it sees the covariates alone, and \code{print()} says "no
-#' spatial information used". The default is \code{FALSE}.
+#' spatial information used".  The default is \code{FALSE}.
 #'
-#' What the coordinates buy depends on where the predictions are wanted. A
-#' forest splits on location as on any column, so it follows the training
-#' surface closely between sampled points, and has nothing but the nearest
-#' edge of the data to go on beyond them. Between sampled points the
+#' The gain from the coordinates depends on where the predictions are
+#' wanted.  A forest splits on location as on any column, so it follows the
+#' training surface closely between sampled points, and has only the nearest
+#' edge of the data to go on beyond them.  Between sampled points the
 #' coordinates can lower the error, most where the covariates carry little
-#' of the spatial structure themselves, and the gain fades with distance
-#' from the training data.
-#' Beyond the autocorrelation range, or in a region the data never visited,
-#' it can reverse: in a simulated hold-out of an unvisited strip the forest
-#' with coordinates was 5.2\% worse on average and 31\% worse in the worst
-#' run. Meyer et al. (2019) report larger failures of the same kind. With
-#' covariates that carry the spatial structure themselves, expect less from
-#' the coordinates.
+#' of the spatial structure themselves, and the gain fades with distance from
+#' the training data.  Beyond the autocorrelation range, or in an area the
+#' data never visited, the coordinates can make predictions worse (Meyer et
+#' al. 2019).  With covariates that carry the spatial structure themselves,
+#' expect less from the coordinates.
 #'
-#' What does not change is how such a forest has to be scored. It fits
-#' location closely, so its error grows quickly with the distance from the
-#' data, and a cross-validated score is the error at the distance its folds
-#' put between the held-out points and their training data. Random folds,
-#' and the out-of-bag error, a random hold-out too, measure it among the
-#' samples: the error of a map over an area the samples cover evenly, which
-#' reads low for predictions made farther from the data. Score it with
-#' \code{\link{cv_rf}} on folds at the distances the map will be used at
-#' (folds matched to the prediction distance, \code{make_folds(method =
-#' "nndm")} or \code{"knndm"}, or blocks, \code{method = "block_kfold"},
-#' for predictions into unsampled gaps), not with the out-of-bag error, and
-#' compare the two forests on the same folds. That comparison is two calls:
-#' build the folds once and hand them to \code{cv_rf()} with and without
-#' the coordinates.
+#' A forest with coordinates fits location closely, so its error grows
+#' quickly with the distance from the data, and a cross-validated score is
+#' the error at the distance its folds put between the held-out points and
+#' their training data.  Random folds, and the out-of-bag error, a random
+#' hold-out too, measure it among the samples: the error of a map over an
+#' area the samples cover evenly, which reads low for predictions made
+#' farther from the data.  Score the forest with \code{\link{cv_rf}()} on
+#' folds at the distances the map will be used at (folds matched to the
+#' prediction distance, \code{make_folds(method = "nndm")} or
+#' \code{"knndm"}, or blocks, \code{method = "block_kfold"}, for predictions
+#' into unsampled gaps), and compare the forests with and without
+#' coordinates on the same folds.  Build the folds once and pass them to
+#' \code{cv_rf()} with and without the coordinates:
 #' \preformatted{
 #' folds   <- make_folds(dat, k = 5, method = "block_kfold")
 #' plain   <- cv_rf(dat, "z", c("a", "b"), folds = folds)
@@ -284,61 +280,58 @@
 #'                  include_coords = TRUE)
 #' c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
 #' }
-#' \code{\link{cv_rf}} runs the same comparison in its example and reads it
-#' fold by fold. Setting
-#' \code{include_coords = TRUE} logs that advice, once per session (it is a
-#' deliberate choice, so it is not raised as an R warning, and it is not
-#' repeated for every fold of a cross-validation).
+#' The example on \code{\link{cv_rf}()} runs this comparison and reads it
+#' fold by fold.  Setting \code{include_coords = TRUE} logs this advice once
+#' per session, as a log line rather than an R warning, and not once for
+#' every fold of a cross-validation.
 #'
 #' @section Categorical predictors:
 #' A predictor that is an unordered factor or a character column is split
 #' with \code{respect.unordered.factors = "order"}: ranger orders its levels
-#' by mean response once, before growing, and splits on that order. That is
-#' the handling ranger's own help recommends. ranger's default for a
-#' regression forest, \code{"ignore"}, splits on the order the levels happen
-#' to be stored in (alphabetical, for most data), which for a nominal
-#' variable is arbitrary: with a 40-level factor carrying random level
-#' effects, the test RMSE was 1.05 by level order against 0.57 by response
-#' order, lower in 10 draws of 10. Pass \code{respect.unordered.factors}
-#' through \code{...} to choose otherwise (\code{"ignore"}, or
-#' \code{"partition"} for every two-way split of the levels, which is slow
-#' beyond a few levels). Ordered factors are left alone and split on their
-#' own order, and with \code{splitrule = "extratrees"} ranger's own default
-#' for that rule, \code{"partition"}, is kept. The setting is recorded in
+#' by mean response once, before growing, and splits on that order, the
+#' handling ranger's own help recommends.  ranger's default for a regression
+#' forest, \code{"ignore"}, splits on the order the levels are stored in
+#' (alphabetical, for most data), which for a nominal variable is arbitrary.
+#' Pass \code{respect.unordered.factors} through \code{...} to choose
+#' otherwise (\code{"ignore"}, or \code{"partition"} for every two-way split
+#' of the levels, which is slow beyond a few levels).  Ordered factors are
+#' left alone and split on their own order, and with
+#' \code{splitrule = "extratrees"} ranger's own default for that rule,
+#' \code{"partition"}, is kept.  The setting is recorded in
 #' \code{$info$respect_unordered_factors} and printed with the fit.
 #'
-#' @section The out-of-bag error is a random hold-out:
-#' \code{ranger}'s OOB error holds each observation out of the trees that did
-#' not sample it. That is a random hold-out: the trees that "did not see" a
-#' point almost certainly saw its neighbours, so under spatial
-#' autocorrelation it is the error of predicting among the samples, as random
-#' k-fold is, and reads low for predictions made farther from the data than
-#' the samples sit from each other (see \code{\link{make_folds}()}). It is
-#' reported as \code{$info$oob_rmse} and \code{$info$oob_r_squared} and
-#' labelled as OOB
-#' everywhere it appears. Use \code{\link{cv_rf}} for a spatial estimate.
+#' @section Out-of-bag error:
+#' \pkg{ranger}'s out-of-bag (OOB) error holds each observation out of the
+#' trees that did not sample it.  That is a random hold-out: the trees that
+#' did not see a point almost always saw its neighbours, so under spatial
+#' autocorrelation it is the error of predicting among the samples, as
+#' random k-fold is, and reads low for predictions made farther from the
+#' data than the samples sit from each other (see \code{\link{make_folds}()}).
+#' It is reported as \code{$info$oob_rmse} and \code{$info$oob_r_squared}
+#' and labelled as OOB wherever it appears.  Use \code{\link{cv_rf}()} for a
+#' spatial estimate.
 #'
-#' @section What fitted() returns:
-#' \code{fitted()} on an \code{rf_fit} returns \strong{out-of-bag} predictions,
-#' not in-sample ones, following the convention of the random forest packages
-#' themselves. In-sample predictions from a forest are close to memorisation
-#' and would make \code{summary()} report a fictitious R-squared. The
-#' consequence is that \code{summary()} means something different here than for
-#' a \code{gwr_fit} or \code{bayesian_fit}, whose fitted values are in-sample:
-#' do not compare the two directly. \code{\link{compare_models_cv}} exists for
-#' that.
+#' @section Fitted values are out-of-bag:
+#' \code{fitted()} on an \code{rf_fit} returns out-of-bag predictions, as the
+#' random forest packages themselves do.  In-sample predictions from a forest
+#' come close to reproducing the training data, and their \eqn{R^2} says
+#' little about new data.  \code{summary()} therefore reports out-of-bag
+#' metrics for a forest and in-sample metrics for a GWR or a Bayesian GP
+#' fit, and the two
+#' do not compare; \code{\link{compare_models_cv}()} scores every backend on
+#' the same folds.
 #'
 #' A row that every tree sampled has no out-of-bag prediction, and ranger
 #' reports \code{NaN} for it.  That is every row under \code{replace = FALSE}
-#' with \code{sample_fraction = 1}, and a few under a small \code{num_trees}.
-#' The fit warns with the count; \code{fitted()} and \code{residuals()} are
-#' \code{NaN} on those rows, and \code{summary()} says how many rows its
-#' metrics were computed on.  With no row out of bag at all, the OOB error
-#' (\code{NA} in \code{$info$oob_rmse} and \code{$info$oob_r_squared}) and
-#' the permutation importance (\code{NaN}) are undefined too, and
-#' \code{print()} says so.  \code{\link{cv_rf}()} scores its fold forests on
-#' the held-out rows, never out of bag, so it warns once with the number of
-#' folds affected rather than once per fold.
+#' with \code{sample_fraction = 1}, and a few under a small
+#' \code{num_trees}.  The fit warns with the count; \code{fitted()} and
+#' \code{residuals()} are \code{NaN} on those rows, and \code{summary()}
+#' says how many rows its metrics were computed on.  With no row out of bag
+#' at all, the OOB error (\code{NA} in \code{$info$oob_rmse} and
+#' \code{$info$oob_r_squared}) and the permutation importance (\code{NaN})
+#' are undefined too, and \code{print()} says so.  \code{\link{cv_rf}()}
+#' scores its fold forests on the held-out rows, never out of bag, so it
+#' warns once with the number of folds affected rather than once per fold.
 #'
 #' @param data_sf An sf object with response, predictors and geometry.
 #' @param response_var Response column name.
@@ -347,9 +340,9 @@
 #' @param mtry Predictors sampled per split. \code{NULL} uses ranger's default.
 #' @param min_node_size Minimum node size. \code{NULL} uses ranger's default.
 #' @param importance \code{"permutation"} (default), \code{"impurity"} or
-#'   \code{"none"}. Impurity importance is biased toward continuous and
-#'   high-cardinality predictors (Strobl et al. 2007), which is why permutation
-#'   is the default despite costing more.
+#'   \code{"none"}.  Impurity importance is biased towards continuous and
+#'   high-cardinality predictors (Strobl et al. 2007), so permutation
+#'   importance is the default although it costs more.
 #' @param include_coords Add the coordinates as predictors. Default
 #'   \code{FALSE}, which leaves the forest with no spatial information; see
 #'   \emph{Coordinates as predictors}.
@@ -359,34 +352,28 @@
 #'   (2007) show that bootstrap sampling with replacement is itself a source
 #'   of bias in variable importance toward predictors with many distinct
 #'   values or categories, and recommend subsampling without replacement.
-#'   The forest's predictions change slightly with the choice; the default is
-#'   kept at ranger's so that an existing script fits the same forest, and
-#'   the setting is recorded in \code{$info} and printed with the fit.
+#'   The forest's predictions change slightly with the choice.  The setting
+#'   is recorded in \code{$info} and printed with the fit.
 #' @param sample_fraction Fraction of rows drawn for each tree.  \code{NULL}
 #'   (default) uses ranger's rule: all rows when \code{replace = TRUE},
 #'   0.632 (the expected share of distinct rows in a bootstrap sample)
 #'   when \code{replace = FALSE}.  A single number in (0, 1] overrides it.
 #'   \code{replace = FALSE} with \code{sample_fraction = 1} grows every tree
-#'   on every row, so nothing is out of bag: the fit warns, and see
-#'   \strong{What fitted() returns}.
+#'   on every row, so nothing is out of bag: the fit warns (see "Fitted
+#'   values are out-of-bag").
 #' @param seed Seed passed to ranger. Default 123.
-#' @param num_threads Threads for ranger. Default \code{NULL} means
+#' @param num_threads Threads for ranger.  Default \code{NULL} means
 #'   \code{getOption("mc.cores", 1L)}: one thread unless the session has
-#'   opted in to more, the convention \pkg{brms} and \pkg{parallel} use.
-#'   ranger's own default is every core on the machine, which is the wrong
-#'   default for a package function (a check farm limits jobs to two cores,
-#'   and \code{cv_rf(parallel = )} would multiply it by the worker count).
-#'   Predictions do not depend on the thread count, only speed does; pass
-#'   \code{parallel::detectCores()} to use them all.
-#' @param .already_prepped Internal; skip \code{prep_model_data()} because the
-#'   caller has already projected and cleaned the data.
+#'   set more, the convention \pkg{brms} and \pkg{parallel} use.
+#'   Predictions do not depend on the thread count; pass
+#'   \code{parallel::detectCores()} to use every core.
+#' @param .already_prepped Internal; leave at the default.
 #' @param ... Passed to \code{ranger::ranger()}.  ranger's own spellings of
 #'   the arguments this function already sets (\code{num.trees},
 #'   \code{min.node.size}, \code{num.threads}, \code{mtry},
 #'   \code{importance}, \code{seed}, \code{replace},
 #'   \code{sample.fraction}, \code{x}, \code{y}) are rejected with a
-#'   message naming the wrapper argument to use instead.  Passing them here
-#'   would reach \code{ranger()} twice and fail the call.
+#'   message naming the wrapper argument to use instead.
 #'   \code{respect.unordered.factors} passed here overrides the
 #'   \code{"order"} this function sets when a predictor is categorical; see
 #'   \emph{Categorical predictors}.
@@ -442,30 +429,25 @@
 #' random forest variable importance measures: illustrations, sources and a
 #' solution. \emph{BMC Bioinformatics} 8, 25. \doi{10.1186/1471-2105-8-25}
 #'
-#' @seealso \code{\link{cv_rf}} for a spatially blocked performance estimate,
-#'   \code{\link{area_of_applicability}}, which weights the predictors by
-#'   \code{pmax(fit$info$importance, 0)} by default when that importance is
-#'   finite and the forest has out-of-bag skill (it is \code{NaN} when no row
-#'   is out of bag; see "What fitted() returns"), and which needs
-#'   \code{categorical = "indicator"} or \code{"drop"} for a forest with a
-#'   factor predictor. For a forest fitted with \code{include_coords = TRUE}
-#'   it also measures location on an index of its own.
+#' @seealso \code{\link{cv_rf}()} to score the forest on spatial folds;
+#'   \code{predict()} (\link{spatial_fit-predict}) and
+#'   \code{\link{predict_surface}()} to predict;
+#'   \code{\link{area_of_applicability}()} to mark where the predictions
+#'   apply (it weights the predictors by this forest's importance).
 #' @family model fitting
-#' @examples
-#' if (requireNamespace("ranger", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   n <- 150
-#'   dat <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-#'                a = rnorm(n), b = rnorm(n)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.3)
-#'   fit <- fit_rf_model(dat, "z", c("a", "b"))
-#'   print(fit)              # print(): only a block's last value shows on its own
-#'   fit$info$importance     # permutation importance, a and b
-#' }
+#' @examplesIf requireNamespace("ranger", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' n <- 150
+#' dat <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              a = rnorm(n), b = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.3)
+#' fit <- fit_rf_model(dat, "z", c("a", "b"))
+#' fit
+#' fit$info$importance     # permutation importance of a and b
 #' @export
 fit_rf_model <- function(data_sf, response_var, predictor_vars,
                          num_trees = 500L, mtry = NULL, min_node_size = NULL,
@@ -840,10 +822,11 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 
 #' Cross-validate a random forest with spatial folds
 #'
-#' Thin wrapper over \code{\link{cv_spatial}} that refits a \code{ranger}
-#' forest on each training fold. Unlike the out-of-bag error, this holds out
-#' whole spatial blocks by default, so most neighbours of a held-out point are
-#' not in the training set; \code{folds} says what that score estimates.
+#' A wrapper over \code{\link{cv_spatial}()} that refits a \pkg{ranger}
+#' forest on each training fold.  By default it holds out whole spatial
+#' blocks, so most neighbours of a held-out point are not in the training
+#' set, where the out-of-bag error holds out single rows; \code{folds} says
+#' what the score estimates.
 #'
 #' @section Comparing the forest with and without coordinates:
 #' Whether \code{include_coords = TRUE} lowers the error depends on how far
@@ -855,11 +838,11 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #' calls, one with \code{include_coords = TRUE} and one without. Each fold
 #' then holds out the same rows in both, so the two \code{overall} rows
 #' compare like with like and the two \code{fold_metrics} tables pair up
-#' fold by fold. A difference in \code{overall} that is small beside the
+#' fold by fold.  A difference in \code{overall} that is small beside the
 #' spread of the per-fold differences is not evidence for either forest.
-#' The example below runs the comparison. \code{\link{compare_models_cv}}
+#' The example below runs the comparison.  \code{\link{compare_models_cv}()}
 #' takes one set of forest arguments (\code{rf_args}) per call, so it scores
-#' one of the two forests, not both.
+#' only one of the two forests.
 #'
 #' @param data_sf An sf object.
 #' @param response_var Response column name.
@@ -888,7 +871,7 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #'   \code{make_folds(method = "knndm", prediction_points = )} builds folds
 #'   matched to them.
 #' @param k Number of folds when \code{folds} is \code{NULL}. Default 5.
-#' @param seed RNG seed. Default 123.  It seeds fold construction \strong{and},
+#' @param seed RNG seed.  Default 123.  It seeds fold construction and,
 #'   through a per-fold draw, each fold's forest, so two different seeds give
 #'   different results even on identical \code{folds}. To grow every fold's
 #'   forest from one fixed ranger seed instead, call \code{\link{cv_spatial}}
@@ -915,34 +898,37 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #'   arguments").  \code{seed} is this function's own argument and never
 #'   reaches \code{fit_rf_model()} through here; see \code{seed} above for
 #'   growing every fold's forest from one fixed seed.
-#' @inheritSection model_metrics Percentage errors on responses with zeros
-#' @return The \code{\link{cv_spatial}} result.
+#' @return The \code{\link{cv_spatial}()} result.  \code{MAPE} and
+#'   \code{SMAPE} skip rows whose denominator is zero; \code{n_MAPE} and
+#'   \code{n_SMAPE} count the rows they used (see "Percentage errors on
+#'   responses with zeros" in \code{\link{model_metrics}()}).
+#' @seealso \code{\link{fit_rf_model}()} for the forest's arguments, and
+#'   \code{\link{plot_cv_metrics}()} to draw the per-fold scores.
 #' @family cross-validation
-#' @examples
-#' if (requireNamespace("ranger", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   n <- 200
-#'   dat <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-#'                a = rnorm(n)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   dat$z <- 2 * dat$a + rnorm(n, 0, 0.3)
-#'   cv_rf(dat, "z", "a", k = 4)$overall
+#' @examplesIf requireNamespace("ranger", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' n <- 200
+#' dat <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              a = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' # An offset keeps the response away from zero, where MAPE is undefined.
+#' dat$z <- 10 + 2 * dat$a + rnorm(n, 0, 0.3)
+#' cv_rf(dat, "z", "a", k = 4)$overall
 #'
-#'   # The forest with and without the coordinates, on the same blocked
-#'   # folds.  (The second call logs the include_coords caution, once per
-#'   # session; this comparison is what it asks for.)  This response has no
-#'   # spatial structure, so here the coordinates can only cost accuracy.
-#'   folds   <- make_folds(dat, k = 4, method = "block_kfold", seed = 1)
-#'   plain   <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200)
-#'   with_xy <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200,
-#'                    include_coords = TRUE)
-#'   c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
-#'   # Fold by fold: positive where the coordinates lowered the error.
-#'   plain$fold_metrics$RMSE - with_xy$fold_metrics$RMSE
-#' }
+#' # The forest with and without the coordinates, on the same blocked
+#' # folds.  The second call logs the include_coords caution once per
+#' # session.  This response has no spatial structure, so here the
+#' # coordinates can only cost accuracy.
+#' folds   <- make_folds(dat, k = 4, method = "block_kfold", seed = 1)
+#' plain   <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200)
+#' with_xy <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200,
+#'                  include_coords = TRUE)
+#' c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
+#' # Fold by fold: positive where the coordinates lowered the error.
+#' plain$fold_metrics$RMSE - with_xy$fold_metrics$RMSE
 #' @export
 cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
                   seed = 123, parallel = FALSE, block_size = NULL,
@@ -1002,51 +988,7 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
 # S3 methods
 # -----------------------------------------------------------------------------
 
-#' Predict from a random forest fit
-#'
-#' With \code{newdata = NULL} this returns \strong{out-of-bag} predictions, not
-#' in-sample ones.  See \code{\link{fit_rf_model}}.
-#'
-#' @param object An \code{rf_fit}.
-#' @param newdata Optional sf object carrying the same predictors. It is
-#'   transformed to the CRS used at fitting time first, so a forest that
-#'   includes the coordinates is not fed a different coordinate system.
-#'   Categorical predictors must not carry a level the forest was never grown
-#'   with, meaning a level with \strong{no training rows}, not merely one
-#'   absent from \code{levels()}: an ordinary subset, or a spatial-CV fold that
-#'   holds out a whole class, keeps the unused level while the forest has no
-#'   split for it.  An unseen level is an error, not a guess.  A predictor that
-#'   was numeric or logical when the forest was grown must also arrive numeric
-#'   or logical: ranger would otherwise factor-code a character column and apply
-#'   the numeric split thresholds to the codes, predicting confidently from
-#'   nonsense, so a character column is refused instead.  (ranger sees a logical
-#'   as 0/1, so either form is accepted for one.)  A layer whose geometries
-#'   mix XY with XYZ or XYM (as \code{rbind()} of an XY and an XYZ layer
-#'   gives) is read in x and y.
-#' @param ... Passed to \code{ranger}'s predict method. Arguments that make
-#'   \code{ranger} return a matrix (\code{predict.all = TRUE},
-#'   \code{type = "quantiles"}, \code{type = "se"} with \code{predict.all})
-#'   are rejected, because this method's contract is one number per row of
-#'   \code{newdata}. Call \code{predict(fit$engine, data = ...)} directly for
-#'   those.  So is anything \code{ranger}'s predict method itself refuses,
-#'   such as \code{type = "quantiles"} on a forest grown without
-#'   \code{quantreg = TRUE} or \code{type = "se"} without
-#'   \code{keep.inbag = TRUE}: the error names ranger's reason.
-#'   \code{fit$engine} predicts \code{(y - fit$info$response_centre) /
-#'   fit$info$response_scale}, which is \code{y} unless the forest was grown
-#'   on the response taken about a centre or scaled (see the Value section of
-#'   \code{\link{fit_rf_model}}); this method puts the centre and scale back.
-#'   \code{seed} defaults to a constant: an unset \code{seed} makes
-#'   \code{ranger} draw one uniform from the global RNG stream per call, so the
-#'   number of \code{predict()} calls a script happens to make (via
-#'   \code{\link{predict_surface}}'s \code{chunk_size}, say) would otherwise
-#'   shift every later random draw. It does not affect a regression forest's
-#'   predictions; pass your own if you need one.
-#' @return Numeric vector, aligned to \code{nrow(newdata)} with \code{NA} for
-#'   rows dropped as incomplete (so all \code{NA}, with a WARN line in the
-#'   log, when every row is).  A failure inside \code{ranger}'s predict
-#'   method is an error, not an all-\code{NA} vector.
-#' @family methods on a fitted model
+#' @rdname spatial_fit-predict
 #' @export
 predict.rf_fit <- function(object, newdata = NULL, ...) {
   if (!requireNamespace("ranger", quietly = TRUE))
@@ -1153,16 +1095,7 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
 }
 
 
-#' Out-of-bag predictions from a random forest fit
-#'
-#' Returns out-of-bag predictions rather than in-sample ones. See
-#' \code{\link{fit_rf_model}} for why, and for what it means for
-#' \code{summary()}.
-#'
-#' @param object An \code{rf_fit}.
-#' @param ... Ignored.
-#' @return Numeric vector of length \code{object$n}.
-#' @family methods on a fitted model
+#' @rdname spatial_fit-fitted
 #' @export
 fitted.rf_fit <- function(object, ...) {
   p <- object$engine$predictions
@@ -1174,22 +1107,7 @@ fitted.rf_fit <- function(object, ...) {
 }
 
 
-#' Out-of-bag residuals from a random forest fit
-#'
-#' Observed response minus \code{\link{fitted.rf_fit}}, which for a forest is
-#' the \strong{out-of-bag} prediction: each observation predicted only by the
-#' trees that did not see it.  These are therefore already held-out residuals,
-#' unlike \code{residuals.gwr_fit()} and \code{residuals.bayesian_fit()},
-#' which are in-sample.  Feed them to \code{\link{residual_morans_i}()} to test
-#' whether spatial structure the forest failed to capture is still sitting in
-#' the residuals.  Out-of-bag is a random hold-out, not a substitute for
-#' spatial CV: use \code{\link{cv_rf}()} on folds at the distances the map
-#' will be used at for its accuracy.
-#'
-#' @param object An \code{rf_fit}.
-#' @param ... Ignored.
-#' @return Numeric vector of length \code{object$n}.
-#' @family methods on a fitted model
+#' @rdname spatial_fit-residuals
 #' @export
 residuals.rf_fit <- function(object, ...) {
   y <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
@@ -1197,17 +1115,7 @@ residuals.rf_fit <- function(object, ...) {
 }
 
 
-#' Coefficients are undefined for a random forest
-#'
-#' Consistent with \code{coef.gwr_fit()} and \code{coef.bayesian_fit()}, which
-#' also error, instead of returning \code{NULL}, when they cannot supply
-#' coefficients.  See the \code{coef()} contract in
-#' \code{\link{new_spatial_fit}}.
-#'
-#' @param object An \code{rf_fit}.
-#' @param ... Ignored.
-#' @return Never returns; always signals an error.
-#' @family methods on a fitted model
+#' @rdname spatial_fit-coef
 #' @export
 coef.rf_fit <- function(object, ...) {
   stop("coef.rf_fit(): a random forest has no coefficients. For per-predictor ",
@@ -1216,24 +1124,7 @@ coef.rf_fit <- function(object, ...) {
 }
 
 
-#' Print a random forest fit
-#'
-#' Shows the forest's shape (formula, n, number of trees, \code{mtry}, node
-#' size) along with the out-of-bag error and, prominently, whether the
-#' coordinates were used as predictors.  That line is the one to check.  A
-#' forest fitted without them prints "no spatial information used": it sees
-#' the covariates alone.  One fitted with \code{include_coords = TRUE} fits
-#' location closely, so its out-of-bag error, a random hold-out, is its error
-#' among the samples and reads low for predictions made farther from the
-#' data; score it on folds at the distances the map will be used at (see
-#' \emph{Coordinates as predictors} in \code{\link{fit_rf_model}}).  When a
-#' predictor is an unordered factor or a character column, a line says how
-#' ranger was told to split it.
-#'
-#' @param x An \code{rf_fit}.
-#' @param ... Ignored.
-#' @return \code{x}, invisibly.
-#' @family methods on a fitted model
+#' @rdname print.spatial_fit
 #' @export
 print.rf_fit <- function(x, ...) {
   cat("<Random Forest (ranger)> spatial model fit\n")

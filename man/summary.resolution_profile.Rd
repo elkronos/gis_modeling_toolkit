@@ -122,6 +122,7 @@ the curves behind these flat regions.
 
 Other resolution:
 \code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
+\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
 \code{\link[=resolution_profile]{resolution_profile()}},
 \code{\link[=select_resolution]{select_resolution()}}
 }

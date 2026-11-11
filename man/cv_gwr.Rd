@@ -165,24 +165,24 @@ Non-zero is judged at the scale of the data: a denominator no larger
 than 100 machine epsilons times the largest one counts as zero, so the
 rule does not depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
-the \code{n} column counts finite observation/prediction pairs.  Read a
-percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
-an average over a subset of the data, whatever its value.
+the \code{n} column (\code{n_pred} in a cross-validation result) counts
+finite observation/prediction pairs.  Read a percentage error next to that
+count: when \code{n_MAPE} is smaller, \code{MAPE} is an average over a
+subset of the data, whatever its value.
 
-This bites on any response taking exact zeros: counts, rainfall,
-abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
-120, \code{MAPE} is an average over the 58 non-zero rows, which
-\code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
-subtly: it drops the rows where observation and prediction are both near
-zero (which on a well-fitted zero-inflated model are the rows it got
-\emph{right}), so it averages the harder rows only and reads worse than
-the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
-count is only a label, not a repair.
+Any response taking exact zeros is affected: counts, rainfall, abundance,
+claim amounts.  On a zero-inflated response with 62 zeros out of 120,
+\code{MAPE} averages the 58 non-zero rows and \code{n_MAPE} is 58.
+\code{SMAPE} drops the rows where observation and prediction are both
+near zero, which on a well-fitted zero-inflated model are the rows it got
+right, so it averages the harder rows only and reads worse than the fit
+deserves.  \code{n_SMAPE} shows how many rows it kept; it does not correct
+the average.
 
-\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row and are
-unaffected; prefer them whenever the response can be zero.  For a Bayesian
-fit, \code{\link{cv_bayes}()} additionally reports CRPS and interval
-coverage, which are proper scoring rules and have no such failure mode.
+\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row; prefer them
+whenever the response can be zero.  For a Bayesian GP fit,
+\code{\link{cv_bayes}()} also reports CRPS and interval coverage, which
+are proper scoring rules and are defined at zero.
 }
 
 \examples{
@@ -204,11 +204,11 @@ cv$fold_metrics     # and fold by fold
 }
 \seealso{
 Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=compare_models_cv]{compare_models_cv()}},
 \code{\link[=cv_bayes]{cv_bayes()}},
 \code{\link[=cv_rf]{cv_rf()}},
 \code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+\code{\link[=plot_calibration]{plot_calibration()}},
+\code{\link[=plot_cv_metrics]{plot_cv_metrics()}}
 }
 \concept{cross-validation}

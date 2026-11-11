@@ -9,29 +9,50 @@
 \arguments{
 \item{x}{An \code{aoa} object.}
 
-\item{...}{Ignored.}
+\item{...}{Not used.}
 }
 \value{
 \code{x}, invisibly.
 }
 \description{
-Summarises where the model may be trusted: how many prediction locations
-fall inside the area of applicability and how many outside, the
-dissimilarity threshold that separated them, and the predictors the index
-was computed over (naming any dropped for having no usable variance).  It
-also says where the weights came from (the model's importance, a vector
-the caller supplied, or equal weights and why), whether location was
-measured and how, how categorical predictors were handled, and how many
-training rows repeat another's predictor values.  With a location index
-the rows outside are split into those outside on the predictors and those
-outside on location.  The
-proportion outside is the headline number. A map that extrapolates over
-much of its extent is reporting predictions its training data cannot
-support, whatever the cross-validation score said.
+Prints how many prediction locations fall inside the area of
+applicability and how many outside, the dissimilarity threshold that
+separated them, and the predictors the index was computed over (naming
+any dropped for having no usable variance).  It also says where the
+weights came from (the model's importance, a vector the caller supplied,
+or equal weights and why), whether location was measured and how, how
+categorical predictors were handled, and how many training rows repeat
+another's predictor values.  With a location index the rows outside are
+split into those outside on the predictors and those outside on location.
+The share of locations outside is the number to report: a map that
+extrapolates over much of its extent rests on predictions the training
+data cannot support.
+}
+\examples{
+library(sf)
+set.seed(1)
+train <- st_as_sf(
+  data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+             a = rnorm(60)),
+  coords = c("x", "y"), crs = 32632
+)
+# 15 new points take values of a seen in training; five lie far above
+# its range, and print() counts those five outside.
+newpts <- st_as_sf(
+  data.frame(x = 5e5 + runif(20, 0, 1000), y = 5e6 + runif(20, 0, 1000),
+             a = c(train$a[1:15], rnorm(5, 8))),
+  coords = c("x", "y"), crs = 32632
+)
+res <- area_of_applicability(newpts, train_sf = train, predictor_vars = "a")
+print(res)
 }
 \seealso{
-Other print methods:
-\code{\link[=print.gwr_model_selection]{print.gwr_model_selection()}},
-\code{\link[=print.morans_i]{print.morans_i()}}
+\code{\link{area_of_applicability}()}, which makes the object,
+and \code{\link{plot.aoa}()}.
+
+Other prediction:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=plot.aoa]{plot.aoa()}},
+\code{\link[=predict_surface]{predict_surface()}}
 }
-\concept{print methods}
+\concept{prediction}

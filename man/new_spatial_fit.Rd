@@ -2,7 +2,7 @@
 % Please edit documentation in R/model-classes.R
 \name{new_spatial_fit}
 \alias{new_spatial_fit}
-\title{Build a spatial_fit S3 object}
+\title{Build a spatial_fit object for a backend of your own}
 \usage{
 new_spatial_fit(
   subclass,
@@ -20,9 +20,9 @@ one of the built-ins \code{"gwr_fit"}, \code{"bayesian_fit"} or
 \code{"rf_fit"}, or any name of your own for a custom backend (say
 \code{"lm_fit"}).  It is the S3 dispatch key: \code{predict()},
 \code{fitted()}, \code{residuals()} and \code{coef()} on the result all
-dispatch on it, so a custom \code{subclass} \strong{requires} a matching
-\code{predict.<subclass>()} method to be usable with
-\code{\link{cv_spatial}()}.}
+dispatch on it, so a custom \code{subclass} needs a matching
+\code{predict.<subclass>()} method before \code{\link{cv_spatial}()} can
+use it.}
 
 \item{engine}{The raw model object your backend produced (an \code{lm},
 a \code{ranger} object, a \code{brmsfit}, ...).  Nothing inspects it
@@ -62,29 +62,36 @@ are held out instead of in-sample, so \code{summary()} labels them
 correctly.}
 }
 \value{
-An object of class \code{c(subclass, "spatial_fit")}.
+An object of class \code{c(subclass, "spatial_fit")}: a list with
+\code{engine}, \code{formula}, \code{response_var},
+\code{predictor_vars} and \code{data_sf} as given, \code{n} (the number
+of rows of \code{data_sf}) and \code{info} (the list given, with a
+private cache environment added as \code{info$.cache}, which methods
+should not modify).
 }
 \description{
-The constructor for the \code{spatial_fit} class, and the public entry point
-for plugging your own model backend into this package.  The three built-in
-fitters (\code{\link{fit_gwr_model}()},
-\code{\link{fit_bayesian_spatial_model}()} and \code{\link{fit_rf_model}()})
-all end by calling it, and so should a custom \code{fit_fn} written for
-\code{\link{cv_spatial}()}: wrapping your model in a \code{spatial_fit} is
-what lets it use the package's folds, metrics, comparison and
-area-of-applicability machinery unchanged.
+The constructor for the \code{spatial_fit} class, and the way to plug a
+model backend of your own into this package.  The three built-in fitters
+(\code{\link{fit_rf_model}()}, \code{\link{fit_gwr_model}()} and
+\code{\link{fit_bayesian_spatial_model}()}) all end by calling it, and so
+should a custom \code{fit_fn} written for \code{\link{cv_spatial}()}.  A
+model wrapped in a \code{spatial_fit} works with the package's folds,
+metrics, comparisons and area of applicability unchanged.
 }
 \details{
-There are two obligations.  Return an object built here from your
-\code{fit_fn}, and define a \code{predict()} method for the \code{subclass}
-you chose.  \code{\link{cv_spatial}()} scores folds by calling the
-\code{predict()} generic on the fit, so without a matching
-\code{predict.<subclass>()} every fold fails.  A
-\code{fitted.<subclass>()} method returning one value per row of the fit's
-\code{data_sf}, in the same order, is \strong{required} by
-\code{\link{summary}()} and \code{\link{model_metrics}()}: both error,
-naming the method to define, without one.  \code{\link{residuals}()} and
-\code{\link{coef}()} methods are optional.
+A custom backend needs three things:
+\enumerate{
+\item a \code{fit_fn} that returns an object built by
+\code{new_spatial_fit()};
+\item a \code{predict.<subclass>()} method for the \code{subclass} you
+chose.  \code{\link{cv_spatial}()} scores each fold by calling the
+\code{predict()} generic on the fit, so without one every fold fails;
+\item a \code{fitted.<subclass>()} method that returns one value per row
+of the fit's \code{data_sf}, in the same order.
+\code{\link{summary}()} and \code{\link{model_metrics}()} need it, and
+without one they stop with an error that names the method to define.
+}
+\code{\link{residuals}()} and \code{\link{coef}()} methods are optional.
 
 The constructor checks the fields the package's functions read from a fit,
 and stops with an error that names the argument: \code{subclass} must be
@@ -105,15 +112,14 @@ that is not numeric or logical.
 coefficients or signals an error.  It never returns \code{NULL}.  A custom
 subclass inherits \code{stats::coef.default()}, which returns \code{NULL},
 so define a \code{coef.<subclass>()} that errors when your backend has no
-coefficients; otherwise the hazard described below applies to your own fits.
-\code{coef.rf_fit()}
-always errors, because a forest has no coefficients; \code{coef.gwr_fit()}
-and \code{coef.bayesian_fit()} error when the backend cannot supply them
-(a missing package, an engine without the expected component).  A
-\code{NULL} return would be indistinguishable from "this model has no
-fixed effects", so \code{lapply(fits, coef)} would quietly produce a
-shorter answer than the caller expected.  Wrap in \code{try()} or
-\code{tryCatch()} when sweeping over a heterogeneous list of fits.
+coefficients.  \code{coef.rf_fit()} always errors, because a forest has no
+coefficients; \code{coef.gwr_fit()} and \code{coef.bayesian_fit()} error
+when the backend cannot supply them (a missing package, an engine without
+the expected component).  A \code{NULL} return could not be told from
+"this model has no fixed effects", and \code{lapply(fits, coef)} would
+return a shorter answer than the caller expected.  Wrap the call in
+\code{try()} or \code{tryCatch()} when sweeping over a list of fits from
+different backends.
 }
 
 \examples{
@@ -148,14 +154,19 @@ predict.lm_fit <- function(object, newdata = NULL, ...) {
 }
 registerS3method("predict", "lm_fit", predict.lm_fit)
 
+# Required by summary() and model_metrics(): one value per training row.
+fitted.lm_fit <- function(object, ...) as.numeric(stats::fitted(object$engine))
+registerS3method("fitted", "lm_fit", fitted.lm_fit)
+
+summary(lm_fit(site))
 cv <- cv_spatial(site, "price", "elev", fit_fn = lm_fit, k = 3, seed = 1)
 cv$overall
-# Always check these two agree before trusting the metrics above.
+# Check that these two agree before reading the metrics above.
 c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
 }
 \seealso{
-\code{\link{cv_spatial}()}, which consumes a custom \code{fit_fn};
-\code{\link{fit_rf_model}()} for a worked built-in fitter.
+\code{\link{cv_spatial}()}, which takes a custom \code{fit_fn};
+\code{\link{fit_rf_model}()} for a built-in fitter.
 
 Other model fitting:
 \code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},

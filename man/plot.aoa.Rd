@@ -13,7 +13,7 @@
 functions on one axis, or \code{"histogram"}, the prediction DI as bars
 with the training DI as an outline.}
 
-\item{...}{Ignored.}
+\item{...}{Not used.}
 }
 \value{
 A \code{ggplot} object.
@@ -50,32 +50,32 @@ the location threshold, and those outside the area of applicability, which
 is either.
 }
 \examples{
-if (requireNamespace("ggplot2", quietly = TRUE)) {
-  library(sf)
-  set.seed(2)
-  n <- 200
-  train <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               a = rnorm(n), b = rnorm(n)),
-    coords = c("x", "y"), crs = 32632)
-  train$z <- train$a - train$b + rnorm(n, 0, 0.3)
-  # Prediction locations whose predictor `a` drifts beyond the training range.
-  new <- st_as_sf(
-    data.frame(x = 5e5 + runif(100, 0, 1000), y = 5e6 + runif(100, 0, 1000),
-               a = rnorm(100, mean = 2), b = rnorm(100)),
-    coords = c("x", "y"), crs = 32632)
-  aoa <- area_of_applicability(new, train_sf = train, predictor_vars = c("a", "b"))
-  print(plot(aoa))              # the two ECDFs; print() because only a
-                                # block's last value is drawn on its own
-  plot(aoa, type = "histogram")
-}
+\dontshow{if (requireNamespace("ggplot2", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+set.seed(2)
+n <- 200
+train <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             a = rnorm(n), b = rnorm(n)),
+  coords = c("x", "y"), crs = 32632)
+train$z <- train$a - train$b + rnorm(n, 0, 0.3)
+# Prediction locations whose predictor `a` drifts beyond the training range.
+new <- st_as_sf(
+  data.frame(x = 5e5 + runif(100, 0, 1000), y = 5e6 + runif(100, 0, 1000),
+             a = rnorm(100, mean = 2), b = rnorm(100)),
+  coords = c("x", "y"), crs = 32632)
+aoa <- area_of_applicability(new, train_sf = train, predictor_vars = c("a", "b"))
+plot(aoa)                     # the two ECDFs
+plot(aoa, type = "histogram")
+\dontshow{\}) # examplesIf}
 }
 \seealso{
-Other plotting:
-\code{\link[=plot.feature_selection]{plot.feature_selection()}},
-\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
-\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
-\code{\link[=plot_calibration]{plot_calibration()}},
-\code{\link[=plot_cv_metrics]{plot_cv_metrics()}}
+\code{\link{area_of_applicability}()}, which makes the object, and
+\code{\link{print.aoa}()}.
+
+Other prediction:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=predict_surface]{predict_surface()}},
+\code{\link[=print.aoa]{print.aoa()}}
 }
-\concept{plotting}
+\concept{prediction}

@@ -11,7 +11,7 @@ plot_calibration(cv, ...)
 \code{\link{compare_models_cv}()} result that ran the Bayesian backend
 (its \code{$bayes_cv} is used).}
 
-\item{...}{Ignored.}
+\item{...}{Not used.}
 }
 \value{
 A \code{ggplot} object.
@@ -50,11 +50,14 @@ plot_calibration(cv)
 }
 }
 \seealso{
-Other plotting:
-\code{\link[=plot.aoa]{plot.aoa()}},
-\code{\link[=plot.feature_selection]{plot.feature_selection()}},
-\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
-\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
+\code{\link{cv_bayes}()}, which makes the result.
+
+Other cross-validation:
+\code{\link[=compare_models_cv]{compare_models_cv()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
 \code{\link[=plot_cv_metrics]{plot_cv_metrics()}}
 }
-\concept{plotting}
+\concept{cross-validation}

@@ -205,48 +205,47 @@ Non-zero is judged at the scale of the data: a denominator no larger
 than 100 machine epsilons times the largest one counts as zero, so the
 rule does not depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
-the \code{n} column counts finite observation/prediction pairs.  Read a
-percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
-an average over a subset of the data, whatever its value.
+the \code{n} column (\code{n_pred} in a cross-validation result) counts
+finite observation/prediction pairs.  Read a percentage error next to that
+count: when \code{n_MAPE} is smaller, \code{MAPE} is an average over a
+subset of the data, whatever its value.
 
-This bites on any response taking exact zeros: counts, rainfall,
-abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
-120, \code{MAPE} is an average over the 58 non-zero rows, which
-\code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
-subtly: it drops the rows where observation and prediction are both near
-zero (which on a well-fitted zero-inflated model are the rows it got
-\emph{right}), so it averages the harder rows only and reads worse than
-the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
-count is only a label, not a repair.
+Any response taking exact zeros is affected: counts, rainfall, abundance,
+claim amounts.  On a zero-inflated response with 62 zeros out of 120,
+\code{MAPE} averages the 58 non-zero rows and \code{n_MAPE} is 58.
+\code{SMAPE} drops the rows where observation and prediction are both
+near zero, which on a well-fitted zero-inflated model are the rows it got
+right, so it averages the harder rows only and reads worse than the fit
+deserves.  \code{n_SMAPE} shows how many rows it kept; it does not correct
+the average.
 
-\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row and are
-unaffected; prefer them whenever the response can be zero.  For a Bayesian
-fit, \code{\link{cv_bayes}()} additionally reports CRPS and interval
-coverage, which are proper scoring rules and have no such failure mode.
+\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row; prefer them
+whenever the response can be zero.  For a Bayesian GP fit,
+\code{\link{cv_bayes}()} also reports CRPS and interval coverage, which
+are proper scoring rules and are defined at zero.
 }
 
 \section{Which metrics survive a non-Gaussian response}{
 
 RMSE and MAE are defined for any numeric response and are what to read for
 a count, a rate or a bounded outcome.  MAPE and SMAPE assume a response
-that is rarely zero (see the previous section), and R-squared and adjusted
-R-squared compare residual variance to total variance, which is the right
-comparison for a Gaussian response and a loose one for anything whose
-variance tracks its mean.  None of the four is wrong to compute; each is
-Gaussian-shaped thinking, and on a Poisson or zero-inflated response should
-be read as a rough summary rather than a score.
+that is rarely zero (see "Percentage errors on responses with zeros"), and
+\eqn{R^2} and adjusted \eqn{R^2} compare residual variance to total
+variance, which suits a Gaussian response and fits loosely anything whose
+variance tracks its mean.  On a Poisson or zero-inflated response read the
+four as a rough summary rather than a score.
 
-For the Bayesian backend, \code{\link{cv_bayes}()} additionally reports
-CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
-scoring rules computed from posterior draws, so they are meaningful for any
-\code{family} that predicts one number per row (a count, a rate, a binary
-or bounded outcome), and they are the numbers to compare when the response
-is not Gaussian.  A categorical or ordinal family predicts a probability
-per response category instead, so \code{cv_bayes()} refuses one before
-fitting anything.  When every fold fails, the
-\code{fold_metrics} frame \code{cv_bayes()} returns carries the CRPS column
-but not the \code{coverage_*} columns, so code that reads those columns
-must tolerate their absence.
+For the Bayesian GP, \code{\link{cv_bayes}()} also reports CRPS and
+interval coverage at its \code{coverage_levels} (50, 80 and 95 percent by
+default).  Both are proper scoring rules computed from posterior draws, so
+they are meaningful for any \code{family} that predicts one number per row
+(a count, a rate, a binary or bounded outcome), and they are the numbers
+to compare when the response is not Gaussian.  A categorical or ordinal
+family predicts a probability per response category instead, so
+\code{cv_bayes()} refuses one before fitting anything.  When every fold
+fails, the \code{fold_metrics} frame \code{cv_bayes()} returns carries
+the \code{CRPS} column but not the \code{coverage_*} columns, so code that
+reads those columns must allow for their absence.
 }
 
 \examples{
@@ -274,11 +273,11 @@ cv$predictive_coverage  # coverage at 50, 80 and 95 percent, and mean CRPS
 }
 \seealso{
 Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=compare_models_cv]{compare_models_cv()}},
 \code{\link[=cv_gwr]{cv_gwr()}},
 \code{\link[=cv_rf]{cv_rf()}},
 \code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+\code{\link[=plot_calibration]{plot_calibration()}},
+\code{\link[=plot_cv_metrics]{plot_cv_metrics()}}
 }
 \concept{cross-validation}

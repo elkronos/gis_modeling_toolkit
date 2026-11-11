@@ -3,7 +3,7 @@
 \name{model_metrics}
 \alias{model_metrics}
 \alias{model_metrics.spatial_fit}
-\title{Compute goodness-of-fit metrics for a spatial model}
+\title{Compute goodness-of-fit metrics for a fitted model}
 \usage{
 model_metrics(object, ...)
 
@@ -12,68 +12,71 @@ model_metrics(object, ...)
 \arguments{
 \item{object}{A \code{spatial_fit} object.}
 
-\item{...}{Additional arguments passed to predict().  The metrics are
+\item{...}{Passed to \code{predict()} when \code{newdata} is given.
+Without \code{newdata} nothing reads them, so any argument here is an
+error, which catches a misspelt \code{newdata}.  The metrics are
 computed from one predicted value per row, so \code{draws = TRUE} (a
-Bayesian fit) and \code{se.fit = TRUE} (a GWR), with which
+Bayesian GP fit) and \code{se.fit = TRUE} (a GWR fit), with which
 \code{predict()} returns a matrix or a list, are refused.}
 
-\item{newdata}{Optional sf object for out-of-sample evaluation. If NULL,
-fitted values are used (in-sample, or out-of-bag for an \code{rf_fit};
-see above).}
+\item{newdata}{Optional sf object of held-out rows, carrying the response
+and the predictors.  If \code{NULL}, the fitted values are used
+(in-sample, or out-of-bag for an \code{rf_fit}; see "What the metrics
+are computed on").}
 }
 \value{
-A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2, n_MAPE and
-n_SMAPE (the last two are the rows each percentage error was averaged
-over; see "Percentage errors on responses with zeros").
-\code{Adj_R2} is always \code{NA}: GWR's effective parameter count far
-exceeds the global predictor count and a GP model has no simple \code{p},
-so it is deliberately suppressed.  A non-numeric response is an error: a
-character or factor response cannot be scored, and used to come back as
-\code{n = 0} with every metric \code{NA}; a logical response is treated
-as 0/1.
+A one-row data.frame with \code{n}, \code{RMSE}, \code{MAE},
+\code{MAPE}, \code{SMAPE}, \code{R2}, \code{Adj_R2}, \code{n_MAPE} and
+\code{n_SMAPE} (the last two are the rows each percentage error was
+averaged over).  \code{Adj_R2} is always \code{NA}: a GWR's effective
+number of parameters far exceeds the global predictor count and a GP
+model has no simple \code{p}.  A character or factor response is an
+error; a logical response is scored as 0/1.
 }
 \description{
 Reports RMSE, MAE, MAPE, SMAPE, \eqn{R^2} and adjusted \eqn{R^2} for any
-\code{spatial_fit}, in one row and on one scale, so that fits from different
-backends can be read side by side.  Reach for it to score a model on data you
-hold out yourself (pass it as \code{newdata}), or to get a quick in-sample
-reading of how closely a fit tracks its training data.
+\code{spatial_fit} as a one-row data frame.  With \code{newdata} it scores
+rows you held out yourself.  Without it, it reads the fit's own fitted
+values: in-sample for a GWR or a Bayesian GP fit, out-of-bag for a random
+forest.  Those numbers do not compare across backends, and the data frame
+carries no label saying which kind it holds.
 }
 \details{
-It is not a substitute for cross-validation.  With \code{newdata = NULL} the
-numbers are in-sample for a \code{gwr_fit} or \code{bayesian_fit}, and a
-GWR can reach a near-perfect in-sample \eqn{R^2} at a small bandwidth
-without predicting anything.  For a figure you can report, use
-\code{\link{cv_gwr}()}, \code{\link{cv_bayes}()}, \code{\link{cv_rf}()}
-or \code{\link{compare_models_cv}()}.
+Use this function for one fit.  \code{\link{evaluate_insample}()} runs it
+over a list of fits and labels each row with its basis, and
+\code{\link{compare_models}()} adds information criteria and residual
+Moran's I to that table.  None of the three refits a model.  An in-sample
+score is not a cross-validation score: a GWR can reach a near-perfect
+in-sample \eqn{R^2} at a small bandwidth without predicting anything.  For
+a figure you can report, use \code{\link{cv_gwr}()},
+\code{\link{cv_bayes}()}, \code{\link{cv_rf}()} or
+\code{\link{compare_models_cv}()}.
 }
 \section{What the metrics are computed on}{
 
 With \code{newdata = NULL} the metrics come from \code{fitted(object)}.
-That is \strong{in-sample} for a \code{gwr_fit} or a \code{bayesian_fit},
-but \strong{out-of-bag} for an \code{rf_fit}, whose \code{fitted()} method
-returns out-of-bag predictions (see \code{\link{fit_rf_model}}).  The
-data.frame \code{model_metrics()} returns carries no label distinguishing
-the two, so check \code{object$info$fitted_are_oob} before comparing
-numbers across backends; \code{\link{evaluate_insample}()} and
+That is in-sample for a GWR or a Bayesian GP fit, and out-of-bag for a
+random forest, whose \code{fitted()} method returns out-of-bag predictions
+(see \code{\link{fit_rf_model}()}).  Check
+\code{object$info$fitted_are_oob} before comparing numbers across
+backends; \code{\link{evaluate_insample}()} and
 \code{\link{compare_models}()} record it per model in a
-\code{metric_basis} column.  \code{\link{compare_models_cv}} scores every
-backend the same way.
+\code{metric_basis} column, and \code{\link{compare_models_cv}()} scores
+every backend the same way.
 
 \eqn{R^2} is \eqn{1 - RSS/TSS} with the total sum of squares taken about
-the mean of the response the model was \emph{fitted} to.  In sample that
-is the ordinary \eqn{R^2}.  With \code{newdata} it is out-of-sample
-\eqn{R^2}, the convention every \code{cv_*()} function uses: the model is
-measured against the prediction it had to beat, the training mean, not
-against the new rows' own mean, which it could not have known.  It is
-below 0 when the model predicts the new rows worse than the training mean
-does, and it is \code{NA} when the response does not vary about that
-baseline beyond the rounding of its values, whatever its units and
-origin.
+the mean of the response the model was fitted to.  In sample that is the
+ordinary \eqn{R^2}.  With \code{newdata} it is the out-of-sample
+\eqn{R^2} every \code{cv_*()} function uses: the model is measured against
+the training mean, the prediction it had to beat, and not against the new
+rows' own mean, which it could not have known.  It is below 0 when the
+model predicts the new rows worse than the training mean does, and
+\code{NA} when the response does not vary about that mean beyond the
+rounding of its values, whatever its units and origin.
 
-A \code{gwr_fit} whose response \code{fit_gwr_model()} took about a
-centre (\code{fit$engine$centres$response}, a response at a large offset)
-is scored on the response and the fitted values or predictions less that
+A GWR fit whose response \code{fit_gwr_model()} took about a centre
+(\code{fit$engine$centres$response}, a response at a large offset) is
+scored on the response and the fitted values or predictions less that
 centre, which keep the spread a double rounds away at the response's
 size: \code{RMSE}, \code{MAE} and \eqn{R^2} are those of the same values
 at 0, and \code{MAPE} and \code{SMAPE} divide the same errors by the
@@ -91,90 +94,71 @@ Non-zero is judged at the scale of the data: a denominator no larger
 than 100 machine epsilons times the largest one counts as zero, so the
 rule does not depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
-the \code{n} column counts finite observation/prediction pairs.  Read a
-percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
-an average over a subset of the data, whatever its value.
+the \code{n} column (\code{n_pred} in a cross-validation result) counts
+finite observation/prediction pairs.  Read a percentage error next to that
+count: when \code{n_MAPE} is smaller, \code{MAPE} is an average over a
+subset of the data, whatever its value.
 
-This bites on any response taking exact zeros: counts, rainfall,
-abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
-120, \code{MAPE} is an average over the 58 non-zero rows, which
-\code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
-subtly: it drops the rows where observation and prediction are both near
-zero (which on a well-fitted zero-inflated model are the rows it got
-\emph{right}), so it averages the harder rows only and reads worse than
-the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
-count is only a label, not a repair.
+Any response taking exact zeros is affected: counts, rainfall, abundance,
+claim amounts.  On a zero-inflated response with 62 zeros out of 120,
+\code{MAPE} averages the 58 non-zero rows and \code{n_MAPE} is 58.
+\code{SMAPE} drops the rows where observation and prediction are both
+near zero, which on a well-fitted zero-inflated model are the rows it got
+right, so it averages the harder rows only and reads worse than the fit
+deserves.  \code{n_SMAPE} shows how many rows it kept; it does not correct
+the average.
 
-\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row and are
-unaffected; prefer them whenever the response can be zero.  For a Bayesian
-fit, \code{\link{cv_bayes}()} additionally reports CRPS and interval
-coverage, which are proper scoring rules and have no such failure mode.
+\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row; prefer them
+whenever the response can be zero.  For a Bayesian GP fit,
+\code{\link{cv_bayes}()} also reports CRPS and interval coverage, which
+are proper scoring rules and are defined at zero.
 }
 
 \section{Which metrics survive a non-Gaussian response}{
 
 RMSE and MAE are defined for any numeric response and are what to read for
 a count, a rate or a bounded outcome.  MAPE and SMAPE assume a response
-that is rarely zero (see the previous section), and R-squared and adjusted
-R-squared compare residual variance to total variance, which is the right
-comparison for a Gaussian response and a loose one for anything whose
-variance tracks its mean.  None of the four is wrong to compute; each is
-Gaussian-shaped thinking, and on a Poisson or zero-inflated response should
-be read as a rough summary rather than a score.
+that is rarely zero (see "Percentage errors on responses with zeros"), and
+\eqn{R^2} and adjusted \eqn{R^2} compare residual variance to total
+variance, which suits a Gaussian response and fits loosely anything whose
+variance tracks its mean.  On a Poisson or zero-inflated response read the
+four as a rough summary rather than a score.
 
-For the Bayesian backend, \code{\link{cv_bayes}()} additionally reports
-CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
-scoring rules computed from posterior draws, so they are meaningful for any
-\code{family} that predicts one number per row (a count, a rate, a binary
-or bounded outcome), and they are the numbers to compare when the response
-is not Gaussian.  A categorical or ordinal family predicts a probability
-per response category instead, so \code{cv_bayes()} refuses one before
-fitting anything.  When every fold fails, the
-\code{fold_metrics} frame \code{cv_bayes()} returns carries the CRPS column
-but not the \code{coverage_*} columns, so code that reads those columns
-must tolerate their absence.
+For the Bayesian GP, \code{\link{cv_bayes}()} also reports CRPS and
+interval coverage at its \code{coverage_levels} (50, 80 and 95 percent by
+default).  Both are proper scoring rules computed from posterior draws, so
+they are meaningful for any \code{family} that predicts one number per row
+(a count, a rate, a binary or bounded outcome), and they are the numbers
+to compare when the response is not Gaussian.  A categorical or ordinal
+family predicts a probability per response category instead, so
+\code{cv_bayes()} refuses one before fitting anything.  When every fold
+fails, the \code{fold_metrics} frame \code{cv_bayes()} returns carries
+the \code{CRPS} column but not the \code{coverage_*} columns, so code that
+reads those columns must allow for their absence.
 }
 
 \examples{
-if (requireNamespace("ranger", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  pts <- st_as_sf(
-    data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
-               a = rnorm(60)),
-    coords = c("x", "y"), crs = 32632
-  )
-  pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
-  # Fit on 40 rows and keep 20 back, so the second call really is out of
-  # sample; scoring the training rows again would only re-read the fit.
-  fit <- fit_rf_model(pts[1:40, ], "z", "a", num_trees = 50, seed = 1)
-  print(model_metrics(fit))                    # in-sample (out-of-bag for RF)
-  model_metrics(fit, newdata = pts[41:60, ])   # on the 20 held-out rows
-}
+\dontshow{if (requireNamespace("ranger", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+set.seed(1)
+pts <- st_as_sf(
+  data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+             a = rnorm(60)),
+  coords = c("x", "y"), crs = 32632
+)
+# An offset keeps the response away from zero, where MAPE is undefined.
+pts$z <- 10 + 2 * pts$a + rnorm(60, 0, 0.3)
+# Fit on 40 rows and keep 20 back, so the second call is out of sample.
+fit <- fit_rf_model(pts[1:40, ], "z", "a", num_trees = 50, seed = 1)
+model_metrics(fit)                           # out-of-bag for a forest
+model_metrics(fit, newdata = pts[41:60, ])   # on the 20 held-out rows
+\dontshow{\}) # examplesIf}
 }
 \seealso{
-Other model evaluation:
+Other in-sample checks:
 \code{\link[=compare_models]{compare_models()}},
-\code{\link[=compare_models_cv]{compare_models_cv()}},
 \code{\link[=evaluate_insample]{evaluate_insample()}},
+\code{\link[=print.morans_i]{print.morans_i()}},
 \code{\link[=residual_morans_i]{residual_morans_i()}}
-
-Other methods on a fitted model:
-\code{\link[=coef.bayesian_fit]{coef.bayesian_fit()}},
-\code{\link[=coef.gwr_fit]{coef.gwr_fit()}},
-\code{\link[=coef.rf_fit]{coef.rf_fit()}},
-\code{\link[=fitted.bayesian_fit]{fitted.bayesian_fit()}},
-\code{\link[=fitted.gwr_fit]{fitted.gwr_fit()}},
-\code{\link[=fitted.rf_fit]{fitted.rf_fit()}},
-\code{\link[=predict.bayesian_fit]{predict.bayesian_fit()}},
-\code{\link[=predict.gwr_fit]{predict.gwr_fit()}},
-\code{\link[=predict.rf_fit]{predict.rf_fit()}},
-\code{\link[=print.rf_fit]{print.rf_fit()}},
-\code{\link[=print.spatial_fit]{print.spatial_fit()}},
-\code{\link[=residuals.bayesian_fit]{residuals.bayesian_fit()}},
-\code{\link[=residuals.gwr_fit]{residuals.gwr_fit()}},
-\code{\link[=residuals.rf_fit]{residuals.rf_fit()}},
-\code{\link[=summary.spatial_fit]{summary.spatial_fit()}}
 }
-\concept{methods on a fitted model}
-\concept{model evaluation}
+\concept{in-sample checks}

@@ -1313,6 +1313,7 @@ and \code{n}.
 
 Other resolution:
 \code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
+\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
 \code{\link[=select_resolution]{select_resolution()}},
 \code{\link[=summary.resolution_profile]{summary.resolution_profile()}}
 }

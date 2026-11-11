@@ -24,7 +24,7 @@ behind \code{"elbow"}: both are drawn as curves with no selected point.}
 
 \item{tol}{Passed to \code{\link{select_resolution}()} for the flat region.}
 
-\item{...}{Ignored.}
+\item{...}{Not used.}
 }
 \value{
 A \code{ggplot} object.
@@ -49,29 +49,30 @@ no selected level and no band, and the caption says that the size set
 the count.
 }
 \examples{
-if (requireNamespace("gstat", quietly = TRUE) &&
-    requireNamespace("ggplot2", quietly = TRUE)) {
-  library(sf)
-  # The same field as ?resolution_profile: an exponential covariance with
-  # range parameter 200 and a nugget of 0.6 on a unit sill.
-  set.seed(4)
-  n <- 400
-  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-  D  <- as.matrix(dist(xy))
-  xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) \%*\% rnorm(n))
-  pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-  prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
-  print(plot(prof))                     # one panel per criterion it scored: no
-                                        # elbow on these uniform points
-  plot(prof, criteria = c("cp", "wss")) # Cp beside the raw WSS curve
-}
+\dontshow{if (requireNamespace("gstat", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+# The same field as ?resolution_profile: an exponential covariance with
+# range parameter 200 and a nugget of 0.6 on a unit sill.
+set.seed(4)
+n <- 400
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+D  <- as.matrix(dist(xy))
+xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) \%*\% rnorm(n))
+pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
+plot(prof)                            # one panel per criterion it scored;
+                                      # no elbow on these uniform points
+plot(prof, criteria = c("cp", "wss")) # Cp beside the raw WSS curve
+\dontshow{\}) # examplesIf}
 }
 \seealso{
-Other plotting:
-\code{\link[=plot.aoa]{plot.aoa()}},
-\code{\link[=plot.feature_selection]{plot.feature_selection()}},
-\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
-\code{\link[=plot_calibration]{plot_calibration()}},
-\code{\link[=plot_cv_metrics]{plot_cv_metrics()}}
+\code{\link{resolution_profile}()}, which makes the object, and
+\code{\link{select_resolution}()}.
+
+Other resolution:
+\code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
+\code{\link[=resolution_profile]{resolution_profile()}},
+\code{\link[=select_resolution]{select_resolution()}},
+\code{\link[=summary.resolution_profile]{summary.resolution_profile()}}
 }
-\concept{plotting}
+\concept{resolution}

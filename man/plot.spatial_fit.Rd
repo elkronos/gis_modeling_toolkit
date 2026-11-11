@@ -126,5 +126,13 @@ if (requireNamespace("gstat", quietly = TRUE))
 }
 \seealso{
 \code{\link{coef.gwr_fit}()} for the coefficients themselves.
+
+Other fit methods:
+\code{\link[=print.spatial_fit]{print.spatial_fit()}},
+\code{\link{spatial_fit-coef}},
+\code{\link{spatial_fit-fitted}},
+\code{\link{spatial_fit-predict}},
+\code{\link{spatial_fit-residuals}},
+\code{\link[=summary.spatial_fit]{summary.spatial_fit()}}
 }
 \concept{fit methods}

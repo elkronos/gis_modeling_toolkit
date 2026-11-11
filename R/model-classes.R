@@ -2,27 +2,29 @@
 # Constructor
 # ---------------------------------------------------------------------------
 
-#' Build a spatial_fit S3 object
+#' Build a spatial_fit object for a backend of your own
 #'
-#' The constructor for the \code{spatial_fit} class, and the public entry point
-#' for plugging your own model backend into this package.  The three built-in
-#' fitters (\code{\link{fit_gwr_model}()},
-#' \code{\link{fit_bayesian_spatial_model}()} and \code{\link{fit_rf_model}()})
-#' all end by calling it, and so should a custom \code{fit_fn} written for
-#' \code{\link{cv_spatial}()}: wrapping your model in a \code{spatial_fit} is
-#' what lets it use the package's folds, metrics, comparison and
-#' area-of-applicability machinery unchanged.
+#' The constructor for the \code{spatial_fit} class, and the way to plug a
+#' model backend of your own into this package.  The three built-in fitters
+#' (\code{\link{fit_rf_model}()}, \code{\link{fit_gwr_model}()} and
+#' \code{\link{fit_bayesian_spatial_model}()}) all end by calling it, and so
+#' should a custom \code{fit_fn} written for \code{\link{cv_spatial}()}.  A
+#' model wrapped in a \code{spatial_fit} works with the package's folds,
+#' metrics, comparisons and area of applicability unchanged.
 #'
-#' There are two obligations.  Return an object built here from your
-#' \code{fit_fn}, and define a \code{predict()} method for the \code{subclass}
-#' you chose.  \code{\link{cv_spatial}()} scores folds by calling the
-#' \code{predict()} generic on the fit, so without a matching
-#' \code{predict.<subclass>()} every fold fails.  A
-#' \code{fitted.<subclass>()} method returning one value per row of the fit's
-#' \code{data_sf}, in the same order, is \strong{required} by
-#' \code{\link{summary}()} and \code{\link{model_metrics}()}: both error,
-#' naming the method to define, without one.  \code{\link{residuals}()} and
-#' \code{\link{coef}()} methods are optional.
+#' A custom backend needs three things:
+#' \enumerate{
+#'   \item a \code{fit_fn} that returns an object built by
+#'     \code{new_spatial_fit()};
+#'   \item a \code{predict.<subclass>()} method for the \code{subclass} you
+#'     chose.  \code{\link{cv_spatial}()} scores each fold by calling the
+#'     \code{predict()} generic on the fit, so without one every fold fails;
+#'   \item a \code{fitted.<subclass>()} method that returns one value per row
+#'     of the fit's \code{data_sf}, in the same order.
+#'     \code{\link{summary}()} and \code{\link{model_metrics}()} need it, and
+#'     without one they stop with an error that names the method to define.
+#' }
+#' \code{\link{residuals}()} and \code{\link{coef}()} methods are optional.
 #'
 #' The constructor checks the fields the package's functions read from a fit,
 #' and stops with an error that names the argument: \code{subclass} must be
@@ -42,24 +44,23 @@
 #' coefficients or signals an error.  It never returns \code{NULL}.  A custom
 #' subclass inherits \code{stats::coef.default()}, which returns \code{NULL},
 #' so define a \code{coef.<subclass>()} that errors when your backend has no
-#' coefficients; otherwise the hazard described below applies to your own fits.
-#' \code{coef.rf_fit()}
-#' always errors, because a forest has no coefficients; \code{coef.gwr_fit()}
-#' and \code{coef.bayesian_fit()} error when the backend cannot supply them
-#' (a missing package, an engine without the expected component).  A
-#' \code{NULL} return would be indistinguishable from "this model has no
-#' fixed effects", so \code{lapply(fits, coef)} would quietly produce a
-#' shorter answer than the caller expected.  Wrap in \code{try()} or
-#' \code{tryCatch()} when sweeping over a heterogeneous list of fits.
+#' coefficients.  \code{coef.rf_fit()} always errors, because a forest has no
+#' coefficients; \code{coef.gwr_fit()} and \code{coef.bayesian_fit()} error
+#' when the backend cannot supply them (a missing package, an engine without
+#' the expected component).  A \code{NULL} return could not be told from
+#' "this model has no fixed effects", and \code{lapply(fits, coef)} would
+#' return a shorter answer than the caller expected.  Wrap the call in
+#' \code{try()} or \code{tryCatch()} when sweeping over a list of fits from
+#' different backends.
 #'
 #' @param subclass Character scalar naming the class to stamp on the object:
 #'   one of the built-ins \code{"gwr_fit"}, \code{"bayesian_fit"} or
 #'   \code{"rf_fit"}, or any name of your own for a custom backend (say
 #'   \code{"lm_fit"}).  It is the S3 dispatch key: \code{predict()},
 #'   \code{fitted()}, \code{residuals()} and \code{coef()} on the result all
-#'   dispatch on it, so a custom \code{subclass} \strong{requires} a matching
-#'   \code{predict.<subclass>()} method to be usable with
-#'   \code{\link{cv_spatial}()}.
+#'   dispatch on it, so a custom \code{subclass} needs a matching
+#'   \code{predict.<subclass>()} method before \code{\link{cv_spatial}()} can
+#'   use it.
 #' @param engine   The raw model object your backend produced (an \code{lm},
 #'   a \code{ranger} object, a \code{brmsfit}, ...).  Nothing inspects it
 #'   except your own methods.
@@ -91,9 +92,14 @@
 #'   none).  Set \code{fitted_are_oob = TRUE} when your \code{fitted()} values
 #'   are held out instead of in-sample, so \code{summary()} labels them
 #'   correctly.
-#' @return An object of class \code{c(subclass, "spatial_fit")}.
-#' @seealso \code{\link{cv_spatial}()}, which consumes a custom \code{fit_fn};
-#'   \code{\link{fit_rf_model}()} for a worked built-in fitter.
+#' @return An object of class \code{c(subclass, "spatial_fit")}: a list with
+#'   \code{engine}, \code{formula}, \code{response_var},
+#'   \code{predictor_vars} and \code{data_sf} as given, \code{n} (the number
+#'   of rows of \code{data_sf}) and \code{info} (the list given, with a
+#'   private cache environment added as \code{info$.cache}, which methods
+#'   should not modify).
+#' @seealso \code{\link{cv_spatial}()}, which takes a custom \code{fit_fn};
+#'   \code{\link{fit_rf_model}()} for a built-in fitter.
 #' @family model fitting
 #' @examples
 #' library(sf)
@@ -127,9 +133,14 @@
 #' }
 #' registerS3method("predict", "lm_fit", predict.lm_fit)
 #'
+#' # Required by summary() and model_metrics(): one value per training row.
+#' fitted.lm_fit <- function(object, ...) as.numeric(stats::fitted(object$engine))
+#' registerS3method("fitted", "lm_fit", fitted.lm_fit)
+#'
+#' summary(lm_fit(site))
 #' cv <- cv_spatial(site, "price", "elev", fit_fn = lm_fit, k = 3, seed = 1)
 #' cv$overall
-#' # Always check these two agree before trusting the metrics above.
+#' # Check that these two agree before reading the metrics above.
 #' c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
 #' @export
 new_spatial_fit <- function(subclass, engine, formula, response_var,
@@ -387,33 +398,62 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
 # print / summary
 # ---------------------------------------------------------------------------
 
-#' Print a fitted spatial model
+#' Print a fitted model
 #'
-#' Shows the one-screen summary of a \code{gwr_fit}, a \code{bayesian_fit} or a
-#' custom subclass: backend, formula, number of observations, CRS, and the few
-#' backend-specific numbers worth seeing immediately (GWR bandwidth; for a
-#' \code{bayesian_fit} the GP basis size, the smallest effective range that
-#' basis resolves in map units, the LOOIC when the fit computed it
-#' (\code{compute_loo = TRUE}, the default of
-#' \code{\link{fit_bayesian_spatial_model}()}), the slope prior, and a flagged
-#' line when the sampler's diagnostics or the basis-adequacy check failed).  An
-#' \code{rf_fit} has its own method (see
-#' \code{\link{print.rf_fit}}), which shows the same header plus the forest
-#' settings.  It is what you get by typing the object's name, and the quickest
-#' way to confirm a fit used the data, predictors and CRS you meant.  For fit
-#' quality use \code{\link{model_metrics}()} or \code{\link{summary}()}
-#' instead.  Apart from a \code{bayesian_fit}'s LOOIC, an approximate
-#' leave-one-out score of single rows rather than a spatial one, nothing
-#' printed here is an out-of-sample score.
-#'
-#' For a \code{gwr_fit} the bandwidth and AICc are followed by the effective
-#' number of parameters and, when any local window is of deficient rank, by
-#' the number of such windows.
+#' Prints the backend, the formula, the number of observations and the CRS,
+#' then lines for the backend:
+#' \itemize{
+#'   \item a random forest (\code{rf_fit}): the number of trees, \code{mtry},
+#'     the node size, whether the coordinates were used as predictors, how
+#'     each tree's rows were sampled, the out-of-bag error and the largest
+#'     importances.  A forest fitted without them prints "no spatial
+#'     information used": it sees the covariates alone.  One fitted with
+#'     \code{include_coords = TRUE} fits location closely, so its
+#'     out-of-bag error, a random hold-out, is its error among the samples
+#'     and reads low for predictions made farther from the data; score it on
+#'     folds at the distances the map will be used at (see "Coordinates as
+#'     predictors" in
+#'     \code{\link{fit_rf_model}()}).  When a predictor is an unordered
+#'     factor or a character column, a line says how ranger was told to split
+#'     it;
+#'   \item a GWR (\code{gwr_fit}): the bandwidth (a count of neighbours, or a
+#'     distance with the CRS's unit), the kernel, the AICc, the effective
+#'     number of parameters and, when any local window is of deficient rank,
+#'     the number of such windows;
+#'   \item a Bayesian GP (\code{bayesian_fit}): the GP basis size, the
+#'     smallest effective range the basis resolves in CRS units, the LOOIC
+#'     when the fit computed it (\code{compute_loo = TRUE}, the default of
+#'     \code{\link{fit_bayesian_spatial_model}()}), the slope prior, the
+#'     standardised predictors, and a flagged line when the sampler's
+#'     diagnostics or the basis check failed.
+#' }
+#' A custom subclass prints the common lines only.  Typing the object's name
+#' calls this method; use it to confirm that a fit used the data, predictors
+#' and CRS you meant.  For fit quality use \code{\link{model_metrics}()} or
+#' \code{\link{summary.spatial_fit}()}.  Apart from a forest's out-of-bag
+#' error and a Bayesian GP's LOOIC, an approximate leave-one-out score of
+#' single rows, nothing printed here is an out-of-sample score, and neither
+#' of those is a spatial one.
 #'
 #' @param x A \code{spatial_fit} object.
-#' @param ... Ignored.
-#' @return \code{x}, invisibly (called for its side effect).
-#' @family methods on a fitted model
+#' @param ... Not used.
+#' @return \code{x}, invisibly.
+#' @seealso \code{\link{fit_rf_model}()}, \code{\link{fit_gwr_model}()} and
+#'   \code{\link{fit_bayesian_spatial_model}()}, which make the objects.
+#' @family fit methods
+#' @examplesIf requireNamespace("ranger", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' pts <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+#'              a = rnorm(60)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' pts$z <- 10 + 2 * pts$a + rnorm(60, 0, 0.3)
+#' fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
+#' fit                     # print.rf_fit()
+#' if (requireNamespace("sp", quietly = TRUE))
+#'   print(fit_gwr_model(pts, "z", "a", bandwidth = 30))   # print.spatial_fit()
 #' @export
 print.spatial_fit <- function(x, ...) {
   subclass <- class(x)[1L]
@@ -526,8 +566,7 @@ print.spatial_fit <- function(x, ...) {
 #' alone does not unflag it: a Gaussian process that carries a share of the
 #' variance at a long range says nothing about an 8 km range beside it, and
 #' "the fitted model does not bear that out" was printed over such fits.  A
-#' fit saved by an earlier version carries none of these fields and prints
-#' none of these lines.
+#' fit that lacks these fields prints none of these lines.
 #'
 #' @param info A \code{bayesian_fit}'s \code{$info}, or a summary's.
 #' @return Character vector of lines, possibly empty.
@@ -641,42 +680,59 @@ print.spatial_fit <- function(x, ...) {
 }
 
 
-#' Summarise a fitted spatial model
+#' Summarise a fitted model
 #'
 #' Computes goodness-of-fit metrics from \code{fitted(object)} against the
-#' observed response.  A non-numeric response is an error: a character or
-#' factor response cannot be scored, and used to come back as \code{n = 0} with
-#' every metric \code{NA}; a logical response is treated as 0/1.
+#' observed response, and prints them with what they are to be read
+#' against.  A character or factor response is an error; a logical response
+#' is scored as 0/1.
 #'
 #' @section What the metrics are computed on:
-#' For a \code{gwr_fit} or a \code{bayesian_fit} these are \strong{in-sample}
-#' metrics: \code{fitted()} returns values computed at the training locations
-#' from the model that saw them.  For an \code{rf_fit} they are
-#' \strong{out-of-bag}, because \code{fitted.rf_fit()} returns out-of-bag
-#' predictions in place of in-sample ones (see \code{\link{fit_rf_model}}).
-#' The two are not comparable, and \code{print()} on the result labels which
-#' one it is holding, driven by \code{$info$fitted_are_oob}.  Use
-#' \code{\link{compare_models_cv}} to compare backends.
+#' For a GWR or a Bayesian GP fit these are in-sample metrics:
+#' \code{fitted()} returns values computed at the training locations from
+#' the model that saw them.  For a random forest they are out-of-bag,
+#' because \code{fitted()} on an \code{rf_fit} returns out-of-bag
+#' predictions (see \code{\link{fit_rf_model}()}).  The two are not
+#' comparable, and \code{print()} on the result says which one it holds,
+#' from \code{$info$fitted_are_oob}.  Use \code{\link{compare_models_cv}()} to
+#' compare backends.
 #'
-#' Adjusted R-squared is suppressed: GWR's effective parameter count far
-#' exceeds the global predictor count, and a GP model has no simple \code{p}.
+#' Adjusted \eqn{R^2} is not computed: a GWR's effective number of
+#' parameters far exceeds the global predictor count, and a GP model has no
+#' simple \code{p}.
 #'
-#' For a \code{gwr_fit}, \code{print()} on the result adds what the
-#' in-sample metrics are to be read against: the effective number of
-#' parameters and residual degrees of freedom, the number of local windows
-#' of deficient rank, the number of locations when observations share one,
-#' and the AICc and RMSE of one global least-squares
-#' regression on the same rows beside the fit's own AICc
-#' (\code{$info$global_ols}; see \code{\link{fit_gwr_model}}).
+#' For a GWR, \code{print()} on the result adds what the in-sample metrics
+#' are to be read against: the effective number of parameters and residual
+#' degrees of freedom, the number of local windows of deficient rank, the
+#' number of locations when observations share one, and the AICc and RMSE of
+#' one global least-squares regression on the same rows beside the fit's own
+#' AICc (\code{$info$global_ols}; see \code{\link{fit_gwr_model}()}).
+#'
+#' \code{MAPE} and \code{SMAPE} skip rows whose denominator is zero;
+#' \code{n_MAPE} and \code{n_SMAPE} count the rows they used (see
+#' "Percentage errors on responses with zeros" in
+#' \code{\link{model_metrics}()}).
 #'
 #' @param object A \code{spatial_fit} object.
-#' @param ... Ignored.
-#' @inheritSection model_metrics Percentage errors on responses with zeros
+#' @param ... Not used.
 #' @return An object of class \code{summary.spatial_fit}: a list with
 #'   \code{class}, \code{formula}, \code{n}, \code{response_var},
 #'   \code{predictor_vars}, \code{info} and \code{in_sample} (the metric
 #'   data.frame, out-of-bag for an \code{rf_fit}).
-#' @family methods on a fitted model
+#' @seealso \code{\link{model_metrics}()} for the metrics alone, and on new
+#'   data.
+#' @family fit methods
+#' @examplesIf requireNamespace("ranger", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' pts <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+#'              a = rnorm(60)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' pts$z <- 10 + 2 * pts$a + rnorm(60, 0, 0.3)
+#' fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
+#' summary(fit)            # out-of-bag metrics for a forest
 #' @export
 summary.spatial_fit <- function(object, ...) {
   fit_vals <- .fitted_checked(object, .caller = "summary")
@@ -820,47 +876,49 @@ print.summary.spatial_fit <- function(x, ...) {
 # model_metrics generic
 # ---------------------------------------------------------------------------
 
-#' Compute goodness-of-fit metrics for a spatial model
+#' Compute goodness-of-fit metrics for a fitted model
 #'
 #' Reports RMSE, MAE, MAPE, SMAPE, \eqn{R^2} and adjusted \eqn{R^2} for any
-#' \code{spatial_fit}, in one row and on one scale, so that fits from different
-#' backends can be read side by side.  Reach for it to score a model on data you
-#' hold out yourself (pass it as \code{newdata}), or to get a quick in-sample
-#' reading of how closely a fit tracks its training data.
+#' \code{spatial_fit} as a one-row data frame.  With \code{newdata} it scores
+#' rows you held out yourself.  Without it, it reads the fit's own fitted
+#' values: in-sample for a GWR or a Bayesian GP fit, out-of-bag for a random
+#' forest.  Those numbers do not compare across backends, and the data frame
+#' carries no label saying which kind it holds.
 #'
-#' It is not a substitute for cross-validation.  With \code{newdata = NULL} the
-#' numbers are in-sample for a \code{gwr_fit} or \code{bayesian_fit}, and a
-#' GWR can reach a near-perfect in-sample \eqn{R^2} at a small bandwidth
-#' without predicting anything.  For a figure you can report, use
-#' \code{\link{cv_gwr}()}, \code{\link{cv_bayes}()}, \code{\link{cv_rf}()}
-#' or \code{\link{compare_models_cv}()}.
+#' Use this function for one fit.  \code{\link{evaluate_insample}()} runs it
+#' over a list of fits and labels each row with its basis, and
+#' \code{\link{compare_models}()} adds information criteria and residual
+#' Moran's I to that table.  None of the three refits a model.  An in-sample
+#' score is not a cross-validation score: a GWR can reach a near-perfect
+#' in-sample \eqn{R^2} at a small bandwidth without predicting anything.  For
+#' a figure you can report, use \code{\link{cv_gwr}()},
+#' \code{\link{cv_bayes}()}, \code{\link{cv_rf}()} or
+#' \code{\link{compare_models_cv}()}.
 #'
 #' @section What the metrics are computed on:
 #' With \code{newdata = NULL} the metrics come from \code{fitted(object)}.
-#' That is \strong{in-sample} for a \code{gwr_fit} or a \code{bayesian_fit},
-#' but \strong{out-of-bag} for an \code{rf_fit}, whose \code{fitted()} method
-#' returns out-of-bag predictions (see \code{\link{fit_rf_model}}).  The
-#' data.frame \code{model_metrics()} returns carries no label distinguishing
-#' the two, so check \code{object$info$fitted_are_oob} before comparing
-#' numbers across backends; \code{\link{evaluate_insample}()} and
+#' That is in-sample for a GWR or a Bayesian GP fit, and out-of-bag for a
+#' random forest, whose \code{fitted()} method returns out-of-bag predictions
+#' (see \code{\link{fit_rf_model}()}).  Check
+#' \code{object$info$fitted_are_oob} before comparing numbers across
+#' backends; \code{\link{evaluate_insample}()} and
 #' \code{\link{compare_models}()} record it per model in a
-#' \code{metric_basis} column.  \code{\link{compare_models_cv}} scores every
-#' backend the same way.
+#' \code{metric_basis} column, and \code{\link{compare_models_cv}()} scores
+#' every backend the same way.
 #'
 #' \eqn{R^2} is \eqn{1 - RSS/TSS} with the total sum of squares taken about
-#' the mean of the response the model was \emph{fitted} to.  In sample that
-#' is the ordinary \eqn{R^2}.  With \code{newdata} it is out-of-sample
-#' \eqn{R^2}, the convention every \code{cv_*()} function uses: the model is
-#' measured against the prediction it had to beat, the training mean, not
-#' against the new rows' own mean, which it could not have known.  It is
-#' below 0 when the model predicts the new rows worse than the training mean
-#' does, and it is \code{NA} when the response does not vary about that
-#' baseline beyond the rounding of its values, whatever its units and
-#' origin.
+#' the mean of the response the model was fitted to.  In sample that is the
+#' ordinary \eqn{R^2}.  With \code{newdata} it is the out-of-sample
+#' \eqn{R^2} every \code{cv_*()} function uses: the model is measured against
+#' the training mean, the prediction it had to beat, and not against the new
+#' rows' own mean, which it could not have known.  It is below 0 when the
+#' model predicts the new rows worse than the training mean does, and
+#' \code{NA} when the response does not vary about that mean beyond the
+#' rounding of its values, whatever its units and origin.
 #'
-#' A \code{gwr_fit} whose response \code{fit_gwr_model()} took about a
-#' centre (\code{fit$engine$centres$response}, a response at a large offset)
-#' is scored on the response and the fitted values or predictions less that
+#' A GWR fit whose response \code{fit_gwr_model()} took about a centre
+#' (\code{fit$engine$centres$response}, a response at a large offset) is
+#' scored on the response and the fitted values or predictions less that
 #' centre, which keep the spread a double rounds away at the response's
 #' size: \code{RMSE}, \code{MAE} and \eqn{R^2} are those of the same values
 #' at 0, and \code{MAPE} and \code{SMAPE} divide the same errors by the
@@ -876,86 +934,83 @@ print.summary.spatial_fit <- function(x, ...) {
 #' than 100 machine epsilons times the largest one counts as zero, so the
 #' rule does not depend on the units of the response.
 #' The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
-#' the \code{n} column counts finite observation/prediction pairs.  Read a
-#' percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
-#' an average over a subset of the data, whatever its value.
+#' the \code{n} column (\code{n_pred} in a cross-validation result) counts
+#' finite observation/prediction pairs.  Read a percentage error next to that
+#' count: when \code{n_MAPE} is smaller, \code{MAPE} is an average over a
+#' subset of the data, whatever its value.
 #'
-#' This bites on any response taking exact zeros: counts, rainfall,
-#' abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
-#' 120, \code{MAPE} is an average over the 58 non-zero rows, which
-#' \code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
-#' subtly: it drops the rows where observation and prediction are both near
-#' zero (which on a well-fitted zero-inflated model are the rows it got
-#' \emph{right}), so it averages the harder rows only and reads worse than
-#' the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
-#' count is only a label, not a repair.
+#' Any response taking exact zeros is affected: counts, rainfall, abundance,
+#' claim amounts.  On a zero-inflated response with 62 zeros out of 120,
+#' \code{MAPE} averages the 58 non-zero rows and \code{n_MAPE} is 58.
+#' \code{SMAPE} drops the rows where observation and prediction are both
+#' near zero, which on a well-fitted zero-inflated model are the rows it got
+#' right, so it averages the harder rows only and reads worse than the fit
+#' deserves.  \code{n_SMAPE} shows how many rows it kept; it does not correct
+#' the average.
 #'
-#' \code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row and are
-#' unaffected; prefer them whenever the response can be zero.  For a Bayesian
-#' fit, \code{\link{cv_bayes}()} additionally reports CRPS and interval
-#' coverage, which are proper scoring rules and have no such failure mode.
+#' \code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row; prefer them
+#' whenever the response can be zero.  For a Bayesian GP fit,
+#' \code{\link{cv_bayes}()} also reports CRPS and interval coverage, which
+#' are proper scoring rules and are defined at zero.
 #'
-#' @param object A \code{spatial_fit} object.
-#' @param newdata Optional sf object for out-of-sample evaluation. If NULL,
-#'   fitted values are used (in-sample, or out-of-bag for an \code{rf_fit};
-#'   see above).
-#' @param ... Additional arguments passed to predict().  The metrics are
-#'   computed from one predicted value per row, so \code{draws = TRUE} (a
-#'   Bayesian fit) and \code{se.fit = TRUE} (a GWR), with which
-#'   \code{predict()} returns a matrix or a list, are refused.
 #' @section Which metrics survive a non-Gaussian response:
 #' RMSE and MAE are defined for any numeric response and are what to read for
 #' a count, a rate or a bounded outcome.  MAPE and SMAPE assume a response
-#' that is rarely zero (see the previous section), and R-squared and adjusted
-#' R-squared compare residual variance to total variance, which is the right
-#' comparison for a Gaussian response and a loose one for anything whose
-#' variance tracks its mean.  None of the four is wrong to compute; each is
-#' Gaussian-shaped thinking, and on a Poisson or zero-inflated response should
-#' be read as a rough summary rather than a score.
+#' that is rarely zero (see "Percentage errors on responses with zeros"), and
+#' \eqn{R^2} and adjusted \eqn{R^2} compare residual variance to total
+#' variance, which suits a Gaussian response and fits loosely anything whose
+#' variance tracks its mean.  On a Poisson or zero-inflated response read the
+#' four as a rough summary rather than a score.
 #'
-#' For the Bayesian backend, \code{\link{cv_bayes}()} additionally reports
-#' CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
-#' scoring rules computed from posterior draws, so they are meaningful for any
-#' \code{family} that predicts one number per row (a count, a rate, a binary
-#' or bounded outcome), and they are the numbers to compare when the response
-#' is not Gaussian.  A categorical or ordinal family predicts a probability
-#' per response category instead, so \code{cv_bayes()} refuses one before
-#' fitting anything.  When every fold fails, the
-#' \code{fold_metrics} frame \code{cv_bayes()} returns carries the CRPS column
-#' but not the \code{coverage_*} columns, so code that reads those columns
-#' must tolerate their absence.
+#' For the Bayesian GP, \code{\link{cv_bayes}()} also reports CRPS and
+#' interval coverage at its \code{coverage_levels} (50, 80 and 95 percent by
+#' default).  Both are proper scoring rules computed from posterior draws, so
+#' they are meaningful for any \code{family} that predicts one number per row
+#' (a count, a rate, a binary or bounded outcome), and they are the numbers
+#' to compare when the response is not Gaussian.  A categorical or ordinal
+#' family predicts a probability per response category instead, so
+#' \code{cv_bayes()} refuses one before fitting anything.  When every fold
+#' fails, the \code{fold_metrics} frame \code{cv_bayes()} returns carries
+#' the \code{CRPS} column but not the \code{coverage_*} columns, so code that
+#' reads those columns must allow for their absence.
 #'
-#' @return A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2, n_MAPE and
-#'   n_SMAPE (the last two are the rows each percentage error was averaged
-#'   over; see "Percentage errors on responses with zeros").
-#'   \code{Adj_R2} is always \code{NA}: GWR's effective parameter count far
-#'   exceeds the global predictor count and a GP model has no simple \code{p},
-#'   so it is deliberately suppressed.  A non-numeric response is an error: a
-#'   character or factor response cannot be scored, and used to come back as
-#'   \code{n = 0} with every metric \code{NA}; a logical response is treated
-#'   as 0/1.
-#' @family model evaluation
-#' @examples
-#' if (requireNamespace("ranger", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   pts <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
-#'                a = rnorm(60)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
-#'   # Fit on 40 rows and keep 20 back, so the second call really is out of
-#'   # sample; scoring the training rows again would only re-read the fit.
-#'   fit <- fit_rf_model(pts[1:40, ], "z", "a", num_trees = 50, seed = 1)
-#'   print(model_metrics(fit))                    # in-sample (out-of-bag for RF)
-#'   model_metrics(fit, newdata = pts[41:60, ])   # on the 20 held-out rows
-#' }
+#' @param object A \code{spatial_fit} object.
+#' @param newdata Optional sf object of held-out rows, carrying the response
+#'   and the predictors.  If \code{NULL}, the fitted values are used
+#'   (in-sample, or out-of-bag for an \code{rf_fit}; see "What the metrics
+#'   are computed on").
+#' @param ... Passed to \code{predict()} when \code{newdata} is given.
+#'   Without \code{newdata} nothing reads them, so any argument here is an
+#'   error, which catches a misspelt \code{newdata}.  The metrics are
+#'   computed from one predicted value per row, so \code{draws = TRUE} (a
+#'   Bayesian GP fit) and \code{se.fit = TRUE} (a GWR fit), with which
+#'   \code{predict()} returns a matrix or a list, are refused.
+#' @return A one-row data.frame with \code{n}, \code{RMSE}, \code{MAE},
+#'   \code{MAPE}, \code{SMAPE}, \code{R2}, \code{Adj_R2}, \code{n_MAPE} and
+#'   \code{n_SMAPE} (the last two are the rows each percentage error was
+#'   averaged over).  \code{Adj_R2} is always \code{NA}: a GWR's effective
+#'   number of parameters far exceeds the global predictor count and a GP
+#'   model has no simple \code{p}.  A character or factor response is an
+#'   error; a logical response is scored as 0/1.
+#' @family in-sample checks
+#' @examplesIf requireNamespace("ranger", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' pts <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+#'              a = rnorm(60)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' # An offset keeps the response away from zero, where MAPE is undefined.
+#' pts$z <- 10 + 2 * pts$a + rnorm(60, 0, 0.3)
+#' # Fit on 40 rows and keep 20 back, so the second call is out of sample.
+#' fit <- fit_rf_model(pts[1:40, ], "z", "a", num_trees = 50, seed = 1)
+#' model_metrics(fit)                           # out-of-bag for a forest
+#' model_metrics(fit, newdata = pts[41:60, ])   # on the 20 held-out rows
 #' @export
 model_metrics <- function(object, ...) UseMethod("model_metrics")
 
 
-#' @family methods on a fitted model
 #' @rdname model_metrics
 #' @export
 model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
@@ -1070,23 +1125,47 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 # predict — GWR
 # ---------------------------------------------------------------------------
 
-#' Predict from a GWR spatial model
+#' Predict from a fitted model
 #'
-#' When \code{newdata} is NULL, returns the in-sample fitted values.
-#' Otherwise solves one local regression at each new location, with the
-#' fit's kernel and bandwidth (an adaptive bandwidth counts neighbours among
-#' the training points), and returns \eqn{x^\top\hat\beta(u)}{x'beta(u)}.
-#' The local regressions are weighted least squares solved by a pivoted QR,
-#' the solve \code{\link{fit_gwr_model}()} uses; on a window of full rank the
-#' values equal those of \code{GWmodel::gwr.predict()} to rounding error, and
-#' at a training location with that row's own predictors they equal
-#' \code{fitted()}.  Each location stands alone: one that cannot be
-#' estimated does not affect the others.
-#' \code{newdata} is first transformed to the CRS used during fitting
-#' (via \code{ensure_projected()}), so predictions are computed in a
-#' single coordinate system regardless of the CRS newdata arrives in.
+#' \code{predict()} has a method for each backend: a random forest
+#' (\code{rf_fit}), a GWR (\code{gwr_fit}) and a Bayesian GP
+#' (\code{bayesian_fit}) fit.  Every method reads \code{newdata} the same
+#' way: a layer without a CRS is read the way
+#' the training data were (see "Layers without a CRS" in
+#' \link{spatialkit-geometry}), the layer is transformed to the CRS used at
+#' fitting time, a feature that is not a point is reduced to one, and a row
+#' with a missing or non-finite predictor or no location gets \code{NA}.  A
+#' layer that mixes XY with XYZ or XYM geometries is read in x and y.  The
+#' response need not be present.  With \code{newdata = NULL} each method
+#' returns the fit's own fitted values: out-of-bag predictions for a random
+#' forest, in-sample values for the others.
 #'
-#' @section When a prediction is NA:
+#' A random forest predicts with \pkg{ranger}'s predict method.  A GWR solves
+#' one local regression at each new location, with the fit's kernel and
+#' bandwidth (an adaptive bandwidth counts neighbours among the training
+#' points), and returns \eqn{x^\top\hat\beta(u)}{x'beta(u)}.  The local
+#' regressions are weighted least squares solved by the pivoted QR
+#' \code{\link{fit_gwr_model}()} uses: on a window of full rank the values
+#' equal those of \code{GWmodel::gwr.predict()} to rounding error, and at a
+#' training location with that row's own predictors they equal
+#' \code{fitted()}.  Each location stands alone, so one that cannot be
+#' estimated does not affect the others.  A Bayesian GP fit applies the
+#' coordinate scaling and predictor standardisation stored at fit time and
+#' then calls \code{brms::posterior_epred()} or
+#' \code{brms::posterior_predict()}.
+#'
+#' @section Random forest predictors:
+#' A categorical predictor must not carry a level the forest was grown
+#' without, meaning a level with no training rows, not only one absent from
+#' \code{levels()}: an ordinary subset, or a spatial fold that holds out a
+#' whole class, keeps the unused level while the forest has no split for it.
+#' An unseen level is an error.  A predictor that was numeric or logical when
+#' the forest was grown must arrive numeric or logical: \pkg{ranger} would
+#' otherwise code a character column as a factor and apply the numeric split
+#' thresholds to the codes, so a character column is refused.  (\pkg{ranger}
+#' reads a logical as 0/1, so either form is accepted for one.)
+#'
+#' @section When a GWR prediction is NA:
 #' A prediction is returned when it is estimable from the training points
 #' that carry weight at the new location, and is \code{NA} otherwise:
 #' \itemize{
@@ -1099,12 +1178,12 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #' }
 #' Where a predictor is constant in the window at the new row's own value,
 #' its coefficient is not needed and the prediction is returned.  The
-#' decision uses the rule and the tolerance of the fit (see
-#' \code{\link{fit_gwr_model}}, \strong{The local solve}).  A warning of
-#' class \code{"spatialkit_gwr_not_estimable"} counts the \code{NA}
-#' predictions.
+#' decision uses the rule and the tolerance of the fit (see "The local
+#' solve" in \code{\link{fit_gwr_model}()}).  A warning of class
+#' \code{"spatialkit_gwr_not_estimable"} counts the \code{NA} predictions; it
+#' carries \code{n_na}, \code{n} and \code{n_empty}.
 #'
-#' @section Locations beyond the reach of the fit:
+#' @section GWR locations beyond the reach of the fit:
 #' An adaptive bandwidth always finds its neighbours, and a Gaussian or an
 #' exponential kernel weights every training point, so a location far from
 #' the data still gets a number: the local regression of training points
@@ -1118,65 +1197,172 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #' fixed.  A bisquare, tricube or boxcar kernel reaches as far as its width;
 #' a Gaussian or exponential kernel has no edge, and its reach is taken as
 #' three widths.  The check is on distance alone and is lenient: a location
-#' just outside the data is not flagged.
+#' just outside the data is not flagged.  The warning carries \code{n_far},
+#' \code{n}, \code{reach} and \code{nearest} (the smallest and largest
+#' distance to a nearest training point).
 #'
-#' The warning is raised once per call, with that call's counts.
-#' \code{\link{predict_surface}()}, which predicts a grid in chunks, and
-#' \code{\link{cv_gwr}()} and \code{\link{cv_spatial}()}, which predict
-#' fold by fold, collect the warnings of their pieces and raise one under
-#' their own name, with the totals and the number of calls they are over
-#' (\code{calls}).  The folds of a cross-validation are separate fits, so
-#' a cross-validation gives the smallest and the largest reach among them.
-#' \code{\link{cv_block_size_sweep}()} and
-#' \code{\link{select_features_forward}()} run many cross-validations of
-#' one learner and raise one warning for the sweep.  A sweep predicts the
-#' same rows from several fits, so its totals count a location once for each
-#' fit that put it out of reach, and the message says so.
-#' \code{model_metrics(fit, newdata)} is
-#' one call and raises the warning once.  A loop of your own over
-#' \code{predict()} gets one warning per call; the condition carries its
-#' numbers as fields (\code{n_far},
-#' \code{n}, \code{reach}, and \code{nearest}, the smallest and largest
-#' distance to a nearest training point), so a handler can total them:
-#' \code{withCallingHandlers(..., spatialkit_gwr_extrapolation = function(w)
-#' \{ total <<- total + w$n_far; invokeRestart("muffleWarning") \})}.  To
-#' drop it where extrapolation is intended, use
+#' Each call raises the warning once, with its own counts.
+#' \code{\link{predict_surface}()}, \code{\link{cv_gwr}()},
+#' \code{\link{cv_spatial}()}, \code{\link{cv_block_size_sweep}()} and
+#' \code{\link{select_features_forward}()} predict in pieces and raise one
+#' warning per call with the totals.  A cross-validation gives the smallest
+#' and the largest reach among its folds, and a sweep counts a location once
+#' for each fit that put it out of reach.  A loop of your own over
+#' \code{predict()} gets one warning per call; the example below totals them
+#' with a handler.  To drop the warning where extrapolation is intended, use
 #' \code{suppressWarnings(predict(fit, newdata), classes =
-#' "spatialkit_gwr_extrapolation")}.  The warning that counts \code{NA}
-#' predictions (class \code{"spatialkit_gwr_not_estimable"}) carries
-#' \code{n_na}, \code{n} and \code{n_empty} and is collected the same way.
+#' "spatialkit_gwr_extrapolation")}.
 #'
-#' @param object A \code{gwr_fit} object.
-#' @param newdata An sf object with the same predictors.
-#'   The response variable need not be present (true out-of-sample prediction
-#'   is supported).  NULL = fitted values.  A layer whose geometries mix XY
-#'   with XYZ or XYM (as \code{rbind()} of an XY and an XYZ layer gives) is
-#'   read in x and y.
-#' @param se.fit Logical; also return standard errors.  Default \code{FALSE}.
-#' @param ... Ignored.
-#' @return With \code{se.fit = FALSE}, a numeric vector aligned to
+#' @section Bayesian GP boundary:
+#' brms 2.17 to 2.22 do not store the Hilbert-space boundary \eqn{L} in a
+#' fitted GP basis, and recompute it from whatever rows \code{predict()} is
+#' handed.  This method therefore appends two rows at the training
+#' coordinate extrema before the posterior draw and drops them from the
+#' result, and when \code{newdata} reaches past the training range it scales
+#' down the \code{c} of the \code{gp()} term by as much as the range grew, so
+#' brms rebuilds the boundary the model was fitted with.  A prediction does
+#' not depend on which other rows share the call: chunked, fold-wise and
+#' single-call predictions agree, and \code{\link{predict_surface}()} does not
+#' depend on \code{chunk_size}.  brms 2.23.0 and later store \eqn{L} and
+#' reuse it; there \code{c} is left alone and the two extra rows change
+#' nothing.
+#'
+#' Predictions outside the training coordinate envelope are extrapolation, and
+#' a line in the log says so.  A row further than \eqn{L} from the centre of
+#' the training coordinates on either axis is past the edge of the basis,
+#' where the approximate GP is an odd reflection of the fitted surface, so it
+#' is returned as \code{NA} (a column of \code{NA} with \code{draws = TRUE})
+#' with a warning.  The default boundary factor puts that edge well outside
+#' the training data.
+#'
+#' @section Bayesian GP categorical predictors:
+#' A factor or character predictor is handed to brms with the levels the
+#' model was fitted with: the values that occur in the training rows
+#' (\code{object$info$predictor_levels}).  A \code{newdata} factor that only
+#' lists an extra level, or a model fitted on a subset whose factor kept an
+#' unused level, is predicted as usual.  A row whose value is not among the
+#' fitted levels has no prediction: it is returned as \code{NA}, the other
+#' rows are predicted, and one warning of class \code{spatialkit_new_levels}
+#' names the predictor, the levels and the number of rows.  The result does
+#' not depend on which other rows share the call.
+#'
+#' @param object A fitted \code{rf_fit}, \code{gwr_fit} or
+#'   \code{bayesian_fit}.
+#' @param newdata An sf object carrying the predictors, or \code{NULL} for the
+#'   fitted values.
+#' @param se.fit GWR only.  Logical; also return standard errors.  Default
+#'   \code{FALSE}.
+#' @param summary Bayesian GP only.  \code{"mean"} (default) or
+#'   \code{"median"} over the posterior draws.
+#' @param type Bayesian GP only.  \code{"epred"} (default) for the expected
+#'   value, without observation noise, or \code{"predict"} for posterior
+#'   predictive draws, with it.
+#' @param draws Bayesian GP only.  \code{TRUE} returns the full matrix of
+#'   posterior draws instead of a summary.  Default \code{FALSE}.
+#' @param ... For a random forest, passed to \pkg{ranger}'s predict method;
+#'   any other name is an error.  Arguments that make \pkg{ranger} return a
+#'   matrix (\code{predict.all = TRUE}, \code{type = "quantiles"},
+#'   \code{type = "se"} with \code{predict.all}) are refused, because the
+#'   method returns one number per row; call \code{predict(fit$engine, data =
+#'   ...)} for those.  What \pkg{ranger} itself refuses, such as
+#'   \code{type = "quantiles"} on a forest grown without
+#'   \code{quantreg = TRUE}, is an error that gives \pkg{ranger}'s reason.
+#'   \code{seed} defaults to a constant, so the number of \code{predict()}
+#'   calls a script makes (through \code{\link{predict_surface}()}'s
+#'   \code{chunk_size}, say) does not shift later random draws; it does not
+#'   change a regression forest's predictions.  \code{num.threads} defaults
+#'   to \code{getOption("mc.cores", 1L)}.  For a GWR or a Bayesian GP fit,
+#'   not used: any argument here is an error, so a misspelt \code{newdata}
+#'   cannot slip through.
+#' @return For a random forest, a numeric vector aligned to
+#'   \code{nrow(newdata)}, with \code{NA} for rows dropped as incomplete (all
+#'   \code{NA}, with a WARN line in the log, when every row is).  The forest
+#'   in \code{fit$engine} predicts \code{(y - fit$info$response_centre) /
+#'   fit$info$response_scale} (see the Value section of
+#'   \code{\link{fit_rf_model}()}); this method puts the centre and scale
+#'   back.  A failure inside \pkg{ranger}'s predict method is an error.
+#'
+#'   For a GWR with \code{se.fit = FALSE}, a numeric vector aligned to
 #'   \code{nrow(newdata)}, with \code{NA} for rows dropped as missing or
-#'   non-finite, and for locations whose local regression cannot be
-#'   estimated (see \strong{When a prediction is NA}); a warning counts
-#'   those.  If the design matrix for \code{newdata} cannot be built, every
-#'   value is \code{NA} and a warning says why.  CRS-less
-#'   \code{newdata} first receives the interpretation the training data got, so
-#'   the same rows land where they did at fit time; when that is longitude and
-#'   latitude, \code{newdata} with an x outside -180 to 360 or a y beyond 90
-#'   north or south cannot be in it, and the call stops.
-#'
-#'   With \code{se.fit = TRUE}, a list: \code{fit} (that vector),
-#'   \code{se.fit} (the standard error of the fitted value,
-#'   \eqn{\hat\sigma\sqrt{s^\top s}} with \eqn{s} the weights the local
-#'   regression puts on the training responses), \code{se.pred} (the standard
-#'   error of a new observation there, \eqn{\hat\sigma\sqrt{1 + s^\top s}},
-#'   the square root of \code{GWmodel::gwr.predict()}'s prediction variance),
+#'   non-finite and for locations whose local regression cannot be estimated
+#'   (see "When a GWR prediction is NA").  If the design matrix for
+#'   \code{newdata} cannot be built, every value is \code{NA} and a warning
+#'   says why.  When the training data were read as longitude and latitude,
+#'   a CRS-less \code{newdata} with an x outside -180 to 360 or a y beyond 90
+#'   north or south stops the call.  With \code{se.fit = TRUE}, a list:
+#'   \code{fit} (that vector), \code{se.fit} (the standard error of the
+#'   fitted value, \eqn{\hat\sigma\sqrt{s^\top s}} with \eqn{s} the weights
+#'   the local regression puts on the training responses), \code{se.pred}
+#'   (the standard error of a new observation there,
+#'   \eqn{\hat\sigma\sqrt{1 + s^\top s}}, the square root of
+#'   \code{GWmodel::gwr.predict()}'s prediction variance),
 #'   \code{residual.scale} (\eqn{\hat\sigma}, from the fit's residual sum of
 #'   squares over its effective degrees of freedom) and \code{df} (those
 #'   degrees of freedom).  The standard errors treat the bandwidth as known
 #'   and the local model as true at each location; they do not measure the
 #'   bias of a local fit and are \code{NA} where the prediction is.
-#' @family methods on a fitted model
+#'
+#'   For a Bayesian GP fit, a numeric vector of length \code{nrow(newdata)},
+#'   or an \code{n_draws} by \code{nrow(newdata)} matrix with
+#'   \code{draws = TRUE}, in the units of the response (see "The response's
+#'   centre and scale" in \code{\link{fit_bayesian_spatial_model}()}).  Rows
+#'   with a missing or non-finite predictor or coordinate, and rows carrying
+#'   a level the model was not fitted with, are \code{NA} (an \code{NA}
+#'   column with \code{draws = TRUE}).  If the posterior draw fails the
+#'   result is all \code{NA} (a one-row matrix for \code{draws = TRUE}) with a
+#'   warning of class \code{spatialkit_predict_failed} that gives the cause.
+#'   An ordinal or categorical family is an error under
+#'   \code{type = "epred"}: its expected value is a probability per response
+#'   category.  Use \code{type = "predict", draws = TRUE} for posterior draws
+#'   of the predicted category, as category indices; the share of draws in
+#'   each category estimates its probability.  Without \code{draws = TRUE},
+#'   \code{type = "predict"} returns the mean (or median) category index, an
+#'   expected rank for an ordinal family and an error for
+#'   \code{brms::categorical()}, whose categories have no order.  With
+#'   \code{newdata = NULL} the cached \code{fitted()} values are returned only
+#'   for the default \code{summary = "mean"}, \code{type = "epred"},
+#'   \code{draws = FALSE}; any other combination is recomputed against the
+#'   training data, because the cache holds the expected values only.
+#' @seealso \code{\link{predict_surface}()} to predict onto a grid, and
+#'   \code{\link{area_of_applicability}()} to mark where the predictions
+#'   apply.
+#' @family fit methods
+#' @examplesIf requireNamespace("ranger", quietly = TRUE) && requireNamespace("sp", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' pts <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+#'              a = rnorm(60)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' pts$z <- 10 + 2 * pts$a + rnorm(60, 0, 0.3)
+#' new <- pts[1:5, ]
+#' new$z <- NULL                          # the response is not needed
+#'
+#' rf <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
+#' predict(rf, newdata = new)
+#'
+#' gw <- fit_gwr_model(pts, "z", "a", bandwidth = 30)
+#' str(predict(gw, newdata = new, se.fit = TRUE))
+#'
+#' # A point 4 km east of the data is beyond the reach of every kernel.  A
+#' # handler totals the extrapolation warnings of several calls; the log
+#' # lines still print (spatialkit_quiet() turns them off).
+#' far <- st_as_sf(data.frame(x = 5.05e5, y = 5e6 + 500, a = 0),
+#'                 coords = c("x", "y"), crs = 32632)
+#' total <- 0
+#' withCallingHandlers(
+#'   for (i in 1:2) predict(gw, newdata = far),
+#'   spatialkit_gwr_extrapolation = function(w) {
+#'     total <<- total + w$n_far
+#'     invokeRestart("muffleWarning")
+#'   })
+#' total
+#' @name spatial_fit-predict
+NULL
+
+
+#' @rdname spatial_fit-predict
 #' @export
 predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
   .check_dots(list(...), "predict.gwr_fit")
@@ -1483,9 +1669,9 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
 
 #' The levels a bayesian_fit's categorical predictors were fitted with
 #'
-#' Stored at fit time as \code{$info$predictor_levels}.  A fit saved by an
-#' earlier version has none, and gets them the way they were made: from the
-#' values that occur in its training rows.
+#' Stored at fit time as \code{$info$predictor_levels}.  A fit that lacks
+#' them gets them the way they are made: from the values that occur in its
+#' training rows.
 #'
 #' @param object A \code{bayesian_fit}.
 #' @return A named list, one element per factor or character predictor, each
@@ -1731,91 +1917,7 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
   "probabilities for the training rows.")
 
 
-#' Predict from a Bayesian spatial GP model
-#'
-#' @section The GP boundary is held at its fitted value:
-#' brms 2.17 to 2.22 do not store the Hilbert-space boundary \eqn{L} in a
-#' fitted GP basis, so \code{brms:::.data_gp()} recomputes it from whatever
-#' rows \code{predict()} is handed, which moved every eigenfunction of the
-#' approximation with the newdata bounding box while the fitted basis
-#' coefficients stayed put.  Two synthetic rows at the training coordinate
-#' extrema are therefore appended before the posterior draw and dropped from
-#' the result, and when \code{newdata} reaches past the training range the
-#' \code{c} of the \code{gp()} term is scaled down by as much as the range
-#' grew, so brms rebuilds exactly the boundary the model was fitted with.  A
-#' prediction therefore does not depend on which other rows share the call:
-#' chunked, fold-wise and single-call predictions agree, and
-#' \code{\link{predict_surface}()} does not depend on \code{chunk_size}.
-#' brms 2.23.0 and later store \eqn{L} and reuse it, so there \code{c} is left
-#' alone and the two extra rows change nothing.
-#'
-#' Predictions outside the training coordinate envelope are extrapolation (a
-#' notice is written to the log).  A row further than \eqn{L} from the centre
-#' of the training coordinates on either axis is past the edge of the basis,
-#' where the approximate GP is an odd reflection of the fitted surface rather
-#' than an estimate of anything, so it is returned as \code{NA} (a column of
-#' \code{NA} with \code{draws = TRUE}) with a warning.  The default boundary
-#' factor puts that edge well outside the training data, so only
-#' \code{newdata} reaching far past it is affected.
-#'
-#' @section Levels of a categorical predictor:
-#' A factor or character predictor is handed to brms with the levels the model
-#' was fitted with: the values that occur in the training rows
-#' (\code{object$info$predictor_levels}).  brms compares the level \emph{set}
-#' of a \code{newdata} factor with those, so without this a factor that only
-#' listed an extra level, or a model fitted on a subset whose factor kept an
-#' unused level, was refused outright.  A row whose value is not among the
-#' fitted levels has no prediction: it is returned as \code{NA}, the other
-#' rows are predicted, and one warning of class \code{spatialkit_new_levels}
-#' names the predictor, the levels and the number of rows.  A prediction
-#' therefore does not depend on which other rows share the call, and
-#' \code{\link{predict_surface}()} returns the same surface at any
-#' \code{chunk_size}.
-#'
-#' @description
-#' Applies the same newdata preparation pipeline as \code{predict.gwr_fit()}:
-#' non-point geometries are coerced to points, the data is projected to the
-#' CRS used during fitting (via \code{ensure_projected()}), and rows with
-#' missing or non-finite values are dropped.  Coordinate scaling and predictor
-#' standardisation stored at fit time are then applied before delegating to
-#' \code{brms::posterior_epred()} or \code{brms::posterior_predict()}.
-#'
-#' @param object A \code{bayesian_fit} object.
-#' @param newdata An sf object with the same predictors.  The response variable
-#'   need not be present (true out-of-sample prediction is supported).
-#'   NULL = fitted values.  A layer whose geometries mix XY with XYZ or XYM
-#'   (as \code{rbind()} of an XY and an XYZ layer gives) is read in x and y.
-#' @param summary "mean" (default) or "median" over posterior draws.
-#' @param type "epred" (default) for expected predictions (no obs noise),
-#'   or "predict" for full posterior predictive draws (includes obs noise).
-#' @param draws If TRUE, return the full posterior draw matrix instead of a
-#'   point summary.  Default FALSE.
-#' @param ... Ignored.
-#' @return Numeric vector of length \code{nrow(newdata)}, or a
-#'   \code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE}, in the
-#'   units of the response (see "The response's centre and scale" in
-#'   \code{\link{fit_bayesian_spatial_model}}).  Rows
-#'   with a missing or non-finite predictor or coordinate, and rows carrying
-#'   a level of a categorical predictor the model was not fitted with, are
-#'   \code{NA} (an \code{NA} column with \code{draws = TRUE}); the other
-#'   rows are unaffected.  If the
-#'   posterior draw fails the result is all \code{NA} (a 1-row matrix for
-#'   \code{draws = TRUE}) with a warning of class
-#'   \code{spatialkit_predict_failed} that gives the cause.  An ordinal or categorical
-#'   family is not a failed draw and is an error under
-#'   \code{type = "epred"}: its expected value is a probability per response
-#'   category, not one number per row.  Use \code{type = "predict",
-#'   draws = TRUE} for posterior draws of the predicted category, as category
-#'   indices; the share of draws in each category estimates its probability.
-#'   Without \code{draws = TRUE}, \code{type = "predict"} returns the mean (or
-#'   median) category index, an expected rank for an ordinal family and an
-#'   error for \code{brms::categorical()}, whose categories have no order.
-#'   With \code{newdata = NULL} the cached \code{fitted()} values are returned
-#'   only for the default \code{summary = "mean"}, \code{type = "epred"},
-#'   \code{draws = FALSE} combination; any other combination is recomputed
-#'   against the training data, because the cache holds epred column means and
-#'   nothing else.
-#' @family methods on a fitted model
+#' @rdname spatial_fit-predict
 #' @export
 predict.bayesian_fit <- function(object, newdata = NULL,
                                  summary = c("mean", "median"),
@@ -2013,21 +2115,82 @@ predict.bayesian_fit <- function(object, newdata = NULL,
 # fitted
 # ---------------------------------------------------------------------------
 
-#' In-sample fitted values from a GWR fit
+#' Extract the fitted values of a fitted model
 #'
-#' Reads the fitted values out of the GWmodel result, which stores them under
-#' one of several names depending on version and entry point; the extraction
-#' falls back through the local coefficients and the residuals when no direct
-#' column is present.  These are \strong{in-sample} values (each observation
-#' was inside its own bandwidth window), so \code{summary()} on a
-#' \code{gwr_fit} reports an optimistic fit.  Use \code{\link{cv_gwr}} for a
-#' spatially blocked estimate.
+#' \code{fitted()} on a random forest, a GWR or a Bayesian GP fit returns one
+#' value per training row, in the order of \code{object$data_sf}.  What the
+#' value is depends on the backend, and so does what \code{summary()} and
+#' \code{model_metrics()} without \code{newdata} report:
+#' \itemize{
+#'   \item a random forest returns out-of-bag predictions: each row predicted
+#'     by the trees that did not sample it (see "Fitted values are
+#'     out-of-bag" in \code{\link{fit_rf_model}()}).  A row that every tree
+#'     sampled has no out-of-bag prediction and is \code{NaN};
+#'   \item a GWR returns the values \code{fit_gwr_model()} stored on the
+#'     fit: at each training location, the value of the local regression
+#'     centred there.  These are in-sample values (each observation sits
+#'     inside its own window), so \code{summary()}, and
+#'     \code{model_metrics()} without \code{newdata}, report an optimistic
+#'     fit; use \code{\link{cv_gwr}()} for a spatially blocked estimate.  An
+#'     engine made elsewhere (a GWmodel result) is read from its \code{SDF}
+#'     table instead;
+#'   \item a Bayesian GP returns the posterior expectation at the training
+#'     locations, the column means of \code{brms::posterior_epred()}, in the
+#'     units of the response (see "The response's centre and scale" in
+#'     \code{\link{fit_bayesian_spatial_model}()}).  These are in-sample
+#'     values.
+#' }
 #'
-#' @param object A \code{gwr_fit}.
-#' @param ... Ignored.
-#' @return Numeric vector of length \code{object$n} (\code{NA} where extraction
-#'   failed).
-#' @family methods on a fitted model
+#' @section The Bayesian GP cache:
+#' \code{brms::posterior_epred()} takes time in proportion to the number of
+#' draws times the number of rows, and \code{summary()}, \code{residuals()},
+#' \code{model_metrics()} and \code{compare_models()} each call
+#' \code{fitted()}, so the values are kept in an environment carried in
+#' \code{object$info$.cache}.  The cache holds the expected values only, so
+#' \code{predict(object, summary = "median")} and
+#' \code{predict(object, type = "predict")} recompute from the posterior.
+#'
+#' The entry records the \code{n} and a digest of the training data it was
+#' computed from, and is recomputed when either differs, so a copy given
+#' other data does not read the original's values.  It is also tied to the
+#' sampling run: a refit or \code{update()} of the \code{brmsfit} recomputes.
+#' A \code{brmsfit} edited in place is what \code{\link{clear_fitted_cache}()}
+#' is for.  A copy made with \code{fit2 <- fit} shares the environment, so
+#' \code{clear_fitted_cache()} on one empties the cache of both (the other
+#' recomputes), and \code{identical()} cannot tell two fits apart by their
+#' caches.  The entry holds the values and a small identifier of the
+#' sampling run, so a fit saved with \code{saveRDS()} after \code{fitted()}
+#' is no larger for it.
+#'
+#' @param object A fitted \code{rf_fit}, \code{gwr_fit} or
+#'   \code{bayesian_fit}.
+#' @param ... Not used.
+#' @return A numeric vector of length \code{object$n}.  For a GWR, \code{NA}
+#'   where the values cannot be read from the engine.  For a Bayesian GP, a
+#'   posterior that cannot be drawn is an error, as is a family with a
+#'   probability per response category (ordinal, categorical), which has no
+#'   single fitted value per row.
+#' @seealso \code{\link{residuals}()} on the same fits
+#'   (\link{spatial_fit-residuals}), and \code{\link{model_metrics}()}.
+#' @family fit methods
+#' @examplesIf requireNamespace("ranger", quietly = TRUE) && requireNamespace("sp", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' pts <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+#'              a = rnorm(60)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' pts$z <- 10 + 2 * pts$a + rnorm(60, 0, 0.3)
+#' rf <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
+#' gw <- fit_gwr_model(pts, "z", "a", bandwidth = 30)
+#' # Out-of-bag for the forest, in-sample for the GWR.
+#' head(cbind(z = pts$z, rf = fitted(rf), gwr = fitted(gw)))
+#' @name spatial_fit-fitted
+NULL
+
+
+#' @rdname spatial_fit-fitted
 #' @export
 fitted.gwr_fit <- function(object, ...) {
   .extract_gwr_values(
@@ -2037,52 +2200,7 @@ fitted.gwr_fit <- function(object, ...) {
 }
 
 
-#' In-sample fitted values from a Bayesian spatial GP fit
-#'
-#' Posterior expectation at the training locations: the column means of
-#' \code{brms::posterior_epred()}, in the units of the response (see "The
-#' response's centre and scale" in \code{\link{fit_bayesian_spatial_model}}).
-#' These are \strong{in-sample} values.
-#'
-#' @section The result is cached:
-#' \code{posterior_epred()} is O(draws x n), and \code{summary()},
-#' \code{residuals()}, \code{model_metrics()} and \code{compare_models()} each
-#' call \code{fitted()} independently, so the value is memoised in an
-#' environment carried in \code{object$info$.cache} (reference semantics, so it
-#' survives R's copy-on-modify).  The cache holds epred column means only,
-#' which is why \code{predict(object, summary = "median")} and
-#' \code{predict(object, type = "predict")} recompute it from scratch.
-#' Call \code{\link{clear_fitted_cache}} if the engine has been mutated by hand
-#' after fitting.
-#'
-#' @section The cache is shared by copies, and validated:
-#' An environment has reference semantics, which is what makes the memo survive
-#' R's copy-on-modify.  But it also means \code{fit2 <- fit} gives the two
-#' objects \emph{the same} cache.  Assigning a different \code{data_sf} to the
-#' copy would then have returned the original's cached values, at the original's
-#' length, which \code{residuals()} silently recycled against the copy's shorter
-#' response.  The entry therefore carries the \code{n} and a digest of the
-#' training data it was computed from, and is recomputed whenever either fails
-#' to match, so a copy with different data recomputes instead of reading the
-#' original's answer.
-#'
-#' Two consequences of the shared environment remain and cannot be removed from
-#' here: \code{\link{clear_fitted_cache}} on one copy empties the cache both
-#' share (harmless, since the other simply recomputes), and \code{identical()}
-#' cannot distinguish two fits by their caches.  The digest covers
-#' \code{data_sf} only.  The entry is also tied to the engine that computed
-#' it -- a refit or \code{update()} of the \code{brmsfit} is a different
-#' sampling run and recomputes -- but a \code{brmsfit} edited by hand in place
-#' is what \code{\link{clear_fitted_cache}} is for.  The entry holds only the
-#' values and a small identifier of the sampling run, so a fit saved with
-#' \code{saveRDS()} after \code{fitted()} is no larger for it.
-#'
-#' @param object A \code{bayesian_fit}.
-#' @param ... Ignored.
-#' @return Numeric vector of length \code{object$n}.  A posterior that cannot
-#'   be drawn is an error, as is a family with a probability per response
-#'   category (ordinal, categorical), which has no single fitted value per row.
-#' @family methods on a fitted model
+#' @rdname spatial_fit-fitted
 #' @export
 fitted.bayesian_fit <- function(object, ...) {
   # --- Lazy cache: posterior_epred() is O(draws × n) and expensive.
@@ -2170,12 +2288,11 @@ fitted.bayesian_fit <- function(object, ...) {
 #' What a fitted() cache entry keeps to tell one engine from another
 #'
 #' The entry must belong to the engine that produced it (see
-#' \code{fitted.bayesian_fit}), and it used to hold the engine itself.  That
-#' costs nothing in memory, but \code{serialize()} tracks environments by
-#' reference and lists not at all, so \code{saveRDS()} on a fit whose cache was
-#' warm -- after any \code{summary()}, \code{residuals()} or
-#' \code{model_metrics()} -- wrote the whole brmsfit a second time: a 40 MB
-#' engine saved as 80 MB before \code{fitted()} and 120 MB after.
+#' \code{fitted.bayesian_fit}).  Holding the engine itself would cost nothing
+#' in memory, but \code{serialize()} tracks environments by reference and
+#' lists not at all, so \code{saveRDS()} on a fit whose cache was warm (after
+#' any \code{summary()}, \code{residuals()} or \code{model_metrics()}) would
+#' write the whole brmsfit a second time.
 #'
 #' A brmsfit carries a stanfit, and every stanfit carries an environment
 #' (\code{@.MISC}) that rstan's sampler, and brms's reader for CmdStan output,
@@ -2183,7 +2300,7 @@ fitted.bayesian_fit <- function(object, ...) {
 #' \code{update()} gets a new one, and it is serialised once however many
 #' references point at it, so it tells engines apart as well as the engine
 #' does and adds nothing to a saved fit.  Any other engine (a custom backend,
-#' a test double) is its own token, as before.
+#' a test double) is its own token.
 #'
 #' @param engine The fit's \code{$engine}.
 #' @return An environment, or \code{engine}.
@@ -2222,35 +2339,38 @@ fitted.bayesian_fit <- function(object, ...) {
 }
 
 
-#' Clear cached fitted values for a Bayesian spatial model
+#' Clear the cached fitted values of a Bayesian GP fit
 #'
-#' Removes the lazily-cached \code{fitted()} result so that the next call
-#' recomputes from the posterior.  This is only necessary if the underlying
-#' \code{brmsfit} engine has been manually mutated after fitting.  A change to
-#' \code{data_sf} invalidates the entry on its own, because the cached value
-#' carries a digest of the data it was computed from (see
-#' \code{\link{fitted.bayesian_fit}}).  Normal usage never requires it.
+#' Removes the cached \code{fitted()} values of a \code{bayesian_fit}, so the
+#' next call recomputes them from the posterior.  You need it only after
+#' editing the \code{brmsfit} engine in place.  A change to \code{data_sf},
+#' or a refit, invalidates the entry on its own (see "The Bayesian GP cache"
+#' in \link{spatial_fit-fitted}).  On any other fit it does nothing.
 #'
-#' The cache environment is shared by every copy of a fit, so clearing it
-#' through one copy clears it for all of them.  That is harmless: the others
-#' recompute.
+#' Every copy of a fit shares the cache, so clearing it through one copy
+#' clears it for all of them; the others recompute.
 #'
 #' @param object A \code{bayesian_fit} object.
-#' @return \code{object}, invisibly (called for side effect).
-#' @family package options and caches
+#' @return \code{object}, invisibly.
+#' @family options and caches
 #' @examples
-#' # Only a bayesian_fit carries the cache; on any other fit this is a no-op.
-#' if (requireNamespace("ranger", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   pts <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
-#'                a = rnorm(60)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
-#'   fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
-#'   clear_fitted_cache(fit)
+#' \dontrun{
+#' # Needs brms and a Stan toolchain, and takes minutes.
+#' library(sf)
+#' set.seed(1)
+#' n <- 60
+#' dat <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              elev = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' dat$price <- 10 + 2 * dat$elev + rnorm(n)
+#' fit <- fit_bayesian_spatial_model(dat, "price", "elev", chains = 2,
+#'                                   iter = 1000, compute_loo = FALSE)
+#' f1 <- fitted(fit)          # computed from the posterior and cached
+#' clear_fitted_cache(fit)
+#' f2 <- fitted(fit)          # computed again
+#' all.equal(f1, f2)
 #' }
 #' @export
 clear_fitted_cache <- function(object) {
@@ -2266,21 +2386,50 @@ clear_fitted_cache <- function(object) {
 # residuals
 # ---------------------------------------------------------------------------
 
-#' In-sample residuals from a GWR fit
+#' Extract the residuals of a fitted model
 #'
-#' Observed response minus \code{\link{fitted.gwr_fit}}, so these are
-#' \strong{in-sample} residuals.  Where \code{\link{fit_gwr_model}()} took
-#' the response about its centre (a response whose centre is more than 1000
-#' times its spread, such as 1e8 plus a spread of 1, or whose raw values
-#' lose their spread, such as 1e15 plus a spread of 1; see \strong{The local
-#' solve} there), both are taken about that centre, so the residuals keep the
-#' spread a double rounds away from the response and the fitted values at
-#' that size.
+#' \code{residuals()} on a random forest, a GWR or a Bayesian GP fit returns
+#' the observed response minus \code{fitted()}, one value per training row:
+#' \itemize{
+#'   \item for a random forest these are out-of-bag residuals, since its
+#'     fitted values are out-of-bag predictions.  Out-of-bag is a random
+#'     hold-out: use \code{\link{cv_rf}()} on folds at the distances the map
+#'     will be used at for the forest's accuracy;
+#'   \item for a GWR they are in-sample.  Where \code{\link{fit_gwr_model}()}
+#'     took the response about its centre (a response whose centre is more
+#'     than 1000 times its spread, such as 1e8 plus a spread of 1, or whose
+#'     raw values lose their spread, such as 1e15 plus a spread of 1; see
+#'     "The local solve" there), the response and the fitted values are both
+#'     taken about that centre, so the residuals keep the spread a double
+#'     rounds away at that size;
+#'   \item for a Bayesian GP they are in-sample, from the cached posterior
+#'     expectation (\link{spatial_fit-fitted}).
+#' }
+#' \code{\link{residual_morans_i}()} tests them for spatial structure the
+#' model did not capture.
 #'
-#' @param object A \code{gwr_fit}.
-#' @param ... Ignored.
-#' @return Numeric vector of length \code{object$n}.
-#' @family methods on a fitted model
+#' @param object A fitted \code{rf_fit}, \code{gwr_fit} or
+#'   \code{bayesian_fit}.
+#' @param ... Not used.
+#' @return A numeric vector of length \code{object$n}.
+#' @seealso \code{\link{residual_morans_i}()}.
+#' @family fit methods
+#' @examplesIf requireNamespace("ranger", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' pts <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+#'              a = rnorm(60)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' pts$z <- 10 + 2 * pts$a + rnorm(60, 0, 0.3)
+#' rf <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
+#' summary(residuals(rf))   # out-of-bag residuals
+#' @name spatial_fit-residuals
+NULL
+
+
+#' @rdname spatial_fit-residuals
 #' @export
 residuals.gwr_fit <- function(object, ...) {
   y_obs <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
@@ -2296,15 +2445,7 @@ residuals.gwr_fit <- function(object, ...) {
 }
 
 
-#' In-sample residuals from a Bayesian spatial GP fit
-#'
-#' Observed response minus \code{\link{fitted.bayesian_fit}} (the cached
-#' posterior expectation), so these are \strong{in-sample} residuals.
-#'
-#' @param object A \code{bayesian_fit}.
-#' @param ... Ignored.
-#' @return Numeric vector of length \code{object$n}.
-#' @family methods on a fitted model
+#' @rdname spatial_fit-residuals
 #' @export
 residuals.bayesian_fit <- function(object, ...) {
   y_obs <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
@@ -2316,40 +2457,49 @@ residuals.bayesian_fit <- function(object, ...) {
 # coef
 # ---------------------------------------------------------------------------
 
-#' Extract GWR local coefficients
+#' Extract the coefficients of a fitted model
 #'
-#' Returns the whole surface of coefficients, one row per observation and one
-#' column per term, against the single global vector \code{coef()} returns
-#' for an \code{lm}.  That table is the point of fitting a GWR at all:
-#' inspect the spread of a predictor's column to see where, and by how much,
-#' its relationship with the response changes across the study area, and join
-#' it back to \code{object$data_sf} to map it.  Use
-#' \code{\link{plot.spatial_fit}()} for a quick look at that map.
+#' \code{coef()} on a GWR returns the local coefficients, one row per
+#' observation and one column per term.  On a Bayesian GP fit it returns the
+#' posterior summary of the global regression terms.  A random forest has no
+#' coefficients, so \code{coef()} on an \code{rf_fit} always stops with an
+#' error rather than returning \code{NULL}; a forest's variable importance is
+#' in \code{fit$info$importance} (see \code{\link{fit_rf_model}()}).  None of
+#' the three returns \code{NULL} (see "The coef() contract" in
+#' \code{\link{new_spatial_fit}()}).
 #'
-#' @section What is and is not returned:
-#' Only the model terms: the intercept and one column per predictor.
-#' The engine's \code{SDF} data slot carries a good deal more alongside them
-#' (standard errors, t-values, the observed response, the fitted values, the
-#' residuals, \code{Local_R2}): 15 columns for a two-predictor fit, of which 3
-#' are coefficients.  Returning the whole slot would have made
-#' \code{coef(fit)$Local_R2} and \code{coef(fit)$a_SE} read like coefficients
-#' and \code{ncol(coef(fit))} a meaningless number.  Ask for the standard
-#' errors and t values with \code{se = TRUE}; reach for
-#' \code{object$engine$SDF} when you want the rest.
+#' The GWR table shows where, and by how much, a predictor's relationship
+#' with the response changes across the study area: read the spread of its
+#' column, or join the table back to \code{object$data_sf} to map it.
+#' \code{\link{plot.spatial_fit}()} draws that map.
+#'
+#' The Bayesian GP summary gives the estimate, error and credible interval of
+#' each predictor, as \code{brms::fixef()} reports them.  The Gaussian-process
+#' term has already taken up the spatially structured part of the signal, so
+#' these are effects net of location (see "Spatial confounding" in
+#' \code{\link{fit_bayesian_spatial_model}()}).
+#'
+#' @section GWR columns:
+#' Only the model terms are returned: the intercept and one column per
+#' predictor.  The engine's \code{SDF} data slot holds more beside them
+#' (standard errors, t values, the observed response, the fitted values, the
+#' residuals, \code{Local_R2}); read \code{object$engine$SDF} for those, and
+#' ask for the standard errors and t values with \code{se = TRUE}.
 #'
 #' A coefficient is \code{NA} at a location whose local window cannot
 #' estimate it: a predictor that does not vary among the observations that
 #' carry weight there has no slope, and the intercept is then not identified
 #' either unless the predictor is 0 there.  \code{object$info$nonfinite_coef}
-#' is the mask, and \code{\link{fit_gwr_model}} raises a warning that counts
-#' them.
+#' is the mask, and \code{\link{fit_gwr_model}()} raises a warning that
+#' counts them.
 #'
 #' If the model terms cannot be located in the \code{SDF} (an engine that
-#' names its coefficient columns differently), the whole slot is returned with
-#' a warning saying so.  The call neither errors nor returns a silently short
-#' table.
+#' names its coefficient columns differently), the whole slot is returned,
+#' with a WARN line in the log saying so (a log record, not an R warning;
+#' see \code{\link{spatialkit_quiet}()}).  With \code{se = TRUE} the call
+#' stops instead.  It never returns a silently short table.
 #'
-#' @section Standard errors:
+#' @section GWR standard errors:
 #' With \code{se = TRUE} the local standard errors and t values come with the
 #' estimates.  A standard error is
 #' \eqn{\hat\sigma\sqrt{(C C^\top)_{jj}}}{sigma * sqrt(diag(C C'))}, with
@@ -2360,25 +2510,74 @@ residuals.bayesian_fit <- function(object, ...) {
 #' gave the estimate.  They treat the bandwidth as known.  The t values are
 #' one test per term and location, tens to thousands of them and strongly
 #' dependent, so a map of \eqn{|t| > 2} overstates what is significant; no
-#' p-value, adjusted or not, is returned.  What an adjustment for the number
-#' of tests needs is on the fit: the t values here, the effective number of
-#' parameters \code{object$info$enp} and the residual degrees of freedom
+#' p-value, adjusted or not, is returned.  An adjustment for the number of
+#' tests can use the t values here, the effective number of parameters
+#' \code{object$info$enp} and the residual degrees of freedom
 #' \code{object$info$edf}.  When observations share a location the standard
-#' errors are too small as well (see \code{\link{fit_gwr_model}},
-#' \strong{Observations that share a location}).
+#' errors are too small as well (see "Observations that share a location" in
+#' \code{\link{fit_gwr_model}()}).
 #'
-#' @param object A \code{gwr_fit} object.
-#' @param se Logical; also return the standard errors and t values.  Default
-#'   \code{FALSE}.
-#' @param ... Ignored.
-#' @return With \code{se = FALSE}, a data.frame of local coefficient
-#'   estimates: one row per observation, one column per model term.  With
-#'   \code{se = TRUE}, a list of three such data.frames: \code{estimate},
-#'   \code{se} and \code{t}.
-#'   Never \code{NULL}: when the engine carries no \code{SDF} component this
-#'   errors, following the \code{coef()} contract described in
-#'   \code{\link{new_spatial_fit}}.
-#' @family methods on a fitted model
+#' @section Bayesian GP standardised predictors:
+#' The summaries are on the scale the model was fitted on.  A fit made with
+#' \code{standardize_predictors = TRUE} was fitted on centred and scaled
+#' numeric predictors, so each slope is the change in the linear predictor
+#' per standard deviation of its predictor and the intercept is its value at
+#' the predictor means, not the raw-unit numbers \code{stats::lm()} reports
+#' on the same formula.  The returned matrix does not say so;
+#' \code{print()} on the fit does, and the centre and scale of each predictor
+#' are in \code{object$info$predictor_scaling}.  To put a slope back in raw
+#' units divide its \code{Estimate}, \code{Est.Error} and interval bounds by
+#' that predictor's \code{scale}.  The intercept's \code{Estimate} follows by
+#' linearity (subtract each raw-unit slope times its predictor's
+#' \code{center}), but its \code{Est.Error} and interval depend on the
+#' posterior covariance of the coefficients: transform the draws from
+#' \code{brms::as_draws_df(object$engine)} for those, or refit without
+#' standardising.
+#'
+#' @param object A fitted \code{gwr_fit}, \code{bayesian_fit} or
+#'   \code{rf_fit}.
+#' @param se GWR only.  Logical; also return the standard errors and t
+#'   values.  Default \code{FALSE}.
+#' @param ... Not used.
+#' @return For a GWR with \code{se = FALSE}, a data.frame of local
+#'   coefficient estimates: one row per observation, one column per model
+#'   term.  With \code{se = TRUE}, a list of three such data.frames:
+#'   \code{estimate}, \code{se} and \code{t}.  An engine without an
+#'   \code{SDF} component is an error.
+#'
+#'   For a Bayesian GP fit, a matrix of fixed-effect posterior summaries, as
+#'   \code{brms::fixef()} returns them, on the fitted scale (per standard
+#'   deviation of each predictor under \code{standardize_predictors = TRUE}),
+#'   in the units of the response: where the response was handed to brms
+#'   less a centre or divided by a scale, the intercept has the centre added
+#'   back and every column is multiplied by the scale (see "The response's
+#'   centre and scale" in \code{\link{fit_bayesian_spatial_model}()}).
+#'   \code{brms::fixef()} on \code{object$engine} answers on the scale brms
+#'   was given.  A missing \pkg{brms} or a failing \code{fixef()} call is an
+#'   error.
+#'
+#'   For a random forest, nothing: the call is an error.
+#' @family fit methods
+#' @examplesIf requireNamespace("sp", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' n <- 80
+#' pts <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              a = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' # The slope on a rises from west to east.
+#' east <- (st_coordinates(pts)[, 1] - 5e5) / 1000
+#' pts$z <- 10 + (1 + 2 * east) * pts$a + rnorm(n, 0, 0.3)
+#' gw <- fit_gwr_model(pts, "z", "a", bandwidth = 30)
+#' str(coef(gw, se = TRUE))
+#' summary(coef(gw)$a)     # the local slopes span the west-east change
+#' @name spatial_fit-coef
+NULL
+
+
+#' @rdname spatial_fit-coef
 #' @export
 coef.gwr_fit <- function(object, se = FALSE, ...) {
   if (!is.logical(se) || length(se) != 1L || is.na(se))
@@ -2450,48 +2649,7 @@ coef.gwr_fit <- function(object, se = FALSE, ...) {
 }
 
 
-#' Extract Bayesian model fixed-effect summaries
-#'
-#' Returns the posterior summary of the global (non-spatial) regression terms:
-#' estimate, error and credible interval per predictor, as
-#' \code{brms::fixef()} reports them.  Reach for it to read the average effect
-#' of a predictor with its uncertainty attached (the Bayesian counterpart to
-#' a coefficient table), remembering that the Gaussian-process term has
-#' already absorbed the spatially structured part of the signal, so these are
-#' effects net of location.
-#'
-#' @section Standardised predictors:
-#' The summaries are on the scale the model was fitted on.  A fit made with
-#' \code{standardize_predictors = TRUE} was fitted on centred and scaled
-#' numeric predictors, so each slope is the change in the linear predictor per
-#' \emph{standard deviation} of its predictor and the intercept is its value
-#' at the predictor \emph{means}, not the raw-unit numbers \code{stats::lm()}
-#' reports on the same formula.  Nothing on the returned matrix says so;
-#' \code{print()} on the fit does, and the centre and scale of each predictor
-#' are in \code{object$info$predictor_scaling}.  To put a slope back in raw
-#' units divide its \code{Estimate}, \code{Est.Error} and interval bounds by
-#' that predictor's \code{scale}.  The intercept's \code{Estimate} follows by
-#' linearity (subtract each raw-unit slope times its predictor's
-#' \code{center}), but its \code{Est.Error} and interval depend on the
-#' posterior covariance of the coefficients: transform the draws from
-#' \code{brms::as_draws_df(object$engine)} for those, or refit without
-#' standardising.
-#'
-#' @param object A \code{bayesian_fit} object.
-#' @param ... Ignored.
-#' @return A matrix of fixed-effect posterior summaries, as returned by
-#'   \code{brms::fixef()}, on the fitted scale (per standard deviation of each
-#'   predictor under \code{standardize_predictors = TRUE}; see above), in the
-#'   units of the response: where the response was handed to brms less a
-#'   centre or divided by a scale, the intercept has the centre added back
-#'   and every column is multiplied by the scale (see "The response's centre
-#'   and scale" in \code{\link{fit_bayesian_spatial_model}}).  Read on
-#'   \code{object$engine}, \code{brms::fixef()} answers on the scale brms was
-#'   given.  Never
-#'   \code{NULL}: a missing 'brms' or a failing
-#'   \code{fixef()} call errors, following the \code{coef()} contract described
-#'   in \code{\link{new_spatial_fit}}.
-#' @family methods on a fitted model
+#' @rdname spatial_fit-coef
 #' @export
 coef.bayesian_fit <- function(object, ...) {
   # A NULL return would be indistinguishable from "this model has no fixed
