@@ -6797,6 +6797,64 @@ old behaviour where there is a way.
   change, and where both sums lie between `n * 1e-300` and the largest
   double every score is as it was.
 
+* **Out-of-sample R-squared was `NA` for training responses near the
+  largest double on platforms whose long double is a double.**  Every
+  out-of-sample R-squared is scored against the mean of the training
+  responses: each fold of the `cv_*()` functions and their pooled score,
+  `model_metrics()` with `newdata`, and `select_features_forward()`'s
+  `score_holdout` and training-fold-mean baseline.  `mean()` sums in a
+  long double, and where that is no wider than a double (as on macOS on
+  Apple silicon) the sum
+  overflows for values near the largest double: `mean(c(x, x, x / 2, -x))`
+  is `-Inf` for `x = .Machine$double.xmax`, whose mean is `0.375 * x`.  On
+  120 points scaled by 2^1020 (largest value 6.1e307) one fold's training
+  mean was `-Inf`, that fold's R-squared and the pooled one `NA`, where
+  every scale up to 2^1019 gives 0.7655072; `model_metrics(newdata =)` of a
+  fit trained on `c(x, x, x / 2, -x)` gave `NA` for 0.9894806, and
+  `select_features_forward()` dropped that fold's rows from its
+  training-fold-mean baseline.  Where `mean()` is not finite the training
+  mean is now taken on the values divided by a power of two, which is
+  exact.  Where `mean()` is finite it is used as before, so every other
+  score is the same to the last bit.
+
+* **`select_features_forward()` warned that a working `fit_fn` "appears to
+  be ignoring its second argument" on a response in small units.**  The
+  check compared every candidate's score with the intercept-only score by
+  `all.equal(tolerance = 1e-12)`, which compares absolute differences when
+  the scores are below 1e-12.  On 60 points with the response in units of
+  1e-20 (RMSE 1.2e-20) a linear learner selected the same predictor as in
+  ordinary units and also drew the warning.  The scores are now compared
+  relative to the intercept-only score, so the warning comes at every
+  scale for a `fit_fn` that ignores its second argument and at none for
+  one that does not.
+
+* **`cv_block_size_sweep()`'s `fold_sd` and the standard error of
+  `select_features_forward(rule = "se")` depended on the response's
+  units.**  Both were `sd()` of fold scores or of their per-fold
+  differences, whose squared deviations fall into the subnormal range near
+  1e-160 and pass the largest double near 1e160.  For a response scaled by 2^-530, `fold_sd` over the scale
+  was off by up to 5.7e-4 relative; scaled by 2^530 it was `Inf` for every
+  block size.  At 2^530 the "se" rule read an infinite standard error,
+  warned that fewer than two folds could be scored while saying 5 were,
+  judged the step on `tol` alone and selected a predictor the rule rejects
+  on the same data in ordinary units.  The standard deviation is now taken
+  on the scores divided by a power of two wherever `sd()` is not finite or
+  is below 1e-150, and where `sd()` gives 0 for values that differ (their
+  deviations all below about 1e-162, as in `cv_bayes()`'s `yhat_sd` for
+  draws that small).  Elsewhere it is `sd()` as before, to the last bit.
+
+* **`prep_model_data()` left out the shift of the dropped rows' response
+  for a response whose values are near 1e160 or near 1e-160.**  The shift is read in
+  standard deviations of the response, and `sd()` was `Inf` for a response
+  scaled by 2^530 and 0 for one scaled by 2^-560.  On 60 points with 6 rows
+  missing a predictor, the warning at scale 1 says the dropped rows'
+  response sits 1.18 SD from the kept rows', more than two standard errors;
+  at both scales that sentence was missing and
+  `attr(, "dropped")$response_std_diff` was `NA`.  The standard deviation is
+  now read as in `cv_block_size_sweep()`'s `fold_sd`, so both scales give
+  1.18 SD and the same sentence.  Where `sd()` is finite and at least
+  1e-150 the reading is as before, to the last bit.
+
 * **`compare_models()` set out-of-bag random-forest metrics beside in-sample
   ones without saying so.**  Without `newdata` an `rf_fit`'s fitted values
   are out-of-bag and every other backend's are in-sample, and the table could

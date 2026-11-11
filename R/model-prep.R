@@ -361,7 +361,11 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
         y_drop <- y_drop - y_ctr
         y_keep <- y_keep - y_ctr
       }
-      s_all  <- stats::sd(c(y_drop, y_keep))
+      # .sd_any_size() is sd() wherever sd() is finite and at least
+      # .POOL_Y_MIN; it reads the spread on a power of two where sd() is
+      # Inf (values near 1e160) or loses its bits (near 1e-160), so the
+      # shift is measured whatever the response's units.
+      s_all  <- .sd_any_size(c(y_drop, y_keep))
       if (length(y_drop) > 0L && is.finite(s_all) && s_all > 0 &&
           (y_ctr != 0 || !.constant_column(c(y_drop, y_keep)))) {
         resp_means <- c(dropped = mean(y_drop), kept = mean(y_keep))

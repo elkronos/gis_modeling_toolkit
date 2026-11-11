@@ -1020,12 +1020,14 @@
   # data.  It fits them at least as well as any other constant, so it gives
   # the LOWER R², not a higher one; the choice is about using training
   # information only.)  model_metrics(newdata =) uses the same baseline.
+  # .train_mean() is mean() of the finite values, read again on a power of
+  # two where mean() overflows near the largest double.
   y_train <- train_df[[response_var]]
-  y_train_mean <- mean(y_train[is.finite(y_train)], na.rm = TRUE)
+  y_train_mean <- .train_mean(y_train)
 
   yc <- scored$centre
   if (yc != 0) {
-    y_train_mean_centred <- mean(y_train[is.finite(y_train)] - yc, na.rm = TRUE)
+    y_train_mean_centred <- .train_mean(y_train, yc)
     met <- .compute_reg_metrics(y_true - yc, scored$yhat_centred, p = p,
                                 y_train_mean = y_train_mean_centred,
                                 centre = yc)
@@ -1136,7 +1138,7 @@
     ct <- .regression_centre(y_train, bounded = FALSE)
     if (ct != 0) {
       pr[[.cv_mean_centre_cols[1L]]] <- ct
-      pr[[.cv_mean_centre_cols[2L]]] <- mean(y_train[is.finite(y_train)] - ct)
+      pr[[.cv_mean_centre_cols[2L]]] <- .train_mean(y_train, ct)
     }
   }
   if (!is.null(per_row)) {
@@ -1277,16 +1279,18 @@
 #' (\code{Inf}) and lose their bits for a spread near 1e-160.  Where the
 #' plain reading is not finite or is below \code{.POOL_Y_MIN}, it is taken by
 #' \code{.cell_sd()}, which divides by a power of two first; elsewhere it is
-#' \code{sd()} as before.
+#' \code{sd()} as before.  A plain reading of 0 stands only where every
+#' value is the same: deviations below about 1e-162 have squares of 0.
 #'
-#' @param x Numeric draws.
+#' @param x Numeric draws or scores.
 #' @return Their standard deviation; \code{NA} where \code{sd()} gives
 #'   \code{NA}.
 #' @keywords internal
 #' @noRd
 .sd_any_size <- function(x) {
   s <- stats::sd(x)
-  if (is.na(s) || s == 0 || (is.finite(s) && s >= .POOL_Y_MIN)) return(s)
+  if (is.na(s) || (s == 0 && all(x == x[1L])) ||
+      (is.finite(s) && s >= .POOL_Y_MIN)) return(s)
   .cell_sd(x)
 }
 

@@ -422,7 +422,7 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
       value = suppressWarnings(as.numeric(ov[[metric]][1L])),
       fold_min = if (length(fv)) min(fv) else NA_real_,
       fold_max = if (length(fv)) max(fv) else NA_real_,
-      fold_sd  = if (length(fv) > 1L) stats::sd(fv) else NA_real_,
+      fold_sd  = if (length(fv) > 1L) .sd_any_size(fv) else NA_real_,
       # The cells built.  A whole number of them is fitted across each axis,
       # so they are 1 to under 2 times `block_size` on an axis at least that
       # long, and as long as the extent (shorter than `block_size`) on an

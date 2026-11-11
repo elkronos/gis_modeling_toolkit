@@ -550,6 +550,32 @@
 }
 
 
+#' The training mean an out-of-sample R-squared is scored against
+#'
+#' \code{mean()} of the finite training responses, less \code{centre} where
+#' the fit took the response about one.  Where that mean is finite it is
+#' returned as it stands, so the baseline is the one \code{mean()} gives.
+#' Where it is not, the values are near the largest double and
+#' \code{mean()}, summing in a double where a long double is not wider, has
+#' overflowed: the mean is then \code{.mean_pow2()} of the values, and
+#' where a value less the centre overflows, twice \code{.mean_pow2()} of the
+#' halves.
+#'
+#' @param y The training responses; values that are not finite are dropped.
+#' @param centre One finite value, 0 where the fit took no centre.
+#' @return The mean, \code{NaN} where no value is finite (as \code{mean()}).
+#' @keywords internal
+#' @noRd
+.train_mean <- function(y, centre = 0) {
+  y <- y[is.finite(y)]
+  d <- if (centre != 0) y - centre else y
+  m <- mean(d)
+  if (is.finite(m) || !length(y)) return(m)
+  if (all(is.finite(d))) return(.mean_pow2(d))
+  .mean_pow2(y / 2 - centre / 2) * 2
+}
+
+
 #' A sum of squared differences at any size
 #'
 #' The differences \code{u - v} are divided by the power of two at or below

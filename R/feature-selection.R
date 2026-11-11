@@ -669,7 +669,7 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
     d  <- d[is.finite(d)]
     out$n <- length(d)
     if (length(d) >= 1L) out$mean <- mean(d)
-    if (length(d) >= 2L) out$se <- stats::sd(d) / sqrt(length(d))
+    if (length(d) >= 2L) out$se <- .sd_any_size(d) / sqrt(length(d))
     out
   }
   # Does a gain count?  Always more than `tol` on the pooled score; under
@@ -879,12 +879,14 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
     # improves on it, and the function returns an empty selection and an NA
     # score with -- until this -- no word about why.  Two different predictor
     # sets do not produce the same cross-validated metric to the last digit,
-    # so the signature is unambiguous.
+    # so the signature is unambiguous.  The scores are compared relative to
+    # the null score: all.equal(tolerance = 1e-12) compares absolute
+    # differences when the scores are below 1e-12, so a working fit_fn on a
+    # response in small units counted as one that ignores its argument.
     if (length(selected) == 0L && length(step_scores) >= 2L &&
         identical(baseline_type, "null model") &&
         is.finite(null_score) && all(is.finite(step_scores)) &&
-        isTRUE(all.equal(unname(step_scores), rep(null_score, length(step_scores)),
-                         tolerance = 1e-12)))
+        all(abs(step_scores - null_score) <= 1e-12 * abs(null_score)))
       .warn_and_log(paste0(
         "select_features_forward(): every candidate scored exactly what the ",
         "intercept-only model scored (%s = %.6g), so `fit_fn` appears to be ",
@@ -1053,10 +1055,10 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
       y_tr <- as.numeric(sf::st_drop_geometry(train_sf)[[response_var]])
       met <- if (yc != 0)
         .compute_reg_metrics(y - yc, yh, p = NULL,
-                             y_train_mean = mean(y_tr[is.finite(y_tr)] - yc),
+                             y_train_mean = .train_mean(y_tr, yc),
                              centre = yc)
       else .compute_reg_metrics(y, yh, p = NULL,
-                                y_train_mean = mean(y_tr[is.finite(y_tr)]))
+                                y_train_mean = .train_mean(y_tr))
       v <- met[[metric]]
       if (is.null(v) || !is.finite(v)) NA_real_ else as.numeric(v)
     }, error = function(e) {

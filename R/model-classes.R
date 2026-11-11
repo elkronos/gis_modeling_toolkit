@@ -1020,7 +1020,7 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
       sf::st_drop_geometry(object$data_sf)[[object$response_var]])),
       error = function(e) NULL)
     if (length(y_tr) && any(is.finite(y_tr)))
-      ytm <- if (yc != 0) mean(y_tr[is.finite(y_tr)] - yc) else mean(y_tr[is.finite(y_tr)])
+      ytm <- .train_mean(y_tr, yc)
   }
   # Adj R² is suppressed (p = NULL) because GWR's effective parameter count
   # far exceeds the global predictor count, and Bayesian GP models likewise
