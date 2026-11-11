@@ -138,3 +138,51 @@ test_that("a row neither repair makes valid under both checks is returned as GEO
   expect_identical(o$poly_id, off$ids)
   expect_identical(sf::st_geometry(o)[[1]], off$g[[1]])
 })
+
+# BUG-196: the warning for the features s2 refuses on the sort copy ended
+# "the geometry returned is the caller's own" whatever `make_valid` was.
+# With make_valid = TRUE the rows returned are the repair made in the
+# layer's own CRS, which for the great-circle polygon is not the row given.
+test_that("the refusal warning says the rows returned are the repair with make_valid = TRUE, and the caller's own with FALSE", {
+  arc <- sf::st_polygon(list(rbind(c(-80, 70), c(80, 70), c(80, 71), c(5, 72),
+                                   c(-5, 72), c(-80, 71), c(-80, 70))))
+  sq <- sf::st_polygon(list(.ce_sq(100, 10, 1)))
+  x <- sf::st_sf(v = 1:2, geometry = sf::st_sfc(arc, sq, crs = 4326))
+  geos <- suppressWarnings(sf::st_make_valid(sf::st_set_crs(sf::st_sfc(arc, crs = 4326), NA)))[[1]]
+  run <- function(s2, mv) local({
+    .ce_s2(s2)
+    w <- character()
+    o <- withCallingHandlers(ensure_stable_poly_id(x, make_valid = mv),
+                             warning = function(c) {
+                               w <<- c(w, conditionMessage(c))
+                               invokeRestart("muffleWarning")
+                             })
+    o <- o[order(o$v), ]
+    list(w = w[grepl("s2 refused", w, fixed = TRUE)], g = sf::st_geometry(o), ids = o$poly_id)
+  })
+  repaired <- paste0("their IDs follow from the order of all the keys, and the rows ",
+                     "returned are the repaired polygons, made in the layer's own CRS ",
+                     "(see `make_valid`), not the copy keyed here.")
+  own <- "their IDs follow from the order of all the keys, and the geometry returned is the caller's own."
+  for (s2 in c(TRUE, FALSE)) {
+    r <- run(s2, TRUE)
+    expect_length(r$w, 1L)
+    expect_match(r$w, "s2 refused 1 of 2 feature(s)", fixed = TRUE)
+    expect_true(endsWith(r$w, repaired), info = paste("s2:", s2))
+    expect_no_match(r$w, "caller's own", fixed = TRUE)
+    # The row returned is GEOS's repair, not the row given; the IDs are as before.
+    expect_identical(r$g[[1]], geos)
+    expect_false(identical(r$g[[1]], arc))
+    # With s2 on the square comes back as it arrived; with s2 off GEOS
+    # repairs every row, and its ring can start or turn another way.
+    if (s2) expect_identical(r$g[[2]], sq)
+    else expect_true(sf::st_equals(sf::st_sfc(r$g[[2]]), sf::st_sfc(sq), sparse = FALSE)[1, 1])
+    expect_identical(r$ids, 1:2)
+    r <- run(s2, FALSE)
+    expect_length(r$w, 1L)
+    expect_true(endsWith(r$w, own), info = paste("s2:", s2))
+    expect_identical(r$g[[1]], arc)
+    expect_identical(r$g[[2]], sq)
+    expect_identical(r$ids, 1:2)
+  }
+})

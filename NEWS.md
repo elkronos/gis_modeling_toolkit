@@ -1876,6 +1876,16 @@ old behaviour where there is a way.
   refuses them with an error that says no point has a location.  With a
   `boundary`, such points still get the boundary as their target.
 
+* **`clip_target_for()` said it used a "small buffer" around points at one
+  location, and gave neither its size nor its unit.**  With no `boundary`
+  and every point at one location the bounding box has no extent to take a
+  share of, and the target is a disk of radius 1 unit of the CRS: 1 m in a
+  metre CRS and 1 km in a kilometre CRS.  The target is unchanged.  The
+  message now gives the radius in the layer's unit (in the units of the
+  coordinates when the points have no CRS) and says to pass `boundary` for
+  a target of real size, or an `expand` of 1 or more, which is taken as the
+  radius; `?clip_target_for` says the same.
+
 * **`summarize_by_cell(area = TRUE)` stopped on cells that carry M.**  Cells
   that are XYM or XYZM throughout reached GEOS, which does not read M, and
   the call stopped with GEOS's "GEOS does not support XYM or XYZM
@@ -3092,6 +3102,47 @@ old behaviour where there is a way.
   tessellation makes the points seeds, and `index` then gives each its
   cell.
 
+* **For points placed by hand that share a cell in `index`, the error of
+  `cell_values_at(seeds = )` told the caller to do what had been done, and
+  `?cell_values_at` said such a point is `NA`.**  `build_tessellation()`
+  gives a point that is not a seed and lies in no cell, but within a
+  thousandth of the median cell width of one, the ID of the nearest cell.
+  Beside a notch in the boundary that can be the cell of another point, so
+  two points had one ID in `index`, and with `seeds$cell_id <- tess$index`
+  the call stopped with "2 seeds have the cell of another", which advised
+  setting the column from `index`.  The error now says why `index` repeats
+  the ID, and that points passed through `get_voronoi_seeds(method =
+  "provided", seeds = )` before `build_tessellation()` each take the cell
+  they generate.  `?cell_values_at` and `?create_voronoi_polygons` now say
+  such a point takes the ID of the nearest cell.  The call still stops: two
+  seeds at different locations cannot share a cell.
+
+* **`create_voronoi_polygons()` counted the points and seeds in no cell in
+  the name of `build_tessellation()`, and `build_tessellation()` counted
+  the `cover` points in no cell in the name of `create_voronoi_polygons()`.**
+  Called directly, the `spatialkit_unassigned` warnings of
+  `create_voronoi_polygons()` on points and seeds began
+  "build_tessellation():", a function the caller had not called, as did the
+  log line on points and `cover` points assigned to the nearest cell.
+  Through `build_tessellation(method = "voronoi")` the warning on `cover`
+  points outside every cell began "create_voronoi_polygons():", where the
+  grid and triangle methods name `build_tessellation()`.  Each now names
+  the function called.
+
+* **`voronoi_seeds_kmeans()` gave the distinct positions as the reason for
+  a clamp set by the number of points.**  Asked for as many seeds as there
+  are points, each at its own position, it returns one fewer, since
+  `stats::kmeans()` refuses as many centres as rows, and warned "requested 10
+  seeds but only 10 unique positions among 10 point(s); clamping to 9".  The
+  warning now takes the words of `get_voronoi_seeds()` for the same clamp:
+  "the points support at most 9 (10 unique position(s) among 10
+  point(s))".  The help says `k` is clamped to the distinct positions or
+  one fewer than the points with a location, whichever is smaller; `k`
+  said `nrow(points_sf) - 1`, which counts the rows without a location
+  that are dropped first.  A count that is not whole, such as 9.5, is now
+  given as requested in this warning and in the same warning of
+  `get_voronoi_seeds()`, which said "requested 9 seeds" for a clamp to 9.
+
 * **`cell_values_at(seeds = )` filled every location, and raised nothing,
   when no seed had the ID of a cell of `values`.**  Seeds whose ID column is
   not the one the cells were built with (a column of that name from
@@ -4104,6 +4155,15 @@ old behaviour where there is a way.
   differ from before.  A row GEOS's repair does not make valid under s2
   either, such as a polygon whose edges cross only as great circles, is
   returned as GEOS repaired it, with a warning that names its rows.
+
+* **`ensure_stable_poly_id()` said the geometry returned was the caller's
+  own when it was the repair.**  When s2 refuses a feature of the lon/lat
+  copy the sort key is measured on, the warning ended "the geometry
+  returned is the caller's own".  With `make_valid = TRUE`, the default,
+  the rows returned are the repaired polygons, made in the layer's own CRS,
+  so a row the repair rewrote came back with another shape than the one
+  given.  The warning now says so with `make_valid = TRUE`, and keeps its
+  words with `make_valid = FALSE`.  No key, ID or row changes.
 
 * **Cells built on seeds placed from lon/lat points could leave observations
   near the edge of a wide layer in no cell.**  The seeding functions attach
@@ -7791,6 +7851,29 @@ old behaviour where there is a way.
   for a fit that did not converge did: `cp` takes its noise variance "from
   the finest level whose cells hold at least two scored rows on average,
   and is NA at every level when none does".
+
+* **`kriging_adequacy()` stopped with base R's "replacement has 3 rows,
+  data has 4" on a `cells_sf` with a cell whose ID is `NA`.**  The
+  per-cell counts were tabulated over the cells' IDs, which hold no level
+  for `NA`, so they came out one short for each such cell, and none when
+  every ID was `NA`. Where the cells with an ID divided the rows evenly
+  (two `NA` IDs among four cells), the shorter counts were recycled over
+  the rows instead, and the call returned with no error: cells took other
+  cells' `n`, `mean`, `se` and `kr_shift`. The counts are now tabulated
+  over the cells that have an ID: a cell whose ID is `NA` comes back with
+  `n` 0 and `mean`, `se`, `plain_var`, `kr_gain` and `kr_shift` `NA`, and
+  is kriged as any other cell. A `cells_sf` in which no cell has an ID
+  (`NA`, `NaN` or a factor's `NA` level) is refused in words that name
+  `cells_sf`, its ID column and `id_col`. A double `NaN` ID is no ID
+  either, on the cells and on the points: such a cell holds no point,
+  where a cell and points that all had `NaN` were matched as one cell,
+  and every cell `NaN` stopped with "factor level [2] is duplicated". A
+  point whose ID is `NaN` is counted in no cell without a warning, as a
+  point whose ID is `NA` is; it was warned about as an ID that matches no
+  cell. Two cells that share an ID, which stopped with base R's "factor
+  level [5] is duplicated", are refused in words that name the column and
+  the IDs, as `assign_features_to_polygons()` refuses them. Layers whose
+  cells all have their own ID give the same results as before.
 
 ## Documentation
 

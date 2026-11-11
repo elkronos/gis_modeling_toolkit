@@ -1440,7 +1440,11 @@ test_that("what `seeds` and `values` must be", {
   expect_identical(conditionMessage(.va_error(.va_at(L, L$held, seeds = twice))), paste0(
     "cell_values_at(): 2 seeds have the cell of another in `seeds$cell_id`; each seed stands ",
     "for one cell. Set the column from the tessellation built on these seeds ",
-    "(seeds$cell_id <- tess$index)."))
+    "(seeds$cell_id <- tess$index). Points placed by hand are indexed by the cell that ",
+    "holds them, and one that lies in no cell but within a thousandth of the median cell ",
+    "width of another seed's cell takes that cell in `index`; passed through ",
+    "get_voronoi_seeds(method = \"provided\", seeds = ) before build_tessellation(), each ",
+    "takes the cell it generates."))
   twice$cell_id[3:4] <- twice$cell_id[1L]
   expect_match(conditionMessage(.va_error(.va_at(L, L$held, seeds = twice))),
                "cell_values_at(): 4 seeds have the cell of another", fixed = TRUE)

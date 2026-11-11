@@ -608,8 +608,9 @@ get_voronoi_seeds <- function(boundary = NULL,
       k_max  <- min(n_uniq, nrow(xy) - 1L)
       k_use  <- max(1L, min(as.integer(n), k_max))
       if (k_use < n) {
-        .warn_and_log("get_voronoi_seeds(kmeans): requested %d seeds but the sampling cloud supports at most %d (%d unique position(s) among %d point(s)); clamping.",
-                  as.integer(n), k_use, n_uniq, nrow(xy))
+        # The request as given, not as.integer(n) (see voronoi_seeds_kmeans()).
+        .warn_and_log("get_voronoi_seeds(kmeans): requested %s seeds but the sampling cloud supports at most %d (%d unique position(s) among %d point(s)); clamping.",
+                  format(n, scientific = FALSE), k_use, n_uniq, nrow(xy))
       }
 
       # One engine for every kind (.partition_centres()).  The default is
@@ -1166,7 +1167,8 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' come back in the input's own coordinates. Rows without a location (an
 #' empty point, or a coordinate that is not finite or lies beyond 1e150, read
 #' as given before the projection) are dropped with a warning, and `k` is
-#' clamped to the number of distinct positions.
+#' clamped to the number of distinct positions or one fewer than the number
+#' of points, whichever is smaller, and not below 1.
 #'
 #' A count given as a number gets a fresh partition, which is not the
 #' partition [resolution_profile()] or [determine_optimal_levels()] scored
@@ -1218,9 +1220,10 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   clustered, since sf reads a layer in the dimension of its first geometry.
 #' @param k Integer; requested number of clusters, treated as an upper bound
 #'   only. It is clamped, with a warning, to whichever is smaller of the number
-#'   of distinct point positions and `nrow(points_sf) - 1`, because k-means can
-#'   produce neither more centres than there are distinct points nor as many
-#'   centres as there are rows. Check `nrow()` on the result. A
+#'   of distinct point positions and one fewer than the number of points with
+#'   a location (rows without one are dropped first), and not below 1, because
+#'   k-means can produce neither more centres than there are distinct points
+#'   nor as many centres as there are rows. Check `nrow()` on the result. A
 #'   [select_resolution()] result or a [resolution_profile()] is also
 #'   accepted: its scored centres are returned when it carries them,
 #'   whatever `partition`, `init` and density settings the call names (see
@@ -1288,7 +1291,7 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   class `"spatialkit_not_converged"`; `partition = "kmeans"` from random
 #'   starts keeps the warning [stats::kmeans()] gives.
 #' @return An sf object of **at most** `k` cluster-centre POINTs (fewer when
-#'   `k` exceeds the number of distinct positions), with `seed_id` and
+#'   `k` is clamped, see `k`), with `seed_id` and
 #'   `method = "kmeans"` columns matching [get_voronoi_seeds()], and
 #'   `attr(, "cover")`, the convex hull of the coordinates of `points_sf`
 #'   (an sfc in its CRS): for lon/lat points, the hull in degrees, with the
@@ -1436,8 +1439,10 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
   k_max  <- min(n_uniq, n - 1L)
   k_use  <- max(1L, min(as.integer(k), k_max))
   if (k_use < k) {
-    .warn_and_log("voronoi_seeds_kmeans(): requested %d seeds but only %d unique positions among %d point(s); clamping to %d.",
-              as.integer(k), n_uniq, n, k_use)
+    # The request as given: as.integer() read k = 9.5 as "requested 9 seeds",
+    # a request equal to the bound it was clamped to.
+    .warn_and_log("voronoi_seeds_kmeans(): requested %s seeds but the points support at most %d (%d unique position(s) among %d point(s)); clamping.",
+              format(k, scientific = FALSE), k_use, n_uniq, n)
   }
 
   cleanup <- .with_seed(set_seed)

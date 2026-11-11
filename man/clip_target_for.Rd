@@ -60,8 +60,12 @@ that boundary (optionally buffered by \code{expand}); without one it is the
 axis-aligned bounding box of \code{points_sf} (the rectangle in the working
 CRS), again optionally buffered, or a small buffer around the points when
 they all share one x or one y, or nearly so (the short side of their
-bounding box below a millionth of the long side). Reach for it to build the
-\code{boundary} that
+bounding box below a millionth of the long side). When every point sits
+at one location the box has no extent to take a share of, and the target
+is a disk of radius 1 unit of the CRS around it (1 m in a metre CRS, 1 km
+in a kilometre CRS), unless \code{expand} is 1 or more, which is then the
+radius; the message says so. Pass \code{boundary} for a target of real size.
+Reach for this function to build the \code{boundary} that
 \code{method = "hex"} and \code{"square"} require, to check that a study-area
 polygon actually contains the observations before tessellating, or to
 pass the same envelope to \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} and

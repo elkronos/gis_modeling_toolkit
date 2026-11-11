@@ -246,7 +246,7 @@ test_that("voronoi_seeds_kmeans clamps k to the distinct positions and says so",
 
   expect_warning(lines <- capture_spatialkit_log(out <- voronoi_seeds_kmeans(dup, k = 10)),
                  "clamping")
-  expect_true(log_has(lines, "only 3 unique positions among 12 point\\(s\\)"))
+  expect_true(log_has(lines, "support at most 3 \\(3 unique position\\(s\\) among 12 point\\(s\\)\\)"))
   expect_true(log_has(lines, "clamping"))
   expect_equal(nrow(out), 3L)
   expect_equal(out$seed_id, 1:3)
@@ -438,6 +438,116 @@ test_that("k-means seeding clamps n to what k-means can actually produce", {
       at2 <- voronoi_seeds_kmeans(cloud, k = k, set_seed = 1)),
       "clamping")
     expect_equal(nrow(at2), N - 1L, info = paste("voronoi_seeds_kmeans k =", k))
-    expect_true(log_has(lines2, "clamping to 11"), info = paste("k =", k))
+    # The bound is one short of the 12 points at 12 positions, and the
+    # warning says so, in the words get_voronoi_seeds() uses.
+    expect_true(log_has(lines2, "support at most 11 \\(12 unique position\\(s\\) among 12 point\\(s\\)\\); clamping\\."),
+                info = paste("k =", k))
   }
+})
+
+
+test_that("voronoi_seeds_kmeans() gives the bound that applied when it clamps k", {
+  # Ten points at ten positions hold ten seeds; stats::kmeans() refuses as
+  # many centres as rows, so the bound is nine, and the warning gave the ten
+  # positions as the reason.  It now reads as get_voronoi_seeds() does for
+  # the same clamp.
+  p10 <- sf::st_as_sf(data.frame(x = 5e5 + (1:10) * 100, y = 4e6 + ((1:10) %% 3) * 70),
+                      coords = c("x", "y"), crs = 32617)
+  w <- character()
+  s <- withCallingHandlers(voronoi_seeds_kmeans(p10, k = 10, set_seed = 1),
+                           warning = function(c) {
+                             w <<- c(w, conditionMessage(c))
+                             invokeRestart("muffleWarning")
+                           })
+  expect_identical(nrow(s), 9L)
+  expect_identical(w, paste0("voronoi_seeds_kmeans(): requested 10 seeds but the points ",
+                             "support at most 9 (10 unique position(s) among 10 point(s)); ",
+                             "clamping."))
+  g <- tryCatch(get_voronoi_seeds(method = "kmeans", n = 10, sample_points = p10, set_seed = 1),
+                warning = conditionMessage)
+  expect_match(g, "supports at most 9 (10 unique position(s) among 10 point(s)); clamping.",
+               fixed = TRUE)
+  # Ten points on five positions: the positions are the bound, as before.
+  w <- tryCatch(voronoi_seeds_kmeans(p10[rep(1:5, 2), ], k = 8, set_seed = 1),
+                warning = conditionMessage)
+  expect_identical(w, paste0("voronoi_seeds_kmeans(): requested 8 seeds but the points ",
+                             "support at most 5 (5 unique position(s) among 10 point(s)); ",
+                             "clamping."))
+  # The help states both bounds.
+  file <- testthat::test_path("..", "..", "man", "voronoi_seeds_kmeans.Rd")
+  rd <- if (file.exists(file)) tools::parse_Rd(file)
+        else tools::Rd_db("spatialkit")[["voronoi_seeds_kmeans.Rd"]]
+  txt <- gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
+  expect_match(txt, paste0("is clamped to the number of distinct positions or one fewer than ",
+                           "the number of points, whichever is smaller, and not below 1."),
+               fixed = TRUE)
+  expect_no_match(txt, "clamped to the number of distinct positions.", fixed = TRUE)
+  # `k` gives the same bound, counted on the points with a location: rows
+  # without one are dropped first, so twelve rows of which two have none
+  # hold nine seeds, not eleven.
+  expect_match(txt, paste0("whichever is smaller of the number of distinct point positions and ",
+                           "one fewer than the number of points with a location"), fixed = TRUE)
+  expect_no_match(txt, "nrow(points_sf) - 1", fixed = TRUE)
+  p12 <- sf::st_as_sf(data.frame(x = c(5e5 + (1:10) * 100, NA, NA),
+                                 y = c(4e6 + ((1:10) %% 3) * 70, NA, NA)),
+                      coords = c("x", "y"), crs = 32617, na.fail = FALSE)
+  w <- character()
+  s <- withCallingHandlers(voronoi_seeds_kmeans(p12, k = 12, set_seed = 1),
+                           warning = function(c) {
+                             w <<- c(w, conditionMessage(c))
+                             invokeRestart("muffleWarning")
+                           })
+  expect_identical(nrow(s), 9L)
+  expect_identical(w[2], paste0("voronoi_seeds_kmeans(): requested 12 seeds but the points ",
+                                "support at most 9 (10 unique position(s) among 10 point(s)); ",
+                                "clamping."))
+})
+
+test_that("voronoi_seeds_kmeans() on one point gives the bound of 1 it clamps to", {
+  # One point gives one seed: the bound is 1, not min(1, 1 - 1) = 0.
+  p1 <- sf::st_as_sf(data.frame(x = 5e5, y = 4e6), coords = c("x", "y"), crs = 32617)
+  w <- character()
+  s <- withCallingHandlers(voronoi_seeds_kmeans(p1, k = 3, set_seed = 1),
+                           warning = function(c) {
+                             w <<- c(w, conditionMessage(c))
+                             invokeRestart("muffleWarning")
+                           })
+  expect_identical(nrow(s), 1L)
+  expect_identical(w, paste0("voronoi_seeds_kmeans(): requested 3 seeds but the points ",
+                             "support at most 1 (1 unique position(s) among 1 point(s)); ",
+                             "clamping."))
+})
+
+test_that("the clamp warnings give a count that is not whole as it was requested", {
+  # k = 9.5 on ten points at ten positions is clamped to nine; the warning
+  # read the request with as.integer() and said "requested 9 seeds", a
+  # request equal to the bound it was clamped to.
+  p10 <- sf::st_as_sf(data.frame(x = 5e5 + (1:10) * 100, y = 4e6 + ((1:10) %% 3) * 70),
+                      coords = c("x", "y"), crs = 32617)
+  w <- character()
+  s <- withCallingHandlers(voronoi_seeds_kmeans(p10, k = 9.5, set_seed = 1),
+                           warning = function(c) {
+                             w <<- c(w, conditionMessage(c))
+                             invokeRestart("muffleWarning")
+                           })
+  expect_identical(nrow(s), 9L)
+  expect_identical(w, paste0("voronoi_seeds_kmeans(): requested 9.5 seeds but the points ",
+                             "support at most 9 (10 unique position(s) among 10 point(s)); ",
+                             "clamping."))
+  g <- character()
+  s <- withCallingHandlers(get_voronoi_seeds(method = "kmeans", n = 9.5, sample_points = p10,
+                                             set_seed = 1),
+                           warning = function(c) {
+                             g <<- c(g, conditionMessage(c))
+                             invokeRestart("muffleWarning")
+                           })
+  expect_identical(nrow(s), 9L)
+  expect_identical(g, paste0("get_voronoi_seeds(kmeans): requested 9.5 seeds but the sampling ",
+                             "cloud supports at most 9 (10 unique position(s) among 10 point(s)); ",
+                             "clamping."))
+  # A whole count reads as before, in full digits.
+  w <- tryCatch(voronoi_seeds_kmeans(p10, k = 1e5, set_seed = 1), warning = conditionMessage)
+  expect_identical(w, paste0("voronoi_seeds_kmeans(): requested 100000 seeds but the points ",
+                             "support at most 9 (10 unique position(s) among 10 point(s)); ",
+                             "clamping."))
 })

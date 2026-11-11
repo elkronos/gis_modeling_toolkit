@@ -51,7 +51,12 @@ whose geometries carry M (XYM or XYZM), which GEOS does not read.}
 and \code{"grid_id"}.  IDs are matched as text, whole numbers written
 out in full, so a double \code{1e5} matches an integer \code{100000};
 a point whose ID matches no cell is counted in no cell, with a
-warning.  Default \code{"poly_id"}.}
+warning.  \code{NA} and \code{NaN} are no ID: a cell without one holds
+no point (\code{n} 0, \code{mean} and \code{se} \code{NA}) and is
+kriged as any other, and a \code{cells_sf} in which no cell has an ID
+is an error.  Two cells with one ID are an error too, since the points
+that carry it cannot be placed in one of them.  Default
+\code{"poly_id"}.}
 
 \item{sac}{Optional \code{sac_range} carrying a variogram model.}
 

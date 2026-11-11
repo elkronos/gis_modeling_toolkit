@@ -295,7 +295,12 @@
 #'   and \code{"grid_id"}.  IDs are matched as text, whole numbers written
 #'   out in full, so a double \code{1e5} matches an integer \code{100000};
 #'   a point whose ID matches no cell is counted in no cell, with a
-#'   warning.  Default \code{"poly_id"}.
+#'   warning.  \code{NA} and \code{NaN} are no ID: a cell without one holds
+#'   no point (\code{n} 0, \code{mean} and \code{se} \code{NA}) and is
+#'   kriged as any other, and a \code{cells_sf} in which no cell has an ID
+#'   is an error.  Two cells with one ID are an error too, since the points
+#'   that carry it cannot be placed in one of them.  Default
+#'   \code{"poly_id"}.
 #' @param sac Optional \code{sac_range} carrying a variogram model.
 #' @param folds Optional \code{\link{make_folds}()} result on
 #'   \code{assigned_points_sf} for the cross-validation statistic, or a
@@ -439,6 +444,42 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
          "Looked for: ", paste(cells_candidates, collapse = ", "), ".",
          call. = FALSE)
   id_cells <- id_cells[[1L]]
+  # A cell with no ID (NA, or a double NaN, which is no ID either) has no
+  # point counted in it; a layer of such cells has no cell any point could
+  # be counted in.  Its counts were tabulated over the cells' IDs, which hold
+  # no level for an NA, so they came out one short for each such cell (none
+  # when every ID was NA) and the call stopped with base R's "replacement has
+  # 3 rows, data has 4".  Refused here, before anything is moved or fitted,
+  # in the words cell_values_at() uses for its `values`.  The IDs are read
+  # as they are matched below: as text, with NA read on the raw column first
+  # (as.character() writes a double NaN as "NaN"), so NaN and a factor's NA
+  # level are no ID either.
+  .ids_as_text <- function(x) {
+    out <- .id_as_character(x)
+    out[is.na(x)] <- NA_character_
+    out
+  }
+  ids_given <- .ids_as_text(cells_sf[[id_cells]])
+  if (all(is.na(ids_given)))
+    stop(sprintf(paste0("kriging_adequacy(): `cells_sf` has no cell ID (its ID column ",
+                        "'%s', found from `id_col`, is all NA), so no point could be ",
+                        "counted in a cell; it must be the cells `assigned_points_sf` ",
+                        "was assigned to."), id_cells), call. = FALSE)
+  # Two cells with one ID: the points that carry it lie in one of them or
+  # the other, and the ID does not say which, so neither cell's n, mean or
+  # plain_var is identified.  The call stopped with base R's "factor level
+  # [5] is duplicated"; refused here in the words of
+  # assign_features_to_polygons(), which refuses such cells.
+  dup_ids <- unique(ids_given[duplicated(ids_given, incomparables = NA)])
+  if (length(dup_ids))
+    stop(sprintf(paste0(
+      "kriging_adequacy(): `cells_sf$%s` holds %d duplicated value(s) (%s), so the ",
+      "points that carry such an ID cannot be placed in one cell. Give every cell ",
+      "its own ID (see ensure_stable_poly_id()) and assign the points to these cells again; ",
+      "if the rows that share an ID are the parts of one cell, merge them into one ",
+      "row per ID first: dplyr::summarise(dplyr::group_by(cells_sf, %s))."),
+      id_cells, sum(duplicated(ids_given, incomparables = NA)),
+      paste(utils::head(dup_ids, 5L), collapse = ", "), id_cells), call. = FALSE)
 
   if (!is.numeric(max_neighbours) || length(max_neighbours) != 1L ||
       !is.finite(max_neighbours) || max_neighbours < 1)
@@ -793,9 +834,10 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # on as "1e+05", so every such point missed its integer-keyed cell and the
   # cell came back with n = 0, no plain mean, and a kriging neighbourhood
   # without its own points.  Said, not silent, when an ID still matches no
-  # cell, as summarize_by_cell() says it.
-  ids_pts <- .id_as_character(sf::st_drop_geometry(kp)[[id_pts]])
-  ids_cells <- .id_as_character(sf::st_drop_geometry(cells)[[id_cells]])
+  # cell, as summarize_by_cell() says it.  Read with .ids_as_text() above:
+  # NA and NaN are no ID.
+  ids_pts <- .ids_as_text(sf::st_drop_geometry(kp)[[id_pts]])
+  ids_cells <- .ids_as_text(sf::st_drop_geometry(cells)[[id_cells]])
   unmatched <- !is.na(ids_pts) & !(ids_pts %in% ids_cells)
   if (any(unmatched))
     .warn_and_log(paste0("kriging_adequacy(): %d of the %d point(s) with a cell ID ",
@@ -933,7 +975,8 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # pairs of its own locations).
   xy_loc  <- xy[first, , drop = FALSE]
   rows_of <- split(seq_len(nrow(kp)),
-                   factor(match(ids_pts, ids_cells), levels = seq_len(nrow(cells))))
+                   factor(match(ids_pts, ids_cells, incomparables = NA),
+                          levels = seq_len(nrow(cells))))
   own_pts <- vector("list", nrow(cells))
   for (ci in which(kriged & lengths(rows_of) > 0L)) {
     l   <- loc[rows_of[[ci]]]
@@ -957,10 +1000,16 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # The variance of a cell's values squares them, and a cell whose own
   # spread is near 1e160 or 1e-160 has squares past what doubles hold:
   # there its standard error is taken from .cell_sd(), which holds at any
-  # size; elsewhere from var() as before.
-  n_c  <- as.integer(table(factor(ids_pts, levels = ids_cells)))
-  m_c  <- tapply(kp$..z, factor(ids_pts, levels = ids_cells), mean)
-  se_c <- as.numeric(tapply(kp$..z, factor(ids_pts, levels = ids_cells), function(x) {
+  # size; elsewhere from var() as before.  Tabulated over the cells that
+  # have an ID: a cell whose ID is NA holds no point, so its n is 0 and its
+  # mean and se are NA, and it is kriged as any other cell.
+  has_id <- !is.na(ids_cells)
+  by_id <- factor(ids_pts, levels = ids_cells[has_id])
+  n_c <- integer(nrow(cells))
+  m_c <- se_c <- rep(NA_real_, nrow(cells))
+  n_c[has_id]  <- as.integer(table(by_id))
+  m_c[has_id]  <- as.numeric(tapply(kp$..z, by_id, mean))
+  se_c[has_id] <- as.numeric(tapply(kp$..z, by_id, function(x) {
     if (length(x) < 2L) return(NA_real_)
     v <- stats::var(x)
     if (is.finite(v) && v >= .POOL_Y_MIN^2) sqrt(v / length(x))

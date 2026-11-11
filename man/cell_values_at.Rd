@@ -51,8 +51,10 @@ For cells from \code{tess <- build_tessellation(seeds)} that is
 seeds a seeding function returned and the seeds of a
 \code{\link[=select_resolution]{select_resolution()}} result, \code{index} gives each seed the cell it
 generates. Other points are indexed by the cell that holds them, and
-one outside the boundary is \code{NA}; with the cell polygons in \code{values}
-such a seed is given its cell when step 3 can tell which it is (it is
+one outside the boundary is \code{NA}, or the ID of the nearest cell, which
+can be the cell of another seed, when it lies within a thousandth of
+the median cell width of it; with the cell polygons in \code{values} a seed
+that is \code{NA} is given its cell when step 3 can tell which it is (it is
 not when the points inside several cells no seed names find it as
 their nearest seed), and without them the locations nearest it have
 none. Passed through \code{get_voronoi_seeds(method = "provided", seeds = )} before the tessellation, points placed by hand
@@ -174,10 +176,14 @@ the cell it generates, a seed outside a boundary that is not convex (a
 k-means centre over a bay) included, and \code{NA} only to a seed whose
 cell the clip removed whole. Other points, such as points placed by
 hand, are indexed by the cell that holds them, so one outside a
-boundary that is not convex is \code{NA} although its cell is built. When
-\code{values} carries the cell polygons, such a seed is given its cell
-here: a seed with an \code{NA} ID that lies in no polygon of \code{values} takes
-the ID of the polygon, among those no seed names, that a point inside
+boundary that is not convex is \code{NA} although its cell is built. One
+that lies in no cell but within a thousandth of the median cell width
+of a cell takes the ID of the nearest cell instead, which beside a
+boundary that is not convex can be the cell of another seed; two
+seeds with one ID stop the call (see \code{seeds}). When \code{values} carries
+the cell polygons, a seed that is \code{NA} is given its cell here: a
+seed with an \code{NA} ID that lies in no polygon of \code{values} takes the
+ID of the polygon, among those no seed names, that a point inside
 it finds as its nearest seed. That is the cell the seed generates,
 since every point of a Voronoi cell is nearer its own seed than any
 other. A seed that the points inside several such polygons find as

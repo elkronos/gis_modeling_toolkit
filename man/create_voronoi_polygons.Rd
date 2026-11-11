@@ -122,7 +122,8 @@ A list with \code{cells}, \code{index}, \code{boundary},
 \code{method} and \code{params}.  \code{index} holds one \code{cell_id}
 per row of \code{points_sf}, and \code{NA} for a point that falls outside
 every cell, which means outside the study area (grown by \code{expand}
-when it is positive), so a summary built from it counts only the points
+when it is positive), and farther than a thousandth of the median cell
+width from the nearest cell, so a summary built from it counts only the points
 the tessellation actually covers.  Such points are counted in
 \code{params$n_outside}, and a warning of class
 \code{"spatialkit_unassigned"} gives their number.  For seeds (see
@@ -210,7 +211,9 @@ layers included), when they are the seeds of a \code{\link[=select_resolution]{s
 result, and when a \code{cover} is passed with them. A selection's seeds are
 seeds by the attributes they carry, which \code{rbind()} and a write to a file
 drop. Any other points are indexed by the cell that holds them, so a
-point outside the study area is \code{NA}; that includes observations that
+point outside the study area is \code{NA}, unless it lies within a thousandth
+of the median cell width of a cell, whose ID it then takes (see \code{index}
+in \code{\link[=build_tessellation]{build_tessellation()}}); that includes observations that
 carry a selection's record of the count, as
 \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} returns them. Seeds placed by hand, and
 a selection's seeds that lost their attributes, are seeds once they pass

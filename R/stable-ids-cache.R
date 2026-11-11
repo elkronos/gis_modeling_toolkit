@@ -534,7 +534,7 @@ ensure_stable_poly_id <- function(polygons_sf,
            "These keys are close to the spherical ones but not exactly equal ",
            "to them.%s The keys of the features s2 accepted are the ones they ",
            "always had, their IDs follow from the order of all the keys, and ",
-           "the geometry returned is the caller's own."),
+           "%s"),
     length(refused), n, conditionMessage(cause), length(split),
     if (isTRUE(repair)) "" else " (none is tried with make_valid = FALSE)",
     length(planar),
@@ -550,7 +550,14 @@ ensure_stable_poly_id <- function(polygons_sf,
              "arrived in, so it can take another place in the order when the ",
              "same layer arrives in another projection, and the IDs between ",
              "the two places move with it.")
-    else "")
+    else "",
+    # The rows returned are not this copy.  With make_valid = TRUE they are
+    # the repair .make_valid_rows() made in the layer's own CRS before the
+    # key was taken, which for a row it rewrote is not the row as it arrived.
+    if (isTRUE(repair))
+      paste0("the rows returned are the repaired polygons, made in the layer's ",
+             "own CRS (see `make_valid`), not the copy keyed here.")
+    else "the geometry returned is the caller's own.")
 
   list(points = points, area = area)
 }

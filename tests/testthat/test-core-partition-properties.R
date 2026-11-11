@@ -368,7 +368,11 @@ test_that("the public functions clamp a count at or above the number of points",
   expect_identical(nrow(voronoi_seeds_kmeans(pts, 1, partition = "density")), 1L)
   expect_identical(nrow(voronoi_seeds_kmeans(pts, n - 1L, partition = "density")), n - 1L)
   for (k in c(n, n + 50L)) {
-    expect_warning(s <- voronoi_seeds_kmeans(pts, k, partition = "density"), "clamping to 79")
+    # Every point at its own position: the bound is one short of the points,
+    # which stats::kmeans() needs, and the warning gives that reason.
+    expect_warning(s <- voronoi_seeds_kmeans(pts, k, partition = "density"),
+                   "support at most 79 (80 unique position(s) among 80 point(s)); clamping.",
+                   fixed = TRUE)
     expect_identical(nrow(s), n - 1L)
     expect_true(all(is.finite(partition_xy(s))))
     expect_warning(g <- get_voronoi_seeds(method = "kmeans", n = k, sample_points = pts,
@@ -380,7 +384,8 @@ test_that("the public functions clamp a count at or above the number of points",
   # A layer of repeats is held to its distinct locations.
   dup <- pts[rep(1:10, each = 6L), ]
   expect_warning(s <- voronoi_seeds_kmeans(dup, 25, partition = "density"),
-                 "only 10 unique positions")
+                 "support at most 10 (10 unique position(s) among 60 point(s)); clamping.",
+                 fixed = TRUE)
   expect_identical(nrow(s), 10L)
   # A density profile's ladder stops where a k-means one does.
   p <- resolution_profile(pts, n_levels = 4, nstart = 2, min_cell_n = 1, partition = "density")

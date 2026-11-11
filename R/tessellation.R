@@ -701,7 +701,8 @@
   cells_cmp <- cells
   if (is.na(sf::st_crs(g)) != is.na(sf::st_crs(cells_cmp)))
     cells_cmp <- sf::st_set_crs(cells_cmp, sf::st_crs(g))
-  idx <- .build_point_cell_index(sf::st_sf(geometry = g), cells_cmp, warn = FALSE)
+  idx <- .build_point_cell_index(sf::st_sf(geometry = g), cells_cmp, warn = FALSE,
+                                 caller = caller)
   n_out <- sum(is.na(idx) & !sf::st_is_empty(g))
   if (n_out > 0L) {
     # What set the cells, and what would make them hold the cover, by method.
@@ -797,8 +798,12 @@
 #' axis-aligned bounding box of `points_sf` (the rectangle in the working
 #' CRS), again optionally buffered, or a small buffer around the points when
 #' they all share one x or one y, or nearly so (the short side of their
-#' bounding box below a millionth of the long side). Reach for it to build the
-#' `boundary` that
+#' bounding box below a millionth of the long side). When every point sits
+#' at one location the box has no extent to take a share of, and the target
+#' is a disk of radius 1 unit of the CRS around it (1 m in a metre CRS, 1 km
+#' in a kilometre CRS), unless `expand` is 1 or more, which is then the
+#' radius; the message says so. Pass `boundary` for a target of real size.
+#' Reach for this function to build the `boundary` that
 #' `method = "hex"` and `"square"` require, to check that a study-area
 #' polygon actually contains the observations before tessellating, or to
 #' pass the same envelope to [create_voronoi_polygons()] and
@@ -986,9 +991,31 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   zero_h <- !isTRUE(dy > 1e-6 * span)
 
   if (zero_w || zero_h) {
-    .msg("clip_target_for(): degenerate bbox; using small buffer around points.")
     dist_use <- .expand_distance(points_sf, if (expand == 0) 0.05 else expand)
-    if (dist_use <= 0) dist_use <- 1
+    if (dist_use <= 0) {
+      # A box with no extent (every point at one location) has no length to
+      # take a share of, so the disk has a radius of 1 unit of the CRS: 1 m
+      # in a metre CRS, 1 km in a kilometre one.  The message gives that
+      # size in the layer's unit and the ways to another one.
+      dist_use <- 1
+      u <- if (is.na(crs_pts)) NA_character_
+           else tryCatch(suppressWarnings(crs_pts$units_gdal), error = function(e) NULL)
+      unit <- if (is.character(u) && length(u) == 1L && !is.na(u) && nzchar(u))
+        sprintf("1 %s (1 unit of the CRS)", u)
+      else if (is.na(crs_pts)) "1 unit of the coordinates (the points have no CRS)"
+      else "1 unit of the CRS"
+      .msg(sprintf(paste0(
+        "clip_target_for(): degenerate bbox: %s, so the box has no extent to take a ",
+        "share of; using a disk of radius %s around %s. Pass `boundary` for a ",
+        "target of real size, or an `expand` of 1 or more, which is taken as the ",
+        "radius in the units of %s."),
+        if (span == 0) "the points sit at one location"
+        else sprintf("the points lie within %s of each other", format(span)),
+        unit, if (span == 0) "it" else "them",
+        if (is.na(crs_pts)) "the coordinates" else "the CRS"))
+    } else {
+      .msg("clip_target_for(): degenerate bbox; using small buffer around points.")
+    }
     tgt <- suppressWarnings(sf::st_buffer(sf::st_union(pts_geom), dist = dist_use))
     tgt <- .safe_make_valid(tgt)
     sf::st_crs(tgt) <- crs_pts
@@ -1030,13 +1057,17 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' @param cells_sf An sf polygon object with a `cell_id` column.
 #' @param warn Raise the classed warning when points fall outside every cell.
 #'   \code{FALSE} for a caller that reports the count in its own words.
+#' @param caller The function the user called, named in the warning and the
+#'   log line: \code{"create_voronoi_polygons"} when that function was
+#'   called directly.
 #' @return Integer vector of cell_id values, one per row of `pts`, with
 #'   \code{NA} for points that fall outside every cell, carrying the
 #'   nearest-cell repairs as \code{attr(, "snapped")} (\code{n}, \code{which},
 #'   \code{distance}); the callers move that record into \code{params}.
 #' @keywords internal
 #' @noRd
-.build_point_cell_index <- function(pts, cells_sf, warn = TRUE) {
+.build_point_cell_index <- function(pts, cells_sf, warn = TRUE,
+                                    caller = "build_tessellation") {
   n <- nrow(pts)
   if (n == 0L)
     return(structure(integer(0),
@@ -1121,10 +1152,10 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
       snapped <- list(n = sum(snap), which = as.integer(unmatched[snap]),
                       distance = as.numeric(d_all[snap]))
       if (snapped$n > 0L)
-        .log_info(paste0("build_tessellation(): %d point(s) sitting just outside ",
+        .log_info(paste0("%s(): %d point(s) sitting just outside ",
                          "every cell (at most %.3g %s, within a thousandth of ",
                          "the median cell width) were assigned to the nearest cell."),
-                  snapped$n, max(snapped$distance),
+                  caller, snapped$n, max(snapped$distance),
                   if (in_degrees) "m"
                   else { u <- sf::st_crs(cells_sf)$units_gdal
                          if (length(u) == 1L && !is.na(u)) u else "units" })
@@ -1140,9 +1171,9 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
     # a location, not for lying outside the study area.
     n_empty <- sum(is.na(index) & !.located_rows(pts))
     .warn_classed("spatialkit_unassigned", paste0(
-      "build_tessellation(): %d of %d point(s) (%.1f%%) fall in no cell and ",
+      "%s(): %d of %d point(s) (%.1f%%) fall in no cell and ",
       "are NA in `index`; `params$n_outside` holds the count. %s"),
-      n_out, length(index), 100 * n_out / length(index),
+      caller, n_out, length(index), 100 * n_out / length(index),
       if (n_empty == n_out)
         sprintf("They have no location (%s), so there is nothing to index.",
                 .UNLOCATED_WHAT)
@@ -1290,7 +1321,9 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' result, and when a `cover` is passed with them. A selection's seeds are
 #' seeds by the attributes they carry, which `rbind()` and a write to a file
 #' drop. Any other points are indexed by the cell that holds them, so a
-#' point outside the study area is `NA`; that includes observations that
+#' point outside the study area is `NA`, unless it lies within a thousandth
+#' of the median cell width of a cell, whose ID it then takes (see `index`
+#' in [build_tessellation()]); that includes observations that
 #' carry a selection's record of the count, as
 #' [assign_features_to_polygons()] returns them. Seeds placed by hand, and
 #' a selection's seeds that lost their attributes, are seeds once they pass
@@ -1417,7 +1450,8 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   \code{method} and \code{params}.  \code{index} holds one \code{cell_id}
 #'   per row of \code{points_sf}, and \code{NA} for a point that falls outside
 #'   every cell, which means outside the study area (grown by \code{expand}
-#'   when it is positive), so a summary built from it counts only the points
+#'   when it is positive), and farther than a thousandth of the median cell
+#'   width from the nearest cell, so a summary built from it counts only the points
 #'   the tessellation actually covers.  Such points are counted in
 #'   \code{params$n_outside}, and a warning of class
 #'   \code{"spatialkit_unassigned"} gives their number.  For seeds (see
@@ -1466,6 +1500,32 @@ create_voronoi_polygons <- function(
     points_sf, boundary = NULL, expand = 0, clip = TRUE,
     keep_duplicates = FALSE, crs = NULL, quiet = FALSE, cover = NULL
 ) {
+  .voronoi_polygons(points_sf, boundary = boundary, expand = expand, clip = clip,
+                    keep_duplicates = keep_duplicates, crs = crs, quiet = quiet,
+                    cover = cover, caller = "create_voronoi_polygons")
+}
+
+#' The body of create_voronoi_polygons(), with the name of the function called
+#'
+#' \code{create_voronoi_polygons()} and the voronoi route of
+#' \code{build_tessellation()} both build their cells here.  The warnings
+#' that count the points, seeds or \code{cover} points in no cell, the log
+#' line on points assigned to the nearest cell, and the warning on cover
+#' rows that cannot be moved name \code{caller}, the function the user
+#' called: they named \code{build_tessellation()} on a direct call to
+#' \code{create_voronoi_polygons()}, or \code{create_voronoi_polygons()}
+#' on a call to \code{build_tessellation()}.  The other texts name
+#' \code{create_voronoi_polygons()}, as they always have.
+#'
+#' @param points_sf,boundary,expand,clip,keep_duplicates,crs,quiet,cover As for
+#'   \code{create_voronoi_polygons()}.
+#' @param caller \code{"create_voronoi_polygons"} or
+#'   \code{"build_tessellation"}.
+#' @return What \code{create_voronoi_polygons()} returns.
+#' @keywords internal
+#' @noRd
+.voronoi_polygons <- function(points_sf, boundary, expand, clip, keep_duplicates,
+                              crs, quiet, cover, caller) {
   .assert_sf(points_sf, c("POINT", "MULTIPOINT"), "points_sf")
   .check_boundary_arg(boundary, "create_voronoi_polygons")
   .check_boundary_arg(cover, "create_voronoi_polygons", label = "cover",
@@ -1628,7 +1688,7 @@ create_voronoi_polygons <- function(
     # From the cover: its hull or polygons, in the working CRS, grown by 2% of
     # the diagonal (see .cover_boundary()).
     from_cover <- .cover_boundary(
-      tryCatch(.cover_follow(cover_geom, pts_in, pts, caller = "create_voronoi_polygons",
+      tryCatch(.cover_follow(cover_geom, pts_in, pts, caller = caller,
                              label = if (identical(cover_from, "cover")) "`cover`"
                                      else "the cover the seeds carry"),
                error = function(e) sf::st_sfc(crs = sf::st_crs(pts))),
@@ -1777,7 +1837,7 @@ create_voronoi_polygons <- function(
   # Build point → cell index using cell_id values.  The snapping record rides
   # on `params`, not on `index`, so `index` stays a plain integer vector.
   # Seeds raise their own warning below.
-  index   <- .build_point_cell_index(pts, cells, warn = !seed_layer)
+  index   <- .build_point_cell_index(pts, cells, warn = !seed_layer, caller = caller)
   snapped <- attr(index, "snapped")
   attr(index, "snapped") <- NULL
   if (seed_layer) {
@@ -1805,9 +1865,9 @@ create_voronoi_polygons <- function(
     if (n_out > 0L) {
       n_empty <- sum(is.na(index) & !.located_rows(pts))
       .warn_classed("spatialkit_unassigned", paste0(
-        "build_tessellation(): %d of %d seed(s) (%.1f%%) have no cell and are NA ",
+        "%s(): %d of %d seed(s) (%.1f%%) have no cell and are NA ",
         "in `index`; `params$n_outside` holds the count. %s"),
-        n_out, length(index), 100 * n_out / length(index),
+        caller, n_out, length(index), 100 * n_out / length(index),
         if (n_empty == n_out)
           sprintf("They have no location (%s), so there is nothing to index.",
                   .UNLOCATED_WHAT)
@@ -1823,8 +1883,7 @@ create_voronoi_polygons <- function(
   }
   # With a boundary given, a point `cover` is checked against the cells.
   cover_outside <- if (identical(boundary_source, "boundary"))
-    .cover_points_outside(cover, cells, pts_in, pts, "create_voronoi_polygons",
-                          method = "voronoi")
+    .cover_points_outside(cover, cells, pts_in, pts, caller, method = "voronoi")
   else NULL
 
   res <- list(
@@ -3131,11 +3190,15 @@ build_tessellation <- function(
       stop(paste0("build_tessellation(voronoi): the move of `points_sf` to the CRS the ",
                   "cells are built in placed none of its points, so no cell can be built."),
            call. = FALSE)
-    res <- create_voronoi_polygons(
+    # The worker of create_voronoi_polygons(), so the warnings that count
+    # points or seeds in no cell name build_tessellation(), the function
+    # called.
+    res <- .voronoi_polygons(
       points_sf = pts_v, boundary = boundary, expand = expand,
       clip = clip, keep_duplicates = keep_duplicates,
       crs = crs_arg, quiet = quiet,
-      cover = if (is.null(cover)) NULL else cover_now
+      cover = if (is.null(cover)) NULL else cover_now,
+      caller = "build_tessellation"
     )
     return(finish(res))
   }

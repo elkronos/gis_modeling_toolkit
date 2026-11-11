@@ -313,7 +313,9 @@
 #' generates, but points it does not take for seeds (points placed by hand,
 #' a selection's seeds bound with \code{rbind()}) are indexed by the cell
 #' that holds them, and one outside a boundary that is not convex is
-#' \code{NA} although its cell is built.  Such a seed lies in no cell, and
+#' \code{NA} although its cell is built, unless it lies within a thousandth
+#' of the median cell width of a cell, whose ID it then takes.  Such a seed
+#' with an \code{NA} ID lies in no cell, and
 #' its cell is a polygon of \code{values} whose ID no seed carries.  Every
 #' point of a Voronoi cell is nearer its own seed than any other, so a point
 #' inside that polygon finds its seed.  A seed with an \code{NA} ID that lies
@@ -538,10 +540,14 @@
 #'    k-means centre over a bay) included, and `NA` only to a seed whose
 #'    cell the clip removed whole. Other points, such as points placed by
 #'    hand, are indexed by the cell that holds them, so one outside a
-#'    boundary that is not convex is `NA` although its cell is built. When
-#'    `values` carries the cell polygons, such a seed is given its cell
-#'    here: a seed with an `NA` ID that lies in no polygon of `values` takes
-#'    the ID of the polygon, among those no seed names, that a point inside
+#'    boundary that is not convex is `NA` although its cell is built. One
+#'    that lies in no cell but within a thousandth of the median cell width
+#'    of a cell takes the ID of the nearest cell instead, which beside a
+#'    boundary that is not convex can be the cell of another seed; two
+#'    seeds with one ID stop the call (see `seeds`). When `values` carries
+#'    the cell polygons, a seed that is `NA` is given its cell here: a
+#'    seed with an `NA` ID that lies in no polygon of `values` takes the
+#'    ID of the polygon, among those no seed names, that a point inside
 #'    it finds as its nearest seed. That is the cell the seed generates,
 #'    since every point of a Voronoi cell is nearer its own seed than any
 #'    other. A seed that the points inside several such polygons find as
@@ -702,8 +708,10 @@
 #'   seeds a seeding function returned and the seeds of a
 #'   [select_resolution()] result, `index` gives each seed the cell it
 #'   generates. Other points are indexed by the cell that holds them, and
-#'   one outside the boundary is `NA`; with the cell polygons in `values`
-#'   such a seed is given its cell when step 3 can tell which it is (it is
+#'   one outside the boundary is `NA`, or the ID of the nearest cell, which
+#'   can be the cell of another seed, when it lies within a thousandth of
+#'   the median cell width of it; with the cell polygons in `values` a seed
+#'   that is `NA` is given its cell when step 3 can tell which it is (it is
 #'   not when the points inside several cells no seed names find it as
 #'   their nearest seed), and without them the locations nearest it have
 #'   none. Passed through `get_voronoi_seeds(method =
@@ -963,10 +971,21 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
                     at_seed[among, 2L] == at_seed[first, 2L]) %in% TRUE)
       twice   <- sum(seed_ids[among] %in% seed_ids[among][apart])
       if (twice > 0L)
+        # Points placed by hand can repeat an ID in `index` with no fault of
+        # the caller's: build_tessellation() gives a point that is not a seed
+        # and lies in no cell, but within a thousandth of the median cell
+        # width of one, the nearest cell (.build_point_cell_index()), which
+        # beside a boundary that is not convex can be another point's cell.
         stop(sprintf(paste0("cell_values_at(): %d seeds have the cell of another in ",
                             "`seeds$%s`; each seed stands for one cell. Set the column ",
                             "from the tessellation built on these seeds ",
-                            "(seeds$%s <- tess$index)."),
+                            "(seeds$%s <- tess$index). Points placed by hand are ",
+                            "indexed by the cell that holds them, and one that lies in ",
+                            "no cell but within a thousandth of the median cell width ",
+                            "of another seed's cell takes that cell in `index`; passed ",
+                            "through get_voronoi_seeds(method = \"provided\", seeds = ) ",
+                            "before build_tessellation(), each takes the cell it ",
+                            "generates."),
                      twice, id_col, id_col), call. = FALSE)
     }
     # Seeds of which no ID is a cell of `values` (an ID column from elsewhere,

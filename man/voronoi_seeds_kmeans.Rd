@@ -23,9 +23,10 @@ clustered, since sf reads a layer in the dimension of its first geometry.}
 
 \item{k}{Integer; requested number of clusters, treated as an upper bound
 only. It is clamped, with a warning, to whichever is smaller of the number
-of distinct point positions and \code{nrow(points_sf) - 1}, because k-means can
-produce neither more centres than there are distinct points nor as many
-centres as there are rows. Check \code{nrow()} on the result. A
+of distinct point positions and one fewer than the number of points with
+a location (rows without one are dropped first), and not below 1, because
+k-means can produce neither more centres than there are distinct points
+nor as many centres as there are rows. Check \code{nrow()} on the result. A
 \code{\link[=select_resolution]{select_resolution()}} result or a \code{\link[=resolution_profile]{resolution_profile()}} is also
 accepted: its scored centres are returned when it carries them,
 whatever \code{partition}, \code{init} and density settings the call names (see
@@ -100,7 +101,7 @@ starts keeps the warning \code{\link[stats:kmeans]{stats::kmeans()}} gives.}
 }
 \value{
 An sf object of \strong{at most} \code{k} cluster-centre POINTs (fewer when
-\code{k} exceeds the number of distinct positions), with \code{seed_id} and
+\code{k} is clamped, see \code{k}), with \code{seed_id} and
 \code{method = "kmeans"} columns matching \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}, and
 \code{attr(, "cover")}, the convex hull of the coordinates of \code{points_sf}
 (an sfc in its CRS): for lon/lat points, the hull in degrees, with the
@@ -144,7 +145,8 @@ heuristic \code{\link[=ensure_projected]{ensure_projected()}} applies, with its 
 come back in the input's own coordinates. Rows without a location (an
 empty point, or a coordinate that is not finite or lies beyond 1e150, read
 as given before the projection) are dropped with a warning, and \code{k} is
-clamped to the number of distinct positions.
+clamped to the number of distinct positions or one fewer than the number
+of points, whichever is smaller, and not below 1.
 
 A count given as a number gets a fresh partition, which is not the
 partition \code{\link[=resolution_profile]{resolution_profile()}} or \code{\link[=determine_optimal_levels]{determine_optimal_levels()}} scored
