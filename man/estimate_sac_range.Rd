@@ -365,7 +365,19 @@ loses its spread on the raw values is centred on its median before the
 predictors are fitted to it and before the test for spatial structure,
 neither of which changes under a shift, and so is a response whose OLS
 residuals on the raw values lose their spread (1e15 plus 1e5 times a
-predictor plus a spread of 1, on that predictor).
+predictor plus a spread of 1, on that predictor).  The test for spatial
+structure, the semivariances and the REML fit are taken on the response
+divided by a power of two near its spread, so a response near 1e-160 or
+1e160, whose squares lie past what doubles hold, gives the range, the
+test and the folds it gives in ordinary units; the variogram, the
+nugget, the short-lag semivariances and the REML variance are returned
+in the response's units squared, which near 1e160 are \code{Inf} and
+near 1e-160 are subnormal doubles that keep few bits, or 0.  A response
+so far from zero that doubles there are spaced more than a millionth of
+its standard deviation apart (a standard deviation of 1 at about 1e10,
+\eqn{2^{33}}, or beyond) is read as stored,
+rounded to that spacing, with a warning of class
+\code{spatialkit_response_imprecise}.
 And the model is fitted without iteration: the criterion is \pkg{gstat}'s weighted least
 squares (weights \eqn{N / h^2}) on lags divided by the cutoff; for each
 trial range the nugget and the partial sill are solved exactly, with both

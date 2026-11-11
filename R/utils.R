@@ -1338,7 +1338,64 @@ setOldClass(c("spatialkit_rows", "sf"))
   FALSE
 }
 
-# The two classed warnings prep_model_data() raises about a layer.  A function
-# that prepares one layer several times raises each once (.once_per_run()).
+# The three classed warnings prep_model_data() raises about a layer.  A
+# function that prepares one layer several times raises each once
+# (.once_per_run()).
 .prep_warning_classes <- c("spatialkit_rows_dropped",
+                           "spatialkit_response_imprecise",
                            "spatialkit_constant_predictor")
+
+
+#' Warn where a response lies so far from zero that doubles there do not
+#' hold a millionth of its spread
+#'
+#' At 1e15 doubles are 0.125 apart, so a response of standard deviation 1
+#' stored there is rounded to eighths, and so is every mean, prediction and
+#' fold score computed at that size: the range, the folds and the selection
+#' read off it are those of the rounded values.  The values are what the
+#' caller gave and are not refused; this says once per call that the
+#' results read that rounding, where one unit in the last place of the
+#' largest absolute value (\code{.ulp_of()}) is more than a millionth of
+#' the standard deviation (\code{.cell_sd()}, which holds at any size).  A
+#' response with no spread beyond a few units in the last place
+#' (\code{.constant_column()}), or of fewer than two finite values, is left
+#' to the tests for a constant.  In a run of calls (\code{.once_per_run()}) it
+#' is said once for the column, by whichever function reads it first.
+#'
+#' @param y The response.
+#' @param caller The function that reads it, named in the message.
+#' @param arg The name of the response column, named in the message.
+#' @return \code{TRUE} (invisibly) when it warned, else \code{FALSE}.
+#' @keywords internal
+#' @noRd
+.warn_response_imprecise <- function(y, caller, arg) {
+  if (!(is.numeric(y) || is.logical(y))) return(invisible(FALSE))
+  y <- as.numeric(y)
+  y <- y[is.finite(y)]
+  if (length(y) < 2L) return(invisible(FALSE))
+  u <- .ulp_of(y)
+  s <- .cell_sd(y)
+  if (!(is.finite(s) && s > 0 && u > 1e-6 * s)) return(invisible(FALSE))
+  # A spread of a few units in the last place is the package's reading of a
+  # constant (.constant_column()), which the tests for one report.
+  if (.constant_column(y)) return(invisible(FALSE))
+  # Taken over by the caller (.answer_for_classed()): not said, and not
+  # recorded for the run either, so that a later call of the run that the
+  # user sees still says it (make_folds()'s range diagnostic muffles every
+  # warning of its estimate_sac_range() call).
+  if ("spatialkit_response_imprecise" %in% .answered_state$classes)
+    return(invisible(FALSE))
+  # Keyed on the column, not on the caller's words, so that a run says it
+  # once whichever of its functions reads the response first.
+  if (.said_in_run("spatialkit_response_imprecise", paste("column", arg)))
+    return(invisible(FALSE))
+  .warn_classed(
+    "spatialkit_response_imprecise",
+    paste0("%s(): `%s` lies so far from zero that its values lose their ",
+           "precision: doubles there are %s apart, more than a millionth of ",
+           "their standard deviation (%s), and the results read that ",
+           "rounding. Subtract a constant from it first."),
+    caller, arg, format(signif(u, 3)), format(signif(s, 3)),
+    data = list(spacing = u, spread = s))
+  invisible(TRUE)
+}

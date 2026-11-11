@@ -549,6 +549,23 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # alone.  It is 0 for every other response, which is computed as before.
   z_centre <- .regression_centre(zk, bounded = FALSE)
   kp$..z <- zk - z_centre
+  # The variogram, the kriging systems and the per-cell variances square the
+  # response.  Near 1e160 the squares overflow, and the variogram was refused
+  # as "fewer than three lag bins hold point pairs"; near 1e-160 they fall
+  # below the smallest normal double, gstat solved no kriging system and se
+  # moved in its third digit.  Where the standard deviation of the centred
+  # response (.cell_sd(), which holds at any size) lies outside
+  # [.POOL_Y_MIN, .POOL_Y_MAX], everything is computed on the response
+  # divided by `z_unit`, the power of two at or below it, and put back:
+  # values times `z_unit`, variances times its square (`up2()`).  Elsewhere
+  # `z_unit` is 1 and nothing changes.
+  z_unit <- 1
+  s_z <- .cell_sd(kp$..z)
+  if (is.finite(s_z) && s_z > 0 && (s_z < .POOL_Y_MIN || s_z > .POOL_Y_MAX)) {
+    z_unit <- .pow2_floor(s_z)
+    kp$..z <- kp$..z / z_unit
+  }
+  up2 <- function(x) if (z_unit == 1) x else x * z_unit * z_unit
 
   # --- the locations, and the folds supplied ---
   # The distinct locations, numbered in the order of the rows; each is kriged
@@ -590,9 +607,16 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
 
   # --- the variogram model ---
   sac_supplied <- !is.null(sac)
+  # A response so far from zero that doubles there do not hold a millionth
+  # of its spread is said here, naming `response_var`, whether or not `sac`
+  # is given: the means, the kriged values and the se read that rounding.
+  # The call of estimate_sac_range() below would name the internal column
+  # `..z`, and takes it over.
+  .warn_response_imprecise(zk, "kriging_adequacy", response_var)
   if (!sac_supplied) {
     .msg("kriging_adequacy(): estimating the variogram of ", response_var, " ...")
-    sac <- estimate_sac_range(kp, "..z", seed = seed)
+    done <- .answer_for_classed("spatialkit_response_imprecise")
+    sac <- tryCatch(estimate_sac_range(kp, "..z", seed = seed), finally = done())
   }
   vm <- attr(sac, "variogram_model")
   if (is.null(vm) || !is.data.frame(vm)) {
@@ -608,6 +632,15 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
                  else sprintf("the variogram estimated here from '%s'", response_var),
                  why), call. = FALSE)
   }
+  # The model as returned, in the response's units squared; the one kriged
+  # with is in those of `z_unit`.  A model passed as `sac` is in the
+  # response's units and is divided down; one estimated here is in those of
+  # `z_unit` already.
+  vm_out <- vm
+  if (z_unit != 1) {
+    if (sac_supplied) vm$psill <- vm$psill / z_unit / z_unit
+    else vm_out$psill <- up2(vm$psill)
+  }
   fam <- as.character(vm$model)
   bad_fam <- setdiff(fam, c("Nug", "Exp", "Sph", "Gau"))
   if (length(bad_fam))
@@ -615,6 +648,19 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
          paste(sQuote(bad_fam), collapse = ", "), ", which this package does not ",
          "interpret (exponential, spherical and Gaussian, plus a nugget).",
          call. = FALSE)
+  # A model whose variances overflowed: estimate_sac_range() returns them in
+  # the response's units squared, which are Inf for a response near 1e160,
+  # and the kriging weights cannot be read off them.  The sill is not
+  # missing but past the largest double, so that is the reason given.
+  if (any(is.infinite(vm$psill)))
+    stop(sprintf(paste0(
+      "kriging_adequacy(): the variogram model %s has a sill past the largest ",
+      "double (Inf): its variances are in the response's units squared, which ",
+      "overflow for a response near 1e160. Use sac = NULL, and the variogram ",
+      "is estimated here on the response divided by a power of two, or divide ",
+      "the response by a constant first."),
+      if (sac_supplied) "in `sac`" else sprintf("estimated from '%s'", response_var)),
+      call. = FALSE)
   nugget <- sum(vm$psill[fam == "Nug"], na.rm = TRUE)
   sill   <- sum(vm$psill, na.rm = TRUE)
   if (!is.finite(sill) || sill <= 0)
@@ -708,8 +754,8 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
     vk$psill[fam == "Nug"] <- 0
     w <- 1 / err_var
     n_rep <- sum(m_loc[loc] > 1L)
-    replicates <- list(n_points = n_rep, within_var = sw2, df = as.integer(df_w),
-                       nugget = nugget, nugget_used = max(nugget, sw2),
+    replicates <- list(n_points = n_rep, within_var = up2(sw2), df = as.integer(df_w),
+                       nugget = up2(nugget), nugget_used = up2(max(nugget, sw2)),
                        above_nugget = above)
     if (above)
       .warn_classed("spatialkit_replicate_var_above_nugget", paste0(
@@ -724,14 +770,14 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
         "computed with it. Refit the variogram with a nugget of at least %.3g ",
         "so the model says the same; attr(, \"replicates\") records both ",
         "numbers."),
-        n_rep, nrow(kk), sw2, as.integer(df_w), nugget, sw2, sw2, sw2,
-        data = list(within_var = sw2, nugget = nugget))
+        n_rep, nrow(kk), up2(sw2), as.integer(df_w), up2(nugget), up2(sw2),
+        up2(sw2), up2(sw2), data = list(within_var = up2(sw2), nugget = up2(nugget)))
     else
       .warn_and_log(paste0("kriging_adequacy(): %d point(s) share a location with another; ",
                            "kriging from the mean at each of the %d distinct locations, with ",
                            "the part of the nugget that differs between replicates (%.3g of ",
                            "%.3g) divided by their count."),
-                    n_rep, nrow(kk), me, nugget)
+                    n_rep, nrow(kk), up2(me), up2(nugget))
   }
 
   # summarize_by_cell()'s conversion: as.character() writes a double from 1e5
@@ -890,21 +936,28 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   }
 
   # --- the plain means and their naive standard error, per cell ---
+  # The variance of a cell's values squares them, and a cell whose own
+  # spread is near 1e160 or 1e-160 has squares past what doubles hold:
+  # there its standard error is taken from .cell_sd(), which holds at any
+  # size; elsewhere from var() as before.
   n_c  <- as.integer(table(factor(ids_pts, levels = ids_cells)))
   m_c  <- tapply(kp$..z, factor(ids_pts, levels = ids_cells), mean)
-  v_c  <- tapply(kp$..z, factor(ids_pts, levels = ids_cells), stats::var)
-  s2_n <- as.numeric(v_c) / n_c
-  s2_n[n_c < 2L] <- NA_real_
-  se_c <- sqrt(s2_n)
+  se_c <- as.numeric(tapply(kp$..z, factor(ids_pts, levels = ids_cells), function(x) {
+    if (length(x) < 2L) return(NA_real_)
+    v <- stats::var(x)
+    if (is.finite(v) && v >= .POOL_Y_MIN^2) sqrt(v / length(x))
+    else .cell_sd(x) / sqrt(length(x))
+  }))
 
   out <- cells[, id_cells, drop = FALSE]
   out$n <- n_c
-  # In the response's units; kr_shift below reads the centred values.
-  out$mean <- as.numeric(m_c) + z_centre
-  out$se <- se_c
-  out$plain_var <- plain_var
-  out$kr_pred <- kr_pred + z_centre
-  out$kr_var <- kr_var
+  # In the response's units; kr_ratio, kr_gain and kr_shift below read the
+  # centred values in the units of `z_unit`, whose ratios do not depend on it.
+  out$mean <- as.numeric(m_c) * z_unit + z_centre
+  out$se <- se_c * z_unit
+  out$plain_var <- up2(plain_var)
+  out$kr_pred <- kr_pred * z_unit + z_centre
+  out$kr_var <- up2(kr_var)
   out$kr_ratio <- ifelse(prior_var > 0, pmin(pmax(kr_var / prior_var, 0), 1), NA_real_)
   # The share of the plain mean's error variance that kriging removes.  gstat's
   # block variance and the same variance written out here agree to about
@@ -998,7 +1051,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
       res <- suppressWarnings(as.numeric(kcv$residual)); res <- res[is.finite(res)]
       cv$zscore_var  <- if (length(zs) > 1L) stats::var(zs) else NA_real_
       cv$zscore_mean <- if (length(zs)) mean(zs) else NA_real_
-      cv$rmse        <- if (length(res)) sqrt(mean(res^2)) else NA_real_
+      cv$rmse        <- if (length(res)) sqrt(mean(res^2)) * z_unit else NA_real_
       cv$n_pred      <- length(zs)
       if (cv$n_pred < length(held))
         .warn_and_log(paste0("kriging_adequacy(): gstat::krige() returned no cross-validation ",
@@ -1011,7 +1064,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   }
 
   structure(out,
-            variogram = vm, sill = sill, nugget = nugget,
+            variogram = vm_out, sill = up2(sill), nugget = up2(nugget),
             range = suppressWarnings(as.numeric(sac)),
             range_identified = range_identified,
             rejected_reason = rejected_reason,

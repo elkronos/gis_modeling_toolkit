@@ -2232,9 +2232,13 @@
   # divided by s_j multiply sigma2 by s_y^2, and the REML log-likelihood is
   # that of the frame less (n - p) log(s_y) and the sum of log(s_j).
   ll_shift <- (n - length(best$beta)) * log(vals$s_y) + sum(log(vals$s_x))
+  # `sigma2_frame` and `s_y` as well: for a response near 1e160 `sigma2` is
+  # Inf, and the caller builds its model from these in a unit of its own.
   list(beta = vals$beta_back(best$beta), range = best$range * dg,
        nugget_prop = best$nugget_prop,
-       sigma2 = best$sigma2 * vals$s_y^2, n_used = n, subsampled = subsampled,
+       sigma2 = best$sigma2 * vals$s_y^2,
+       sigma2_frame = best$sigma2, s_y = vals$s_y,
+       n_used = n, subsampled = subsampled,
        n_colocated = as.integer(n_colocated),
        pair_floor = pair_floor * dg, logLik = best$logLik - ll_shift,
        logLik_null = if (length(ll_null) == 1L && is.finite(ll_null)) ll_null - ll_shift
@@ -2289,9 +2293,19 @@
     if (length(col) != 1L) next
     scaled[[nm[k]]] <- colnames(X0)[col]
   }
+  # .kmeans_frame() takes the range as the root of its square, which is Inf
+  # for a range near 1e160 (gls() then got the raw values and failed) and
+  # loses its bits near 1e-160.  Where the range lies outside [.POOL_Y_MIN,
+  # .POOL_Y_MAX] the column is divided by the power of two at or below it
+  # first and the frame multiplied back, which is exact; elsewhere nothing
+  # changes.
   one <- function(v) {
-    f <- .kmeans_frame(matrix(as.numeric(v), ncol = 1L))
-    list(z = as.numeric(f$z), mid = f$mid, scale = f$scale)
+    v <- as.numeric(v)
+    r <- diff(range(v))
+    p <- if (is.finite(r) && r > 0 && (r < .POOL_Y_MIN || r > .POOL_Y_MAX))
+      .pow2_floor(r) else 1
+    f <- .kmeans_frame(matrix(v / p, ncol = 1L))
+    list(z = as.numeric(f$z), mid = f$mid * p, scale = f$scale * p)
   }
   fy <- one(d[[nm[1L]]])
   d[[nm[1L]]] <- fy$z
@@ -2799,6 +2813,17 @@
   if (is.null(X)) X <- matrix(1, n, 1L)
   if (!is.matrix(X) || nrow(X) != n || nrow(xy) != n) return(NULL)
   y <- as.numeric(y)
+  # Moran's I and its z are ratios of sums of squares of the residuals, and
+  # the squares of a response near 1e160 overflow (no test at all), and of
+  # one near 1e-160 fall below the smallest normal double (Moran's I off in
+  # its fifth digit).  The response is divided by the power of two of
+  # .spread_scaled() first: exact, and neither statistic depends on the
+  # unit, so nothing is put back.  A response of ordinary size gives the
+  # same bits.
+  if (n > 0L && all(is.finite(y))) {
+    s <- .spread_scaled(y)$scale
+    if (is.finite(s) && s > 0) y <- y / s
+  }
   loc <- .sac_locations(xy)
   if (length(loc$first) < n) {
     xy <- xy[loc$first, , drop = FALSE]
@@ -3100,7 +3125,19 @@ sac_nugget <- function(x) {
 #' predictors are fitted to it and before the test for spatial structure,
 #' neither of which changes under a shift, and so is a response whose OLS
 #' residuals on the raw values lose their spread (1e15 plus 1e5 times a
-#' predictor plus a spread of 1, on that predictor).
+#' predictor plus a spread of 1, on that predictor).  The test for spatial
+#' structure, the semivariances and the REML fit are taken on the response
+#' divided by a power of two near its spread, so a response near 1e-160 or
+#' 1e160, whose squares lie past what doubles hold, gives the range, the
+#' test and the folds it gives in ordinary units; the variogram, the
+#' nugget, the short-lag semivariances and the REML variance are returned
+#' in the response's units squared, which near 1e160 are \code{Inf} and
+#' near 1e-160 are subnormal doubles that keep few bits, or 0.  A response
+#' so far from zero that doubles there are spaced more than a millionth of
+#' its standard deviation apart (a standard deviation of 1 at about 1e10,
+#' \eqn{2^{33}}, or beyond) is read as stored,
+#' rounded to that spacing, with a warning of class
+#' \code{spatialkit_response_imprecise}.
 #' And the model is fitted without iteration: the criterion is \pkg{gstat}'s weighted least
 #' squares (weights \eqn{N / h^2}) on lags divided by the cutoff; for each
 #' trial range the nugget and the partial sill are solved exactly, with both
@@ -3868,6 +3905,9 @@ estimate_sac_range <- function(points_sf, response_var,
       "%d point(s) with a finite value to model, fewer than the 30 a ",
       "variogram range is estimated from"), sum(fin))))
   }
+  # A response so far from zero that doubles there are spaced more than a
+  # millionth of its spread apart: the range read off it reads that rounding.
+  .warn_response_imprecise(y_all[fin], "estimate_sac_range", response_var)
   if (n_missing > 0L) points_sf <- points_sf[fin, , drop = FALSE]
 
   # Rows in a canonical order: the coordinates as supplied first, then the
@@ -4216,7 +4256,19 @@ estimate_sac_range <- function(points_sf, response_var,
       "the residuals on predictor_vars are constant: the predictors explain the response exactly"
       else "the response is constant"))
   }
-  y_var <- y_sd^2
+  # The square of a standard deviation near 1e160 overflows, and of one near
+  # 1e-160 falls below the smallest normal double: the semivariances put
+  # back on it were Inf, so every bin was dropped and the range refused as
+  # "fewer than three lag bins hold point pairs", or lost their bits, and
+  # the range moved.  Where the standard deviation lies outside
+  # [.POOL_Y_MIN, .POOL_Y_MAX], the semivariances, the model and the nugget
+  # are taken in units of `v_unit`, the power of two at or below it, and
+  # put back times its square where they are returned or written (`up()`).
+  # Elsewhere `v_unit` is 1 and nothing changes.
+  v_unit <- if (is.finite(y_sd) && y_sd > 0 &&
+                (y_sd < .POOL_Y_MIN || y_sd > .POOL_Y_MAX)) .pow2_floor(y_sd) else 1
+  up <- function(x) if (v_unit == 1) x else x * v_unit * v_unit
+  y_var <- (y_sd / v_unit)^2
   # The variogram is computed on the standardised variable and put back on
   # the response's scale afterwards, and the model is fitted on scaled axes
   # (see .sac_fit_model()), so nothing below depends on the unit of the
@@ -4551,9 +4603,15 @@ estimate_sac_range <- function(points_sf, response_var,
     # empirical variogram of the residuals is attached for inspection, and
     # the model line drawn through it is the REML model.
     effective_range <- 3 * reml_fit$range
-    vgm_used <- gstat::vgm(psill  = reml_fit$sigma2 * (1 - reml_fit$nugget_prop),
+    # In the units of `v_unit`, as the other models are: the variance of the
+    # fit in its own frame times the square of the frame's scale over
+    # `v_unit`.  Built from `sigma2` in the response's units, it was Inf for
+    # a response near 1e160.  Where `v_unit` is 1 it is built as before.
+    s2_reml <- if (v_unit == 1) reml_fit$sigma2
+               else reml_fit$sigma2_frame * (reml_fit$s_y / v_unit)^2
+    vgm_used <- gstat::vgm(psill  = s2_reml * (1 - reml_fit$nugget_prop),
                            model  = "Exp", range = reml_fit$range,
-                           nugget = reml_fit$sigma2 * reml_fit$nugget_prop)
+                           nugget = s2_reml * reml_fit$nugget_prop)
   } else if (is.finite(iso_fit)) {
     effective_range <- as.numeric(iso_fit)
     vgm_used <- attr(iso_fit, "vgm_model")
@@ -4590,6 +4648,18 @@ estimate_sac_range <- function(points_sf, response_var,
   # it can be trusted, the structure test, and what the lags and the row
   # counts were.
   finish <- function(value, ...) {
+    # The semivariances and the models in the response's units (`v_unit`).
+    up_model <- function(m) {
+      if (v_unit != 1 && is.data.frame(m) && "psill" %in% names(m)) m$psill <- up(m$psill)
+      m
+    }
+    up_vg <- function(v) {
+      if (v_unit != 1 && is.data.frame(v) && "gamma" %in% names(v)) v$gamma <- up(v$gamma)
+      v
+    }
+    if (v_unit != 1 && !is.null(dir_detail_out))
+      dir_detail_out <- lapply(dir_detail_out, function(d)
+        list(variogram = up_vg(d$variogram), model = up_model(d$model)))
     structure(
       value,
       class           = c("sac_range", "numeric"),
@@ -4608,20 +4678,20 @@ estimate_sac_range <- function(points_sf, response_var,
       cutoff_dist     = as.numeric(cutoff_dist),
       # The CRS the variogram was fitted in: the unit of the range.
       crs             = sf::st_crs(pts),
-      variogram       = vg_used,
-      variogram_model = vgm_used,
-      nugget          = nugget_val,
+      variogram       = up_vg(vg_used),
+      variogram_model = up_model(vgm_used),
+      nugget          = up(nugget_val),
       nugget_at_bound = nugget_at_bound,
       first_lag       = as.numeric(first_lag),
       bins_below_range = bins_below,
-      short_lag_semivariance = short_lag$gamma,
+      short_lag_semivariance = up(short_lag$gamma),
       short_lag_pairs = short_lag$pairs,
       short_lag_dist  = short_lag$dist,
-      zero_lag_semivariance = short_lag$zero_gamma,
+      zero_lag_semivariance = up(short_lag$zero_gamma),
       zero_lag_pairs  = short_lag$zero_pairs,
       # The floor the variogram fit held the nugget to; the REML model is
       # not fitted to the variogram and has none.
-      nugget_floor    = if (is.null(reml_fit)) nugget_floor else 0,
+      nugget_floor    = if (is.null(reml_fit)) up(nugget_floor) else 0,
       structure_p     = structure_p,
       morans_i        = if (is.null(structure_test)) NA_real_ else structure_test$morans_i,
       structure_test  = if (is.null(structure_test)) NULL else structure_test$table,
@@ -4680,7 +4750,7 @@ estimate_sac_range <- function(points_sf, response_var,
                        "resolved (%.3g to %.3g). Returning NA. The empirical ",
                        "variogram is attached for inspection: call plot() on ",
                        "the returned value."),
-                nugget_val, first_lag, cutoff_dist)
+                up(nugget_val), first_lag, cutoff_dist)
       return(finish(NA_real_, rejected_range = NA_real_,
                     rejected_reason = .sac_reason_flat))
     }
@@ -4856,7 +4926,7 @@ estimate_sac_range <- function(points_sf, response_var,
                      "an estimate (attr(range, \"nugget_at_bound\") is TRUE). ",
                      "The semivariance of nearest-neighbour pairs, %.3g at a ",
                      "median separation of %.3g, bounds the nugget from above."),
-              nugget_val, sill_val, short_lag$gamma, short_lag$dist)
+              up(nugget_val), up(sill_val), up(short_lag$gamma), short_lag$dist)
 
   finish(effective_range)
 }
@@ -5084,6 +5154,11 @@ print.sac_range <- function(x, ...) {
     .log_info("make_folds(block_kfold): the check of the blocks against the autocorrelation range is skipped: fewer than 30 points, below the floor at which a variogram range is estimated.")
     return(NA_real_)
   }
+  # The warning that the response lies too far from zero for doubles to hold
+  # its spread is muffled here with the rest, and is taken over for the call
+  # so that it is not counted as said: in a run (compare_models_cv()), the
+  # first prep_model_data() after the folds says it.
+  done <- .answer_for_classed("spatialkit_response_imprecise")
   r <- tryCatch(
     logger::with_log_threshold(
       withCallingHandlers(
@@ -5092,7 +5167,7 @@ print.sac_range <- function(x, ...) {
                            range_frac = range_frac, seed = seed),
         warning = function(w) invokeRestart("muffleWarning")),
       threshold = logger::FATAL, namespace = "spatialkit", index = 2),
-    error = function(e) NA_real_)
+    error = function(e) NA_real_, finally = done())
   r <- suppressWarnings(as.numeric(r))
   if (length(r) != 1L || !is.finite(r) || r <= 0) NA_real_ else r
 }
@@ -9756,6 +9831,12 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
   if (!("..row_id" %in% names(data_sf))) data_sf$`..row_id` <- seq_len(nrow(data_sf))
   folds <- .folds_from_labels(folds, data_sf, .caller)
   boundary <- .cv_boundary_crs(boundary, .caller)
+  # A `fit_fn` that calls one of the package's fitters prepares each fold's
+  # training rows again, and a response too far from zero for doubles to
+  # hold its spread is the same response in every fold: said once, by the
+  # preparation of the layer below.
+  end_run <- .once_per_run("spatialkit_response_imprecise")
+  on.exit(end_run(), add = TRUE)
   dat_sf <- prep_model_data(data_sf, response_var, predictor_vars, boundary, pointize)
   keep_idx <- dat_sf$`..row_id`
 

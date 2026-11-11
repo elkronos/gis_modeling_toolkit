@@ -7652,6 +7652,54 @@ old behaviour where there is a way.
   now says the REML detrending "could not be fitted" and gives the
   design's error.
 
+* **`estimate_sac_range()` and `kriging_adequacy()` squared a response near
+  1e160 or 1e-160 as given.**  The squares of such a response lie past
+  what doubles hold. Near 1e160 the structure test of
+  `estimate_sac_range()` was not made and the semivariances overflowed,
+  so the range was refused with "fewer than three lag bins hold point
+  pairs", which was false, and `make_folds(auto_range = TRUE)` built
+  other blocks; `kriging_adequacy()` refused with the same reason. Near
+  1e-160 Moran's I of the structure test and the range moved in their
+  fourth or fifth digit, `kriging_adequacy()` kriged no cell, and its
+  `se` moved by up to 0.3 percent. With `detrend = "reml"` the REML fit
+  failed near 1e160 and the range came from the OLS fallback, with a
+  warning that REML "did not converge". The structure test now reads the
+  response divided by a power of two near its spread; the semivariances,
+  the model and the nugget of `estimate_sac_range()`, its REML fit, and
+  the variogram, the kriging and the per-cell variances of
+  `kriging_adequacy()`, are computed in units of a power of two near the
+  response's spread wherever that lies outside 1e-150 to 1e150, and put
+  back in the response's units. A response times 2^-530 or 2^530 gives
+  the range, the test, the folds and the kriged values of the response
+  itself, times the factor where they carry its unit; values in the
+  response's units squared (the variogram, the nugget, the REML variance,
+  `kr_var`, `plain_var`) are `Inf` near 1e160, and near 1e-160 are
+  subnormal doubles that keep few bits, or 0. A variogram model whose
+  sill is `Inf`, passed to `kriging_adequacy()` as `sac`, is refused with
+  that reason, where it was refused as having "no positive sill" or for
+  "fewer than three lag bins". A response of ordinary size gives the same
+  results as before.
+
+* **A response far from zero was read without a word where doubles there
+  do not hold a millionth of its spread.**  At 1e15 doubles are 0.125
+  apart, so a response of standard deviation 1 stored there is rounded to
+  eighths, and so is every mean and prediction computed at that size:
+  `make_folds(auto_range = TRUE)` built other blocks from another range,
+  and `select_features_forward()` selected a predictor where the same
+  response near zero selects none, both in silence. `prep_model_data()`,
+  and so every fit and `cv_*()` function, `estimate_sac_range()` and
+  `kriging_adequacy()` (with or without `sac`) now warn, with class
+  `spatialkit_response_imprecise`, where one unit in the last place of
+  the largest absolute value of the response is more than a millionth of
+  its standard deviation (a standard deviation of 1 at about 1e10, 2^33,
+  or beyond), and give that spacing and the standard deviation. The
+  values are read as given. A response whose spread is a few units in the
+  last place, which the package reads as constant, is left to the tests
+  for a constant. `compare_models_cv()`, `cv_block_size_sweep()` and
+  `select_features_forward()` raise it once for the run, and
+  `cv_spatial()` once for its folds when its `fit_fn` prepares each
+  fold's rows again.
+
 ## Documentation
 
 * The README, the vignettes, the help's examples, the scripts in

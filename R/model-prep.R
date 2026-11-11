@@ -92,7 +92,7 @@
 #'   declines are passed through as-is.  Set the CRS on \code{data_sf} if the
 #'   data are planar.
 #' @section Warnings:
-#' When preparing data for a fit (\code{require_response = TRUE}) two
+#' When preparing data for a fit (\code{require_response = TRUE}) three
 #' conditions are raised as R warnings, each with a class so it can be caught
 #' by name with \code{tryCatch()} or \code{withCallingHandlers()}:
 #' \describe{
@@ -103,6 +103,13 @@
 #'     that remain describes those rows only; when the difference is large
 #'     the rows are not missing at random and the fit is biased towards the
 #'     complete ones.}
+#'   \item{\code{spatialkit_response_imprecise}}{The response lies so far
+#'     from zero that doubles there are spaced more than a millionth of its
+#'     standard deviation apart (a standard deviation of 1 at about 1e10,
+#'     \eqn{2^{33}}, or beyond).  Its values are rounded to that spacing, and so is every
+#'     mean and prediction computed at that size: the fit, its scores and
+#'     any choice made on them read that rounding.  The rows are kept;
+#'     subtract a constant from the response first.}
 #'   \item{\code{spatialkit_constant_predictor}}{A predictor takes a single
 #'     value in every row that remains.  Its coefficient cannot be told from
 #'     the intercept: a GWR window is rank-deficient, a Bayesian slope is
@@ -113,11 +120,15 @@
 #' passes these on.  \code{\link{compare_models_cv}()},
 #' \code{\link{cv_block_size_sweep}()} and
 #' \code{\link{select_features_forward}()} run several cross-validations
-#' of one layer, each of which prepares it, and raise a warning of either
-#' class once per distinct text for the run.
+#' of one layer, each of which prepares it, and raise
+#' \code{spatialkit_rows_dropped} and \code{spatialkit_constant_predictor}
+#' once per distinct text for the run and
+#' \code{spatialkit_response_imprecise} once per response column;
+#' \code{\link{cv_spatial}()} raises the last once as well when its
+#' \code{fit_fn} prepares each fold's rows again.
 #'
 #' With \code{require_response = FALSE} (how every \code{predict()} method
-#' prepares \code{newdata}) neither is raised: the dropped rows are written
+#' prepares \code{newdata}) none is raised: the dropped rows are written
 #' to the log and to the record, and the prediction for each comes back
 #' \code{NA}, so nothing is lost without a trace.  Repeated locations are
 #' legitimate (repeat visits to one site) and are counted in the record and
@@ -436,6 +447,9 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
                                                       imaginary = xy_k[, 2L])))
   }
   if (require_response) {
+    y_out <- out_df[[response_var]]
+    if (is.numeric(y_out))
+      .warn_response_imprecise(y_out, "prep_model_data", response_var)
     if (length(constant_predictors) > 0L)
       .warn_classed(
         "spatialkit_constant_predictor",

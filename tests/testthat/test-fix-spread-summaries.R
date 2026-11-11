@@ -175,10 +175,17 @@ test_that("the Kish ICC of a column with spread is as before, to the bit (BUG-89
   d <- sf::st_as_sf(data.frame(x = x, y = y, z = o + zq, p = p),
                     coords = c("x", "y"), crs = 32615)
   msg <- NULL
+  imprecise <- 0L
   r <- withCallingHandlers(prep_model_data(d, "z", "p"),
     spatialkit_rows_dropped = function(w) {
       msg <<- conditionMessage(w); invokeRestart("muffleWarning")
+    },
+    # At 1e15 doubles are 0.125 apart, more than a millionth of the spread
+    # (BUG-235): said once.
+    spatialkit_response_imprecise = function(w) {
+      imprecise <<- imprecise + 1L; invokeRestart("muffleWarning")
     })
+  expect_identical(imprecise, if (o >= 1e12) 1L else 0L)
   list(sd = attr(r, "dropped")$response_std_diff, msg = msg, zq = zq)
 }
 

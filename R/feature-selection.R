@@ -502,6 +502,11 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
               sum(!keep), sum(keep))
     train_sf <- train_sf[keep, , drop = FALSE]
   }
+  # Said here, once for the sweep: the first cross-validation, of the null
+  # model, runs with its warnings silenced, and the run then holds back the
+  # same warning from every later one (.warn_response_imprecise()).
+  .warn_response_imprecise(sf::st_drop_geometry(train_sf)[[response_var]],
+                           "select_features_forward", response_var)
 
   # Sample splitting: the sweep sees the selection half only; the estimation
   # half scores the chosen set afterwards.  .spatial_half_split()'s positions
