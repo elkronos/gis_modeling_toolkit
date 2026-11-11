@@ -251,11 +251,14 @@ cell \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} g
 without. Other seeds, among them a subset of the centres, are searched as
 given. A location the same distance from two locations of scored rows takes
 the one in the lower column (x values within one part in ten million of the
-diagonal of the scored locations' bounding box counting as one), then the
-one lower in y; among scored rows at one location that lie in different
-cells, the cell that comes first in the order of the IDs (ascending for
-numbers, the C-locale order for strings, the order of the levels for a
-factor). Neither rule depends on the order of
+diagonal of the scored locations' bounding box, or within one part in 1e10
+of their largest coordinate where that is more, counting as one), then the
+one lower in y, y values read the same way; among scored rows at one
+location that lie in different cells, the cell that comes first in the
+order of the IDs (ascending for numbers, the C-locale order for strings,
+the order of the levels for a factor), and the same among locations in one
+column and one row (two records of one station that differ only in the
+last bits of their coordinates). Neither rule depends on the order of
 the rows of \code{points}, or on whether the \pkg{FNN} package is installed. A
 tie is a tie between distances computed from the coordinates in the working
 CRS, so on gridded locations the same layer in another projected CRS can

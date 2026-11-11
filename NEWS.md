@@ -4284,11 +4284,18 @@ old behaviour where there is a way.
   0.1 m; `.pred` moved by up to 0.03.  For point covariates, squared
   distances within one part in ten million of the least are now a tie, and
   the tie goes to the point lowest in x (x values within one part in ten
-  million of the diagonal of the points' bounding box counting as one),
-  then lowest in y, then first in row order.  The grid above takes the same
-  covariates in all three frames, with or without the FNN package.  A grid
-  point that ties with no other point takes the row it took before.  Lines
-  and polygons had the same fault: a grid point on the edge two covariate
+  million of the diagonal of the points' bounding box, or within one part
+  in 1e10 of their largest coordinate where that is more, counting as
+  one), then lowest in y (y values read the same way), then first in row
+  order.  The grid above takes the same covariates in all three frames,
+  with or without the FNN package.  Two points that differ only in the
+  last bits of their coordinates (one station recorded twice, one
+  billionth of a metre apart) now take the tie the same way with another
+  origin, where a grid point the same distance from both, 570 m away, took
+  one row in metres and US feet and the other with the false origin moved
+  by 0.1 m; the first in row order takes it now.  A grid point that ties
+  with no other point takes the row it took before.  Lines and polygons
+  had the same fault: a grid point on the edge two covariate
   polygons share, or at the shared end of two lines, is at distance 0 from
   both, and GEOS gave it either.  On 10 by 8 square cells of 500 m with
   the grid on their shared edges, 34 of 72 grid points took another cell
@@ -4414,10 +4421,17 @@ old behaviour where there is a way.
   point with the false origin moved by 0.1 m, where EPSG:26915 and US feet
   take the lower, and their `filled_from` and `value` moved with it.  The
   scored locations are now in column order (x values within one part in
-  ten million of the diagonal of their bounding box counting as one), then
-  by y, so the tie goes to the lower point in every frame, as "Ties" in
-  `?cell_values_at` said of another unit or origin.  That section now
-  states the column rule.
+  ten million of the diagonal of their bounding box, or within one part in
+  1e10 of their largest coordinate where that is more, counting as one),
+  then in row order (y values read the same way), then by the first cell in
+  ID order among their rows, so the tie goes to the lower point in every
+  frame, as "Ties" in `?cell_values_at` said of another unit or origin.
+  Two scored locations that differ only in the last bits of their
+  coordinates (one station recorded twice, in two cells) now take the tie
+  the same way with another origin, from the cell first in ID order as
+  rows at one location do, where the fill came from one cell in metres and
+  US feet and from the other with the false origin moved by 0.1 m.  That
+  section now states the column rule.
 
 * **`summarize_by_cell()` read columns at extreme scales as having no
   spread.**  The test compared the spread inside the cells with the size of

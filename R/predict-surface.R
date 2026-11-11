@@ -114,8 +114,14 @@
 #' squared distances within \code{.TIE_TOL} (one part in ten million) of the
 #' least are a tie, and the tie goes to the point in the lowest column
 #' (\code{.near_columns()}: first coordinates within \code{.TIE_TOL} of the
-#' diagonal of the points' box are one column), then the lowest y, then the
-#' lower row.  A layer of lines or polygons (or one that mixes them with
+#' extent are one column), then in the lowest row by the same rule read on
+#' y, then the lower row of the layer.  The extent is the diagonal of the
+#' points' box, or one part in 1e10 of their largest coordinate over
+#' \code{.TIE_TOL} where that is more (\code{.near_points_extent()}): two
+#' records of one station that differ in their last bits, alone in the
+#' layer, have a box whose diagonal is last-bits small, and a raw y read
+#' after the column let those bits choose, which move with the unit and the
+#' origin.  A layer of lines or polygons (or one that mixes them with
 #' points) is searched by \code{.surface_nearest_shapes()}, the same rule
 #' read on distances to the features and on the centres of their bounding
 #' boxes.  A layer in degrees is searched by \code{sf::st_nearest_feature()}
@@ -149,8 +155,13 @@
   live <- which(!is.na(cxy[, 1L]))
   if (!length(live)) return(out)
   cx <- cxy[live, 1L]; cy <- cxy[live, 2L]
-  # By column, then y, then row: order() keeps the row order among ties.
-  o <- order(.near_columns(cx, cy), cy)
+  # By column, then by row read the same way on y, then row of the layer:
+  # order() keeps the row order among ties.  The step is never less than one
+  # part in 1e10 of the largest coordinate (.near_points_extent()): points
+  # that all lie within the last bits of each other have a last-bits small
+  # box.
+  ex <- .near_points_extent(cx, cy)
+  o  <- order(.near_columns(cx, cy, ex), .near_columns(cy, cx, ex))
   j <- .values_at_nearest(gxy[q, 1L], gxy[q, 2L], cx[o], cy[o],
                           use_fnn = .has_backend("FNN"))
   out[q] <- live[o[j]]
@@ -326,10 +337,18 @@
 #'   point the same distance from several points of \code{covariates}
 #'   (squared distances within one part in ten million of the least) takes
 #'   the one lowest in x, x values within one part in ten million of the
-#'   diagonal of the points' bounding box counting as one, then the one
-#'   lowest in y, then the first in row order, so a grid laid between the
-#'   points of a lattice takes the same covariates in another unit or with
-#'   another origin, and with or without the \pkg{FNN} package.  A grid
+#'   diagonal of the points' bounding box, or within one part in 1e10 of
+#'   their largest coordinate where that is more, counting as one, then the
+#'   one lowest in y, y values read the same way, then the first in row
+#'   order, so a grid laid between the points of a lattice takes the same
+#'   covariates in another unit or with another origin, and with or without
+#'   the \pkg{FNN} package, as does a grid point the same distance from two
+#'   points that differ only in the last bits of their coordinates.  A grid
+#'   point closer to such a pair than about twenty million times the
+#'   distance between them (2 cm for points one billionth of a metre apart)
+#'   need not be the same distance from both by that rule, and takes the
+#'   nearer as its coordinates give it, which can change with the unit or
+#'   the origin.  A grid
 #'   point the same distance from several features of a layer of lines or
 #'   polygons, or of one that mixes them with points (on the edge two
 #'   polygons share, say: distances within one part in ten million of the

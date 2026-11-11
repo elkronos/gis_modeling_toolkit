@@ -95,6 +95,8 @@ test_that("?cell_values_at states the column rule for tied scored locations", {
   rd <- if (file.exists(file)) tools::parse_Rd(file) else tools::Rd_db("spatialkit")[["cell_values_at.Rd"]]
   txt <- gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
   expect_match(txt, paste0("takes the one in the lower column (x values within one part in ten ",
-                           "million of the diagonal of the scored locations' bounding box ",
-                           "counting as one), then the one lower in y"), fixed = TRUE)
+                           "million of the diagonal of the scored locations' bounding box, or ",
+                           "within one part in 1e10 of their largest coordinate where that is ",
+                           "more, counting as one), then the one lower in y, y values read the ",
+                           "same way"), fixed = TRUE)
 })

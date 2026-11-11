@@ -194,6 +194,29 @@
 }
 
 
+#' The extent the tie step of a point search is a part of
+#'
+#' The diagonal of the points' bounding box, or \code{.edge_tol()} of that
+#' box divided by \code{.TIE_TOL}, whichever is more, so the step of
+#' \code{.near_columns()} is never less than one part in 1e10 of the largest
+#' coordinate, the margin of \code{.edge_tol()}.  Points that all lie within
+#' the last bits of each other (two records of one station, alone in the
+#' layer) have a box whose diagonal is itself last-bits small, and with that
+#' diagonal alone those bits, which move with the unit and the origin, would
+#' part them into two columns.  On a layer whose diagonal is more than a
+#' thousandth of its largest coordinate the extent is the diagonal.
+#'
+#' @param x,y Finite coordinates of the points.
+#' @return One number, in the units of the coordinates.
+#' @keywords internal
+#' @noRd
+.near_points_extent <- function(x, y) {
+  if (!length(x)) return(0)
+  rx <- range(x); ry <- range(y)
+  max(sqrt(diff(rx)^2 + diff(ry)^2), .edge_tol(c(rx, ry)) / .TIE_TOL)
+}
+
+
 #' The nearest centre of every point, where many points can tie
 #'
 #' The answer of \code{.nearest_centre()}: the nearest centre by squared
@@ -590,11 +613,14 @@
 #' without. Other seeds, among them a subset of the centres, are searched as
 #' given. A location the same distance from two locations of scored rows takes
 #' the one in the lower column (x values within one part in ten million of the
-#' diagonal of the scored locations' bounding box counting as one), then the
-#' one lower in y; among scored rows at one location that lie in different
-#' cells, the cell that comes first in the order of the IDs (ascending for
-#' numbers, the C-locale order for strings, the order of the levels for a
-#' factor). Neither rule depends on the order of
+#' diagonal of the scored locations' bounding box, or within one part in 1e10
+#' of their largest coordinate where that is more, counting as one), then the
+#' one lower in y, y values read the same way; among scored rows at one
+#' location that lie in different cells, the cell that comes first in the
+#' order of the IDs (ascending for numbers, the C-locale order for strings,
+#' the order of the levels for a factor), and the same among locations in one
+#' column and one row (two records of one station that differ only in the
+#' last bits of their coordinates). Neither rule depends on the order of
 #' the rows of `points`, or on whether the \pkg{FNN} package is installed. A
 #' tie is a tie between distances computed from the coordinates in the working
 #' CRS, so on gridded locations the same layer in another projected CRS can
@@ -1021,16 +1047,27 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
   # The cells in the order of their IDs, and the rows by location and then by
   # cell: the first row of a location is the one in the first of those cells.
   # The locations are in column order (.near_columns(): x values within
-  # .TIE_TOL of the diagonal of their bounding box are one column), then by
-  # y, then by x, so rows at one location stay together.  The search below
-  # gives a tie to the lower location number, and in exact x order a
-  # lattice moved to another false origin no longer has one x per column,
-  # so of two locations of a column the one whose x was lower in its last
-  # bits won, not the lower one.
+  # .TIE_TOL of the extent are one column), then in row order (y values read
+  # the same way), then by the first cell in ID order among the rows at each
+  # location, then by exact y and x, so rows at one location stay together.
+  # The extent is the diagonal of the scored locations' bounding box, or
+  # one part in 1e10 of their largest coordinate over .TIE_TOL where that is
+  # more (.near_points_extent()).  The search below gives a tie to the lower
+  # location number, and in exact x or y order the last bits of the
+  # coordinates, which move with the unit and the origin, chose between
+  # two locations of a column (a lattice moved to another false origin) or
+  # two that lie within those bits of each other (two records of one
+  # station), not the lower one or the one in the first cell.
   cells <- unique(sid)
   cells <- cells[order(cells, method = "radix")]
   gi    <- match(sid, cells)
-  o     <- order(.near_columns(sx, sy), sy, sx, gi)
+  ex    <- .near_points_extent(sx, sy)
+  at    <- order(sy, sx)
+  loc   <- integer(n_scored)
+  loc[at] <- cumsum(c(TRUE, sx[at][-1L] != sx[at][-n_scored] |
+                            sy[at][-1L] != sy[at][-n_scored]))
+  lo_gi <- as.integer(tapply(gi, loc, min))[loc]
+  o     <- order(.near_columns(sx, sy, ex), .near_columns(sy, sx, ex), lo_gi, sy, sx, gi)
   sx <- sx[o]; sy <- sy[o]
   first <- c(TRUE, sx[-1L] != sx[-n_scored] | sy[-1L] != sy[-n_scored])
   ux <- sx[first]
