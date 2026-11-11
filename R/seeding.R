@@ -65,7 +65,17 @@
 #'   proportion to their areas; a piece whose own box is over 10,000 times
 #'   its area stops the call with an error that says to transform
 #'   `boundary` to a projected CRS. A boundary whose bounding box has no
-#'   height or no width (three vertices on one parallel) is refused.
+#'   height or no width (three vertices on one parallel) is refused. In
+#'   longitude and latitude s2 reads the edges as great circles, which
+#'   leave the bounding box read from the coordinates, and sf (without the
+#'   lwgeom package) draws in that box: a boundary whose box has less than
+#'   half its area on the sphere (three vertices on or near one parallel)
+#'   is refused too. That error, and the error for a box with no height
+#'   whose vertices lie on one parallel other than the equator, say to
+#'   transform `boundary` to a projected CRS in which a parallel is a
+#'   curve, such as the one [ensure_projected()] picks for it (a polar one,
+#'   such as EPSG:3413 or 3031, for a ring around a pole), where the
+#'   region has an area and lies in its box.
 #'   sf draws the points in the bounding box and keeps those inside, so it
 #'   draws the number asked for times the ratio of the box to the area. In
 #'   any CRS, a boundary that would take more than 10^6 points drawn in its
@@ -739,7 +749,10 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' The box the draw is made in is read from the coordinates first.  With no
 #' width or no height (a lon/lat ring of three vertices on one parallel,
 #' which s2 reads as a sliver with an area) \code{sf::st_sample()} drew in
-#' it without end, so the call stops in the caller's name instead.
+#' it without end, so the call stops in the caller's name instead.  So it
+#' does where, in longitude and latitude, the box has less than half the
+#' area of the region (\code{.sample_box_short()}), and where the region
+#' holds no polygon (the s2 union of a ring on one meridian is a line).
 #'
 #' \code{sf::st_sample()} draws \code{n} times the ratio of the bounding box
 #' to the area of points in the box and keeps those inside, at about 470
@@ -787,11 +800,18 @@ get_voronoi_seeds <- function(boundary = NULL,
   # seeding on a lon/lat boundary failed with "package lwgeom required".
   if (.is_longlat(geom) && !isTRUE(sf::sf_use_s2()))
     return(.with_s2(.robust_st_sample(geom, n, caller, nothing, by_piece, remedy, plan)))
-  .sample_box_check(geom, caller, nothing)
+  .sample_box_check(geom, caller, nothing, piece = !isTRUE(by_piece))
+  # The s2 union of a lon/lat ring that holds no ground (three vertices on
+  # one meridian from 80 S to 80 N) can be a line whose box has a width of
+  # rounding size, which sf sampled as a line: seeds came back as
+  # MULTIPOINTs, some empty.
+  if (!any(.has_polygon(geom)))
+    .stop_boundary_unlocated(caller, nothing, "union")
   # The draw sf makes is bounded: above the cap the geometry goes piece by
   # piece, and a piece in bounded draws.  A lon/lat region sf refuses is left
   # to sf's refusal below, which draws nothing.
   if (is.null(plan)) plan <- .sample_draw_plan(geom, n)
+  .sample_box_short(plan, caller, nothing, piece = !isTRUE(by_piece))
   if (isTRUE(plan$draws > .sample_draw_cap(n)) && !any(plan$sf_refuses))
     return(if (isTRUE(by_piece))
              .sample_by_piece(geom, n, NULL, caller, nothing, by_piece, remedy, whole = plan)
@@ -955,22 +975,108 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' in the box falls inside, and the draw ran without end.
 #' create_grid_polygons() refuses such a box ("non-positive extent").
 #'
+#' A lon/lat region with no height whose vertices lie on one parallel
+#' other than the equator (or a pole) has an area once projected, where the
+#' parallel is a curve: a ring of three vertices from 10 to 12 E at 60 N is
+#' a sliver of 110 km by 3 km in the UTM zone ensure_projected() picks, and
+#' a ring around a pole with every vertex on one parallel is a polygon in a
+#' polar stereographic CRS.  There the refusal says to transform
+#' `boundary` to a projected CRS.  The equator and the meridians are great
+#' circles, so a ring on one of them holds no ground, projected or not, and
+#' a projected region with no height has no area: those refusals offer no
+#' remedy.
+#'
 #' @param geom An sfc.
 #' @param caller,nothing As \code{.robust_st_sample()}.
+#' @param piece \code{TRUE} where \code{geom} is one polygon of the
+#'   piece-by-piece draw, so the refusal names that polygon, not
+#'   `boundary`, whose own box has a height.
 #' @return \code{NULL}, invisibly, when the box has a width and a height;
 #'   otherwise it stops.
 #' @keywords internal
 #' @noRd
-.sample_box_check <- function(geom, caller, nothing) {
+.sample_box_check <- function(geom, caller, nothing, piece = FALSE) {
   bb <- sf::st_bbox(geom)
   w  <- as.numeric(bb[["xmax"]] - bb[["xmin"]])
   h  <- as.numeric(bb[["ymax"]] - bb[["ymin"]])
-  if (!(is.finite(h) && h > 0) || !(is.finite(w) && w > 0))
-    stop(sprintf(paste0("%s(): `boundary` cannot be sampled (its bounding box, read from ",
-                        "its coordinates, has no %s), so %s."),
-                 caller, if (!(is.finite(h) && h > 0)) "height" else "width", nothing),
+  has_h <- is.finite(h) && h > 0
+  has_w <- is.finite(w) && w > 0
+  if (!has_h || !has_w) {
+    lat <- as.numeric(bb[["ymin"]])
+    on_parallel <- !has_h && has_w && .is_longlat(geom) && is.finite(lat) &&
+      lat != 0 && abs(lat) < 90
+    stop(sprintf(paste0("%s(): %s cannot be sampled (its bounding box, read from ",
+                        "its coordinates, has no %s), so %s.%s"),
+                 caller, if (isTRUE(piece)) "one of the polygons of `boundary`" else "`boundary`",
+                 if (!has_h) "height" else "width", nothing,
+                 if (on_parallel) .sample_project_remedy() else ""),
          call. = FALSE)
+  }
   invisible(NULL)
+}
+
+#' The sentence that ends a refusal of a lon/lat region sf cannot draw in
+#'
+#' In a projected CRS in which a parallel is a curve the edges are straight
+#' and the region lies in its box.  In a cylindrical one (EPSG:3857, 3395,
+#' 4087) a parallel stays straight, and a ring on one still has no height,
+#' so the sentence names the CRS ensure_projected() picks: a UTM zone, or a
+#' polar or regional equal-area one.
+#'
+#' @return A sentence, with a leading space.
+#' @keywords internal
+#' @noRd
+.sample_project_remedy <- function() {
+  paste0(" Transform `boundary` to a projected CRS in which a parallel is a curve, ",
+         "such as the one ensure_projected() picks for it (for a ring around a pole, ",
+         "a polar one such as EPSG:3413 or 3031), to seed it.")
+}
+
+#' Whether sf draws in the box read from the coordinates of a lon/lat region
+#'
+#' With s2 on and without lwgeom (not a dependency), sf draws a lon/lat
+#' region in the box of its coordinates; with lwgeom it draws in the box of
+#' the region segmentized along great circles, which holds the region.
+#'
+#' @return \code{TRUE} or \code{FALSE}.
+#' @keywords internal
+#' @noRd
+.sf_box_from_coordinates <- function() !requireNamespace("lwgeom", quietly = TRUE)
+
+#' Refuse a lon/lat region that lies mostly outside its bounding box
+#'
+#' In longitude and latitude s2 reads the edges as great circles, which
+#' leave the box read from the coordinates: a ring of three vertices on a
+#' parallel bulges toward the pole.  sf draws in that box and keeps the
+#' points that fall in the region, so it draws only in the part of the
+#' region inside the box, which is at most the box's area.  Where the box
+#' has less than half the area of the region on the sphere, more than half
+#' the region can take no point, and where it has almost none of it the
+#' draw ran without end: the s2 union of a ring on the 30th parallel moves
+#' its latitudes by a few units in the last place, so its box has a height
+#' of about 1e-14 degrees, which passed \code{.sample_box_check()}, and a
+#' sliver 1e-7 degrees tall along a parallel did the same.  Such a region
+#' is refused at once, with the remedy of \code{.sample_project_remedy()}:
+#' projected, the edges are straight and the region lies in its box.  With
+#' lwgeom, sf draws in the box of the region segmentized along great
+#' circles instead, and nothing is refused here.
+#'
+#' @param plan \code{.sample_draw_plan()} of the region (or of a piece).
+#' @param caller,nothing As \code{.robust_st_sample()}.
+#' @param piece As \code{.sample_box_check()}.
+#' @return \code{NULL}, invisibly, when the region is drawn; otherwise it
+#'   stops.
+#' @keywords internal
+#' @noRd
+.sample_box_short <- function(plan, caller, nothing, piece = FALSE) {
+  if (!isTRUE(plan$longlat) || !isTRUE(plan$ratio < 0.5) || !.sf_box_from_coordinates())
+    return(invisible(NULL))
+  stop(sprintf(paste0(
+    "%s(): %s cannot be sampled (its edges are great circles that leave its bounding ",
+    "box, read from its coordinates, which sf draws in: the box has %s times its area ",
+    "on the sphere), so %s.%s"),
+    caller, if (isTRUE(piece)) "one of the polygons of `boundary`" else "`boundary`",
+    format(signif(plan$ratio, 2)), nothing, .sample_project_remedy()), call. = FALSE)
 }
 
 #' Sample a region piece by piece
@@ -1553,7 +1659,17 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
 #'   proportion to their areas; a piece whose own box is over 10,000 times
 #'   its area stops the call with an error that says to transform
 #'   `boundary` to a projected CRS. A boundary whose bounding box has no
-#'   height or no width (three vertices on one parallel) is refused.
+#'   height or no width (three vertices on one parallel) is refused. In
+#'   longitude and latitude s2 reads the edges as great circles, which
+#'   leave the bounding box read from the coordinates, and sf (without the
+#'   lwgeom package) draws in that box: a boundary whose box has less than
+#'   half its area on the sphere (three vertices on or near one parallel)
+#'   is refused too. That error, and the error for a box with no height
+#'   whose vertices lie on one parallel other than the equator, say to
+#'   transform `boundary` to a projected CRS in which a parallel is a
+#'   curve, such as the one [ensure_projected()] picks for it (a polar one,
+#'   such as EPSG:3413 or 3031, for a ring around a pole), where the
+#'   region has an area and lies in its box.
 #'   sf draws the points in the bounding box and keeps those inside, so it
 #'   draws `k` times the ratio of the box to the area. In any CRS, a
 #'   boundary that would take more than 10^6 points drawn in its box, or
@@ -1672,8 +1788,11 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #' @param caller Name of the exported function, for that error.
 #' @param task What cannot run in degrees, for that error.
 #' @param all \code{TRUE} to put every row through \code{.safe_make_valid()}
-#'   first, under the engine of the session, as get_voronoi_seeds() and
-#'   create_grid_polygons() always have; \code{FALSE} to repair only the rows
+#'   first, as get_voronoi_seeds() always has, on the sphere in longitude and
+#'   latitude whatever \code{sf::sf_use_s2()} says (with s2 off, GEOS's
+#'   repair in the plane turned a ring s2 accepts, three vertices on one
+#'   parallel or a ring around a pole, into a line, and the call refused it
+#'   as a row s2 refuses); \code{FALSE} to repair only the rows
 #'   the engine of the union refuses (GEOS's validity in a projected CRS,
 #'   s2's conversion in degrees), so a boundary of valid rows is unioned as it
 #'   arrived, to the bit.
@@ -1694,7 +1813,7 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   ll <- .is_longlat(g)
   had <- any(.has_polygon(g))
   if (isTRUE(all)) {
-    g <- .safe_make_valid(g)
+    g <- if (ll) .with_s2(.safe_make_valid(g)) else .safe_make_valid(g)
   } else if (!ll && length(g)) {
     bad <- which(!(suppressWarnings(sf::st_is_valid(g)) %in% TRUE))
     if (length(bad)) g[bad] <- .safe_make_valid(g[bad])
@@ -1731,9 +1850,12 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   # square beside it is unioned as the square alone; with no polygon left
   # the call stops.
   keep <- if (had && length(g)) .has_polygon(g) else rep(TRUE, length(g))
+  # With `all`, s2's rebuild also takes the rows s2 accepts, and turns one
+  # that holds no ground (a ring on one meridian) into a line, so the reason
+  # names every row, not those s2 refuses.
   if (!any(keep))
     .stop_boundary_unlocated(if (is.null(caller)) "spatialkit" else caller, nothing,
-                             if (ll) "s2" else "geos")
+                             if (!ll) "geos" else if (isTRUE(all)) "repair" else "s2")
   if (!inherits(b, "sf")) return(if (all(keep)) g else g[keep])
   if (!identical(g, sf::st_geometry(b))) sf::st_geometry(b) <- g
   if (!all(keep)) b <- b[keep, ]
@@ -1828,7 +1950,9 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
                  "beyond 1e150"),
   moved = "every row is empty after its move to the CRS the call works in, which cannot place them",
   s2    = "the repair of the rows s2 refuses leaves no polygon with an area",
-  geos  = "the repair of the rows GEOS refuses leaves no polygon with an area")
+  geos  = "the repair of the rows GEOS refuses leaves no polygon with an area",
+  union = "the union of its rows leaves no polygon with an area",
+  repair = "the repair of its rows leaves no polygon with an area")
 
 #' The error for a boundary with no polygon that has a location
 #'

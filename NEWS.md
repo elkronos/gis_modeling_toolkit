@@ -4187,6 +4187,43 @@ old behaviour where there is a way.
   refuse a boundary whose bounding box has no height or no width at once,
   as `create_grid_polygons()` does.
 
+* **The seeders' refusal of a lon/lat boundary whose bounding box has no
+  height gave no way forward, and on a boundary sampled piece by piece it
+  said the box of `boundary` had no height when only one of its polygons
+  had none.**  In a projected CRS such as the one `ensure_projected()`
+  picks, a parallel other than the equator is a curve, so a ring with every
+  vertex on it has an area there.  The error of `voronoi_seeds_random()`
+  and `get_voronoi_seeds()` on such a boundary now says to transform
+  `boundary` to a projected CRS in which a parallel is a curve, such as the
+  one `ensure_projected()` picks for it (a polar one, such as EPSG:3413 or
+  3031, for a ring around a pole), and where only one of the polygons of
+  `boundary` has a box with no height, it says so.  In Web Mercator, World
+  Mercator or plate carree a parallel stays straight and the ring has no
+  area.  A ring on the equator or on a meridian holds no ground, and a
+  projected boundary with no height has no area; their errors offer no
+  remedy, as before.
+
+* **The seeders still never returned on most lon/lat rings on a parallel,
+  and on slivers along one.**  The s2 union of `boundary` moves the
+  latitudes of such a ring by a few units in the last place, so its box
+  has a height of about 1e-14 degrees and passed the test above, and a
+  sliver 1e-7 degrees tall did the same; which latitudes passed differed
+  between platforms.  s2 reads the edges as great circles, which leave the
+  bounding box, and sf (without the lwgeom package) draws in the box and
+  keeps the points in the region, so it drew without end.  A lon/lat
+  boundary whose box has less than half its area on the sphere is now
+  refused at once, with the remedy above: in such a box sf drew in less
+  than half the region, so a triangle 120 degrees wide at 80 N, whose box
+  has 0.42 times its area, took seeds only in the part inside the box.
+  With `sf_use_s2(FALSE)`, `get_voronoi_seeds()` repaired every lon/lat
+  row in the plane, which turned a ring on a parallel into a line and
+  refused it as a row s2 refuses; it now repairs them on the sphere, as
+  with s2 on.  `voronoi_seeds_random()` on a ring along one meridian, whose
+  union on the sphere is a line, returned MULTIPOINT seeds, some empty; it
+  now refuses it, as `get_voronoi_seeds()` does, with the reason that the
+  union of its rows leaves no polygon with an area, and the reason
+  `get_voronoi_seeds()` gives no longer says that s2 refuses the row.
+
 * **A `boundary` row whose repair leaves no polygon made the builders
   refuse a valid boundary or return a line.**  A ring with no height (every
   vertex on one line, or in degrees on one parallel) comes out of the

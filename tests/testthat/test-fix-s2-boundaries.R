@@ -496,21 +496,32 @@ test_that("a lon/lat bowtie is split into its lobes for the seeds and the grid i
 
 test_that("a valid boundary gives its seeds and its grid in degrees as before", {
   # get_voronoi_seeds() repaired every row before the union; that is kept.
+  # In degrees the repair runs on the sphere whatever sf_use_s2() says: with
+  # s2 off it ran in the plane, which turned a ring s2 accepts (three
+  # vertices on one parallel) into a line, and the seeds of a valid boundary
+  # differed from those with s2 on in the last bits.
   old_union <- function(b, ...) {
-    b <- spatialkit:::.safe_make_valid(b)
-    if (spatialkit:::.is_longlat(b)) spatialkit:::.with_s2(sf::st_union(b)) else sf::st_union(b)
+    if (spatialkit:::.is_longlat(b))
+      spatialkit:::.with_s2(sf::st_union(spatialkit:::.safe_make_valid(b)))
+    else sf::st_union(spatialkit:::.safe_make_valid(b))
   }
   old <- function(expr) {
     testthat::local_mocked_bindings(.boundary_union = old_union, .package = "spatialkit")
     expr
   }
   b <- layer(sq(-94.2, 39.5, 0.4), sq(-93.7, 39.5, 0.3))
+  seeds_with <- list()
   for (on in c(TRUE, FALSE)) {
     local_s2(on)
-    for (m in c("random", "kmeans"))
-      expect_identical(quiet(get_voronoi_seeds(b, n = 12, method = m, set_seed = 3)),
-                       old(quiet(get_voronoi_seeds(b, n = 12, method = m, set_seed = 3))))
+    for (m in c("random", "kmeans")) {
+      s <- quiet(get_voronoi_seeds(b, n = 12, method = m, set_seed = 3))
+      expect_identical(s, old(quiet(get_voronoi_seeds(b, n = 12, method = m, set_seed = 3))))
+      seeds_with[[paste(m, on)]] <- s
+    }
   }
+  # The same seeds with s2 on and off.
+  for (m in c("random", "kmeans"))
+    expect_identical(seeds_with[[paste(m, FALSE)]], seeds_with[[paste(m, TRUE)]], label = m)
   local_s2(TRUE)
   # A valid boundary is clipped as it was: the repair of its rows changes
   # nothing.

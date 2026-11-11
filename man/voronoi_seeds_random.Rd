@@ -31,7 +31,17 @@ is sampled piece by piece, the points shared among the pieces in
 proportion to their areas; a piece whose own box is over 10,000 times
 its area stops the call with an error that says to transform
 \code{boundary} to a projected CRS. A boundary whose bounding box has no
-height or no width (three vertices on one parallel) is refused.
+height or no width (three vertices on one parallel) is refused. In
+longitude and latitude s2 reads the edges as great circles, which
+leave the bounding box read from the coordinates, and sf (without the
+lwgeom package) draws in that box: a boundary whose box has less than
+half its area on the sphere (three vertices on or near one parallel)
+is refused too. That error, and the error for a box with no height
+whose vertices lie on one parallel other than the equator, say to
+transform \code{boundary} to a projected CRS in which a parallel is a
+curve, such as the one \code{\link[=ensure_projected]{ensure_projected()}} picks for it (a polar one,
+such as EPSG:3413 or 3031, for a ring around a pole), where the
+region has an area and lies in its box.
 sf draws the points in the bounding box and keeps those inside, so it
 draws \code{k} times the ratio of the box to the area. In any CRS, a
 boundary that would take more than 10^6 points drawn in its box, or

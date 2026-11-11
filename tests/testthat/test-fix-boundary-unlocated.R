@@ -175,9 +175,13 @@ test_that("the box test refuses a region whose bounding box has no height or wid
   # below that could draw without end.
   e <- err_of(function() spatialkit:::.sample_box_check(sf::st_geometry(sliver), "probe",
                                                       "no seed can be drawn in it"))
+  # In degrees, on a parallel other than the equator, the ring has an area
+  # once projected, and the error says so (test-fix-boundary-degrees.R).
   expect_identical(conditionMessage(e), paste0(
     "probe(): `boundary` cannot be sampled (its bounding box, read from its coordinates, ",
-    "has no height), so no seed can be drawn in it."))
+    "has no height), so no seed can be drawn in it. Transform `boundary` to a projected ",
+    "CRS in which a parallel is a curve, such as the one ensure_projected() picks for it ",
+    "(for a ring around a pole, a polar one such as EPSG:3413 or 3031), to seed it."))
   tall <- sf::st_sfc(sf::st_polygon(list(rbind(c(10, 60), c(10, 61), c(10, 62), c(10, 60)))),
                      crs = 4326)
   expect_match(conditionMessage(err_of(function()
@@ -194,7 +198,10 @@ test_that("the seeders refuse a lon/lat sliver whose box has no height at once",
     e <- err_of(f)
     expect_match(conditionMessage(e), paste0(
       "\\(\\): `boundary` cannot be sampled \\(its bounding box, read from its coordinates, ",
-      "has no height\\), so no (seed|point of the k-means cloud) can be drawn in it\\.$"))
+      "has no height\\), so no (seed|point of the k-means cloud) can be drawn in it\\. ",
+      "Transform `boundary` to a projected CRS in which a parallel is a curve, such as ",
+      "the one ensure_projected\\(\\) picks for it \\(for a ring around a pole, a polar ",
+      "one such as EPSG:3413 or 3031\\), to seed it\\.$"))
   }
   # A valid square beside a valid square samples as before.
   two <- sf::st_sf(geometry = c(square_ll, sf::st_sfc(sq(21, 50, 0.5), crs = 4326)))
