@@ -35,7 +35,6 @@ edition. Springer.
 \seealso{
 Other print methods:
 \code{\link[=print.aoa]{print.aoa()}},
-\code{\link[=print.morans_i]{print.morans_i()}},
-\code{\link[=print.sac_range]{print.sac_range()}}
+\code{\link[=print.morans_i]{print.morans_i()}}
 }
 \concept{print methods}

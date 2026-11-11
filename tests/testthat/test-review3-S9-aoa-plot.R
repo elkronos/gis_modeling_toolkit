@@ -225,11 +225,11 @@ test_that("plot_folds' subtitle gives the CRS's linear unit, not its identifier"
   # The proj string, the whole ~1300-character WKT, or "EPSG:32632 units".
   for (pts in list(pts_p4, pts_wkt, pts_epsg)) {
     sub <- sub_of(pts, k = 5, method = "block_kfold", block_size = 300)
-    expect_match(sub, "^Block size 300 \\(metre\\)\n")
+    expect_match(sub, "^Blocks [0-9.,]+ x [0-9.,]+ m, block_size 300\n")
     expect_lt(nchar(sub), 120)
   }
   expect_identical(sub_of(pts_epsg, method = "buffered_loo", buffer = 100),
-                   "Leave-one-out with a 100 buffer (metre)")
+                   "Leave-one-out with a 100 m buffer")
 })
 
 

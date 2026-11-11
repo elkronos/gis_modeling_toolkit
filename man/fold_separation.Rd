@@ -2,68 +2,55 @@
 % Please edit documentation in R/fold-separation.R
 \name{fold_separation}
 \alias{fold_separation}
-\title{How far the held-out points sit from the training data}
+\title{Measure how far the held-out points sit from their training data}
 \usage{
 fold_separation(folds, data_sf, sac = NULL, prediction_points = NULL)
 }
 \arguments{
-\item{folds}{A \code{\link{make_folds}()} result, or its \code{$folds}
-element (a list of \code{train}/\code{test} splits).}
+\item{folds}{A \code{\link[=make_folds]{make_folds()}} result, or its \verb{$folds} element (a list of
+\code{train}/\code{test} splits).}
 
 \item{data_sf}{The layer the folds were built on.  Row identifiers are
 matched through \code{..row_id} when the layer carries one, and by row
-position otherwise, which is what \code{make_folds()} and every
-\code{cv_*()} do.  As in \code{cv_*()}, a \code{make_folds()} result
-whose recorded rows sit at other locations here (folds built on another
-layer, such as the points before
-\code{\link{assign_features_to_polygons}()} dropped some) is refused;
-the location check is skipped when one of the two layers is POINT and
-the other is not.  A layer that mixes XY and XYZ (or XYM) geometries is
-read in x and y, for the distances and for that check, since sf reads
-a layer in the dimension of its first geometry.  So is a layer whose
-geometries carry M (XYM or XYZM), which GEOS refuses.  The points a
-layer is reduced to are read in x and y when they mix dimensions, as
-those of a layer XYZ throughout that holds points and polygons do.  A
-row without a location (an empty point, or a coordinate that is not
-finite or lies beyond 1e150, read as given and again in the CRS the
-distances are measured in) is left out of the distances.}
+position otherwise, as in \code{\link[=make_folds]{make_folds()}} and every \verb{cv_*()} function.
+As in \verb{cv_*()}, a \code{\link[=make_folds]{make_folds()}} result whose recorded rows sit at other
+locations here (folds built on another layer, such as the points before
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} dropped some) is refused; the location
+check is skipped when one of the two layers is POINT and the other is
+not.  A layer that mixes dimensions or carries M is read in x and y, for
+the distances and for that check (\link{spatialkit-geometry}).  A row without
+a location, as given or in the CRS the distances are measured in, is
+left out of the distances.}
 
-\item{sac}{Optional: an \code{\link{estimate_sac_range}()} result or a
-single number.  Defaults to the range the folds carry, if any.  Supplying
-one adds the \code{mean_cor} column and, with a prediction target,
-the gap on the correlation scale.  A
-range that records its CRS (the folds' own, or an
-\code{estimate_sac_range()} result) is compared with distances measured
-in that CRS, whatever CRS \code{data_sf} is in.  A bare number is taken
-to be in the units the distances are otherwise measured in: those of
-\code{data_sf} if it is projected, and for geographic (lon/lat) input
-metres, in the CRS \code{\link{ensure_projected}()} chooses (as for
-\code{make_folds()}'s \code{block_size}), not degrees.  A \code{units}
-object is refused.}
+\item{sac}{Optional: an \code{\link[=estimate_sac_range]{estimate_sac_range()}} result or a single number.
+Defaults to the range the folds carry, if any.  Supplying one adds the
+\code{mean_cor} column and, with a prediction target, the gap on the
+correlation scale.  A range that records its CRS (the folds' own, or an
+\code{\link[=estimate_sac_range]{estimate_sac_range()}} result) is compared with distances measured in
+that CRS, whatever CRS \code{data_sf} is in.  A bare number is taken to be in
+the units the distances are otherwise measured in: those of \code{data_sf} if
+it is projected, and for lon/lat input metres, in the CRS
+\code{\link[=ensure_projected]{ensure_projected()}} chooses (as for the \code{block_size} of \code{\link[=make_folds]{make_folds()}}),
+not degrees.  A \code{units} object is refused.}
 
-\item{prediction_points}{Optional \code{sf} or \code{sfc} layer of the
-locations the model will predict at: the grid from
-\code{\link{predict_surface}()}, or a grid over the region of interest
-(\code{sf::st_make_grid(region, what = "centers")}).  A non-POINT layer
-is reduced to one representative point per feature, as in
-\code{make_folds(method = "nndm")}, so pass grid cells or points, not
-one polygon of the region.  It is brought into the CRS the distances are
-measured in; one that mixes XY and XYZ (or XYM) geometries is read in x
-and y first.  So is one whose geometries carry M (XYM or XYZM), and so
-are the points it is reduced to when they mix dimensions.  Default
-\code{NULL}: no target and no reading, except for NNDM and kNNDM folds
-(\code{method = "nndm"} and \code{"knndm"}), which carry the distances
-from the prediction points they were built for and are compared
-against those, measured to all sites.  The carried distances are
-lengths in the CRS the folds were built in
-(\code{folds$params$crs}).  When the distances here are measured in
-another CRS (\code{data_sf} is in another projected CRS, or \code{sac}
-records another), the two are not compared, \code{print()} says so, and
-passing \code{prediction_points} has the target measured here.  A
-prediction point without a location (an empty point, or a coordinate
-that is not finite or lies beyond 1e150) as given or in the CRS the
-distances are measured in takes no part in the target and is not
-counted.}
+\item{prediction_points}{Optional sf or sfc layer of the locations the
+model will predict at: the grid from \code{\link[=predict_surface]{predict_surface()}}, or a grid over
+the region of interest (\code{sf::st_make_grid(region, what = "centers")}).
+A layer of other geometry is reduced to one representative point per
+feature, as in \code{make_folds(method = "nndm")}, so pass grid cells or
+points, not one polygon of the region.  It is brought into the CRS the
+distances are measured in, and read in x and y when it mixes dimensions
+or carries M (\link{spatialkit-geometry}).  Default \code{NULL}: no target and no
+reading, except for NNDM and kNNDM folds (\code{method = "nndm"} and
+\code{"knndm"}), which carry the distances from the prediction points they
+were built for and are compared against those, measured to all sites.
+The carried distances are lengths in the CRS the folds were built in
+(\code{folds$params$crs}).  When the distances here are measured in another
+CRS (\code{data_sf} is in another projected CRS, or \code{sac} records another),
+the two are not compared, \code{print()} says so, and passing
+\code{prediction_points} has the target measured here.  A prediction point
+without a location, as given or in the CRS the distances are measured
+in, takes no part in the target and is not counted.}
 }
 \value{
 A data.frame of class \code{fold_separation}, one row per fold:
@@ -80,19 +67,17 @@ held-out distance minus its mean prediction distance); the last two are
 \code{NA} without a target, and \code{print()} shows them under the
 headings \code{target} and \code{gap}.
 
-\code{mean_cor} is a mean correlation, \code{NA} without a
-range: the mean over the fold's held-out points of \eqn{\rho(d)}, the
+\code{mean_cor} is a mean correlation, \code{NA} without a range: the
+mean over the fold's held-out points of \eqn{\rho(d)}{rho(d)}, the
 correlation the range leaves between a point and its nearest training
 point at distance \eqn{d}.  It is 1 for a point on top of training data
 and falls towards 0 beyond the range, so a point at a twentieth of the
-range counts for more than one at nine tenths of it.  \eqn{\rho(d)} is
-\eqn{\exp(-3 d / range)}, the exponential model whose effective range is
-the range given (0.05 at the range), or the spherical model when the
-range comes from an \code{estimate_sac_range()} fit that was spherical;
-the \code{range_model} attribute says which.  Earlier development
-versions had a column \code{within_range} in its place: the share of
-held-out points closer than the range, which counted every such point
-the same.
+range counts for more than one at nine tenths of it.
+\eqn{\rho(d)}{rho(d)} is \eqn{\exp(-3 d / range)}{exp(-3 d / range)},
+the exponential model whose effective range is the range given (0.05 at
+the range), or the spherical model when the range comes from an
+\code{estimate_sac_range()} fit that was spherical; the
+\code{range_model} attribute says which.
 
 Attributes: \code{method}, \code{sac_range}, \code{range_model},
 \code{crs} (the CRS the distances were measured in),
@@ -109,7 +94,7 @@ list with \code{n_prediction_points}, \code{source}, \code{basis}
 (the prediction distances to all sites), \code{mean_diff}, \code{w1},
 \code{cor_gap}, \code{cor_w1} (\code{NA} without a range), \code{scale}
 (\code{"correlation"} or \code{"distance"}), \code{tolerance},
-\code{reading} (see \strong{Reading the gap}) and
+\code{reading} (see the section "Reading the gap") and
 \code{nndm_out_of_reach} (for NNDM and kNNDM folds, the
 \code{params$target_out_of_reach} that \code{make_folds()} recorded;
 \code{NA} for other schemes).  \code{not_compared} is \code{NULL}, or,
@@ -119,13 +104,11 @@ CRSs; \code{target} is then \code{NULL} and \code{print()} gives the
 sentence where it would otherwise say that no target is given.
 }
 \description{
-Blocked cross-validation exists to put distance between a test point and
-the training points that could tell you its value.  Whether it succeeded is
-a measurement, and \code{\link{make_folds}()} only offers a proxy for it:
-the block size compared against the estimated autocorrelation range,
-reported as a warning.  That comparison is about the \emph{design}.  This
-is about the \emph{result}: for every held-out point, the distance to its
-nearest training point, summarised per fold.
+Returns, for each fold, how far the held-out points sit from their nearest
+training point.  \code{\link[=make_folds]{make_folds()}} only compares the block size with the
+estimated autocorrelation range; this measures the folds that were built.
+Nothing is estimated: the distances come from the geometry, and the range,
+when one is shown, is the one the folds carry (\code{make_folds(auto_range = TRUE)} records it) or the one you pass as \code{sac}.
 }
 \details{
 The distances do not say by themselves which way a score errs.  A
@@ -142,9 +125,11 @@ the function reports the distances and draws no conclusion.  Give it
 distances from those points to the same training data, and words its
 reading by the signed gap between the two.
 
-Nothing is estimated: the distances come from the geometry, and the range,
-when one is shown, is the one the folds already carry (\code{make_folds(
-auto_range = TRUE)} records it) or the one you pass as \code{sac}.
+\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}} gives the cross-validated error at each block
+size, but not which size matches a map.  This function does, read on the
+folds of each size (the \verb{$folds} of each element of
+\code{attr(sweep, "results")}) with the map's locations as
+\code{prediction_points}.
 }
 \section{Reading the gap}{
 
@@ -152,45 +137,45 @@ With a target, the held-out distances and the prediction distances are
 compared as two distributions.  Each fold's prediction distances are
 measured to that fold's own training rows, so that a five-fold design is
 not read as too far only because each fold trains on four fifths of the
-sites; the distances to all sites are reported beside them.  (With more
-than 50 folds, the leave-one-out schemes, every training set is nearly the
-whole sample and the prediction points are measured against all sites
-once.)  Folds count by their share of the held-out points.
+sites; the distances to all sites are reported beside them.  With more
+than 50 folds, as in the leave-one-out schemes, every training set is
+nearly the whole sample, and the prediction points are measured against
+all sites once.  Folds count by their share of the held-out points.
 
 Two numbers summarise the comparison: the signed difference of the means,
 held-out minus prediction (the signed area between the two cumulative
-distributions), and the Wasserstein distance \eqn{W_1} (the unsigned
+distributions), and the Wasserstein distance \eqn{W_1}{W1} (the unsigned
 area).  When a range is available both are also given on the correlation
-scale, after each distance \eqn{d} is replaced by \eqn{1 - \rho(d)}, with
-\eqn{\rho} the correlation the range implies (see \code{mean_cor}
-under Value).  That scale counts a difference between two distances well
-inside the range and ignores one between two distances beyond it.
+scale, after each distance \eqn{d} is replaced by \eqn{1 - \rho(d)}{1 -
+rho(d)}, with \eqn{\rho}{rho} the correlation the range implies (see
+\code{mean_cor} under Value).  That scale counts a difference between two
+distances well inside the range and ignores one between two distances
+beyond it.
 
 The reading is taken on the correlation scale when there is a range, with
-a tolerance of 0.1, and otherwise on the mean distance, with a tolerance
-of a quarter of the prediction mean.  (When the prediction points are
-measured to all sites and every one lies on a site, as when the sites
-themselves are passed as \code{prediction_points} to a leave-one-out
-design, the prediction mean and with it that tolerance
-are 0: held-out distances above 0 then read \code{"farther"}, and
-held-out distances that are all 0 as well read \code{"matched"}.  With
-50 folds or fewer the points are measured to each fold's own training
-rows, which leave out that fold's held-out sites, so the mean is above 0
-and the quarter rule gives the reading.)
+a tolerance of 0.1, and otherwise on the mean distance, with a tolerance of
+a quarter of the prediction mean.  When the prediction points are measured
+to all sites and every one lies on a site, as when the sites themselves
+are passed as \code{prediction_points} to a leave-one-out design, the
+prediction mean and with it that tolerance are 0: held-out distances above
+0 then read \code{"farther"}, and held-out distances that are all 0 as well
+read \code{"matched"}.  With 50 folds or fewer the points are measured to each
+fold's own training rows, which leave out that fold's held-out sites, so
+the mean is above 0 and the quarter rule gives the reading.
 \describe{
 \item{\code{"closer"}}{The gap is below minus the tolerance and at least
-half of \eqn{W_1} in size: the held-out points sit closer to their
+half of \eqn{W_1}{W1} in size: the held-out points sit closer to their
 training data than the prediction points do, and the cross-validated
 error tends to read low for that target.}
-\item{\code{"farther"}}{The gap is above the tolerance and at least
-half of \eqn{W_1}: the held-out points sit farther, and the error
-tends to read high for that target.}
-\item{\code{"matched"}}{The gap is within the tolerance and
-\eqn{W_1} within twice the tolerance.}
-\item{\code{"mixed"}}{The two distributions cross, closer at some
-distances and farther at others (the gap is under half of
-\eqn{W_1}, or it is within the tolerance while \eqn{W_1} is not), so
-the distances give no single direction.}
+\item{\code{"farther"}}{The gap is above the tolerance and at least half of
+\eqn{W_1}{W1}: the held-out points sit farther, and the error tends to
+read high for that target.}
+\item{\code{"matched"}}{The gap is within the tolerance and \eqn{W_1}{W1}
+within twice the tolerance.}
+\item{\code{"mixed"}}{The two distributions cross, closer at some distances
+and farther at others (the gap is under half of \eqn{W_1}{W1}, or it is
+within the tolerance while \eqn{W_1}{W1} is not), so the distances give
+no single direction.}
 }
 The reading is a statement about nearest-neighbour distances, not a
 measured bias.  A learner that draws on several neighbours can still score
@@ -222,23 +207,13 @@ print(fold_separation(random, pts, sac = 200, prediction_points = cells))
 print(fold_separation(blocked, pts, sac = 200, prediction_points = cells))
 }
 \seealso{
-\code{\link{make_folds}()} for the fold schemes and the block
-sizing this measures the outcome of; \code{\link{cv_block_size_sweep}()}
-for the cross-validated error at each block size.  The sweep does not
-say which size matches a map; this function does, read on the folds of
-each size with the map's locations as \code{prediction_points}.
+\code{\link[=make_folds]{make_folds()}} for the fold schemes and the block sizing this
+measures the outcome of, \code{\link[=plot_folds]{plot_folds()}} to map the folds, and
+\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}} for the cross-validated error at each block size.
 
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
+Other folds:
 \code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
 \code{\link[=make_folds]{make_folds()}},
-\code{\link[=sac_nugget]{sac_nugget()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+\code{\link[=plot_folds]{plot_folds()}}
 }
-\concept{cross-validation}
+\concept{folds}

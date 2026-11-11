@@ -2,6 +2,7 @@
 % Please edit documentation in R/cross-validation.R
 \name{estimate_sac_range}
 \alias{estimate_sac_range}
+\alias{print.sac_range}
 \title{Estimate the spatial autocorrelation range from data}
 \usage{
 estimate_sac_range(
@@ -19,548 +20,451 @@ estimate_sac_range(
   n_lags = 15L,
   structure_alpha = 0.05
 )
+
+\method{print}{sac_range}(x, ...)
 }
 \arguments{
-\item{points_sf}{An sf object with point geometries (will be projected
-automatically if in geographic CRS).  Non-POINT geometry is reduced to
-representative points; any Z or M dimension is dropped, because
-\code{gstat::variogram()} uses every coordinate dimension and an XYZ layer
-would otherwise return a range in 3-D while every consumer of it works in
-2-D map distance; and rows without a location (an empty point, or a
-coordinate that is not finite or lies beyond 1e150, as given or once
-projected) are dropped with a logged count.}
+\item{points_sf}{An sf layer of points.  A lon/lat layer is projected
+first (\link{spatialkit-geometry}); other geometry is reduced to
+representative points, and Z and M are dropped, since
+\code{gstat::variogram()} would otherwise measure distances in three
+dimensions.  Rows without a location are dropped with a logged count.}
 
-\item{response_var}{Character(1) name of the response column.  Rows where
-it is missing or infinite are left out before anything else is done, so
-they neither take part in the choice of projection for lon/lat input
-nor use up the \code{n_max} subsample.  For a
-count or other response whose variance tracks its mean, see the section
-on non-Gaussian responses: the range is still estimated, but it is a
-less reliable number than for a Gaussian response.}
+\item{response_var}{Name of the response column.  Rows where it is missing
+or infinite are left out before anything else is done, so they take no
+part in the choice of projection for lon/lat input and do not use up the
+\code{n_max} subsample.  For a count or other response whose variance tracks
+its mean, see the section "Count and other non-Gaussian responses": the
+range is still estimated, but it is less reliable than for a Gaussian
+response.}
 
-\item{predictor_vars}{Optional character vector.  When supplied, the
-trend on these predictors is removed first and the variogram describes
-the residual autocorrelation, the part a spatial model has to handle
-once the covariates have done their work.  How the trend is removed is
-set by \code{detrend}, and it matters: see "Detrending and the
-residual-variogram bias".  Rows whose response or predictor is missing
-or infinite are left out of that fit, and so of the variogram, with a
-logged count.  When that leaves fewer than 30 rows, or fewer than 30
-distinct locations, the result is the unclassed \code{NA} that says
-how many were left (see Value).  One
-case differs, as it always has: when no row at all has every predictor
-(one is missing on every row) no trend can be fitted, and the variogram
-is of the raw response, with an R warning and \code{detrended} set to
-\code{FALSE}.  Where nothing is fitted then either (fewer than 30
-distinct locations, a constant response, or points with no extent),
-the result is the \code{NA} with its reason, and there is no such
-warning.}
+\item{predictor_vars}{Optional character vector of predictor column names.
+When given, the trend on these predictors is removed first and the
+variogram describes the residual autocorrelation, the part a spatial
+model has to handle once the covariates have done their work.  How the
+trend is removed is set by \code{detrend} (see the section "Detrending and
+the residual-variogram bias").  Rows whose response or predictor is
+missing or infinite are left out of that fit, and so of the variogram,
+with a logged count; when that leaves fewer than 30 rows, or fewer than
+30 distinct locations, the result is the unclassed \code{NA} that says how
+many were left (see Value).  When no row has every predictor (one is
+missing on every row) no trend can be fitted, and the variogram is of the
+raw response, with an R warning and \code{detrended} set to \code{FALSE}.  Where
+nothing is fitted then either (fewer than 30 distinct locations, a constant
+response, or points with no extent), the result is the \code{NA} with its
+reason, and there is no such warning.}
 
-\item{n_max}{Maximum number of points the variogram is computed on, at
-least 30; \code{Inf} for no limit.  Variogram estimation is O(n²) so
-this keeps runtime bounded.  A layer with more rows that carry a value
-is cut to a seeded random subsample of this size, drawn after rows with
-nothing to model have been left out and with the rows in a fixed order,
-so the subsample does not depend on how the layer is sorted.  The
-counts are returned as the attributes \code{n_used}, \code{n_missing}
-and \code{n_subsampled}.  The floor of 30 distinct locations applies
-to the rows the variogram is computed on, and a subsample of a layer
-with many rows a location can hold fewer locations than the layer.
-When the layer itself has 30 locations or more and the subsample holds
-fewer, the reason of the \code{NA} says
-\code{"of the n_max subsample"}, and a larger \code{n_max} keeps more
-of them; when the layer has fewer than 30, the reason gives the layer's
+\item{n_max}{The most points the variogram is computed on, at least 30;
+\code{Inf} for no limit.  Variogram estimation is \code{O(n^2)}, so
+this bounds the run time.  A layer with more rows that carry a value is
+cut to a seeded random subsample of this size, drawn after the rows with
+nothing to model are left out and with the rows in a fixed order, so the
+subsample does not depend on how the layer is sorted.  The counts are
+returned as the attributes \code{n_used}, \code{n_missing} and \code{n_subsampled}.
+The floor of 30 distinct locations applies to the rows the variogram is
+computed on, and a subsample of a layer with many rows a location can
+hold fewer locations than the layer.  When the layer itself has 30
+locations or more and the subsample holds fewer, the reason of the \code{NA}
+says \code{"of the n_max subsample"}, and a larger \code{n_max} keeps more of
+them; when the layer has fewer than 30, the reason gives the layer's
 counts.}
 
-\item{cutoff}{Fraction of the maximum inter-point distance to use as the
-variogram lag cutoff, above 0 and at most 1.  That distance is the
-farthest pair, found on the convex hull, and not the bounding-box
-diagonal, which depends on how the axes are oriented.  Default 0.5.}
+\item{cutoff}{Fraction of the largest distance between two points to use
+as the variogram lag cutoff, above 0 and at most 1.  That distance is the
+farthest pair, found on the convex hull, not the diagonal of the bounding
+box, which depends on how the axes are oriented.  Default 0.5.}
 
-\item{range_frac}{Positive numeric.  A fitted range exceeding
-\code{range_frac * cutoff * max_dist} (at the default of 1, beyond the
-longest lag the empirical variogram was actually fitted over) is treated
-as unidentified and \code{NA_real_} is returned.
-A model fit yields a finite number even when the
+\item{range_frac}{A positive number, default 1.  A fitted range beyond
+\code{range_frac * cutoff * max_dist} (at the default, beyond the longest lag
+the empirical variogram was fitted over) is treated as unidentified and
+the result is \code{NA}.  A model fit gives a finite number even when the
 variogram never reaches a sill, and such a value extrapolates past the
-observed lags instead of measuring a long autocorrelation range.  Passing
-it to \code{make_folds(auto_range = TRUE)} would collapse the block grid to
-a single block.  Default 1.0; raise it to accept ranges extrapolated
-beyond the fitted lags.  The bound does not guarantee room for two
-blocks: at the defaults it is half the farthest-pair distance, about
-0.71 of the side of a square layer, and a block grid needs a range below
-half the width of the bounding box in one direction or the other.  An
-accepted range between the two leaves
-\code{make_folds(auto_range = TRUE)} room for a single block of that
-size (see its \code{auto_range} argument for what it does then).
-Lowering \code{range_frac} to fit the
-grid would turn those estimates into \code{NA} and the blocks into
-geometric ones smaller than the range.}
+observed lags; passed to \code{make_folds(auto_range = TRUE)} it would
+collapse the block grid to a single block.  Raise \code{range_frac} to accept
+ranges extrapolated beyond the fitted lags.  The bound does not
+guarantee room for two blocks: at the defaults it is half the
+farthest-pair distance, about 0.71 of the side of a square layer, and a
+block grid needs a range below half the width of the bounding box in one
+direction or the other.  An accepted range between the two leaves
+\code{make_folds(auto_range = TRUE)} room for a single block of that size (see
+its \code{auto_range} argument).  Lowering \code{range_frac} to fit the grid would
+turn those estimates into \code{NA} and the blocks into geometric ones smaller
+than the range.}
 
-\item{seed}{RNG seed for the \code{n_max} subsample, restored afterwards so
-the caller's random stream is untouched.  Default \code{123L}: the
-subsample is an internal approximation and no part of the answer, and
-leaving it unseeded would make the returned range differ between runs on
-identical input and silently advance the caller's RNG.  Pass \code{NULL}
-for an unseeded subsample, or a
-different number to check how sensitive the estimate is to the subsample.
-Ignored when no more than \code{n_max} rows carry a value, where nothing
-is sampled.  On a layer whose rows crowd onto few locations the
+\item{seed}{RNG seed for the \code{n_max} subsample, the \code{reml_max_n}
+subsample, and the draw of one row a location that \code{detrend = "reml"}
+makes on a layer with repeat visits.  With a seed, the caller's random
+stream is restored afterwards.  Default 123, so the same layer gives the
+same range on every run; \code{NULL} leaves the draws unseeded, and another
+number shows how sensitive the estimate is to the subsample.  It has no
+effect where
+nothing is drawn.  On a layer whose rows crowd onto few locations the
 subsample can also decide whether 30 distinct locations remain, and so
-whether a range is estimated at all (see \code{n_max}).  The
-\code{reml_max_n} subsample uses the same seed, and so
-does the draw of one row a location that \code{detrend = "reml"} makes
-on a layer with repeat visits.}
+whether a range is estimated at all (see \code{n_max}).}
 
-\item{detrend}{How the trend on \code{predictor_vars} is removed;
-ignored when there are none.  \code{"ols"} (default) fits it by ordinary
-least squares and fits the variogram to the residuals, which
-underestimates the range (see the section
-below).  \code{"reml"} fits the trend and an exponential-plus-nugget
-covariance together by residual maximum likelihood with
-\code{nlme::gls()}, returns the REML range, and attaches the empirical
-variogram of the REML residuals for inspection.  It needs \pkg{nlme},
-costs \eqn{O(n^3)}, and so runs on at most \code{reml_max_n} points;
-it takes one row a location and needs 30 locations, which every layer
-needs anyway (a layer with fewer gets the unclassed \code{NA}, see
-Value, and no fit is tried).  When it is not fitted (no \pkg{nlme}),
-cannot be fitted (the design of the trend cannot be built, as on a
-factor with one level) or does not converge,
-the \code{"ols"} path runs instead with an R warning that says which.
-The start of the fit is chosen from the profile
-REML likelihood on a grid of ranges and nugget proportions, and when
-more than one start is fitted the fit with the largest log-likelihood
-is kept.}
+\item{detrend}{How the trend on \code{predictor_vars} is removed; ignored when
+there are none.  \code{"ols"} (default) fits it by ordinary least squares and
+fits the variogram to the residuals, which underestimates the range (see
+the section "Detrending and the residual-variogram bias").  \code{"reml"}
+fits the trend and an exponential-plus-nugget covariance together by
+residual maximum likelihood with \code{nlme::gls()}, returns the REML range,
+and attaches the empirical variogram of the REML residuals for
+inspection.  It needs \pkg{nlme}, costs \code{O(n^3)} and so runs
+on at most \code{reml_max_n} points, and takes one row a location.  When it
+is not fitted (no \pkg{nlme}), cannot be fitted (the design of the trend
+cannot be built, as on a factor with one level) or does not converge,
+the \code{"ols"} path runs instead with an R warning that says which.  The
+start of the fit is chosen from the profile REML likelihood on a grid of
+ranges and nugget proportions, and when more than one start is fitted
+the fit with the largest log-likelihood is kept.}
 
-\item{reml_max_n}{Positive integer, at least 30.  With \code{detrend =
-"reml"}, the trend and covariance are fitted on a seeded random subsample
-of this many points when the layer has more; the fitted trend is then
-removed from every point.  The fit takes one row a location: where a
-location has several rows (repeat visits), one of them is drawn at
-random under \code{seed}, so that the nugget fitted is the variance
-between visits and not that of their minimum or of their mean.
-Default 400.  Raise it for a better-determined fit at a cubic cost.}
+\item{reml_max_n}{A whole number of at least 30, default 400.  With
+\code{detrend = "reml"}, the trend and covariance are fitted on a seeded
+random subsample of this many points when the layer has more, and the
+fitted trend is then removed from every point.  The fit takes one row a
+location: where a location has several rows (repeat visits), one of them
+is drawn at random under \code{seed}, so the nugget fitted is the variance
+between visits and not that of their minimum or of their mean.  Raise it
+for a better-determined fit at a cubic cost.}
 
-\item{keep_directional_fits}{\code{TRUE} or \code{FALSE}.  Attach each
-direction's empirical
-variogram and fitted model as \code{directional_fits}?  Defaults to
-\code{FALSE}: the four variograms are most of the object's size, while
-the numbers
-read from them (\code{directional}, \code{directional_fitted},
-\code{directional_status}, \code{anisotropy}) are attached either
-way, and \code{plot()} draws the effective variogram from its own
-attribute.  Set \code{TRUE} to inspect the directional curves.}
+\item{keep_directional_fits}{\code{TRUE} or \code{FALSE}, default \code{FALSE}.  Attach
+each direction's empirical variogram and fitted model as
+\code{directional_fits}.  The four variograms are most of the object's size;
+the numbers read from them (\code{directional}, \code{directional_fitted},
+\code{directional_status}, \code{anisotropy}) are attached either way, and
+\code{plot()} draws the all-pairs variogram from its own attribute.}
 
-\item{lags}{How the lags are binned: \code{"adaptive"} (default) or
-\code{"equal"}; see "The lags" above.}
+\item{lags}{How the lags are binned: \code{"adaptive"} (default) or \code{"equal"};
+see the section "The lags".}
 
 \item{n_lags}{A whole number from 5 to 100, default 15.  With
-\code{lags = "equal"}, the number of bins.  With
-\code{lags = "adaptive"}, the most bins spaced geometrically past the
-first; fewer are used when that many would hold under 30 pairs each.}
+\code{lags = "equal"}, the number of bins.  With \code{lags = "adaptive"}, the most
+bins spaced geometrically past the first; fewer are used when that many
+would hold under 30 pairs each.}
 
-\item{structure_alpha}{The level of the test for spatial structure, above
-0 and at most 1; default 0.05.  A layer whose adjusted p-value is not
-below it gets no range.  \code{1} switches the refusal off; the test
-is still computed and attached.}
+\item{structure_alpha}{The level of the test for spatial structure, above 0
+and at most 1; default 0.05.  A layer whose adjusted p-value is not below
+it gets no range.  \code{1} switches the refusal off; the test is still
+computed and attached.}
+
+\item{x}{A \code{sac_range} object, for \code{print()}.}
+
+\item{...}{Ignored.}
 }
 \value{
-A single number, of class \code{sac_range} in the first two of the
-three shapes below and an unclassed \code{NA} in the third; all three
-behave as an ordinary number.  The shapes carry different attributes:
+A single number, in one of three shapes, each of which behaves as
+an ordinary number.  A range that was fitted, and a range fitted and
+refused, are of class \code{sac_range}; a call that could fit nothing returns
+an unclassed \code{NA}.  The attributes and the class do not affect \code{is.na()}
+or \code{is.finite()}, so code that tests for a missing range treats all
+three alike.
 \describe{
-\item{Success}{A positive effective range in projected coordinate units,
-with the fit attached as attributes \code{directional} (the 0°, 45°,
-90° and 135° ranges, named by azimuth; \code{NA} where that
-direction's fit was unusable), \code{anisotropy} (largest
-over smallest), \code{anisotropy_used} (always \code{FALSE}: the
-all-pairs fit is the estimate; kept for code that reads it),
-\code{directional_status}
-(per azimuth, why a direction is
-\code{NA} in \code{directional}: \code{"ok"}, \code{"over_cutoff"}
-(its range ran past the largest lag fitted), \code{"not_converged"}
-(its fit has no minimum inside the ranges searched)
-or \code{"no_fit"} (a flat variogram, or too few bins)),
-\code{directional_fitted} (the range each
-direction's fit reported whether or not it was usable, so a refused
-directional range stays recoverable) and \code{directional_fits} (a
-list by azimuth of each direction's empirical \code{variogram} and
-fitted \code{model}, \code{NULL} where there is none, and
-\code{NULL} altogether unless \code{keep_directional_fits = TRUE}),
-\code{detrended} (logical: whether the variogram is of the
-residuals on \code{predictor_vars} or of the raw response.  A
-missing predictor is an error, and a failed detrending fit
-warns and falls back to the raw response with this set to
-\code{FALSE}), \code{detrend_method} (\code{"ols"} or \code{"reml"}
-when detrended, \code{NA} otherwise), \code{reml} (with
-\code{detrend = "reml"}: a list with \code{n_used},
-\code{subsampled}, \code{nugget_prop}, \code{sigma2},
-\code{logLik} (the REML log-likelihood of the fit kept),
-\code{logLik_gain} (its gain over the same trend with independent
-errors) and \code{n_fits} (the starts fitted); \code{NULL}
-otherwise),
-\code{crs} (the projected CRS the variogram was
-fitted in: the unit of the range), \code{max_dist},
-\code{cutoff_dist}, \code{variogram} (the empirical variogram, in
-the units of the response's variance),
-\code{variogram_model} (the fitted model, in \pkg{gstat}'s layout,
-or with \code{detrend = "reml"} one built from the REML
-parameters), \code{nugget} (that model's nugget variance; see
-\code{\link{sac_nugget}}), \code{nugget_at_bound} (\code{TRUE} when
-the nugget is at its lower bound, 0 or at most \eqn{10^{-4}} of
-the sill, and so is not an estimate), \code{first_lag} (the mean separation in the
-first bin: the shortest lag resolved, from which the nugget is
-extrapolated), \code{bins_below_range} (how many bins lie inside
-the fitted range; with fewer than three the split between nugget
-and structure rests on very little),
-\code{short_lag_semivariance}, \code{short_lag_pairs} and
-\code{short_lag_dist} (the semivariance of nearest-neighbour pairs
-of locations with no model, their number and their median
-separation: an upper bound on the nugget),
-\code{zero_lag_semivariance} and \code{zero_lag_pairs} (the
-semivariance of the pairs of rows that share a location, which is
-the variance between visits to one place and a lower bound on the
-nugget, and their number; \code{NA} and 0 when no location has two
-rows), \code{nugget_floor} (the value the fitted nugget was not let
-under: \code{zero_lag_semivariance} when the rows outnumber the
-locations by 30 or more, else 0, and always 0 with
-\code{detrend = "reml"}), \code{structure_p},
-\code{morans_i} and
-\code{structure_test} (the adjusted p-value of the test for
-spatial structure, Moran's I on the 8 nearest neighbours, and the
-statistic, z and p for each neighbourhood size),
-\code{structures} and \code{short_range} (how many structures the
-model has besides the nugget, and the effective range of the short
-one when there are two, \code{NA} otherwise), \code{lags},
-\code{lag_boundaries} and \code{lag_fallback} (the binning behind
-the result, its upper bin edges, and \code{TRUE} when adaptive lags
-were asked for and the equal-lag result is returned; see "The
-lags"), and
-\code{n_used}, \code{n_missing} and \code{n_subsampled} (the points
-the variogram was computed on, the rows left out for a missing
-response or predictor, and the rows left out by the \code{n_max}
-subsample), so the fit can be inspected and need not
-be taken on trust.}
-\item{Rejected range}{\code{NA_real_} when no range is identified.
-It is classed \code{sac_range} as well, so it prints as \code{NA}
-without dumping its attributes, and it carries every attribute of
-a success (the evidence for the rejection), plus
-\code{rejected_range} (the value that was refused, \code{NA} when
-none was fitted) and \code{rejected_reason}, one of:
+\item{Success}{A positive effective range in the units of the
+projected CRS, with the fit attached as attributes:
 \itemize{
-\item \code{"no spatial structure detected at the
-          nearest-neighbour scale"}: the test above.  The model attached
-is a pure nugget at the variance of the modelled variable, and
-nothing fitted is handed on.
-\item \code{"the empirical variogram is flat: no spatial
-          structure at the lags resolved"}: no model with a range fits
-the variogram better than a constant.  The model attached is
-that constant, a pure nugget.
+\item \code{crs}: the projected CRS the variogram was fitted in, which
+gives the unit of the range; \code{max_dist} and \code{cutoff_dist}: the
+farthest pair and the lag cutoff.
+\item \code{variogram}: the empirical variogram, in the units of the
+response's variance; \code{variogram_model}: the fitted model, in
+\pkg{gstat}'s layout, or with \code{detrend = "reml"} one built from
+the REML parameters.
+\item \code{lags}, \code{lag_boundaries} and \code{lag_fallback}: the binning
+behind the result, its upper bin edges, and \code{TRUE} when adaptive
+lags were asked for and the equal-lag result is returned (see the
+section "The lags").
+\item \code{first_lag}: the mean separation in the first bin, the
+shortest lag resolved, from which the nugget is extrapolated;
+\code{bins_below_range}: how many bins lie inside the fitted range
+(with fewer than three, the split between nugget and structure
+rests on very little).
+\item \code{structures} and \code{short_range}: how many structures the model
+has besides the nugget, and the effective range of the short one
+when there are two (\code{NA} otherwise).
+\item \code{nugget} (the model's nugget variance), \code{nugget_at_bound},
+\code{nugget_floor}, \code{short_lag_semivariance}, \code{short_lag_pairs},
+\code{short_lag_dist}, \code{zero_lag_semivariance} and \code{zero_lag_pairs}:
+the nugget and the evidence to judge it by, described in
+\code{\link[=sac_nugget]{sac_nugget()}}.  \code{zero_lag_semivariance} is \code{NA} and
+\code{zero_lag_pairs} 0 when no location has two rows.
+\item \code{structure_p}, \code{morans_i} and \code{structure_test}: the adjusted
+p-value of the test for spatial structure, Moran's I on the 8
+nearest neighbours, and the statistic, z and p for each
+neighbourhood size.
+\item \code{directional}: the ranges at azimuths 0, 45, 90 and 135
+degrees, named by azimuth, \code{NA} where that direction's fit was
+unusable;
+\code{directional_status}: per azimuth, why a direction is \code{NA} in
+\code{directional}: \code{"ok"}, \code{"over_cutoff"} (its range ran past the
+largest lag fitted), \code{"not_converged"} (its fit has no minimum
+inside the ranges searched) or \code{"no_fit"} (a flat variogram, or
+too few bins); \code{directional_fitted}: the range each direction's
+fit reported, usable or not, so a refused directional range stays
+recoverable; \code{directional_fits}: with
+\code{keep_directional_fits = TRUE}, a list by azimuth of each
+direction's empirical \code{variogram} and fitted \code{model} (\code{NULL}
+where there is none), and \code{NULL} otherwise; \code{anisotropy}: the
+largest directional range over the smallest; \code{anisotropy_used}:
+always \code{FALSE}, since the all-pairs fit is the estimate.
+\item \code{detrended}: whether the variogram is of the residuals on
+\code{predictor_vars} (\code{TRUE}) or of the raw response.  A predictor
+that is not a column is an error, and a detrending fit that fails
+warns and falls back to the raw response with this set to
+\code{FALSE}.  \code{detrend_method}: \code{"ols"} or \code{"reml"} when detrended,
+\code{NA} otherwise.  \code{reml}: with \code{detrend = "reml"}, a list with
+\code{n_used}, \code{subsampled}, \code{nugget_prop}, \code{sigma2}, \code{logLik} (the
+REML log-likelihood of the fit kept), \code{logLik_gain} (its gain
+over the same trend with independent errors) and \code{n_fits} (the
+starts fitted); \code{NULL} otherwise.
+\item \code{n_used}, \code{n_missing} and \code{n_subsampled}: the points the
+variogram was computed on, the rows left out for a missing
+response or predictor, and the rows the \code{n_max} subsample left
+out.
+}}
+\item{Rejected range}{\code{NA_real_} when no range is identified.  It is
+classed \code{sac_range} as well, so it prints as \code{NA} without dumping its
+attributes, and it carries every attribute of a success (the
+evidence for the rejection), plus \code{rejected_range} (the value that
+was refused, \code{NA} when none was fitted) and \code{rejected_reason}, one
+of:
+\itemize{
+\item \code{"no spatial structure detected at the nearest-neighbour scale"}: the test in the section "The test for spatial
+structure".  The model attached is a pure nugget at the variance
+of the modelled variable, and nothing fitted is handed on.
+\item \code{"the empirical variogram is flat: no spatial structure at the lags resolved"}: no model with a range fits the variogram
+better than a constant.  The model attached is that constant, a
+pure nugget.
 \item \code{"empirical variogram decreases with distance"}: the
-semivariance falls over the shorter lags (a net fall of more
-than 15 percent of the mean semivariance there, weighted by
-pairs), which is the shape of a periodic, hole-effect
-structure or of a variance that differs between a dense
-cluster and the rest of the layer.  Sampling noise in the
-short-lag bins of a small sample can make that fall too.
-\item \code{"fitted range exceeds the largest lag fitted"}: the
-range is past \code{range_frac * cutoff * max_dist} (see
-\code{range_frac}).  An unremoved trend ends here when the
-variogram rises past the fitted lags; a milder trend only
-lengthens the fitted range and passes, which is what
-\code{predictor_vars} is for.
-\item \code{"fitted range is below the shortest lag fitted"}:
-too few pairs of points lie inside the range to identify it,
-because it is shorter than the shortest lag the
-empirical variogram resolves (\code{first_lag}) or, with
-\code{detrend = "reml"}, than the distance within
-which 30 pairs of the points the REML fit used lie, when that is
-shorter (the REML range is fitted to the point pairs, not to the
-bins).  A structure that short cannot be told from a nugget.
-\code{range_floor} holds the distance the refused range fell
-short of.
+semivariance falls over the shorter lags (a net fall of more than
+15 percent of the mean semivariance there, weighted by pairs),
+which is the shape of a periodic, hole-effect structure or of a
+variance that differs between a dense cluster and the rest of the
+layer.  Sampling noise in the short-lag bins of a small sample can
+make that fall too.
+\item \code{"fitted range exceeds the largest lag fitted"}: the range is
+past \code{range_frac * cutoff * max_dist} (see \code{range_frac}).  An
+unremoved trend ends here when the variogram rises past the
+fitted lags; a milder trend only lengthens the fitted range and
+passes, which is what \code{predictor_vars} is for.
+\item \code{"fitted range is below the shortest lag fitted"}: too few
+pairs of points lie inside the range to identify it, because it
+is shorter than the shortest lag the empirical variogram
+resolves (\code{first_lag}) or, with \code{detrend = "reml"}, than the
+distance within which 30 pairs of the points the REML fit used
+lie, when that is shorter (the REML range is fitted to the point
+pairs, not to the bins).  A structure that short cannot be told
+from a nugget.  \code{range_floor} holds the distance the refused
+range fell short of.
 \item \code{"fitted range is non-positive or non-finite"}.
-\item \code{"no variogram model could be fitted: fewer than
-          three lag bins hold point pairs"}, which is when it is
-returned.  \code{variogram_model} is \code{NULL} and
+\item \code{"no variogram model could be fitted: fewer than three lag bins hold point pairs"}.  \code{variogram_model} is then \code{NULL} and
 \code{nugget} is \code{NA}.
 }
 The reason names one ground for the refusal, in the order above.
-\code{attr(attr(range, "variogram_model"), "converged")} says one
-thing more about the model: it is \code{FALSE} when the
-least-squares criterion is still falling at an edge of the ranges
-searched (a variogram with no sill inside four cutoffs), and the
-nugget and sill of such a model are that edge and not fitted
-values.  For a model with two structures the flag is that of the
-equal-lag fit the long range came from: when that fit has no
-minimum, the long structure's range and partial sill are the edge
-of its search and the flag is \code{FALSE}, although the nugget
-and the short structure were fitted at the adaptive lags.  A model
-built from REML parameters carries no such
-attribute.  \code{\link{resolution_profile}()} reads it, and takes
-no nugget from a model marked \code{FALSE}.  Results
-stored by earlier versions can carry
-\code{"variogram model did not converge"} as their reason and
-\code{anisotropy_used = TRUE}; neither is produced any more.}
-\item{No fit}{An unclassed \code{NA_real_} when estimation could not
-be attempted at all, whose one attribute, \code{rejected_reason},
-says why: \code{"package 'gstat', which the variogram needs, is not
-      installed"}, \code{"<n> points, fewer than the 30 a variogram range
-      is estimated from"}, \code{"<n> point(s) with a finite value to
-      model, fewer than the 30 a variogram range is estimated from"}
-(the count is of the whole layer's rows with a value),
-\code{"<k> distinct location(s) among the <n> point(s) with a
-      finite value to model, fewer than the 30 a variogram range is
-      estimated from"} (rows that share a location count once; when the
-layer has 30 or more locations and the \code{n_max} subsample kept
-fewer, the counts are the subsample's and
-\code{"of the n_max subsample"} stands in place of \code{"with a
-      finite value to model"}),
-\code{"the response is constant"}, \code{"the residuals on
-      predictor_vars are constant: the predictors explain the response
-      exactly"} or \code{"the points have no extent (the largest distance
-      between them is zero or could not be computed)"}.  Nothing is
-fitted, so none of the other attributes above exist: no
-\code{variogram}, \code{variogram_model} or \code{rejected_range},
-which is what tells it from a range that was fitted and refused.}
+\code{attr(attr(range, "variogram_model"), "converged")} says one thing
+more about the model: it is \code{FALSE} when the least-squares criterion
+is still falling at an edge of the ranges searched (a variogram with
+no sill inside four cutoffs), and the nugget and sill of such a model
+are that edge and not fitted values.  For a model with two
+structures the flag is that of the equal-lag fit the long range came
+from: when that fit has no minimum, the long structure's range and
+partial sill are the edge of its search and the flag is \code{FALSE},
+although the nugget and the short structure were fitted at the
+adaptive lags.  A model built from REML parameters carries no such
+attribute.  \code{\link[=resolution_profile]{resolution_profile()}} reads it, and takes no nugget from
+a model marked \code{FALSE}.}
+\item{No fit}{An unclassed \code{NA_real_} when estimation could not be
+attempted at all, whose one attribute, \code{rejected_reason}, says why:
+\code{"package 'gstat', which the variogram needs, is not installed"},
+\code{"<n> points, fewer than the 30 a variogram range is estimated from"}, \code{"<n> point(s) with a finite value to model, fewer than the 30 a variogram range is estimated from"} (the count is of the whole
+layer's rows with a value), \code{"<k> distinct location(s) among the <n> point(s) with a finite value to model, fewer than the 30 a variogram range is estimated from"} (rows that share a location count once;
+when the layer has 30 or more locations and the \code{n_max} subsample
+kept fewer, the counts are the subsample's and
+\code{"of the n_max subsample"} stands in place of \code{"with a finite value to model"}), \code{"the response is constant"}, \code{"the residuals on predictor_vars are constant: the predictors explain the response exactly"} or \code{"the points have no extent (the largest distance between them is zero or could not be computed)"}.  Nothing is
+fitted, so none of the other attributes exist: no \code{variogram},
+\code{variogram_model} or \code{rejected_range}, which is what tells it from a
+range that was fitted and refused.}
 }
-Attributes and the class do not affect \code{is.na()} or
-\code{is.finite()}, so every downstream guard treats all three the same
-way it always did.
 }
 \description{
 Fits an exponential variogram model with a nugget and returns the
-\emph{effective range}: three times the fitted range parameter, which is
-where the semivariance reaches about 95 percent of the sill.  It is the
-distance beyond which two observations are (near) uncorrelated, which is
-what a block or a buffer has to exceed.
+effective range: three times the fitted range parameter, where the
+semivariance reaches about 95 percent of the sill.  Beyond it two
+observations are close to uncorrelated, so it is the distance a block or a
+buffer has to exceed.  The range is in the units of the projected CRS the
+variogram is fitted in.  Pass it as the \code{block_size} of \code{\link[=make_folds]{make_folds()}}, or
+let \code{make_folds(auto_range = TRUE)} estimate it, so that the blocks are at
+least as wide as the autocorrelation range.
 }
 \details{
-The result is a function of the data alone.  The same layer gives the
-same answer whatever the unit of the response or of the coordinates and
-whatever the order of its rows, and a change in the last bits of the
-values changes the answer by about as much.  Three things make it so.
-The rows are sorted by their coordinates as supplied, then by the
-response and the predictors, before anything else, so the projection
-chosen for lon/lat input, the \code{n_max} subsample and the pair sums
-do not depend on their order.  First coordinates within 1e-7 of the
-diagonal of the points' bounding box count as one column, sorted by the
-second coordinate, so that a lattice, whose first coordinates in one
-column differ in their last bits after another unit or origin, gets the
-same order and the same subsample in each.  (Rows that share a location
-are therefore in the order of their values, and no step treats the first
-of them as special.)  The variogram is computed on the standardised variable, and a
-response is called constant only when its standard deviation is under
-1e-12 of its largest absolute value, which no change of unit alters, and
-the values centred on their median and scaled have a standard deviation
-of at most three units in the last place of that value.  Residuals of
-the predictors are called constant when they are no more than the
-rounding of the regression, taken on the size of the fit's terms, or
-three such units of the response, whether or not the floor finds spread
-in them, as the test for \code{cp} of \code{resolution_profile()} reads
-them.  So 1e15 plus a spread of 1, stored to an eighth, is not
-constant, and the residuals of a response the predictors fit exactly
-are, on a predictor far from 0 (a northing) as well.  A response that
-loses its spread on the raw values is centred on its median before the
-predictors are fitted to it and before the test for spatial structure,
-neither of which changes under a shift, and so is a response whose OLS
-residuals on the raw values lose their spread (1e15 plus 1e5 times a
-predictor plus a spread of 1, on that predictor).  The test for spatial
-structure, the semivariances and the REML fit are taken on the response
-divided by a power of two near its spread, so a response near 1e-160 or
-1e160, whose squares lie past what doubles hold, gives the range, the
-test and the folds it gives in ordinary units; the variogram, the
-nugget, the short-lag semivariances and the REML variance are returned
-in the response's units squared, which near 1e160 are \code{Inf} and
-near 1e-160 are subnormal doubles that keep few bits, or 0.  A response
-so far from zero that doubles there are spaced more than a millionth of
-its standard deviation apart (a standard deviation of 1 at about 1e10,
-\eqn{2^{33}}, or beyond) is read as stored,
-rounded to that spacing, with a warning of class
-\code{spatialkit_response_imprecise}.
-And the model is fitted without iteration: the criterion is \pkg{gstat}'s weighted least
-squares (weights \eqn{N / h^2}) on lags divided by the cutoff; for each
-trial range the nugget and the partial sill are solved exactly, with both
-kept at or above zero; and the range is found by a search over a
-logarithmic grid from a quarter of the first lag to four cutoffs, refined
-in one dimension.  There is no start value, no iteration limit and no
-fit that fails to converge.  With \code{detrend = "reml"} there is a
-fourth: the REML fit reads the coordinates of the rows it uses centred on
-the middle of their bounding box, divided by its diagonal and rounded to
-\eqn{2^{-30}} of it, and the response and each numeric predictor centred
-on the middle of their range on those rows, divided by it and rounded
-the same way; its range, coefficients and variance are taken back to
-the layer's units.  Where the REML range is not identified the
-likelihood is flat, and whether the fit converged or fell back to OLS
-was set by the last bits of the coordinates, the response and the
-predictors; in that frame it does not depend on their units or origins.
-A value within its own rounding noise of the middle of a step, about a
-billionth of the diagonal or the range, can still fall on either side of
-it.
+The layer is first tested for spatial structure, and a range the data
+cannot identify is refused: the answer is then \code{NA}, with the reason and
+the evidence attached (see Value).  \code{\link[=plot.sac_range]{plot.sac_range()}} draws the variogram
+behind the estimate, and \code{\link[=sac_nugget]{sac_nugget()}} reads its nugget.
+}
+\section{What is estimated}{
 
-Only the exponential family is fitted.  On fields smoother than
-exponential that makes the range long, and blocks sized from it come out
-larger: they still hold the test points at least the field's range from
-their training data, which blocks sized from a short range do not.
-Choosing the family by the smaller weighted sum of squares would correct
-a spherical field but send exponential fields short, and blocks sized
-from them smaller than the range.
+The estimate is the omnidirectional (all-pairs) fit of an exponential model
+with a nugget.  Only the exponential family is fitted.  On fields smoother
+than exponential that makes the range long, and blocks sized from it come
+out larger: they still hold the test points at least the field's range
+from their training data, which blocks sized from a short range do not.
+Choosing the family by the smaller weighted sum of squares would correct a
+spherical field but send exponential fields short, and blocks sized from
+them smaller than the range.
 
-\strong{Spatial structure is tested first.}  A variogram model can be
-fitted to anything, and on a layer with no structure the fit returns a
-finite range for a large share of draws.  So Moran's I of the modelled
-variable is computed on its 2, 4, 8 and 16 nearest neighbours, each
-standardised with the moments that fit the variable (those of regression
-residuals when \code{predictor_vars} are given), and the smallest
-one-sided p-value is multiplied by four.  Neighbours tied at the k-th
-distance, those whose squared distances are within one part in ten
-million of the k-th's, share its slot's weight equally, as in
-\code{\link{residual_morans_i}()}, so the graphs do not depend on the
+The model is fitted without iteration.  The criterion is \pkg{gstat}'s
+weighted least squares (weights \code{N / h^2}) on lags divided by
+the cutoff.  For each trial range the nugget and the partial sill are
+solved exactly, both kept at or above zero, and the range is found by a
+search over a logarithmic grid from a quarter of the first lag to four
+cutoffs, refined in one dimension.  There is no start value, no iteration
+limit and no fit that fails to converge.
+}
+
+\section{The test for spatial structure}{
+
+A variogram model can be fitted to anything, and on a layer with no
+structure the fit returns a finite range for a large share of draws.  So
+Moran's I of the modelled variable is computed first, on its 2, 4, 8 and
+16 nearest neighbours, each standardised with the moments that fit the
+variable (those of regression residuals when \code{predictor_vars} are given),
+and the smallest one-sided p-value is multiplied by four.  When that
+adjusted p-value is not below \code{structure_alpha}, the result is \code{NA} with
+\code{rejected_reason} \code{"no spatial structure detected at the nearest-neighbour scale"}, a pure-nugget model and no fitted range.  The test uses no random
+numbers, and \code{structure_p}, \code{morans_i} and \code{structure_test} are attached
+to every classed result.  Its power is limited where few neighbours lie
+inside the range, so a short range on a sparse layer can be refused;
+\code{structure_alpha = 1} switches the refusal off.
+
+Neighbours tied at the k-th distance, those whose squared distances are
+within one part in ten million of the k-th's, share its slot's weight
+equally, as in \code{\link[=residual_morans_i]{residual_morans_i()}}.  The graphs then do not depend on the
 unit or the origin of the coordinates wherever the doubles hold them to
 better than about one part in 1e8 of the distances between neighbours.
 Where they do not, and a distance lies past a tie by less than that
-rounding, the call warns, with class \code{"spatialkit_xy_imprecise"};
-the same holds for the nearest other location of the short-lag
-semivariances.  The results are those the coordinates as stored give.
-When that adjusted p-value is
-not below \code{structure_alpha}, the result is \code{NA} with
-\code{rejected_reason} \code{"no spatial structure detected at the
-nearest-neighbour scale"}, a pure-nugget model and no fitted range.  The
-test uses no random numbers.  \code{structure_p}, \code{morans_i} and
-\code{structure_test} are attached to every classed result.  Measured on
-a 1000 m square with 300 points, the test refuses 388 of 400 white-noise
-layers and 8 get a finite range, against 196 with the test off.
-Its power is limited where few neighbours lie inside the range.  With a
-nugget of a fifth of the sill it finds structure in 88 percent of fields
-of effective range 60 on 300 points, and in 21 percent at range 30, which
-is about the spacing of those points.  A short range on a sparse layer
-can therefore be refused; \code{structure_alpha = 1} switches the
-refusal off.  Rows that share a location (repeat visits) are one place
-and not each other's neighbours, so on such a layer the test is made on
-the means of the locations: what it asks is whether locations near each
-other are alike, which a location's own effect, however large, does not
-answer.  With very unequal numbers of visits the p-value is approximate.
-For the same reason a layer needs 30 distinct locations, not only 30
-rows: below that the result is the unclassed \code{NA} whose reason gives
-the count (see Value), and nothing is fitted.  Five locations visited 20
-times give ten pairs of locations and five means, from which neither a
-range nor a verdict on structure can be read.  Two rows are at one
-location when both their coordinates are equal to the last bit after the
-projection, so repeat visits recorded with slightly different
-coordinates count as separate locations; round the coordinates first to
-pool them.
+rounding, the call warns with class \code{"spatialkit_xy_imprecise"} (see
+\link{spatialkit-geometry}), as it does for the nearest other location of the
+short-lag semivariances.  The results are those the coordinates as stored
+give.
 
-\strong{The lags.}  With \code{lags = "adaptive"} (the default) the first
-bin runs from zero to the distance within which the closest
-\code{max(50, n / 4)} pairs of distinct locations lie, and up to
-\code{n_lags} further bins are spaced geometrically from there to the
-cutoff; a bin holding fewer than 30 pairs is merged with the next.  The
-short lags are then resolved at the spacing of the points, which is what
-the nugget and a short range are read from.  With \code{lags = "equal"}
-there are \code{n_lags} bins of equal width out to the cutoff, as
-\pkg{gstat} bins by default; each is \code{cutoff * max_dist / n_lags}
-wide, a structure shorter than the first of them is invisible and is
-counted as nugget, and the range fitted is that of whatever longer
-structure the layer has.  Below about a hundred points neither binning
-resolves much and the adaptive bins bring no gain.
+Rows that share a location (repeat visits) are one place and not each
+other's neighbours, so on such a layer the test is made on the means of the
+locations: it asks whether locations near each other are alike, which a
+location's own effect, however large, does not answer.  With very unequal
+numbers of visits the p-value is approximate.  For the same reason a layer
+needs 30 distinct locations, not only 30 rows; below that the result is the
+unclassed \code{NA} whose reason gives the count (see Value), and nothing is
+fitted.  Five locations visited 20 times give ten pairs of locations and
+five means, from which neither a range nor a verdict on structure can be
+read.  Two rows are at one location when both their coordinates are equal
+to the last bit after the projection, so repeat visits recorded with
+slightly different coordinates count as separate locations; round the
+coordinates first to pool them.
+}
 
-Two rows at one location are a pair at zero separation, and are in no
-bin, whichever the binning: the variogram and the model describe positive
-separations.  Their semivariance, the variance between visits to a
-location, is returned on its own as \code{zero_lag_semivariance}, and
-the nugget fitted to the variogram is not let under it when the layer has
-30 or more rows beyond one a location to estimate it from (a model from
-\code{detrend = "reml"} takes no such floor); see
-\code{\link{sac_nugget}}.
+\section{The lags}{
+
+With \code{lags = "adaptive"} (the default) the first bin runs from zero to the
+distance within which the closest \code{max(50, n / 4)} pairs of distinct
+locations lie, and up to \code{n_lags} further bins are spaced geometrically
+from there to the cutoff; a bin holding fewer than 30 pairs is merged with
+the next.  The short lags, which the nugget and a short range are read
+from, are then resolved at the spacing of the points.  With
+\code{lags = "equal"} there are \code{n_lags} bins of equal width out to the cutoff,
+as \pkg{gstat} bins by default.  Each is \code{cutoff * max_dist / n_lags}
+wide; a structure shorter than the first of them is counted as nugget, and
+the range fitted is that of whatever longer structure the layer has.  Below
+about a hundred points neither binning resolves much, and the adaptive
+bins bring no gain.
 
 The adaptive lags put little weight on the long ones, and a weak, long
 structure under much noise can be clear at equal lags while the adaptive
 fit runs past the largest lag.  So when the adaptive range is refused as
 past the fitted lags and the equal-lag fit has a range it would itself
-return, the result is the equal-lag one, whole, exactly as
-\code{lags = "equal"} gives it, with \code{lags} saying \code{"equal"}
-and \code{lag_fallback} set to \code{TRUE}.  Its nugget is then the
-equal-lag nugget.  No other refusal falls back.
+return, the result is the equal-lag one, whole, as \code{lags = "equal"} gives
+it, with \code{lags} saying \code{"equal"} and \code{lag_fallback} set to \code{TRUE}.  Its
+nugget is then the equal-lag nugget.  No other refusal falls back.
+}
 
-\strong{Structure at two scales.}  One structure fitted to lags that
-resolve the spacing of the points follows the shortest structure of the
-layer.  A layer can have a weaker structure several times longer as well,
-and blocks sized from the short one would leave the long one across
-folds.  So with \code{lags = "adaptive"} the equal-lag fit is made too,
-and when its range is at least twice the adaptive one, a model with a
-nugget and both structures, at those two ranges, is fitted to the
-adaptive variogram.  That model is returned (\code{structures} is 2 and
-\code{short_range} holds the range of the short structure) and the range
-is the long one, unless the long structure carries under 3 percent of
-the model's semivariance at the largest lag: then the lags that resolve
-the layer give the equal-lag range nothing, and the single structure
-stands.  The bar is low because the two mistakes are not alike.  A long
-structure that is missed is lost: the range returned is the short one
-alone.  One that is believed in error returns the equal-lag range, which
-is too long, and \code{short_range} still holds the short one.  When the
-equal-lag range is one that \code{lags = "equal"}
-would itself refuse (past the fitted lags, as under an unremoved trend),
-the model with it is refused as well, the answer is taken away and not
-lengthened, and the long structure has to carry 10 percent.
+\section{Structure at two scales}{
 
-Measured on a clustered layer of 1200 points over a 1000 m square, 30
-draws each.  With structures of range 20 and 200 both are kept in 20
-draws, and the range returned is under half the equal-lag one in 1; with
-40 and 400, in 18 and 1; with 30 and 300, in 21 and 0; with 15 and 450,
-in 28 and 1.  With one structure of range 40 a second is kept in 4, and
-the range is within a factor 2 of the truth in 27 draws (19 with equal
-lags); with one of range 30, in 7 and 25 (14).  The nugget comes from the
-adaptive lags either way: where it is 0.3, the median is 0.32 to 0.35,
-and 0.49 to 0.65 with equal lags.  A long structure whose equal-lag
-range is under twice the adaptive one is not separated: the range is
-then that of the single fit, which lies between the two.
+One structure fitted to lags that resolve the spacing of the points
+follows the shortest structure of the layer.  A layer can have a weaker
+structure several times longer as well, and blocks sized from the short one
+would leave the long one across folds.  So with \code{lags = "adaptive"} the
+equal-lag fit is made too, and when its range is at least twice the
+adaptive one, a model with a nugget and both structures, at those two
+ranges, is fitted to the adaptive variogram.  That model is returned
+(\code{structures} is 2 and \code{short_range} holds the range of the short
+structure) and the range is the long one, unless the long structure carries
+under 3 percent of the model's semivariance at the largest lag; then the
+single structure stands.
 
-The estimate is the \strong{omnidirectional} (all-pairs) fit.  Directional
-variograms are fitted as well, at 0° (N–S), 45°, 90° (E–W) and 135°
-azimuths with a ±22.5° tolerance.  Those four windows tile all 180 distinct
-azimuths exactly once, and their ranges are returned in the
-\code{directional} attribute, with their largest-over-smallest ratio in
-\code{anisotropy}.  They are a diagnostic and never the answer, for two
-reasons.  Each direction sees about a quarter of the point pairs, and the
-maximum of four quarter-sample fits is biased upward.  And the windows
-are fixed to the coordinate axes, so any answer built from them changes
-when the layer is rotated, which a property of the field must not do.
-The all-pairs fit is the best-powered estimate available and is invariant
-to rotation.  When it identifies no range, no range is returned: the
-largest directional range does not stand in for it.
+The bar is low because the two mistakes are not alike.  A long structure
+that is missed is lost: the range returned is the short one alone.  One
+that is believed in error returns the equal-lag range, which is too long,
+and \code{short_range} still holds the short one.  When the equal-lag range is
+one that \code{lags = "equal"} would itself refuse (past the fitted lags, as
+under an unremoved trend), the model with it is refused as well, the answer
+is taken away and not lengthened, and the long structure has to carry 10
+percent.  The nugget comes from the adaptive lags either way.  A long
+structure whose equal-lag range is under twice the adaptive one is not
+separated: the range is then that of the single fit, which lies between the
+two.
+}
 
-Where a field is \emph{known} to be anisotropic and blocks are to be at
-least as large as its autocorrelation range in every direction, size them
-from the longest directional range explicitly.  Read it from
-\code{directional_fitted}, not
-\code{directional}: on a strongly anisotropic field the major axis is the
-direction most likely to run past the fitted lags, which leaves it
-\code{NA} in \code{directional}, so \code{max()} of that is \code{NA}, or
-with \code{na.rm = TRUE} the second-longest range.  Check
-\code{directional_status} first: a major axis marked \code{"over_cutoff"}
-has no identified range at all, and a longer \code{cutoff} or
-\code{\link{make_folds}(method = "nndm")} is the way on.  A ratio above
-1.5 is written to the package log at INFO level with that advice, which
-reaches the session log file but not the console (the ratio passes 1.5 on
-most isotropic fields too); \code{print()} shows the directional ranges
-and the ratio, and \code{attr(range, "anisotropy")} holds it.
+\section{Directional ranges and anisotropy}{
+
+Directional variograms are fitted as well, at azimuths of 0 (north-south),
+45, 90 (east-west) and 135 degrees, each with a tolerance of 22.5 degrees
+either way.  Those four windows tile all 180 distinct azimuths once, and
+their ranges are returned in the \code{directional} attribute, with their
+largest-over-smallest ratio in \code{anisotropy}.  They are a diagnostic and
+never the answer, for two reasons.  Each direction sees about a quarter of
+the point pairs, and the maximum of four quarter-sample fits is biased
+upward.  And the windows are fixed to the coordinate axes, so any answer
+built from them changes when the layer is rotated, which a property of the
+field must not do.  The all-pairs fit is the best-powered estimate
+available and does not change under rotation.  When it identifies no range,
+no range is returned: the largest directional range does not stand in for
+it.
 
 A direction whose variogram is flat or has too few bins, whose range runs
 beyond the longest fitted lag, or whose fit has no minimum inside the
-ranges searched is excluded and recorded as \code{NA} in the
-\code{directional} attribute.
+ranges searched is left out and recorded as \code{NA} in \code{directional}.
 
-The model is fitted \strong{with a nugget}.  A nugget-free model forces
-the curve through the origin, and on any real measurement (which has one)
-the \eqn{N / h^2} weights buy that constraint by collapsing the range.
-The fitted nugget can sit at its lower bound of zero; the result then
-carries \code{nugget_at_bound = TRUE}, and \code{\link{sac_nugget}} says
-what else is attached to judge a nugget by.
-
-The returned range is in the coordinate units of the (projected) data and
-can be passed directly to \code{make_folds(block_size = ...)} so that CV
-blocks are at least as wide as the autocorrelation range.
+Where a field is known to be anisotropic and blocks are to be at least as
+large as its autocorrelation range in every direction, size them from the
+longest directional range yourself.  Read it from \code{directional_fitted},
+not \code{directional}: on a strongly anisotropic field the major axis is the
+direction most likely to run past the fitted lags, which leaves it \code{NA} in
+\code{directional}, so \code{max()} of that is \code{NA}, or with \code{na.rm = TRUE} the
+second-longest range.  Check \code{directional_status} first: a major axis
+marked \code{"over_cutoff"} has no identified range at all, and a longer
+\code{cutoff} or \code{make_folds(method = "nndm")} is the way on.  A ratio above
+1.5 is written to the package log at INFO level with that advice, which
+reaches the session log file but not the console (the ratio passes 1.5 on
+most isotropic fields too).
 }
+
+\section{The nugget}{
+
+The model is fitted with a nugget.  A nugget-free model forces the curve
+through the origin, and on a measurement that has a nugget the
+\code{N / h^2} weights buy that constraint by collapsing the range.
+The fitted nugget can sit at its lower bound of zero; the result then
+carries \code{nugget_at_bound = TRUE}, and \code{\link[=sac_nugget]{sac_nugget()}} lists what else is
+attached to judge a nugget by.
+
+Two rows at one location are a pair at zero separation and are in no bin,
+whichever the binning, since the variogram and the model describe positive
+separations.  Their semivariance, the variance between visits to a
+location, is returned on its own as \code{zero_lag_semivariance}.  The nugget
+fitted to the variogram is not let under it when the layer has 30 or more
+rows beyond one a location to estimate it from; a model from
+\code{detrend = "reml"} takes no such floor.
+}
+
 \section{Detrending and the residual-variogram bias}{
 
 Fitting a variogram to the residuals of a least-squares trend
@@ -568,21 +472,19 @@ underestimates both the sill and the range, because the trend fit absorbs
 part of the long-wavelength spatial variation (Lark, Cullis and Welham
 2006).  Blocks sized from that range are then narrower than the field's
 range, and hold the test points less far from their training data than
-range-sized blocks are meant to.  How large the effect is
-depends on how smooth the trend terms are in space, and on how many there
-are: for ordinary covariates it is a few percent, and for trend surfaces
-in the coordinates it is large.  Iterating between a GLS trend
-fit and a variogram refit (Neuman and Jacobson 1984) recovers only part of
-it, because the variogram of GLS residuals
-is biased too; REML does not fit a variogram to residuals at all, which is
-why \code{detrend = "reml"} returns its own range estimate.  Its price is
-a single family (exponential with nugget), a cubic cost in \code{n}, and
-a somewhat wider sampling spread.  The default stays \code{"ols"} so that
-existing scripts keep their method; a script that detrends on smooth
+range-sized blocks are meant to.  How large the effect is depends on how
+smooth the trend terms are in space and on how many there are: it is small
+for ordinary covariates and large for trend surfaces in the coordinates.
+Iterating between a GLS trend fit and a variogram refit (Neuman and
+Jacobson 1984) recovers only part of it, because the variogram of GLS
+residuals is biased too.  REML fits no variogram to residuals, which is why
+\code{detrend = "reml"} returns its own range estimate.  Its price is a single
+family (exponential with nugget), a cubic cost in \code{n}, and a somewhat wider
+sampling spread.  The default is \code{"ols"}; a script that detrends on smooth
 or coordinate-based terms should pass \code{detrend = "reml"}, or size its
 blocks with a margin above the range returned, to make up the shortfall.
-Detrending removes a trend the predictors explain.
-It does not make an unidentified range identified.
+Detrending removes a trend the predictors explain; it does not make an
+unidentified range identified.
 }
 
 \section{Count and other non-Gaussian responses}{
@@ -592,59 +494,129 @@ is the same everywhere, so that semivariance depends on separation alone.
 A count response breaks that assumption by construction, because its
 variance tracks its mean, and so does any response with a mean-variance
 relationship (rates, proportions, skewed amounts).  On such data the
-variogram mixes distance-dependence with mean-dependence, and the fitted
-range is not the thing it claims to be: where the mean is high the
-semivariance is inflated whatever the distance, which flattens the curve
-and can lengthen or shorten the apparent range depending on where the
-high-mean regions sit.
+variogram mixes distance-dependence with mean-dependence: where the mean is
+high the semivariance is inflated whatever the distance, which flattens the
+curve and can lengthen or shorten the apparent range depending on where the
+high-mean areas sit.
 
-Supplying \code{predictor_vars} to detrend helps, because it removes the
-part of the mean the covariates explain, but it does not fix the variance
-structure: the residuals of an OLS fit to a count still have a variance
-that tracks the fitted mean.  The principled remedy is a variogram of
-Pearson residuals from a model in the right family, which this function
-does not compute.  Treat the range from a count response as no
-more than an order of magnitude, since it can come out long or short, and
-prefer \code{\link{make_folds}(method = "nndm")}, which does not depend on a
-fitted range at all.
+Detrending on \code{predictor_vars} removes the part of the mean the covariates
+explain, but it does not fix the variance structure: the residuals of an
+OLS fit to a count still have a variance that tracks the fitted mean.  The
+remedy is a variogram of Pearson residuals from a model in the right
+family, which this function does not compute.  Treat the range from a
+count response as no more than an order of magnitude, since it can come out
+long or short, and prefer \code{make_folds(method = "nndm")}, which needs no
+fitted range.
+}
+
+\section{Numerical behaviour}{
+
+The result is a function of the data alone.  The same layer gives the same
+answer whatever the unit of the response or of the coordinates and
+whatever the order of its rows, and a change in the last bits of the values
+changes the answer by about as much.
+
+The rows are sorted by their coordinates as supplied, then by the response
+and the predictors, before anything else, so the projection chosen for
+lon/lat input, the \code{n_max} subsample and the pair sums do not depend on
+their order.  First coordinates within 1e-7 of the diagonal of the points'
+bounding box count as one column, sorted by the second coordinate, so a
+lattice whose first coordinates in one column differ in their last bits
+after a change of unit or origin gets the same order and the same
+subsample in each.  Rows that share a location are therefore in the order
+of their values, and no step treats the first of them as special.
+
+The variogram is computed on the standardised variable.  A response is
+called constant only when its standard deviation is under 1e-12 of its
+largest absolute value, which no change of unit alters, and the values
+centred on their median and scaled have a standard deviation of at most
+three units in the last place of that value.  Residuals of the predictors
+are called constant when they are no more than the rounding of the
+regression, taken on the size of the fit's terms, or three such units of
+the response, whether or not the floor finds spread in them, as the test
+for \code{cp} of \code{\link[=resolution_profile]{resolution_profile()}} reads them.  So 1e15 plus a spread of
+1, stored to an eighth, is not constant, and the residuals of a response
+the predictors fit exactly are, on a predictor far from 0 (a northing) as
+well.  A response that loses its spread on the raw values is centred on its
+median before the predictors are fitted to it and before the test for
+spatial structure, neither of which changes under a shift; so is a response
+whose OLS residuals on the raw values lose their spread (1e15 plus 1e5
+times a predictor plus a spread of 1, on that predictor).
+
+The test for spatial structure, the semivariances and the REML fit are
+taken on the response divided by a power of two near its spread.  A
+response near 1e-160 or 1e160, whose squares lie past what doubles hold,
+then gives the range, the test and the folds it gives in ordinary units.
+The variogram, the nugget, the short-lag semivariances and the REML
+variance are returned in the response's units squared, which near 1e160
+are \code{Inf} and near 1e-160 are subnormal doubles that keep few bits, or 0.
+A response so far from zero that doubles there are spaced more than a
+millionth of its standard deviation apart (a standard deviation of 1 at
+about 1e10, 2^33, or beyond) is read as stored, rounded to
+that spacing, with a warning of class \code{spatialkit_response_imprecise}.
+
+With \code{detrend = "reml"} the REML fit reads the coordinates of the rows it
+uses centred on the middle of their bounding box, divided by its diagonal
+and rounded to 2^-30 of it, and the response and each
+numeric predictor centred on the middle of their range on those rows,
+divided by it and rounded the same way.  Its range, coefficients and
+variance are taken back to the layer's units.  Where the REML range is not
+identified the likelihood is flat, and whether the fit converges or falls
+back to OLS is set by the last bits of the coordinates, the response and
+the predictors; in that frame it does not depend on their units or
+origins.  A value within its own rounding noise of the middle of a step,
+about a billionth of the diagonal or the range, can still fall on either
+side of it.
+}
+
+\section{Printing}{
+
+\code{print()} shows the effective range as a plain number, and beneath it the
+directional ranges and their ratio when the directional fit is available.
+A direction whose fit was unusable is labelled with why
+(\code{directional_status}) and the range its fit reported
+(\code{directional_fitted}) when the object carries them, and \code{unidentified}
+otherwise.  A last line names the unit and the CRS the range is a length
+in (\code{attr(x, "crs")}, which for lon/lat input is the projected CRS the
+estimate chose; for a layer with no CRS, it says the range is in that
+layer's own coordinate units), and whether the variogram is of the
+response or of its residuals on \code{predictor_vars} (\code{detrended},
+\code{detrend_method}).  \code{print()} returns \code{x} invisibly.
 }
 
 \examples{
-if (requireNamespace("gstat", quietly = TRUE)) {
-  library(sf)
-  # A Gaussian random field with an exponential covariance: range
-  # parameter 100, so the true effective range is 3 x 100 = 300, plus a
-  # small nugget.
-  set.seed(9)
-  n <- 150
-  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-  D  <- as.matrix(dist(xy))
-  xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) \%*\% rnorm(n))
-  pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-  r <- estimate_sac_range(pts, response_var = "z")
-  # print() throughout, because only the last value of a braced block is
-  # shown on its own, and every one of these is worth reading.
-  print(r)                              # the effective range, in metres
-  print(attr(r, "directional"))         # the four directional ranges
-  print(attr(r, "variogram_model"))     # the fitted model behind it
-  print(attr(r, "structure_p"))         # the test for spatial structure
+\dontshow{if (requireNamespace("gstat", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+# A Gaussian random field with an exponential covariance: range parameter
+# 100, so the true effective range is 3 x 100 = 300, plus a small nugget.
+set.seed(9)
+n <- 150
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+D  <- as.matrix(dist(xy))
+xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) \%*\% rnorm(n))
+pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+r <- estimate_sac_range(pts, response_var = "z")
+r                            # the effective range, in metres
+attr(r, "directional")       # the four directional ranges
+attr(r, "variogram_model")   # the fitted model behind it
+attr(r, "structure_p")       # the test for spatial structure
 
-  # A field whose range the data cannot pin down: the variogram never
-  # reaches a sill within the lags fitted, so the answer is NA with the
-  # refused value attached rather than a long range asserted.
-  xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
-  r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
-                           response_var = "trend")
-  print(r2)
-  attr(r2, "rejected_reason")
-  attr(r2, "rejected_range")
+# A field whose range the data cannot pin down: the variogram never
+# reaches a sill within the lags fitted, so the answer is NA, with the
+# refused value and the reason attached.
+xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
+r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
+                         response_var = "trend")
+r2
+attr(r2, "rejected_reason")
+attr(r2, "rejected_range")
 
-  # White noise: no structure, so no range.
-  xy$noise <- rnorm(n)
-  r3 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
-                           response_var = "noise")
-  attr(r3, "rejected_reason")
-}
+# White noise: no structure, so no range.
+xy$noise <- rnorm(n)
+r3 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
+                         response_var = "noise")
+attr(r3, "rejected_reason")
+\dontshow{\}) # examplesIf}
 }
 \references{
 Cliff, A. D. and Ord, J. K. (1981). \emph{Spatial Processes: Models and
@@ -661,20 +633,11 @@ levels. \emph{Mathematical Geology}, 16(5), 499--521.
 \doi{10.1007/BF01886329}
 }
 \seealso{
-\code{\link{sac_nugget}} for the nugget behind the estimate,
-\code{\link{plot.sac_range}} to see the variogram the estimate rests on.
+\code{\link[=sac_nugget]{sac_nugget()}} for the nugget behind the estimate, and
+\code{\link[=plot.sac_range]{plot.sac_range()}} to see the variogram the estimate rests on.
 
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=fold_separation]{fold_separation()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=sac_nugget]{sac_nugget()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+Other spatial autocorrelation:
+\code{\link[=plot.sac_range]{plot.sac_range()}},
+\code{\link[=sac_nugget]{sac_nugget()}}
 }
-\concept{cross-validation}
+\concept{spatial autocorrelation}

@@ -47,12 +47,12 @@ fitted trend understate the variogram (see
 \code{\link{estimate_sac_range}()}, "Detrending and the
 residual-variogram bias").
 The distance axis is labelled in the units of the CRS the variogram
-was actually fitted in, which is not necessarily the fit's own CRS
-(lon/lat data are projected first). Each curve is the variogram
+was fitted in, which is not always the fit's own CRS (lon/lat data
+are projected first).  Each curve is the variogram
 \code{estimate_sac_range()} returns for its variable, which is over
-all point pairs. A fit that identified no range says why in
-the subtitle, since the overlaid model line is then not a fit to believe.
-Requires 'gstat'.}
+all point pairs.  A fit that identified no range says why in the
+subtitle, since the overlaid model line is then not a fit to believe.
+Requires \pkg{gstat}.}
 \item{\code{"coefficients"}}{For a GWR fit only: the local coefficient
 of one \code{term} mapped at the training locations, which is the
 reason to fit GWR at all.  Locations where the local design is
@@ -95,48 +95,36 @@ are masked either way.}
 A \code{ggplot} object.
 }
 \description{
-Diagnostic plots for a \code{spatial_fit}.  The package previously shipped
-\code{print()} and \code{summary()} methods but no \code{plot()}, so the
-checks most likely to reveal a problem (is there structure left in the
-residuals, and where is it) had to be written by hand each time.
+Draws one of four diagnostic plots of a \code{spatial_fit}, as a \pkg{ggplot2}
+object: the residuals mapped at the training locations, observed against
+fitted values, the residual variogram beside the response's, or, for a
+GWR, the map of one local coefficient.  Use it to see whether spatial
+structure is left in the residuals, and where.
 }
 \examples{
+\dontshow{if (requireNamespace("ranger", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)) withAutoprint(\{ # examplesIf}
 # Works on any spatial_fit; a forest keeps the example free of the optional
-# GWR/Stan backends.
-if (requireNamespace("ranger", quietly = TRUE) &&
-    requireNamespace("ggplot2", quietly = TRUE)) {
-  library(sf)
-  # price depends on elevation, which the forest sees, and on a spatially
-  # correlated field it does not: that field is what the residual plots
-  # are there to find.
-  set.seed(2)
-  n <- 120
-  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-                   elev = rnorm(n))
-  D  <- as.matrix(dist(xy[, c("x", "y")]))
-  xy$price <- 10 + 2 * xy$elev +
-    as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) \%*\% rnorm(n))
-  pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-  fit <- fit_rf_model(pts, "price", "elev", num_trees = 100, seed = 1)
-  # print() each one: inside a braced block only the last value is drawn.
-  print(plot(fit, type = "residuals"))          # structure left in the residuals
-  print(plot(fit, type = "observed_predicted"))
-  if (requireNamespace("gstat", quietly = TRUE))
-    plot(fit, type = "variogram")   # residual and response variograms compared
-}
+# GWR and Stan backends.
+library(sf)
+# price depends on elevation, which the forest sees, and on a spatially
+# correlated field it does not: that field is what the residual plots are
+# there to find.
+set.seed(2)
+n <- 120
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+                 elev = rnorm(n))
+D  <- as.matrix(dist(xy[, c("x", "y")]))
+xy$price <- 10 + 2 * xy$elev +
+  as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) \%*\% rnorm(n))
+pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+fit <- fit_rf_model(pts, "price", "elev", num_trees = 100, seed = 1)
+plot(fit, type = "residuals")            # structure left in the residuals
+plot(fit, type = "observed_predicted")
+if (requireNamespace("gstat", quietly = TRUE))
+  plot(fit, type = "variogram")          # residual and response variograms
+\dontshow{\}) # examplesIf}
 }
 \seealso{
 \code{\link{coef.gwr_fit}()} for the coefficients themselves.
-
-Other plotting:
-\code{\link[=plot.aoa]{plot.aoa()}},
-\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
-\code{\link[=plot.feature_selection]{plot.feature_selection()}},
-\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
-\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
-\code{\link[=plot.sac_range]{plot.sac_range()}},
-\code{\link[=plot_calibration]{plot_calibration()}},
-\code{\link[=plot_cv_metrics]{plot_cv_metrics()}},
-\code{\link[=plot_folds]{plot_folds()}}
 }
-\concept{plotting}
+\concept{fit methods}

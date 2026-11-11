@@ -2,7 +2,7 @@
 % Please edit documentation in R/cross-validation.R
 \name{cv_bayes}
 \alias{cv_bayes}
-\title{K-fold cross-validation for the Bayesian spatial model}
+\title{Cross-validate a Bayesian GP with spatial folds}
 \usage{
 cv_bayes(
   data_sf,
@@ -24,179 +24,175 @@ cv_bayes(
 )
 }
 \arguments{
-\item{data_sf}{An sf object.}
+\item{data_sf}{An sf layer with the response and the predictors.}
 
-\item{response_var}{Response column name.}
+\item{response_var}{Name of the response column.}
 
-\item{predictor_vars}{Predictor column names.}
+\item{predictor_vars}{Character vector of predictor column names.}
 
-\item{folds}{Optional fold definitions, in any of three shapes: a
-\code{\link{make_folds}()} return value; a bare list of
-\code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
-of fold labels, one per row, which becomes leave-that-label-out splits.
-The label vector is how folds built by another package are used here
-(\code{blockCV::cv_spatial()} returns one as \code{$folds_ids}), since its
-\code{$folds_list} holds two \emph{unnamed} vectors per fold and is
-refused by name.  Train and test must be disjoint: a fold that trains on
-its own test rows is not a cross-validation split and is refused with an
-error.  IDs naming no row in the prepared data are dropped with
-a logged count (expected when rows were removed for missing values; a sign
-the folds came from other data when they were not).
+\item{folds}{Optional fold definitions, in one of three shapes: a
+\code{\link[=make_folds]{make_folds()}} result; a bare list of \code{list(train =, test =)} pairs of
+\code{..row_id} values; or a vector of fold labels, one per row, which becomes
+leave-that-label-out splits.  The label vector is how folds built by
+another package are used here: \code{blockCV::cv_spatial()} returns one as
+\verb{$folds_ids}, while its \verb{$folds_list} holds two unnamed vectors per fold
+and is refused by name.  Train and test must be disjoint; a fold that
+trains on its own test rows is not a cross-validation split and is
+refused with an error.  IDs naming no row of the prepared data are
+dropped with a logged count (expected when rows were removed for missing
+values; a sign the folds came from other data when they were not).  When
+\code{NULL}, the folds are \code{make_folds(method = "block_kfold")}, built with
+\code{k}, \code{seed}, \code{boundary}, \code{block_size} and \code{auto_range}.
 With \code{folds = NULL} the score estimates the error at the distance
 the block grid built here puts between the held-out points and their
 training data, which overstates the error of a map where the samples
 cover the area it predicts over.  The excess is how much the model's
 error grows from the map's distances to the data to the block grid's,
 and is small for a model whose error changes little with the distance
-from the data.  \code{\link{fold_separation}()}
-with \code{prediction_points} compares the held-out distances with those
-of the locations the model will predict at, and
-\code{make_folds(method = "knndm", prediction_points = )} builds folds
-matched to them.}
+from the data.  \code{\link[=fold_separation]{fold_separation()}} with \code{prediction_points} compares
+the held-out distances with those of the locations the model will
+predict at, and \code{make_folds(method = "knndm", prediction_points = )}
+builds folds matched to them.}
 
-\item{k}{Number of folds to build when \code{folds} is \code{NULL}; not
-read when \code{folds} is supplied.  Default 5.}
+\item{k}{Number of folds to build when \code{folds} is \code{NULL}; not read when
+\code{folds} is supplied.  Default 5.}
 
-\item{seed}{RNG seed. Default 123.  It seeds fold construction \strong{and},
-through a per-fold draw, each fold's Stan sampler, so two seeds give
-different posteriors even on identical \code{folds}. A \code{seed} in
-\code{fit_args} overrides the per-fold draw with one fixed sampler seed.}
+\item{seed}{Seed for building the folds when \code{folds} is \code{NULL} and,
+through one seed drawn per fold, for each fold's Stan sampler, so two
+seeds give different posteriors even on identical \code{folds}.  A \code{seed} in
+\code{fit_args} overrides the per-fold draw with one fixed sampler seed.
+Default 123.}
 
-\item{boundary}{Optional polygonal sf/sfc for CRS alignment.}
+\item{boundary}{Optional polygon layer (sf or sfc).  Data without a CRS are
+aligned to it, and the blocks built when \code{folds} is \code{NULL} are clipped to
+it (see \code{\link[=make_folds]{make_folds()}} and \link{spatialkit-geometry}).}
 
-\item{pointize}{Geometry coercion strategy.}
+\item{pointize}{How a feature that is not a point is reduced to one before
+fitting: a mode of \code{\link[=coerce_to_points]{coerce_to_points()}}.  Default \code{"auto"}.}
 
-\item{fit_args}{Named list of extra arguments for fit_bayesian_spatial_model().
-A user-supplied \code{gp_k} is respected in every fold; when omitted, the
-GP rank is auto-selected per training fold.  \code{compute_loo},
-\code{boundary}, and \code{pointize} are always overridden by the CV
-internals.  A categorical or ordinal \code{family}
-(\code{brms::categorical()}, \code{cumulative}, \code{sratio},
-\code{cratio}, \code{acat}) is refused before anything is fitted: its
-prediction is a probability per response category, and every score
-here needs one number per row.}
+\item{fit_args}{Named list of extra arguments for
+\code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}}.  A \code{gp_k} given here is used in every
+fold; without one, the GP rank is chosen in each training fold.
+\code{compute_loo}, \code{boundary} and \code{pointize} are always set by the
+cross-validation.  A categorical or ordinal \code{family}
+(\code{brms::categorical()}, \code{cumulative}, \code{sratio}, \code{cratio}, \code{acat}) is
+refused before anything is fitted: its prediction is a probability per
+response category, and every score here needs one number per row.}
 
-\item{summary}{"mean" or "median" for posterior predictions.}
+\item{summary}{\code{"mean"} (default) or \code{"median"}: the summary of the
+posterior predictive draws used as each held-out row's prediction.}
 
-\item{compute_pred_intervals}{Logical; compute predictive intervals.}
+\item{compute_pred_intervals}{Logical, default \code{TRUE}: draw the posterior
+predictive distribution of the held-out rows.  \code{FALSE} skips the draws
+and saves time, and leaves the \verb{coverage_*} columns, \code{CRPS}, \code{n_draws},
+\code{predictive_coverage} and \code{predictions$yhat_sd} \code{NA}.}
 
 \item{coverage_levels}{Numeric vector of the nominal coverage levels to
-score, as proportions strictly between 0 and 1 (\code{0.95}, not
-\code{95}), each given once; anything else is an error.  Each becomes a
-column \code{coverage_<percent>} of \code{fold_metrics}, named at full
-precision (\code{0.975} gives \code{coverage_97.5}).}
+score, as proportions strictly between 0 and 1 (\code{0.95}, not \code{95}), each
+given once; anything else is an error.  Each becomes a column
+\verb{coverage_<percent>} of \code{fold_metrics}, named at full precision (\code{0.975}
+gives \code{coverage_97.5}).}
 
-\item{block_size}{Optional minimum block edge length (projected CRS
-units) for the blocks built when \code{folds} is \code{NULL}; see
-\code{\link{make_folds}()}.  Beside supplied \code{folds} it has
-nothing to size and raises a warning (class
-\code{spatialkit_fold_args_ignored}).}
+\item{block_size}{Optional minimum block edge length, in the units of the
+CRS the folds are built in, for the blocks built when \code{folds} is \code{NULL};
+see \code{\link[=make_folds]{make_folds()}}.  It is a size you choose and is compared with the
+autocorrelation range only when one can be estimated, in which case a
+smaller size is warned about.  Beside supplied \code{folds} it has nothing to
+size and raises a warning of class \code{spatialkit_fold_args_ignored}.}
 
-\item{auto_range}{Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
-estimate the autocorrelation range and use it as the minimum block size.
-Default \code{FALSE}.  \code{TRUE} beside supplied \code{folds} raises
-the same warning as \code{block_size}.}
+\item{auto_range}{Logical, default \code{FALSE}.  \code{TRUE} with \code{folds = NULL}
+estimates the autocorrelation range and uses it as the minimum block
+size.  \code{TRUE} beside supplied \code{folds} raises the same warning as
+\code{block_size}.}
 
-\item{parallel}{Logical or positive integer.  If \code{TRUE},
-auto-detect the number of cores and fit folds in parallel via
-\code{parallel::mclapply()} (macOS / Linux; falls back to sequential
-on Windows).  If an integer > 1, use that many cores.  Default
-\code{FALSE} (sequential).  Bayesian folds with full MCMC runs
-are the primary beneficiary of this option.  Mind the memory: every
-fold compiles its own Stan model, and one compilation can take several
-GB (3.6 GB was measured), so \code{parallel = n} runs \code{n} of them
-at once.  A compiler killed for lack of memory fails its fold with
-rstan's \code{"invalid connection"} error, which \code{fold_status}
-records; use fewer cores if you see it.}
+\item{parallel}{Logical or positive integer.  \code{TRUE} detects the number of
+cores and fits the folds in parallel with \code{parallel::mclapply()} (macOS
+and Linux; sequential on Windows); an integer above 1 uses that many
+cores.  Default \code{FALSE} (sequential).  Mind the memory: every fold
+compiles its own Stan model, and one compilation can take several GB, so
+\code{parallel = n} runs \code{n} of them at once.  A compiler killed for lack of
+memory fails its fold with \pkg{rstan}'s \code{"invalid connection"} error,
+which \code{fold_status} records; use fewer cores if you see it.}
 
 \item{metrics}{Optional scoring function of your own, a
-\code{function(y, yhat)} returning a named numeric vector; its names
-become columns of \code{fold_metrics} (per fold) and \code{overall}
-(pooled) beside the built-in ones.  See \strong{Your own metrics} on
-\code{\link{cv_spatial}()} for the contract.  \code{yhat} is the
-posterior predictive \code{summary} (mean or median) of each held-out
-row; a score that needs the draws belongs in \code{predictive_coverage}
-and \code{CRPS}, which this function computes itself.}
+\verb{function(y, yhat)} returning a named numeric vector; its names become
+columns of \code{fold_metrics} (per fold) and \code{overall} (pooled) beside the
+built-in ones.  See the section "Your own metrics" in \code{\link[=cv_spatial]{cv_spatial()}} for
+the contract.  \code{yhat} is the posterior predictive \code{summary} (mean or
+median) of each held-out row; a score that needs the draws belongs in
+\code{predictive_coverage} and \code{CRPS}, which this function computes itself.}
 }
 \value{
-A list with \code{overall}, \code{fold_metrics},
-\code{predictions}, \code{folds}, \code{n_folds_attempted},
-\code{n_folds_succeeded}, \code{fold_status}, \code{orphan_rows},
-\code{n_unknown_ids}, \code{n_dropped}, \code{formula},
-\code{predictive_coverage} and \code{coverage_levels} (the nominal
-levels, named by their \code{coverage_*} column).
-The two fold counts make a run where every fold failed visible in the
-return value itself, beyond the warning, and \code{fold_status} (one
-row per fold: \code{fold}, \code{status}, \code{message}) keeps the
-reason each missing fold is missing, including the error text of a fold
-whose sampler failed, where a long run's console output would not.
-See \code{\link{cv_spatial}} for the five statuses and for
-\code{orphan_rows}.  \code{predictions} carries,
-beyond the columns its siblings share, \code{yhat_sd}: the posterior
-predictive standard deviation of each held-out row, from the same draws
-that give the coverage below (\code{NA} when
-\code{compute_pred_intervals = FALSE} or the draws failed for that fold).
-\code{overall$Adj_R2} is always \code{NA}, as for every \code{cv_*()}:
-see \code{\link{cv_spatial}}.
-\code{fold_metrics} carries, beyond the columns its siblings share,
-\code{gp_k}, \code{gp_n_basis}, \code{n_draws}, \code{CRPS}, the
-\code{coverage_*} columns, \code{convergence_ok} and
-\code{gp_adequacy}.  \code{convergence_ok} is \code{TRUE} or
-\code{FALSE} as \code{\link{fit_bayesian_spatial_model}()} judged that
-fold's sampler (divergent transitions, R-hat, effective sample size and
-E-BFMI; see its \code{check_convergence}), \code{NA}
-when \code{fit_args} sets \code{check_convergence = FALSE}.  A fold that
-did not converge is scored like the others, so a run with any
-\code{FALSE} raises one warning of class \code{spatialkit_convergence}
-naming those folds and the checks each failed.
-\code{gp_adequacy} is what that fold's posterior said about its
-Gaussian-process basis (\code{"ok"}, \code{"below_resolution"},
+A list with the elements \code{\link[=cv_spatial]{cv_spatial()}} returns (\code{overall},
+\code{fold_metrics}, \code{predictions}, \code{folds}, \code{n_folds_attempted},
+\code{n_folds_succeeded}, \code{fold_status}, \code{orphan_rows}, \code{n_unknown_ids} and
+\code{n_dropped}; see its Value for each, and for the five fold statuses),
+plus:
+\describe{
+\item{\code{formula}}{The model formula, as text.}
+\item{\code{predictive_coverage}}{One entry per \code{coverage_levels} value,
+plus \code{mean_CRPS}: averages across folds weighted by each fold's
+\code{n_pred}.  The per-fold values in \code{fold_metrics} are means over that
+fold's test rows, so an unweighted average would not be the pooled
+quantity when fold sizes differ, as they do for spatial blocks.}
+\item{\code{coverage_levels}}{The nominal levels, named by their
+\verb{coverage_*} column.}
+}
+\code{fold_status} keeps the error text of a fold whose sampler failed.
+\code{predictions} also carries \code{yhat_sd}, the posterior predictive standard
+deviation of each held-out row, from the same draws that give the
+coverage (\code{NA} when \code{compute_pred_intervals = FALSE} or the draws failed
+for that fold).  \code{overall$Adj_R2} is always \code{NA}, as for every
+\verb{cv_*()}.
+
+\code{fold_metrics} also carries \code{gp_k}, \code{gp_n_basis}, \code{n_draws}, \code{CRPS}, the
+\verb{coverage_*} columns, \code{convergence_ok} and \code{gp_adequacy}.
+\code{convergence_ok} is \code{TRUE} or \code{FALSE} as \code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}}
+judged that fold's sampler (divergent transitions, R-hat, effective
+sample size and E-BFMI; see its \code{check_convergence}), and \code{NA} when
+\code{fit_args} sets \code{check_convergence = FALSE}.  A fold that did not
+converge is scored like the others, so a run with any \code{FALSE} raises one
+warning of class \code{spatialkit_convergence} naming those folds and the
+checks each failed.  \code{gp_adequacy} is what that fold's posterior said
+about its Gaussian-process basis (\code{"ok"}, \code{"below_resolution"},
 \code{"unresolved_short_range"}, \code{"no_signal_above_floor"} or
 \code{"not_checked"}; see "What the basis resolves" in
-\code{\link{fit_bayesian_spatial_model}}).  A fold whose basis was
-found too coarse is scored like the others too.  See \strong{Warnings
-from the folds}.
-The \code{predictive_coverage} entries (one per
-\code{coverage_levels} value, plus \code{mean_CRPS}) are averages across
-folds \strong{weighted by each fold's \code{n_pred}}, because the per-fold
-values in \code{fold_metrics} are themselves means over that fold's test
-rows; an unweighted average would not be the pooled quantity when fold
-sizes differ, which for spatially blocked folds they routinely do.
+\code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}}).  A fold whose basis was found too
+coarse is scored like the others too; see the section "Warnings from the
+folds".
 }
 \description{
-Refits the Gaussian-process model of
-\code{\link{fit_bayesian_spatial_model}()} on each training fold and scores
-it on the held-out fold.  Beyond the point-prediction metrics the other CV
-wrappers report, this one scores the whole predictive \emph{distribution}:
-\code{predictive_coverage} says what fraction of held-out observations fell
-inside the 50/80/95\% intervals, and \code{mean_CRPS} rates sharpness and
-calibration together.  That is the reason to reach for it.  A Bayesian model
-is usually chosen for its uncertainty, and only held-out coverage shows
-whether those intervals are honest at locations the model has not seen.
+Refits the Gaussian-process model of \code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}} on
+each training fold and scores it on the held-out fold.  Besides the
+point-prediction metrics the other \verb{cv_*()} functions report, it scores
+the whole predictive distribution: \code{predictive_coverage} gives the share of
+held-out observations inside the 50, 80 and 95 percent intervals, and
+\code{mean_CRPS} rates sharpness and calibration together.  A Bayesian model is
+often chosen for its uncertainty, and held-out coverage shows whether
+those intervals are honest at locations the model has not seen.
 }
 \details{
-It is the most expensive wrapper in the package by a wide margin: every fold
-is a full MCMC run.  Use few folds, and \code{parallel = TRUE} if you have
-the cores.  For a cheap first pass on the same question, cross-validate a
-forest with \code{\link{cv_rf}()} and come back here once the predictor set
-has settled.
+Every fold is a full MCMC run, so this is the slowest of the \verb{cv_*()}
+functions.  Use few folds, and \code{parallel = TRUE} if you have the cores.
+For a quicker first pass on the same question, cross-validate a random
+forest with \code{\link[=cv_rf]{cv_rf()}} and come back here once the predictor set has
+settled.
 }
 \section{Warnings from the folds}{
 
-\code{\link{fit_bayesian_spatial_model}()} warns about a fit under four
-condition classes: \code{spatialkit_gp_basis_size},
-\code{spatialkit_gp_resolution}, \code{spatialkit_convergence} and
-\code{spatialkit_gp_adequacy} (see its \strong{Warnings}).  Each fold is
-a fit, and none of those warnings says which fold it came from, so they
-are collected as the folds run and each class is raised once after the
-last fold, under this function's name and with the same class.  Each
-warning names the folds and carries \code{folds} (their labels) and
-\code{fold_messages} (every fold's own text, named by fold) as fields of
-the condition.  The convergence warning covers the folds that were
-scored and gives the checks each failed, also as the field
-\code{failed}; the other three quote the first fold's own text.  Each
-fold's own line is in the log.  Warnings that Stan or \pkg{brms} raise
-themselves are not collected and are passed on.
+\code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}} warns about a fit under four condition
+classes: \code{spatialkit_gp_basis_size}, \code{spatialkit_gp_resolution},
+\code{spatialkit_convergence} and \code{spatialkit_gp_adequacy} (see its section
+"Warnings").  Each fold is a fit, and none of those warnings says which
+fold it came from, so they are collected as the folds run and each class is
+raised once after the last fold, under this function's name and with the
+same class.  Each warning names the folds and carries \code{folds} (their
+labels) and \code{fold_messages} (every fold's own text, named by fold) as
+fields of the condition.  The convergence warning covers the folds that
+were scored and gives the checks each failed, also as the field \code{failed};
+the other three quote the first fold's own text.  Each fold's own line is
+in the log.  Warnings that Stan or \pkg{brms} raise themselves are not
+collected and are passed on.
 }
 
 \section{Percentage errors on responses with zeros}{
@@ -256,40 +252,33 @@ must tolerate their absence.
 \examples{
 \dontrun{
 # Not run: fits with Stan, which needs a working C++ toolchain and takes
-# minutes of MCMC -- both outside what an example may assume.
-if (requireNamespace("brms", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  n <- 60
-  dat <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               elev = rnorm(n)),
-    coords = c("x", "y"), crs = 32632
-  )
-  dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
-    2 * dat$elev + rnorm(n)
-  # Two short chains per fold keep this to a few minutes and leave the
-  # posterior rough, so the intervals below will run narrow; a run to
-  # report uses brms's defaults (chains = 4, iter = 2000).
-  cv <- cv_bayes(dat, "price", "elev", k = 2,
-                 fit_args = list(chains = 2, iter = 1000))
-  print(cv$overall)
-  cv$predictive_coverage  # coverage at 50/80/95\% plus mean CRPS
-}
+# minutes of MCMC.
+library(sf)
+set.seed(1)
+n <- 60
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             elev = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
+  2 * dat$elev + rnorm(n)
+# Two short chains per fold keep this to a few minutes and leave the
+# posterior rough, so the intervals below will run narrow; a run to
+# report uses the defaults of brms (chains = 4, iter = 2000).
+cv <- cv_bayes(dat, "price", "elev", k = 2,
+               fit_args = list(chains = 2, iter = 1000))
+cv$overall
+cv$predictive_coverage  # coverage at 50, 80 and 95 percent, and mean CRPS
 }
 }
 \seealso{
 Other cross-validation:
 \code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
 \code{\link[=cv_gwr]{cv_gwr()}},
 \code{\link[=cv_rf]{cv_rf()}},
 \code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=fold_separation]{fold_separation()}},
 \code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=sac_nugget]{sac_nugget()}},
 \code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

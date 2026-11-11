@@ -32,7 +32,6 @@ support, whatever the cross-validation score said.
 \seealso{
 Other print methods:
 \code{\link[=print.gwr_model_selection]{print.gwr_model_selection()}},
-\code{\link[=print.morans_i]{print.morans_i()}},
-\code{\link[=print.sac_range]{print.sac_range()}}
+\code{\link[=print.morans_i]{print.morans_i()}}
 }
 \concept{print methods}

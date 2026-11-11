@@ -512,12 +512,12 @@
 #'     pointization; the \code{cv_*()} wrappers probe the \code{data_sf} they
 #'     were handed, before \code{prep_model_data()}.  Both therefore see the
 #'     same features, and a polygon layer reduced with a different
-#'     \code{pointize} in the two calls no longer reads as different data.
+#'     \code{pointize} in the two calls does not read as different data.
 #'     Non-point geometry is reduced to its centroid here, identically on both
 #'     sides, purely as a stable representative location.
 #'   \item \strong{Row IDs kept in their own type.}  A user-supplied character
-#'     \code{..row_id} used to be coerced with \code{as.integer()}, becoming
-#'     all-\code{NA} and matching row 1 on every probe.
+#'     \code{..row_id} coerced with \code{as.integer()} would become
+#'     all-\code{NA} and match row 1 on every probe.
 #'   \item \strong{Compared numerically, with a tolerance.}  Formatting the
 #'     coordinates with \code{"\%.7g"} and comparing strings flipped on the
 #'     ~1 in 5000 coordinates that a reprojection round trip moved across a
@@ -1845,9 +1845,9 @@
 #' \code{overall} is pooled over the folds that succeeded, so a run that lost
 #' a fold reports a score over fewer rows -- and not a random few: in spatial
 #' block CV the fold that fails is usually the hardest extrapolation block
-#' (the only rows of a factor level, a region no training fold covers).  This
-#' used to be a log line only, which \code{tryCatch()},
-#' \code{expect_warning()} and \code{options(warn = 2)} never see.  Folds
+#' (the only rows of a factor level, a region no training fold covers).  It is
+#' an R warning and not a log line only, which \code{tryCatch()},
+#' \code{expect_warning()} and \code{options(warn = 2)} would not see.  Folds
 #' dropped before fitting are left out of the warning: \code{.remap_folds()}
 #' has already raised one for them.  The all-folds-failed case is the
 #' callers' own, louder warning.
@@ -2048,8 +2048,8 @@
 #'   (\code{.centre_columns()}): \code{gls()} on a predictor or a response
 #'   at 1e8 plus a spread of 1 fails.
 #' @param fml The trend formula.
-#' @param extent A length scale of the layer in the caller's unit, used to
-#'   bound starting ranges; it is divided by the diagonal and rounded to
+#' @param extent A length scale of the layer in the caller's unit, which
+#'   bounds the starting ranges; it is divided by the diagonal and rounded to
 #'   \code{.KMEANS_STEP}, as the coordinates are.  One that is not finite
 #'   or not positive is read as the diagonal.
 #' @return \code{NULL} when no fit converged; a list with one element,
@@ -3022,90 +3022,88 @@
 }
 
 
-#' The nugget of an estimated autocorrelation range
+#' Extract the nugget of an estimated autocorrelation range
 #'
-#' The nugget variance of the variogram model behind a
-#' \code{\link{estimate_sac_range}()} result: the model's semivariance as
-#' the separation shrinks to zero, i.e. measurement error plus variation at
-#' scales shorter than the first lag of the empirical variogram.  It is
-#' extrapolated to zero from that lag, not observed, so it is only as good
-#' as the first lag is short: \code{attr(x, "first_lag")} says where the
-#' extrapolation starts.
-#' With \code{lags = "adaptive"} (the default) that is the separation of the
-#' closest pairs of points; with \code{lags = "equal"} it is the middle of a
-#' bin \code{cutoff * max_dist / n_lags} wide, which on a dense layer can be
-#' many times the spacing of close pairs, and structure shorter than that
-#' bin is then counted as nugget.
+#' The nugget variance of the variogram model behind an
+#' [estimate_sac_range()] result: the model's semivariance as the separation
+#' shrinks to zero, which is measurement error plus variation at scales
+#' shorter than the first lag of the empirical variogram.
 #'
-#' Three more attributes say how far to trust it.
-#' \code{attr(x, "nugget_at_bound")} is \code{TRUE} when the fit put the
-#' nugget at its lower bound (0, or at most \eqn{10^{-4}} of the sill): that
-#' is the bound and not an estimate, and a criterion that uses it as a noise
-#' variance has no penalty left.  \code{attr(x, "short_lag_semivariance")}
-#' is the semivariance of nearest-neighbour pairs, computed with no model:
-#' each location is paired with the nearest other location (of several
-#' whose squared distances agree to within one part in ten million, the one
-#' with the lower x coordinate, then the lower y, with or without
-#' \pkg{FNN}) (\code{short_lag_pairs} and \code{short_lag_dist} give the
-#' number of such pairs and their median separation).  On a square lattice
-#' that pairs almost every location with its neighbour along x, so the value
-#' measures the field along x; with the axes of the CRS swapped it can
-#' differ.  A semivariance does not fall
-#' as the lag shrinks, so this value bounds the nugget from above, up to its
-#' sampling error; a fitted nugget well above it is contradicted by the
-#' closest pairs.  \code{attr(x, "zero_lag_semivariance")} exists where
-#' locations were visited more than once (\code{zero_lag_pairs} is not 0):
-#' it is the semivariance of every pair of rows that share a location, that
-#' is, the variance between visits to one place.  That is the measurement
-#' part of the nugget, observed and not extrapolated, without the variation
-#' at scales below the spacing of the locations, so it bounds the nugget
-#' from below.  Such pairs are at no lag and are in no bin of the
-#' variogram: the model, and so the nugget, describe positive separations.
-#' The variogram fit uses the bound, though: where it rests on 30 degrees
-#' of freedom or more (rows less locations) the nugget is not let under it,
-#' and \code{attr(x, "nugget_floor")} holds the value (0 when there is no
-#' floor).  With \code{detrend = "reml"} the model is built from the REML
-#' parameters and takes no floor: its nugget can come out below the
-#' variance between visits, and \code{nugget_floor} is 0.
-#' A nugget equal to its floor is the variance between visits, a
-#' measurement, and \code{nugget_at_bound} stays \code{FALSE} for it unless
-#' the floor itself is at most \eqn{10^{-4}} of the sill.
+#' @details
+#' The nugget is extrapolated to zero from the first lag, not observed, so it
+#' is only as good as that lag is short; `attr(x, "first_lag")` says where the
+#' extrapolation starts.  With `lags = "adaptive"` (the default) the first
+#' lag is the separation of the closest pairs of points.  With
+#' `lags = "equal"` it is the middle of a bin `cutoff * max_dist / n_lags`
+#' wide, which on a dense layer can be many times the spacing of close pairs,
+#' and structure shorter than that bin is then counted as nugget.  When
+#' `attr(x, "lag_fallback")` is `TRUE` the result is the equal-lag one
+#' although adaptive lags were asked for (see the section "The lags" in
+#' [estimate_sac_range()]), and its nugget is extrapolated from the first
+#' equal bin.
 #'
-#' When \code{attr(x, "lag_fallback")} is \code{TRUE} the result is the
-#' equal-lag one although adaptive lags were asked for (see "The lags" in
-#' \code{\link{estimate_sac_range}}), and its nugget is extrapolated from
-#' the first equal bin.
+#' Every classed result, identified or rejected, carries the nugget as its
+#' `nugget` attribute, since a resolution criterion for a tessellation needs
+#' it: it is the short-lag variance that no cell can average away.  On a
+#' result refused for want of spatial structure it is the variance of the
+#' modelled variable, the nugget of the pure-nugget model that the refusal
+#' supports.
 #'
-#' The nugget is carried as the \code{nugget} attribute of every classed
-#' result, identified or rejected, because it is the number a resolution
-#' criterion for a tessellation needs (the short-lag variance that no cell
-#' can average away).  On a result refused for want of spatial structure it
-#' is the variance of the modelled variable, which is the nugget of the
-#' model that refusal supports.
+#' @section How far to trust it:
+#' Four more attributes of the result bear on the nugget.
+#' * `nugget_at_bound` is `TRUE` when the fit put the nugget at its lower
+#'   bound (0, or at most 1e-4 of the sill).  That value is
+#'   the bound and not an estimate, and a criterion that uses it as a noise
+#'   variance has no penalty left.  A nugget equal to its floor (see
+#'   `nugget_floor`) is the variance between visits, a measurement, and
+#'   `nugget_at_bound` stays `FALSE` for it unless the floor itself is at
+#'   most 1e-4 of the sill.
+#' * `short_lag_semivariance` is the semivariance of nearest-neighbour pairs
+#'   of locations, computed with no model; `short_lag_pairs` and
+#'   `short_lag_dist` give the number of pairs and their median separation.
+#'   Each location is paired with the nearest other location, and of several
+#'   whose squared distances agree to one part in ten million, with the one
+#'   of lower x coordinate, then lower y.  On a square lattice that pairs
+#'   almost every location with its neighbour along x, so the value measures
+#'   the field along x, and with the axes of the CRS swapped it can differ.
+#'   A semivariance does not fall as the lag shrinks, so this value bounds the
+#'   nugget from above, up to its sampling error: a fitted nugget well above
+#'   it is contradicted by the closest pairs.
+#' * `zero_lag_semivariance` exists where locations were visited more than
+#'   once (`zero_lag_pairs` is not 0).  It is the semivariance of every pair
+#'   of rows that share a location, the variance between visits to one place.
+#'   That is the measurement part of the nugget, observed and not
+#'   extrapolated, without the variation at scales below the spacing of the
+#'   locations, so it bounds the nugget from below.  Such pairs are at no lag
+#'   and in no bin of the variogram, since the model, and so the nugget,
+#'   describe positive separations.
+#' * `nugget_floor` is the value the fit did not let the nugget under:
+#'   `zero_lag_semivariance` where it rests on 30 degrees of freedom or more
+#'   (rows less locations), and 0 otherwise.  With `detrend = "reml"` the
+#'   model is built from the REML parameters and takes no floor: its nugget
+#'   can come out below the variance between visits, and `nugget_floor` is 0.
 #'
-#' @param x A \code{sac_range} object, or anything else.
-#' @return A single number: the nugget in the units of the response's
-#'   variance; \code{NA_real_} when \code{x} carries no fitted model (a bare
-#'   \code{NA} from a run that could not fit anything, a rejected result with
-#'   too few lag bins to fit, or an object that is not a \code{sac_range}).
-#' @seealso \code{\link{estimate_sac_range}}, which produces the object.
-#' @family cross-validation
-#' @examples
-#' if (requireNamespace("gstat", quietly = TRUE)) {
-#'   library(sf)
-#'   # A field with a real nugget: half a unit of white noise on a unit sill.
-#'   set.seed(3)
-#'   n <- 250
-#'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-#'   D  <- as.matrix(dist(xy))
-#'   xy$z <- as.numeric(t(chol(exp(-D / 150) + diag(0.5, n))) %*% rnorm(n))
-#'   r <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632), "z")
-#'   print(sac_nugget(r))  # the fitted nugget variance, on the sill's scale
-#'   attr(r, "nugget_at_bound")         # FALSE: an estimate, not the bound
-#'   attr(r, "short_lag_semivariance")  # what the closest pairs say, no model
-#'   attr(r, "zero_lag_pairs")          # 0: no location was visited twice
-#'   sac_nugget(NA)        # nothing fitted: NA
-#' }
+#' @param x A `sac_range` object, or any other value.
+#' @return A single number, the nugget in the units of the response's
+#'   variance, or `NA_real_` when `x` carries no fitted model: a bare `NA`
+#'   from a run that could not fit anything, a rejected result with too few
+#'   lag bins to fit, or an object that is not a `sac_range`.
+#' @seealso [estimate_sac_range()], which produces the object.
+#' @family spatial autocorrelation
+#' @examplesIf requireNamespace("gstat", quietly = TRUE)
+#' library(sf)
+#' # A field with a nugget: half a unit of white noise on a unit sill.
+#' set.seed(3)
+#' n <- 250
+#' xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+#' D  <- as.matrix(dist(xy))
+#' xy$z <- as.numeric(t(chol(exp(-D / 150) + diag(0.5, n))) %*% rnorm(n))
+#' r <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632), "z")
+#' sac_nugget(r)                      # the fitted nugget, on the sill's scale
+#' attr(r, "nugget_at_bound")         # FALSE: an estimate, not the bound
+#' attr(r, "short_lag_semivariance")  # what the closest pairs say, no model
+#' attr(r, "zero_lag_pairs")          # 0: no location was visited twice
+#' sac_nugget(NA)                     # nothing fitted: NA
 #' @export
 sac_nugget <- function(x) {
   v <- attr(x, "nugget")
@@ -3118,387 +3116,191 @@ sac_nugget <- function(x) {
 #' Estimate the spatial autocorrelation range from data
 #'
 #' Fits an exponential variogram model with a nugget and returns the
-#' \emph{effective range}: three times the fitted range parameter, which is
-#' where the semivariance reaches about 95 percent of the sill.  It is the
-#' distance beyond which two observations are (near) uncorrelated, which is
-#' what a block or a buffer has to exceed.
+#' effective range: three times the fitted range parameter, where the
+#' semivariance reaches about 95 percent of the sill.  Beyond it two
+#' observations are close to uncorrelated, so it is the distance a block or a
+#' buffer has to exceed.  The range is in the units of the projected CRS the
+#' variogram is fitted in.  Pass it as the `block_size` of [make_folds()], or
+#' let `make_folds(auto_range = TRUE)` estimate it, so that the blocks are at
+#' least as wide as the autocorrelation range.
 #'
-#' The result is a function of the data alone.  The same layer gives the
-#' same answer whatever the unit of the response or of the coordinates and
-#' whatever the order of its rows, and a change in the last bits of the
-#' values changes the answer by about as much.  Three things make it so.
-#' The rows are sorted by their coordinates as supplied, then by the
-#' response and the predictors, before anything else, so the projection
-#' chosen for lon/lat input, the \code{n_max} subsample and the pair sums
-#' do not depend on their order.  First coordinates within 1e-7 of the
-#' diagonal of the points' bounding box count as one column, sorted by the
-#' second coordinate, so that a lattice, whose first coordinates in one
-#' column differ in their last bits after another unit or origin, gets the
-#' same order and the same subsample in each.  (Rows that share a location
-#' are therefore in the order of their values, and no step treats the first
-#' of them as special.)  The variogram is computed on the standardised variable, and a
-#' response is called constant only when its standard deviation is under
-#' 1e-12 of its largest absolute value, which no change of unit alters, and
-#' the values centred on their median and scaled have a standard deviation
-#' of at most three units in the last place of that value.  Residuals of
-#' the predictors are called constant when they are no more than the
-#' rounding of the regression, taken on the size of the fit's terms, or
-#' three such units of the response, whether or not the floor finds spread
-#' in them, as the test for \code{cp} of \code{resolution_profile()} reads
-#' them.  So 1e15 plus a spread of 1, stored to an eighth, is not
-#' constant, and the residuals of a response the predictors fit exactly
-#' are, on a predictor far from 0 (a northing) as well.  A response that
-#' loses its spread on the raw values is centred on its median before the
-#' predictors are fitted to it and before the test for spatial structure,
-#' neither of which changes under a shift, and so is a response whose OLS
-#' residuals on the raw values lose their spread (1e15 plus 1e5 times a
-#' predictor plus a spread of 1, on that predictor).  The test for spatial
-#' structure, the semivariances and the REML fit are taken on the response
-#' divided by a power of two near its spread, so a response near 1e-160 or
-#' 1e160, whose squares lie past what doubles hold, gives the range, the
-#' test and the folds it gives in ordinary units; the variogram, the
-#' nugget, the short-lag semivariances and the REML variance are returned
-#' in the response's units squared, which near 1e160 are \code{Inf} and
-#' near 1e-160 are subnormal doubles that keep few bits, or 0.  A response
-#' so far from zero that doubles there are spaced more than a millionth of
-#' its standard deviation apart (a standard deviation of 1 at about 1e10,
-#' \eqn{2^{33}}, or beyond) is read as stored,
-#' rounded to that spacing, with a warning of class
-#' \code{spatialkit_response_imprecise}.
-#' And the model is fitted without iteration: the criterion is \pkg{gstat}'s weighted least
-#' squares (weights \eqn{N / h^2}) on lags divided by the cutoff; for each
-#' trial range the nugget and the partial sill are solved exactly, with both
-#' kept at or above zero; and the range is found by a search over a
-#' logarithmic grid from a quarter of the first lag to four cutoffs, refined
-#' in one dimension.  There is no start value, no iteration limit and no
-#' fit that fails to converge.  With \code{detrend = "reml"} there is a
-#' fourth: the REML fit reads the coordinates of the rows it uses centred on
-#' the middle of their bounding box, divided by its diagonal and rounded to
-#' \eqn{2^{-30}} of it, and the response and each numeric predictor centred
-#' on the middle of their range on those rows, divided by it and rounded
-#' the same way; its range, coefficients and variance are taken back to
-#' the layer's units.  Where the REML range is not identified the
-#' likelihood is flat, and whether the fit converged or fell back to OLS
-#' was set by the last bits of the coordinates, the response and the
-#' predictors; in that frame it does not depend on their units or origins.
-#' A value within its own rounding noise of the middle of a step, about a
-#' billionth of the diagonal or the range, can still fall on either side of
-#' it.
+#' The layer is first tested for spatial structure, and a range the data
+#' cannot identify is refused: the answer is then `NA`, with the reason and
+#' the evidence attached (see Value).  [plot.sac_range()] draws the variogram
+#' behind the estimate, and [sac_nugget()] reads its nugget.
 #'
-#' Only the exponential family is fitted.  On fields smoother than
-#' exponential that makes the range long, and blocks sized from it come out
-#' larger: they still hold the test points at least the field's range from
-#' their training data, which blocks sized from a short range do not.
-#' Choosing the family by the smaller weighted sum of squares would correct
-#' a spherical field but send exponential fields short, and blocks sized
-#' from them smaller than the range.
+#' @section What is estimated:
+#' The estimate is the omnidirectional (all-pairs) fit of an exponential model
+#' with a nugget.  Only the exponential family is fitted.  On fields smoother
+#' than exponential that makes the range long, and blocks sized from it come
+#' out larger: they still hold the test points at least the field's range
+#' from their training data, which blocks sized from a short range do not.
+#' Choosing the family by the smaller weighted sum of squares would correct a
+#' spherical field but send exponential fields short, and blocks sized from
+#' them smaller than the range.
 #'
-#' \strong{Spatial structure is tested first.}  A variogram model can be
-#' fitted to anything, and on a layer with no structure the fit returns a
-#' finite range for a large share of draws.  So Moran's I of the modelled
-#' variable is computed on its 2, 4, 8 and 16 nearest neighbours, each
-#' standardised with the moments that fit the variable (those of regression
-#' residuals when \code{predictor_vars} are given), and the smallest
-#' one-sided p-value is multiplied by four.  Neighbours tied at the k-th
-#' distance, those whose squared distances are within one part in ten
-#' million of the k-th's, share its slot's weight equally, as in
-#' \code{\link{residual_morans_i}()}, so the graphs do not depend on the
+#' The model is fitted without iteration.  The criterion is \pkg{gstat}'s
+#' weighted least squares (weights `N / h^2`) on lags divided by
+#' the cutoff.  For each trial range the nugget and the partial sill are
+#' solved exactly, both kept at or above zero, and the range is found by a
+#' search over a logarithmic grid from a quarter of the first lag to four
+#' cutoffs, refined in one dimension.  There is no start value, no iteration
+#' limit and no fit that fails to converge.
+#'
+#' @section The test for spatial structure:
+#' A variogram model can be fitted to anything, and on a layer with no
+#' structure the fit returns a finite range for a large share of draws.  So
+#' Moran's I of the modelled variable is computed first, on its 2, 4, 8 and
+#' 16 nearest neighbours, each standardised with the moments that fit the
+#' variable (those of regression residuals when `predictor_vars` are given),
+#' and the smallest one-sided p-value is multiplied by four.  When that
+#' adjusted p-value is not below `structure_alpha`, the result is `NA` with
+#' `rejected_reason` `"no spatial structure detected at the nearest-neighbour
+#' scale"`, a pure-nugget model and no fitted range.  The test uses no random
+#' numbers, and `structure_p`, `morans_i` and `structure_test` are attached
+#' to every classed result.  Its power is limited where few neighbours lie
+#' inside the range, so a short range on a sparse layer can be refused;
+#' `structure_alpha = 1` switches the refusal off.
+#'
+#' Neighbours tied at the k-th distance, those whose squared distances are
+#' within one part in ten million of the k-th's, share its slot's weight
+#' equally, as in [residual_morans_i()].  The graphs then do not depend on the
 #' unit or the origin of the coordinates wherever the doubles hold them to
 #' better than about one part in 1e8 of the distances between neighbours.
 #' Where they do not, and a distance lies past a tie by less than that
-#' rounding, the call warns, with class \code{"spatialkit_xy_imprecise"};
-#' the same holds for the nearest other location of the short-lag
-#' semivariances.  The results are those the coordinates as stored give.
-#' When that adjusted p-value is
-#' not below \code{structure_alpha}, the result is \code{NA} with
-#' \code{rejected_reason} \code{"no spatial structure detected at the
-#' nearest-neighbour scale"}, a pure-nugget model and no fitted range.  The
-#' test uses no random numbers.  \code{structure_p}, \code{morans_i} and
-#' \code{structure_test} are attached to every classed result.  Measured on
-#' a 1000 m square with 300 points, the test refuses 388 of 400 white-noise
-#' layers and 8 get a finite range, against 196 with the test off.
-#' Its power is limited where few neighbours lie inside the range.  With a
-#' nugget of a fifth of the sill it finds structure in 88 percent of fields
-#' of effective range 60 on 300 points, and in 21 percent at range 30, which
-#' is about the spacing of those points.  A short range on a sparse layer
-#' can therefore be refused; \code{structure_alpha = 1} switches the
-#' refusal off.  Rows that share a location (repeat visits) are one place
-#' and not each other's neighbours, so on such a layer the test is made on
-#' the means of the locations: what it asks is whether locations near each
-#' other are alike, which a location's own effect, however large, does not
-#' answer.  With very unequal numbers of visits the p-value is approximate.
-#' For the same reason a layer needs 30 distinct locations, not only 30
-#' rows: below that the result is the unclassed \code{NA} whose reason gives
-#' the count (see Value), and nothing is fitted.  Five locations visited 20
-#' times give ten pairs of locations and five means, from which neither a
-#' range nor a verdict on structure can be read.  Two rows are at one
-#' location when both their coordinates are equal to the last bit after the
-#' projection, so repeat visits recorded with slightly different
-#' coordinates count as separate locations; round the coordinates first to
-#' pool them.
+#' rounding, the call warns with class `"spatialkit_xy_imprecise"` (see
+#' [spatialkit-geometry]), as it does for the nearest other location of the
+#' short-lag semivariances.  The results are those the coordinates as stored
+#' give.
 #'
-#' \strong{The lags.}  With \code{lags = "adaptive"} (the default) the first
-#' bin runs from zero to the distance within which the closest
-#' \code{max(50, n / 4)} pairs of distinct locations lie, and up to
-#' \code{n_lags} further bins are spaced geometrically from there to the
-#' cutoff; a bin holding fewer than 30 pairs is merged with the next.  The
-#' short lags are then resolved at the spacing of the points, which is what
-#' the nugget and a short range are read from.  With \code{lags = "equal"}
-#' there are \code{n_lags} bins of equal width out to the cutoff, as
-#' \pkg{gstat} bins by default; each is \code{cutoff * max_dist / n_lags}
-#' wide, a structure shorter than the first of them is invisible and is
-#' counted as nugget, and the range fitted is that of whatever longer
-#' structure the layer has.  Below about a hundred points neither binning
-#' resolves much and the adaptive bins bring no gain.
+#' Rows that share a location (repeat visits) are one place and not each
+#' other's neighbours, so on such a layer the test is made on the means of the
+#' locations: it asks whether locations near each other are alike, which a
+#' location's own effect, however large, does not answer.  With very unequal
+#' numbers of visits the p-value is approximate.  For the same reason a layer
+#' needs 30 distinct locations, not only 30 rows; below that the result is the
+#' unclassed `NA` whose reason gives the count (see Value), and nothing is
+#' fitted.  Five locations visited 20 times give ten pairs of locations and
+#' five means, from which neither a range nor a verdict on structure can be
+#' read.  Two rows are at one location when both their coordinates are equal
+#' to the last bit after the projection, so repeat visits recorded with
+#' slightly different coordinates count as separate locations; round the
+#' coordinates first to pool them.
 #'
-#' Two rows at one location are a pair at zero separation, and are in no
-#' bin, whichever the binning: the variogram and the model describe positive
-#' separations.  Their semivariance, the variance between visits to a
-#' location, is returned on its own as \code{zero_lag_semivariance}, and
-#' the nugget fitted to the variogram is not let under it when the layer has
-#' 30 or more rows beyond one a location to estimate it from (a model from
-#' \code{detrend = "reml"} takes no such floor); see
-#' \code{\link{sac_nugget}}.
+#' @section The lags:
+#' With `lags = "adaptive"` (the default) the first bin runs from zero to the
+#' distance within which the closest `max(50, n / 4)` pairs of distinct
+#' locations lie, and up to `n_lags` further bins are spaced geometrically
+#' from there to the cutoff; a bin holding fewer than 30 pairs is merged with
+#' the next.  The short lags, which the nugget and a short range are read
+#' from, are then resolved at the spacing of the points.  With
+#' `lags = "equal"` there are `n_lags` bins of equal width out to the cutoff,
+#' as \pkg{gstat} bins by default.  Each is `cutoff * max_dist / n_lags`
+#' wide; a structure shorter than the first of them is counted as nugget, and
+#' the range fitted is that of whatever longer structure the layer has.  Below
+#' about a hundred points neither binning resolves much, and the adaptive
+#' bins bring no gain.
 #'
 #' The adaptive lags put little weight on the long ones, and a weak, long
 #' structure under much noise can be clear at equal lags while the adaptive
 #' fit runs past the largest lag.  So when the adaptive range is refused as
 #' past the fitted lags and the equal-lag fit has a range it would itself
-#' return, the result is the equal-lag one, whole, exactly as
-#' \code{lags = "equal"} gives it, with \code{lags} saying \code{"equal"}
-#' and \code{lag_fallback} set to \code{TRUE}.  Its nugget is then the
-#' equal-lag nugget.  No other refusal falls back.
+#' return, the result is the equal-lag one, whole, as `lags = "equal"` gives
+#' it, with `lags` saying `"equal"` and `lag_fallback` set to `TRUE`.  Its
+#' nugget is then the equal-lag nugget.  No other refusal falls back.
 #'
-#' \strong{Structure at two scales.}  One structure fitted to lags that
-#' resolve the spacing of the points follows the shortest structure of the
-#' layer.  A layer can have a weaker structure several times longer as well,
-#' and blocks sized from the short one would leave the long one across
-#' folds.  So with \code{lags = "adaptive"} the equal-lag fit is made too,
-#' and when its range is at least twice the adaptive one, a model with a
-#' nugget and both structures, at those two ranges, is fitted to the
-#' adaptive variogram.  That model is returned (\code{structures} is 2 and
-#' \code{short_range} holds the range of the short structure) and the range
-#' is the long one, unless the long structure carries under 3 percent of
-#' the model's semivariance at the largest lag: then the lags that resolve
-#' the layer give the equal-lag range nothing, and the single structure
-#' stands.  The bar is low because the two mistakes are not alike.  A long
-#' structure that is missed is lost: the range returned is the short one
-#' alone.  One that is believed in error returns the equal-lag range, which
-#' is too long, and \code{short_range} still holds the short one.  When the
-#' equal-lag range is one that \code{lags = "equal"}
-#' would itself refuse (past the fitted lags, as under an unremoved trend),
-#' the model with it is refused as well, the answer is taken away and not
-#' lengthened, and the long structure has to carry 10 percent.
+#' @section Structure at two scales:
+#' One structure fitted to lags that resolve the spacing of the points
+#' follows the shortest structure of the layer.  A layer can have a weaker
+#' structure several times longer as well, and blocks sized from the short one
+#' would leave the long one across folds.  So with `lags = "adaptive"` the
+#' equal-lag fit is made too, and when its range is at least twice the
+#' adaptive one, a model with a nugget and both structures, at those two
+#' ranges, is fitted to the adaptive variogram.  That model is returned
+#' (`structures` is 2 and `short_range` holds the range of the short
+#' structure) and the range is the long one, unless the long structure carries
+#' under 3 percent of the model's semivariance at the largest lag; then the
+#' single structure stands.
 #'
-#' Measured on a clustered layer of 1200 points over a 1000 m square, 30
-#' draws each.  With structures of range 20 and 200 both are kept in 20
-#' draws, and the range returned is under half the equal-lag one in 1; with
-#' 40 and 400, in 18 and 1; with 30 and 300, in 21 and 0; with 15 and 450,
-#' in 28 and 1.  With one structure of range 40 a second is kept in 4, and
-#' the range is within a factor 2 of the truth in 27 draws (19 with equal
-#' lags); with one of range 30, in 7 and 25 (14).  The nugget comes from the
-#' adaptive lags either way: where it is 0.3, the median is 0.32 to 0.35,
-#' and 0.49 to 0.65 with equal lags.  A long structure whose equal-lag
-#' range is under twice the adaptive one is not separated: the range is
-#' then that of the single fit, which lies between the two.
+#' The bar is low because the two mistakes are not alike.  A long structure
+#' that is missed is lost: the range returned is the short one alone.  One
+#' that is believed in error returns the equal-lag range, which is too long,
+#' and `short_range` still holds the short one.  When the equal-lag range is
+#' one that `lags = "equal"` would itself refuse (past the fitted lags, as
+#' under an unremoved trend), the model with it is refused as well, the answer
+#' is taken away and not lengthened, and the long structure has to carry 10
+#' percent.  The nugget comes from the adaptive lags either way.  A long
+#' structure whose equal-lag range is under twice the adaptive one is not
+#' separated: the range is then that of the single fit, which lies between the
+#' two.
 #'
-#' The estimate is the \strong{omnidirectional} (all-pairs) fit.  Directional
-#' variograms are fitted as well, at 0° (N–S), 45°, 90° (E–W) and 135°
-#' azimuths with a ±22.5° tolerance.  Those four windows tile all 180 distinct
-#' azimuths exactly once, and their ranges are returned in the
-#' \code{directional} attribute, with their largest-over-smallest ratio in
-#' \code{anisotropy}.  They are a diagnostic and never the answer, for two
-#' reasons.  Each direction sees about a quarter of the point pairs, and the
-#' maximum of four quarter-sample fits is biased upward.  And the windows
-#' are fixed to the coordinate axes, so any answer built from them changes
-#' when the layer is rotated, which a property of the field must not do.
-#' The all-pairs fit is the best-powered estimate available and is invariant
-#' to rotation.  When it identifies no range, no range is returned: the
-#' largest directional range does not stand in for it.
-#'
-#' Where a field is \emph{known} to be anisotropic and blocks are to be at
-#' least as large as its autocorrelation range in every direction, size them
-#' from the longest directional range explicitly.  Read it from
-#' \code{directional_fitted}, not
-#' \code{directional}: on a strongly anisotropic field the major axis is the
-#' direction most likely to run past the fitted lags, which leaves it
-#' \code{NA} in \code{directional}, so \code{max()} of that is \code{NA}, or
-#' with \code{na.rm = TRUE} the second-longest range.  Check
-#' \code{directional_status} first: a major axis marked \code{"over_cutoff"}
-#' has no identified range at all, and a longer \code{cutoff} or
-#' \code{\link{make_folds}(method = "nndm")} is the way on.  A ratio above
-#' 1.5 is written to the package log at INFO level with that advice, which
-#' reaches the session log file but not the console (the ratio passes 1.5 on
-#' most isotropic fields too); \code{print()} shows the directional ranges
-#' and the ratio, and \code{attr(range, "anisotropy")} holds it.
+#' @section Directional ranges and anisotropy:
+#' Directional variograms are fitted as well, at azimuths of 0 (north-south),
+#' 45, 90 (east-west) and 135 degrees, each with a tolerance of 22.5 degrees
+#' either way.  Those four windows tile all 180 distinct azimuths once, and
+#' their ranges are returned in the `directional` attribute, with their
+#' largest-over-smallest ratio in `anisotropy`.  They are a diagnostic and
+#' never the answer, for two reasons.  Each direction sees about a quarter of
+#' the point pairs, and the maximum of four quarter-sample fits is biased
+#' upward.  And the windows are fixed to the coordinate axes, so any answer
+#' built from them changes when the layer is rotated, which a property of the
+#' field must not do.  The all-pairs fit is the best-powered estimate
+#' available and does not change under rotation.  When it identifies no range,
+#' no range is returned: the largest directional range does not stand in for
+#' it.
 #'
 #' A direction whose variogram is flat or has too few bins, whose range runs
 #' beyond the longest fitted lag, or whose fit has no minimum inside the
-#' ranges searched is excluded and recorded as \code{NA} in the
-#' \code{directional} attribute.
+#' ranges searched is left out and recorded as `NA` in `directional`.
 #'
-#' The model is fitted \strong{with a nugget}.  A nugget-free model forces
-#' the curve through the origin, and on any real measurement (which has one)
-#' the \eqn{N / h^2} weights buy that constraint by collapsing the range.
+#' Where a field is known to be anisotropic and blocks are to be at least as
+#' large as its autocorrelation range in every direction, size them from the
+#' longest directional range yourself.  Read it from `directional_fitted`,
+#' not `directional`: on a strongly anisotropic field the major axis is the
+#' direction most likely to run past the fitted lags, which leaves it `NA` in
+#' `directional`, so `max()` of that is `NA`, or with `na.rm = TRUE` the
+#' second-longest range.  Check `directional_status` first: a major axis
+#' marked `"over_cutoff"` has no identified range at all, and a longer
+#' `cutoff` or `make_folds(method = "nndm")` is the way on.  A ratio above
+#' 1.5 is written to the package log at INFO level with that advice, which
+#' reaches the session log file but not the console (the ratio passes 1.5 on
+#' most isotropic fields too).
+#'
+#' @section The nugget:
+#' The model is fitted with a nugget.  A nugget-free model forces the curve
+#' through the origin, and on a measurement that has a nugget the
+#' `N / h^2` weights buy that constraint by collapsing the range.
 #' The fitted nugget can sit at its lower bound of zero; the result then
-#' carries \code{nugget_at_bound = TRUE}, and \code{\link{sac_nugget}} says
-#' what else is attached to judge a nugget by.
+#' carries `nugget_at_bound = TRUE`, and [sac_nugget()] lists what else is
+#' attached to judge a nugget by.
 #'
-#' The returned range is in the coordinate units of the (projected) data and
-#' can be passed directly to \code{make_folds(block_size = ...)} so that CV
-#' blocks are at least as wide as the autocorrelation range.
+#' Two rows at one location are a pair at zero separation and are in no bin,
+#' whichever the binning, since the variogram and the model describe positive
+#' separations.  Their semivariance, the variance between visits to a
+#' location, is returned on its own as `zero_lag_semivariance`.  The nugget
+#' fitted to the variogram is not let under it when the layer has 30 or more
+#' rows beyond one a location to estimate it from; a model from
+#' `detrend = "reml"` takes no such floor.
 #'
-#' @param points_sf An sf object with point geometries (will be projected
-#'   automatically if in geographic CRS).  Non-POINT geometry is reduced to
-#'   representative points; any Z or M dimension is dropped, because
-#'   \code{gstat::variogram()} uses every coordinate dimension and an XYZ layer
-#'   would otherwise return a range in 3-D while every consumer of it works in
-#'   2-D map distance; and rows without a location (an empty point, or a
-#'   coordinate that is not finite or lies beyond 1e150, as given or once
-#'   projected) are dropped with a logged count.
-#' @param response_var Character(1) name of the response column.  Rows where
-#'   it is missing or infinite are left out before anything else is done, so
-#'   they neither take part in the choice of projection for lon/lat input
-#'   nor use up the \code{n_max} subsample.  For a
-#'   count or other response whose variance tracks its mean, see the section
-#'   on non-Gaussian responses: the range is still estimated, but it is a
-#'   less reliable number than for a Gaussian response.
-#' @param predictor_vars Optional character vector.  When supplied, the
-#'   trend on these predictors is removed first and the variogram describes
-#'   the residual autocorrelation, the part a spatial model has to handle
-#'   once the covariates have done their work.  How the trend is removed is
-#'   set by \code{detrend}, and it matters: see "Detrending and the
-#'   residual-variogram bias".  Rows whose response or predictor is missing
-#'   or infinite are left out of that fit, and so of the variogram, with a
-#'   logged count.  When that leaves fewer than 30 rows, or fewer than 30
-#'   distinct locations, the result is the unclassed \code{NA} that says
-#'   how many were left (see Value).  One
-#'   case differs, as it always has: when no row at all has every predictor
-#'   (one is missing on every row) no trend can be fitted, and the variogram
-#'   is of the raw response, with an R warning and \code{detrended} set to
-#'   \code{FALSE}.  Where nothing is fitted then either (fewer than 30
-#'   distinct locations, a constant response, or points with no extent),
-#'   the result is the \code{NA} with its reason, and there is no such
-#'   warning.
-#' @param n_max Maximum number of points the variogram is computed on, at
-#'   least 30; \code{Inf} for no limit.  Variogram estimation is O(n²) so
-#'   this keeps runtime bounded.  A layer with more rows that carry a value
-#'   is cut to a seeded random subsample of this size, drawn after rows with
-#'   nothing to model have been left out and with the rows in a fixed order,
-#'   so the subsample does not depend on how the layer is sorted.  The
-#'   counts are returned as the attributes \code{n_used}, \code{n_missing}
-#'   and \code{n_subsampled}.  The floor of 30 distinct locations applies
-#'   to the rows the variogram is computed on, and a subsample of a layer
-#'   with many rows a location can hold fewer locations than the layer.
-#'   When the layer itself has 30 locations or more and the subsample holds
-#'   fewer, the reason of the \code{NA} says
-#'   \code{"of the n_max subsample"}, and a larger \code{n_max} keeps more
-#'   of them; when the layer has fewer than 30, the reason gives the layer's
-#'   counts.
-#' @param cutoff Fraction of the maximum inter-point distance to use as the
-#'   variogram lag cutoff, above 0 and at most 1.  That distance is the
-#'   farthest pair, found on the convex hull, and not the bounding-box
-#'   diagonal, which depends on how the axes are oriented.  Default 0.5.
-#' @param range_frac Positive numeric.  A fitted range exceeding
-#'   \code{range_frac * cutoff * max_dist} (at the default of 1, beyond the
-#'   longest lag the empirical variogram was actually fitted over) is treated
-#'   as unidentified and \code{NA_real_} is returned.
-#'   A model fit yields a finite number even when the
-#'   variogram never reaches a sill, and such a value extrapolates past the
-#'   observed lags instead of measuring a long autocorrelation range.  Passing
-#'   it to \code{make_folds(auto_range = TRUE)} would collapse the block grid to
-#'   a single block.  Default 1.0; raise it to accept ranges extrapolated
-#'   beyond the fitted lags.  The bound does not guarantee room for two
-#'   blocks: at the defaults it is half the farthest-pair distance, about
-#'   0.71 of the side of a square layer, and a block grid needs a range below
-#'   half the width of the bounding box in one direction or the other.  An
-#'   accepted range between the two leaves
-#'   \code{make_folds(auto_range = TRUE)} room for a single block of that
-#'   size (see its \code{auto_range} argument for what it does then).
-#'   Lowering \code{range_frac} to fit the
-#'   grid would turn those estimates into \code{NA} and the blocks into
-#'   geometric ones smaller than the range.
-#' @param seed RNG seed for the \code{n_max} subsample, restored afterwards so
-#'   the caller's random stream is untouched.  Default \code{123L}: the
-#'   subsample is an internal approximation and no part of the answer, and
-#'   leaving it unseeded would make the returned range differ between runs on
-#'   identical input and silently advance the caller's RNG.  Pass \code{NULL}
-#'   for an unseeded subsample, or a
-#'   different number to check how sensitive the estimate is to the subsample.
-#'   Ignored when no more than \code{n_max} rows carry a value, where nothing
-#'   is sampled.  On a layer whose rows crowd onto few locations the
-#'   subsample can also decide whether 30 distinct locations remain, and so
-#'   whether a range is estimated at all (see \code{n_max}).  The
-#'   \code{reml_max_n} subsample uses the same seed, and so
-#'   does the draw of one row a location that \code{detrend = "reml"} makes
-#'   on a layer with repeat visits.
-#' @param detrend How the trend on \code{predictor_vars} is removed;
-#'   ignored when there are none.  \code{"ols"} (default) fits it by ordinary
-#'   least squares and fits the variogram to the residuals, which
-#'   underestimates the range (see the section
-#'   below).  \code{"reml"} fits the trend and an exponential-plus-nugget
-#'   covariance together by residual maximum likelihood with
-#'   \code{nlme::gls()}, returns the REML range, and attaches the empirical
-#'   variogram of the REML residuals for inspection.  It needs \pkg{nlme},
-#'   costs \eqn{O(n^3)}, and so runs on at most \code{reml_max_n} points;
-#'   it takes one row a location and needs 30 locations, which every layer
-#'   needs anyway (a layer with fewer gets the unclassed \code{NA}, see
-#'   Value, and no fit is tried).  When it is not fitted (no \pkg{nlme}),
-#'   cannot be fitted (the design of the trend cannot be built, as on a
-#'   factor with one level) or does not converge,
-#'   the \code{"ols"} path runs instead with an R warning that says which.
-#'   The start of the fit is chosen from the profile
-#'   REML likelihood on a grid of ranges and nugget proportions, and when
-#'   more than one start is fitted the fit with the largest log-likelihood
-#'   is kept.
-#' @param reml_max_n Positive integer, at least 30.  With \code{detrend =
-#'   "reml"}, the trend and covariance are fitted on a seeded random subsample
-#'   of this many points when the layer has more; the fitted trend is then
-#'   removed from every point.  The fit takes one row a location: where a
-#'   location has several rows (repeat visits), one of them is drawn at
-#'   random under \code{seed}, so that the nugget fitted is the variance
-#'   between visits and not that of their minimum or of their mean.
-#'   Default 400.  Raise it for a better-determined fit at a cubic cost.
-#' @param keep_directional_fits \code{TRUE} or \code{FALSE}.  Attach each
-#'   direction's empirical
-#'   variogram and fitted model as \code{directional_fits}?  Defaults to
-#'   \code{FALSE}: the four variograms are most of the object's size, while
-#'   the numbers
-#'   read from them (\code{directional}, \code{directional_fitted},
-#'   \code{directional_status}, \code{anisotropy}) are attached either
-#'   way, and \code{plot()} draws the effective variogram from its own
-#'   attribute.  Set \code{TRUE} to inspect the directional curves.
-#' @param lags How the lags are binned: \code{"adaptive"} (default) or
-#'   \code{"equal"}; see "The lags" above.
-#' @param n_lags A whole number from 5 to 100, default 15.  With
-#'   \code{lags = "equal"}, the number of bins.  With
-#'   \code{lags = "adaptive"}, the most bins spaced geometrically past the
-#'   first; fewer are used when that many would hold under 30 pairs each.
-#' @param structure_alpha The level of the test for spatial structure, above
-#'   0 and at most 1; default 0.05.  A layer whose adjusted p-value is not
-#'   below it gets no range.  \code{1} switches the refusal off; the test
-#'   is still computed and attached.
 #' @section Detrending and the residual-variogram bias:
 #' Fitting a variogram to the residuals of a least-squares trend
 #' underestimates both the sill and the range, because the trend fit absorbs
 #' part of the long-wavelength spatial variation (Lark, Cullis and Welham
 #' 2006).  Blocks sized from that range are then narrower than the field's
 #' range, and hold the test points less far from their training data than
-#' range-sized blocks are meant to.  How large the effect is
-#' depends on how smooth the trend terms are in space, and on how many there
-#' are: for ordinary covariates it is a few percent, and for trend surfaces
-#' in the coordinates it is large.  Iterating between a GLS trend
-#' fit and a variogram refit (Neuman and Jacobson 1984) recovers only part of
-#' it, because the variogram of GLS residuals
-#' is biased too; REML does not fit a variogram to residuals at all, which is
-#' why \code{detrend = "reml"} returns its own range estimate.  Its price is
-#' a single family (exponential with nugget), a cubic cost in \code{n}, and
-#' a somewhat wider sampling spread.  The default stays \code{"ols"} so that
-#' existing scripts keep their method; a script that detrends on smooth
-#' or coordinate-based terms should pass \code{detrend = "reml"}, or size its
+#' range-sized blocks are meant to.  How large the effect is depends on how
+#' smooth the trend terms are in space and on how many there are: it is small
+#' for ordinary covariates and large for trend surfaces in the coordinates.
+#' Iterating between a GLS trend fit and a variogram refit (Neuman and
+#' Jacobson 1984) recovers only part of it, because the variogram of GLS
+#' residuals is biased too.  REML fits no variogram to residuals, which is why
+#' `detrend = "reml"` returns its own range estimate.  Its price is a single
+#' family (exponential with nugget), a cubic cost in `n`, and a somewhat wider
+#' sampling spread.  The default is `"ols"`; a script that detrends on smooth
+#' or coordinate-based terms should pass `detrend = "reml"`, or size its
 #' blocks with a margin above the range returned, to make up the shortfall.
-#' Detrending removes a trend the predictors explain.
-#' It does not make an unidentified range identified.
+#' Detrending removes a trend the predictors explain; it does not make an
+#' unidentified range identified.
 #'
 #' @section Count and other non-Gaussian responses:
 #' The empirical variogram assumes second-order stationarity: a variance that
@@ -3506,184 +3308,346 @@ sac_nugget <- function(x) {
 #' A count response breaks that assumption by construction, because its
 #' variance tracks its mean, and so does any response with a mean-variance
 #' relationship (rates, proportions, skewed amounts).  On such data the
-#' variogram mixes distance-dependence with mean-dependence, and the fitted
-#' range is not the thing it claims to be: where the mean is high the
-#' semivariance is inflated whatever the distance, which flattens the curve
-#' and can lengthen or shorten the apparent range depending on where the
-#' high-mean regions sit.
+#' variogram mixes distance-dependence with mean-dependence: where the mean is
+#' high the semivariance is inflated whatever the distance, which flattens the
+#' curve and can lengthen or shorten the apparent range depending on where the
+#' high-mean areas sit.
 #'
-#' Supplying \code{predictor_vars} to detrend helps, because it removes the
-#' part of the mean the covariates explain, but it does not fix the variance
-#' structure: the residuals of an OLS fit to a count still have a variance
-#' that tracks the fitted mean.  The principled remedy is a variogram of
-#' Pearson residuals from a model in the right family, which this function
-#' does not compute.  Treat the range from a count response as no
-#' more than an order of magnitude, since it can come out long or short, and
-#' prefer \code{\link{make_folds}(method = "nndm")}, which does not depend on a
-#' fitted range at all.
+#' Detrending on `predictor_vars` removes the part of the mean the covariates
+#' explain, but it does not fix the variance structure: the residuals of an
+#' OLS fit to a count still have a variance that tracks the fitted mean.  The
+#' remedy is a variogram of Pearson residuals from a model in the right
+#' family, which this function does not compute.  Treat the range from a
+#' count response as no more than an order of magnitude, since it can come out
+#' long or short, and prefer `make_folds(method = "nndm")`, which needs no
+#' fitted range.
 #'
-#' @return A single number, of class \code{sac_range} in the first two of the
-#'   three shapes below and an unclassed \code{NA} in the third; all three
-#'   behave as an ordinary number.  The shapes carry different attributes:
+#' @section Numerical behaviour:
+#' The result is a function of the data alone.  The same layer gives the same
+#' answer whatever the unit of the response or of the coordinates and
+#' whatever the order of its rows, and a change in the last bits of the values
+#' changes the answer by about as much.
+#'
+#' The rows are sorted by their coordinates as supplied, then by the response
+#' and the predictors, before anything else, so the projection chosen for
+#' lon/lat input, the `n_max` subsample and the pair sums do not depend on
+#' their order.  First coordinates within 1e-7 of the diagonal of the points'
+#' bounding box count as one column, sorted by the second coordinate, so a
+#' lattice whose first coordinates in one column differ in their last bits
+#' after a change of unit or origin gets the same order and the same
+#' subsample in each.  Rows that share a location are therefore in the order
+#' of their values, and no step treats the first of them as special.
+#'
+#' The variogram is computed on the standardised variable.  A response is
+#' called constant only when its standard deviation is under 1e-12 of its
+#' largest absolute value, which no change of unit alters, and the values
+#' centred on their median and scaled have a standard deviation of at most
+#' three units in the last place of that value.  Residuals of the predictors
+#' are called constant when they are no more than the rounding of the
+#' regression, taken on the size of the fit's terms, or three such units of
+#' the response, whether or not the floor finds spread in them, as the test
+#' for `cp` of [resolution_profile()] reads them.  So 1e15 plus a spread of
+#' 1, stored to an eighth, is not constant, and the residuals of a response
+#' the predictors fit exactly are, on a predictor far from 0 (a northing) as
+#' well.  A response that loses its spread on the raw values is centred on its
+#' median before the predictors are fitted to it and before the test for
+#' spatial structure, neither of which changes under a shift; so is a response
+#' whose OLS residuals on the raw values lose their spread (1e15 plus 1e5
+#' times a predictor plus a spread of 1, on that predictor).
+#'
+#' The test for spatial structure, the semivariances and the REML fit are
+#' taken on the response divided by a power of two near its spread.  A
+#' response near 1e-160 or 1e160, whose squares lie past what doubles hold,
+#' then gives the range, the test and the folds it gives in ordinary units.
+#' The variogram, the nugget, the short-lag semivariances and the REML
+#' variance are returned in the response's units squared, which near 1e160
+#' are `Inf` and near 1e-160 are subnormal doubles that keep few bits, or 0.
+#' A response so far from zero that doubles there are spaced more than a
+#' millionth of its standard deviation apart (a standard deviation of 1 at
+#' about 1e10, 2^33, or beyond) is read as stored, rounded to
+#' that spacing, with a warning of class `spatialkit_response_imprecise`.
+#'
+#' With `detrend = "reml"` the REML fit reads the coordinates of the rows it
+#' uses centred on the middle of their bounding box, divided by its diagonal
+#' and rounded to 2^-30 of it, and the response and each
+#' numeric predictor centred on the middle of their range on those rows,
+#' divided by it and rounded the same way.  Its range, coefficients and
+#' variance are taken back to the layer's units.  Where the REML range is not
+#' identified the likelihood is flat, and whether the fit converges or falls
+#' back to OLS is set by the last bits of the coordinates, the response and
+#' the predictors; in that frame it does not depend on their units or
+#' origins.  A value within its own rounding noise of the middle of a step,
+#' about a billionth of the diagonal or the range, can still fall on either
+#' side of it.
+#'
+#' @section Printing:
+#' `print()` shows the effective range as a plain number, and beneath it the
+#' directional ranges and their ratio when the directional fit is available.
+#' A direction whose fit was unusable is labelled with why
+#' (`directional_status`) and the range its fit reported
+#' (`directional_fitted`) when the object carries them, and `unidentified`
+#' otherwise.  A last line names the unit and the CRS the range is a length
+#' in (`attr(x, "crs")`, which for lon/lat input is the projected CRS the
+#' estimate chose; for a layer with no CRS, it says the range is in that
+#' layer's own coordinate units), and whether the variogram is of the
+#' response or of its residuals on `predictor_vars` (`detrended`,
+#' `detrend_method`).  `print()` returns `x` invisibly.
+#'
+#' @param points_sf An sf layer of points.  A lon/lat layer is projected
+#'   first ([spatialkit-geometry]); other geometry is reduced to
+#'   representative points, and Z and M are dropped, since
+#'   `gstat::variogram()` would otherwise measure distances in three
+#'   dimensions.  Rows without a location are dropped with a logged count.
+#' @param response_var Name of the response column.  Rows where it is missing
+#'   or infinite are left out before anything else is done, so they take no
+#'   part in the choice of projection for lon/lat input and do not use up the
+#'   `n_max` subsample.  For a count or other response whose variance tracks
+#'   its mean, see the section "Count and other non-Gaussian responses": the
+#'   range is still estimated, but it is less reliable than for a Gaussian
+#'   response.
+#' @param predictor_vars Optional character vector of predictor column names.
+#'   When given, the trend on these predictors is removed first and the
+#'   variogram describes the residual autocorrelation, the part a spatial
+#'   model has to handle once the covariates have done their work.  How the
+#'   trend is removed is set by `detrend` (see the section "Detrending and
+#'   the residual-variogram bias").  Rows whose response or predictor is
+#'   missing or infinite are left out of that fit, and so of the variogram,
+#'   with a logged count; when that leaves fewer than 30 rows, or fewer than
+#'   30 distinct locations, the result is the unclassed `NA` that says how
+#'   many were left (see Value).  When no row has every predictor (one is
+#'   missing on every row) no trend can be fitted, and the variogram is of the
+#'   raw response, with an R warning and `detrended` set to `FALSE`.  Where
+#'   nothing is fitted then either (fewer than 30 distinct locations, a constant
+#'   response, or points with no extent), the result is the `NA` with its
+#'   reason, and there is no such warning.
+#' @param n_max The most points the variogram is computed on, at least 30;
+#'   `Inf` for no limit.  Variogram estimation is `O(n^2)`, so
+#'   this bounds the run time.  A layer with more rows that carry a value is
+#'   cut to a seeded random subsample of this size, drawn after the rows with
+#'   nothing to model are left out and with the rows in a fixed order, so the
+#'   subsample does not depend on how the layer is sorted.  The counts are
+#'   returned as the attributes `n_used`, `n_missing` and `n_subsampled`.
+#'   The floor of 30 distinct locations applies to the rows the variogram is
+#'   computed on, and a subsample of a layer with many rows a location can
+#'   hold fewer locations than the layer.  When the layer itself has 30
+#'   locations or more and the subsample holds fewer, the reason of the `NA`
+#'   says `"of the n_max subsample"`, and a larger `n_max` keeps more of
+#'   them; when the layer has fewer than 30, the reason gives the layer's
+#'   counts.
+#' @param cutoff Fraction of the largest distance between two points to use
+#'   as the variogram lag cutoff, above 0 and at most 1.  That distance is the
+#'   farthest pair, found on the convex hull, not the diagonal of the bounding
+#'   box, which depends on how the axes are oriented.  Default 0.5.
+#' @param range_frac A positive number, default 1.  A fitted range beyond
+#'   `range_frac * cutoff * max_dist` (at the default, beyond the longest lag
+#'   the empirical variogram was fitted over) is treated as unidentified and
+#'   the result is `NA`.  A model fit gives a finite number even when the
+#'   variogram never reaches a sill, and such a value extrapolates past the
+#'   observed lags; passed to `make_folds(auto_range = TRUE)` it would
+#'   collapse the block grid to a single block.  Raise `range_frac` to accept
+#'   ranges extrapolated beyond the fitted lags.  The bound does not
+#'   guarantee room for two blocks: at the defaults it is half the
+#'   farthest-pair distance, about 0.71 of the side of a square layer, and a
+#'   block grid needs a range below half the width of the bounding box in one
+#'   direction or the other.  An accepted range between the two leaves
+#'   `make_folds(auto_range = TRUE)` room for a single block of that size (see
+#'   its `auto_range` argument).  Lowering `range_frac` to fit the grid would
+#'   turn those estimates into `NA` and the blocks into geometric ones smaller
+#'   than the range.
+#' @param seed RNG seed for the `n_max` subsample, the `reml_max_n`
+#'   subsample, and the draw of one row a location that `detrend = "reml"`
+#'   makes on a layer with repeat visits.  With a seed, the caller's random
+#'   stream is restored afterwards.  Default 123, so the same layer gives the
+#'   same range on every run; `NULL` leaves the draws unseeded, and another
+#'   number shows how sensitive the estimate is to the subsample.  It has no
+#'   effect where
+#'   nothing is drawn.  On a layer whose rows crowd onto few locations the
+#'   subsample can also decide whether 30 distinct locations remain, and so
+#'   whether a range is estimated at all (see `n_max`).
+#' @param detrend How the trend on `predictor_vars` is removed; ignored when
+#'   there are none.  `"ols"` (default) fits it by ordinary least squares and
+#'   fits the variogram to the residuals, which underestimates the range (see
+#'   the section "Detrending and the residual-variogram bias").  `"reml"`
+#'   fits the trend and an exponential-plus-nugget covariance together by
+#'   residual maximum likelihood with `nlme::gls()`, returns the REML range,
+#'   and attaches the empirical variogram of the REML residuals for
+#'   inspection.  It needs \pkg{nlme}, costs `O(n^3)` and so runs
+#'   on at most `reml_max_n` points, and takes one row a location.  When it
+#'   is not fitted (no \pkg{nlme}), cannot be fitted (the design of the trend
+#'   cannot be built, as on a factor with one level) or does not converge,
+#'   the `"ols"` path runs instead with an R warning that says which.  The
+#'   start of the fit is chosen from the profile REML likelihood on a grid of
+#'   ranges and nugget proportions, and when more than one start is fitted
+#'   the fit with the largest log-likelihood is kept.
+#' @param reml_max_n A whole number of at least 30, default 400.  With
+#'   `detrend = "reml"`, the trend and covariance are fitted on a seeded
+#'   random subsample of this many points when the layer has more, and the
+#'   fitted trend is then removed from every point.  The fit takes one row a
+#'   location: where a location has several rows (repeat visits), one of them
+#'   is drawn at random under `seed`, so the nugget fitted is the variance
+#'   between visits and not that of their minimum or of their mean.  Raise it
+#'   for a better-determined fit at a cubic cost.
+#' @param keep_directional_fits `TRUE` or `FALSE`, default `FALSE`.  Attach
+#'   each direction's empirical variogram and fitted model as
+#'   `directional_fits`.  The four variograms are most of the object's size;
+#'   the numbers read from them (`directional`, `directional_fitted`,
+#'   `directional_status`, `anisotropy`) are attached either way, and
+#'   `plot()` draws the all-pairs variogram from its own attribute.
+#' @param lags How the lags are binned: `"adaptive"` (default) or `"equal"`;
+#'   see the section "The lags".
+#' @param n_lags A whole number from 5 to 100, default 15.  With
+#'   `lags = "equal"`, the number of bins.  With `lags = "adaptive"`, the most
+#'   bins spaced geometrically past the first; fewer are used when that many
+#'   would hold under 30 pairs each.
+#' @param structure_alpha The level of the test for spatial structure, above 0
+#'   and at most 1; default 0.05.  A layer whose adjusted p-value is not below
+#'   it gets no range.  `1` switches the refusal off; the test is still
+#'   computed and attached.
+#' @param x A `sac_range` object, for `print()`.
+#' @param ... Ignored.
+#' @return A single number, in one of three shapes, each of which behaves as
+#'   an ordinary number.  A range that was fitted, and a range fitted and
+#'   refused, are of class `sac_range`; a call that could fit nothing returns
+#'   an unclassed `NA`.  The attributes and the class do not affect `is.na()`
+#'   or `is.finite()`, so code that tests for a missing range treats all
+#'   three alike.
 #'   \describe{
-#'     \item{Success}{A positive effective range in projected coordinate units,
-#'       with the fit attached as attributes \code{directional} (the 0°, 45°,
-#'       90° and 135° ranges, named by azimuth; \code{NA} where that
-#'       direction's fit was unusable), \code{anisotropy} (largest
-#'       over smallest), \code{anisotropy_used} (always \code{FALSE}: the
-#'       all-pairs fit is the estimate; kept for code that reads it),
-#'       \code{directional_status}
-#'       (per azimuth, why a direction is
-#'       \code{NA} in \code{directional}: \code{"ok"}, \code{"over_cutoff"}
-#'       (its range ran past the largest lag fitted), \code{"not_converged"}
-#'       (its fit has no minimum inside the ranges searched)
-#'       or \code{"no_fit"} (a flat variogram, or too few bins)),
-#'       \code{directional_fitted} (the range each
-#'       direction's fit reported whether or not it was usable, so a refused
-#'       directional range stays recoverable) and \code{directional_fits} (a
-#'       list by azimuth of each direction's empirical \code{variogram} and
-#'       fitted \code{model}, \code{NULL} where there is none, and
-#'       \code{NULL} altogether unless \code{keep_directional_fits = TRUE}),
-#'       \code{detrended} (logical: whether the variogram is of the
-#'       residuals on \code{predictor_vars} or of the raw response.  A
-#'       missing predictor is an error, and a failed detrending fit
-#'       warns and falls back to the raw response with this set to
-#'       \code{FALSE}), \code{detrend_method} (\code{"ols"} or \code{"reml"}
-#'       when detrended, \code{NA} otherwise), \code{reml} (with
-#'       \code{detrend = "reml"}: a list with \code{n_used},
-#'       \code{subsampled}, \code{nugget_prop}, \code{sigma2},
-#'       \code{logLik} (the REML log-likelihood of the fit kept),
-#'       \code{logLik_gain} (its gain over the same trend with independent
-#'       errors) and \code{n_fits} (the starts fitted); \code{NULL}
-#'       otherwise),
-#'       \code{crs} (the projected CRS the variogram was
-#'       fitted in: the unit of the range), \code{max_dist},
-#'       \code{cutoff_dist}, \code{variogram} (the empirical variogram, in
-#'       the units of the response's variance),
-#'       \code{variogram_model} (the fitted model, in \pkg{gstat}'s layout,
-#'       or with \code{detrend = "reml"} one built from the REML
-#'       parameters), \code{nugget} (that model's nugget variance; see
-#'       \code{\link{sac_nugget}}), \code{nugget_at_bound} (\code{TRUE} when
-#'       the nugget is at its lower bound, 0 or at most \eqn{10^{-4}} of
-#'       the sill, and so is not an estimate), \code{first_lag} (the mean separation in the
-#'       first bin: the shortest lag resolved, from which the nugget is
-#'       extrapolated), \code{bins_below_range} (how many bins lie inside
-#'       the fitted range; with fewer than three the split between nugget
-#'       and structure rests on very little),
-#'       \code{short_lag_semivariance}, \code{short_lag_pairs} and
-#'       \code{short_lag_dist} (the semivariance of nearest-neighbour pairs
-#'       of locations with no model, their number and their median
-#'       separation: an upper bound on the nugget),
-#'       \code{zero_lag_semivariance} and \code{zero_lag_pairs} (the
-#'       semivariance of the pairs of rows that share a location, which is
-#'       the variance between visits to one place and a lower bound on the
-#'       nugget, and their number; \code{NA} and 0 when no location has two
-#'       rows), \code{nugget_floor} (the value the fitted nugget was not let
-#'       under: \code{zero_lag_semivariance} when the rows outnumber the
-#'       locations by 30 or more, else 0, and always 0 with
-#'       \code{detrend = "reml"}), \code{structure_p},
-#'       \code{morans_i} and
-#'       \code{structure_test} (the adjusted p-value of the test for
-#'       spatial structure, Moran's I on the 8 nearest neighbours, and the
-#'       statistic, z and p for each neighbourhood size),
-#'       \code{structures} and \code{short_range} (how many structures the
-#'       model has besides the nugget, and the effective range of the short
-#'       one when there are two, \code{NA} otherwise), \code{lags},
-#'       \code{lag_boundaries} and \code{lag_fallback} (the binning behind
-#'       the result, its upper bin edges, and \code{TRUE} when adaptive lags
-#'       were asked for and the equal-lag result is returned; see "The
-#'       lags"), and
-#'       \code{n_used}, \code{n_missing} and \code{n_subsampled} (the points
-#'       the variogram was computed on, the rows left out for a missing
-#'       response or predictor, and the rows left out by the \code{n_max}
-#'       subsample), so the fit can be inspected and need not
-#'       be taken on trust.}
-#'     \item{Rejected range}{\code{NA_real_} when no range is identified.
-#'       It is classed \code{sac_range} as well, so it prints as \code{NA}
-#'       without dumping its attributes, and it carries every attribute of
-#'       a success (the evidence for the rejection), plus
-#'       \code{rejected_range} (the value that was refused, \code{NA} when
-#'       none was fitted) and \code{rejected_reason}, one of:
+#'     \item{Success}{A positive effective range in the units of the
+#'       projected CRS, with the fit attached as attributes:
 #'       \itemize{
-#'         \item \code{"no spatial structure detected at the
-#'           nearest-neighbour scale"}: the test above.  The model attached
-#'           is a pure nugget at the variance of the modelled variable, and
-#'           nothing fitted is handed on.
-#'         \item \code{"the empirical variogram is flat: no spatial
-#'           structure at the lags resolved"}: no model with a range fits
-#'           the variogram better than a constant.  The model attached is
-#'           that constant, a pure nugget.
-#'         \item \code{"empirical variogram decreases with distance"}: the
-#'           semivariance falls over the shorter lags (a net fall of more
-#'           than 15 percent of the mean semivariance there, weighted by
-#'           pairs), which is the shape of a periodic, hole-effect
-#'           structure or of a variance that differs between a dense
-#'           cluster and the rest of the layer.  Sampling noise in the
-#'           short-lag bins of a small sample can make that fall too.
-#'         \item \code{"fitted range exceeds the largest lag fitted"}: the
-#'           range is past \code{range_frac * cutoff * max_dist} (see
-#'           \code{range_frac}).  An unremoved trend ends here when the
-#'           variogram rises past the fitted lags; a milder trend only
-#'           lengthens the fitted range and passes, which is what
-#'           \code{predictor_vars} is for.
-#'         \item \code{"fitted range is below the shortest lag fitted"}:
-#'           too few pairs of points lie inside the range to identify it,
-#'           because it is shorter than the shortest lag the
-#'           empirical variogram resolves (\code{first_lag}) or, with
-#'           \code{detrend = "reml"}, than the distance within
-#'           which 30 pairs of the points the REML fit used lie, when that is
-#'           shorter (the REML range is fitted to the point pairs, not to the
-#'           bins).  A structure that short cannot be told from a nugget.
-#'           \code{range_floor} holds the distance the refused range fell
-#'           short of.
-#'         \item \code{"fitted range is non-positive or non-finite"}.
-#'         \item \code{"no variogram model could be fitted: fewer than
-#'           three lag bins hold point pairs"}, which is when it is
-#'           returned.  \code{variogram_model} is \code{NULL} and
-#'           \code{nugget} is \code{NA}.
+#'         \item `crs`: the projected CRS the variogram was fitted in, which
+#'           gives the unit of the range; `max_dist` and `cutoff_dist`: the
+#'           farthest pair and the lag cutoff.
+#'         \item `variogram`: the empirical variogram, in the units of the
+#'           response's variance; `variogram_model`: the fitted model, in
+#'           \pkg{gstat}'s layout, or with `detrend = "reml"` one built from
+#'           the REML parameters.
+#'         \item `lags`, `lag_boundaries` and `lag_fallback`: the binning
+#'           behind the result, its upper bin edges, and `TRUE` when adaptive
+#'           lags were asked for and the equal-lag result is returned (see the
+#'           section "The lags").
+#'         \item `first_lag`: the mean separation in the first bin, the
+#'           shortest lag resolved, from which the nugget is extrapolated;
+#'           `bins_below_range`: how many bins lie inside the fitted range
+#'           (with fewer than three, the split between nugget and structure
+#'           rests on very little).
+#'         \item `structures` and `short_range`: how many structures the model
+#'           has besides the nugget, and the effective range of the short one
+#'           when there are two (`NA` otherwise).
+#'         \item `nugget` (the model's nugget variance), `nugget_at_bound`,
+#'           `nugget_floor`, `short_lag_semivariance`, `short_lag_pairs`,
+#'           `short_lag_dist`, `zero_lag_semivariance` and `zero_lag_pairs`:
+#'           the nugget and the evidence to judge it by, described in
+#'           [sac_nugget()].  `zero_lag_semivariance` is `NA` and
+#'           `zero_lag_pairs` 0 when no location has two rows.
+#'         \item `structure_p`, `morans_i` and `structure_test`: the adjusted
+#'           p-value of the test for spatial structure, Moran's I on the 8
+#'           nearest neighbours, and the statistic, z and p for each
+#'           neighbourhood size.
+#'         \item `directional`: the ranges at azimuths 0, 45, 90 and 135
+#'           degrees, named by azimuth, `NA` where that direction's fit was
+#'           unusable;
+#'           `directional_status`: per azimuth, why a direction is `NA` in
+#'           `directional`: `"ok"`, `"over_cutoff"` (its range ran past the
+#'           largest lag fitted), `"not_converged"` (its fit has no minimum
+#'           inside the ranges searched) or `"no_fit"` (a flat variogram, or
+#'           too few bins); `directional_fitted`: the range each direction's
+#'           fit reported, usable or not, so a refused directional range stays
+#'           recoverable; `directional_fits`: with
+#'           `keep_directional_fits = TRUE`, a list by azimuth of each
+#'           direction's empirical `variogram` and fitted `model` (`NULL`
+#'           where there is none), and `NULL` otherwise; `anisotropy`: the
+#'           largest directional range over the smallest; `anisotropy_used`:
+#'           always `FALSE`, since the all-pairs fit is the estimate.
+#'         \item `detrended`: whether the variogram is of the residuals on
+#'           `predictor_vars` (`TRUE`) or of the raw response.  A predictor
+#'           that is not a column is an error, and a detrending fit that fails
+#'           warns and falls back to the raw response with this set to
+#'           `FALSE`.  `detrend_method`: `"ols"` or `"reml"` when detrended,
+#'           `NA` otherwise.  `reml`: with `detrend = "reml"`, a list with
+#'           `n_used`, `subsampled`, `nugget_prop`, `sigma2`, `logLik` (the
+#'           REML log-likelihood of the fit kept), `logLik_gain` (its gain
+#'           over the same trend with independent errors) and `n_fits` (the
+#'           starts fitted); `NULL` otherwise.
+#'         \item `n_used`, `n_missing` and `n_subsampled`: the points the
+#'           variogram was computed on, the rows left out for a missing
+#'           response or predictor, and the rows the `n_max` subsample left
+#'           out.
+#'       }}
+#'     \item{Rejected range}{`NA_real_` when no range is identified.  It is
+#'       classed `sac_range` as well, so it prints as `NA` without dumping its
+#'       attributes, and it carries every attribute of a success (the
+#'       evidence for the rejection), plus `rejected_range` (the value that
+#'       was refused, `NA` when none was fitted) and `rejected_reason`, one
+#'       of:
+#'       \itemize{
+#'         \item `"no spatial structure detected at the nearest-neighbour
+#'           scale"`: the test in the section "The test for spatial
+#'           structure".  The model attached is a pure nugget at the variance
+#'           of the modelled variable, and nothing fitted is handed on.
+#'         \item `"the empirical variogram is flat: no spatial structure at
+#'           the lags resolved"`: no model with a range fits the variogram
+#'           better than a constant.  The model attached is that constant, a
+#'           pure nugget.
+#'         \item `"empirical variogram decreases with distance"`: the
+#'           semivariance falls over the shorter lags (a net fall of more than
+#'           15 percent of the mean semivariance there, weighted by pairs),
+#'           which is the shape of a periodic, hole-effect structure or of a
+#'           variance that differs between a dense cluster and the rest of the
+#'           layer.  Sampling noise in the short-lag bins of a small sample can
+#'           make that fall too.
+#'         \item `"fitted range exceeds the largest lag fitted"`: the range is
+#'           past `range_frac * cutoff * max_dist` (see `range_frac`).  An
+#'           unremoved trend ends here when the variogram rises past the
+#'           fitted lags; a milder trend only lengthens the fitted range and
+#'           passes, which is what `predictor_vars` is for.
+#'         \item `"fitted range is below the shortest lag fitted"`: too few
+#'           pairs of points lie inside the range to identify it, because it
+#'           is shorter than the shortest lag the empirical variogram
+#'           resolves (`first_lag`) or, with `detrend = "reml"`, than the
+#'           distance within which 30 pairs of the points the REML fit used
+#'           lie, when that is shorter (the REML range is fitted to the point
+#'           pairs, not to the bins).  A structure that short cannot be told
+#'           from a nugget.  `range_floor` holds the distance the refused
+#'           range fell short of.
+#'         \item `"fitted range is non-positive or non-finite"`.
+#'         \item `"no variogram model could be fitted: fewer than three lag
+#'           bins hold point pairs"`.  `variogram_model` is then `NULL` and
+#'           `nugget` is `NA`.
 #'       }
 #'       The reason names one ground for the refusal, in the order above.
-#'       \code{attr(attr(range, "variogram_model"), "converged")} says one
-#'       thing more about the model: it is \code{FALSE} when the
-#'       least-squares criterion is still falling at an edge of the ranges
-#'       searched (a variogram with no sill inside four cutoffs), and the
-#'       nugget and sill of such a model are that edge and not fitted
-#'       values.  For a model with two structures the flag is that of the
-#'       equal-lag fit the long range came from: when that fit has no
-#'       minimum, the long structure's range and partial sill are the edge
-#'       of its search and the flag is \code{FALSE}, although the nugget
-#'       and the short structure were fitted at the adaptive lags.  A model
-#'       built from REML parameters carries no such
-#'       attribute.  \code{\link{resolution_profile}()} reads it, and takes
-#'       no nugget from a model marked \code{FALSE}.  Results
-#'       stored by earlier versions can carry
-#'       \code{"variogram model did not converge"} as their reason and
-#'       \code{anisotropy_used = TRUE}; neither is produced any more.}
-#'     \item{No fit}{An unclassed \code{NA_real_} when estimation could not
-#'       be attempted at all, whose one attribute, \code{rejected_reason},
-#'       says why: \code{"package 'gstat', which the variogram needs, is not
-#'       installed"}, \code{"<n> points, fewer than the 30 a variogram range
-#'       is estimated from"}, \code{"<n> point(s) with a finite value to
-#'       model, fewer than the 30 a variogram range is estimated from"}
-#'       (the count is of the whole layer's rows with a value),
-#'       \code{"<k> distinct location(s) among the <n> point(s) with a
-#'       finite value to model, fewer than the 30 a variogram range is
-#'       estimated from"} (rows that share a location count once; when the
-#'       layer has 30 or more locations and the \code{n_max} subsample kept
-#'       fewer, the counts are the subsample's and
-#'       \code{"of the n_max subsample"} stands in place of \code{"with a
-#'       finite value to model"}),
-#'       \code{"the response is constant"}, \code{"the residuals on
+#'       `attr(attr(range, "variogram_model"), "converged")` says one thing
+#'       more about the model: it is `FALSE` when the least-squares criterion
+#'       is still falling at an edge of the ranges searched (a variogram with
+#'       no sill inside four cutoffs), and the nugget and sill of such a model
+#'       are that edge and not fitted values.  For a model with two
+#'       structures the flag is that of the equal-lag fit the long range came
+#'       from: when that fit has no minimum, the long structure's range and
+#'       partial sill are the edge of its search and the flag is `FALSE`,
+#'       although the nugget and the short structure were fitted at the
+#'       adaptive lags.  A model built from REML parameters carries no such
+#'       attribute.  [resolution_profile()] reads it, and takes no nugget from
+#'       a model marked `FALSE`.}
+#'     \item{No fit}{An unclassed `NA_real_` when estimation could not be
+#'       attempted at all, whose one attribute, `rejected_reason`, says why:
+#'       `"package 'gstat', which the variogram needs, is not installed"`,
+#'       `"<n> points, fewer than the 30 a variogram range is estimated
+#'       from"`, `"<n> point(s) with a finite value to model, fewer than the
+#'       30 a variogram range is estimated from"` (the count is of the whole
+#'       layer's rows with a value), `"<k> distinct location(s) among the <n>
+#'       point(s) with a finite value to model, fewer than the 30 a variogram
+#'       range is estimated from"` (rows that share a location count once;
+#'       when the layer has 30 or more locations and the `n_max` subsample
+#'       kept fewer, the counts are the subsample's and
+#'       `"of the n_max subsample"` stands in place of `"with a finite value
+#'       to model"`), `"the response is constant"`, `"the residuals on
 #'       predictor_vars are constant: the predictors explain the response
-#'       exactly"} or \code{"the points have no extent (the largest distance
-#'       between them is zero or could not be computed)"}.  Nothing is
-#'       fitted, so none of the other attributes above exist: no
-#'       \code{variogram}, \code{variogram_model} or \code{rejected_range},
-#'       which is what tells it from a range that was fitted and refused.}
+#'       exactly"` or `"the points have no extent (the largest distance
+#'       between them is zero or could not be computed)"`.  Nothing is
+#'       fitted, so none of the other attributes exist: no `variogram`,
+#'       `variogram_model` or `rejected_range`, which is what tells it from a
+#'       range that was fitted and refused.}
 #'   }
-#'   Attributes and the class do not affect \code{is.na()} or
-#'   \code{is.finite()}, so every downstream guard treats all three the same
-#'   way it always did.
 #' @references
 #' Cliff, A. D. and Ord, J. K. (1981). \emph{Spatial Processes: Models and
 #' Applications}. Pion, London.
@@ -3697,45 +3661,40 @@ sac_nugget <- function(x) {
 #' variability by residual kriging with application to regional groundwater
 #' levels. \emph{Mathematical Geology}, 16(5), 499--521.
 #' \doi{10.1007/BF01886329}
-#' @seealso \code{\link{sac_nugget}} for the nugget behind the estimate,
-#'   \code{\link{plot.sac_range}} to see the variogram the estimate rests on.
-#' @family cross-validation
-#' @examples
-#' if (requireNamespace("gstat", quietly = TRUE)) {
-#'   library(sf)
-#'   # A Gaussian random field with an exponential covariance: range
-#'   # parameter 100, so the true effective range is 3 x 100 = 300, plus a
-#'   # small nugget.
-#'   set.seed(9)
-#'   n <- 150
-#'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-#'   D  <- as.matrix(dist(xy))
-#'   xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) %*% rnorm(n))
-#'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-#'   r <- estimate_sac_range(pts, response_var = "z")
-#'   # print() throughout, because only the last value of a braced block is
-#'   # shown on its own, and every one of these is worth reading.
-#'   print(r)                              # the effective range, in metres
-#'   print(attr(r, "directional"))         # the four directional ranges
-#'   print(attr(r, "variogram_model"))     # the fitted model behind it
-#'   print(attr(r, "structure_p"))         # the test for spatial structure
+#' @seealso [sac_nugget()] for the nugget behind the estimate, and
+#'   [plot.sac_range()] to see the variogram the estimate rests on.
+#' @family spatial autocorrelation
+#' @examplesIf requireNamespace("gstat", quietly = TRUE)
+#' library(sf)
+#' # A Gaussian random field with an exponential covariance: range parameter
+#' # 100, so the true effective range is 3 x 100 = 300, plus a small nugget.
+#' set.seed(9)
+#' n <- 150
+#' xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+#' D  <- as.matrix(dist(xy))
+#' xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) %*% rnorm(n))
+#' pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+#' r <- estimate_sac_range(pts, response_var = "z")
+#' r                            # the effective range, in metres
+#' attr(r, "directional")       # the four directional ranges
+#' attr(r, "variogram_model")   # the fitted model behind it
+#' attr(r, "structure_p")       # the test for spatial structure
 #'
-#'   # A field whose range the data cannot pin down: the variogram never
-#'   # reaches a sill within the lags fitted, so the answer is NA with the
-#'   # refused value attached rather than a long range asserted.
-#'   xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
-#'   r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
-#'                            response_var = "trend")
-#'   print(r2)
-#'   attr(r2, "rejected_reason")
-#'   attr(r2, "rejected_range")
+#' # A field whose range the data cannot pin down: the variogram never
+#' # reaches a sill within the lags fitted, so the answer is NA, with the
+#' # refused value and the reason attached.
+#' xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
+#' r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
+#'                          response_var = "trend")
+#' r2
+#' attr(r2, "rejected_reason")
+#' attr(r2, "rejected_range")
 #'
-#'   # White noise: no structure, so no range.
-#'   xy$noise <- rnorm(n)
-#'   r3 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
-#'                            response_var = "noise")
-#'   attr(r3, "rejected_reason")
-#' }
+#' # White noise: no structure, so no range.
+#' xy$noise <- rnorm(n)
+#' r3 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
+#'                          response_var = "noise")
+#' attr(r3, "rejected_reason")
 #' @export
 estimate_sac_range <- function(points_sf, response_var,
                                predictor_vars = NULL,
@@ -5021,9 +4980,9 @@ estimate_sac_range <- function(points_sf, response_var,
 #' always was: nothing is taken from a model marked FALSE.  NA when the
 #' model says nothing
 #' either way: one built from REML parameters, one made by hand, or no model
-#' at all.  Objects stored by earlier versions carry gstat's verdict here
-#' (FALSE when its optimiser stopped at the iteration limit), which is read
-#' the same way.
+#' at all.  An object fitted with gstat's iterative fit carries gstat's
+#' verdict here (FALSE when its optimiser stopped at the iteration limit),
+#' which is read the same way.
 #' @keywords internal
 #' @noRd
 .vgm_converged <- function(vm) {
@@ -5032,23 +4991,7 @@ estimate_sac_range <- function(points_sf, response_var,
 }
 
 
-#' Print a spatial autocorrelation range
-#'
-#' Prints the effective range as a plain number, with the directional fit
-#' summarised beneath it when one is available.  A direction whose fit was
-#' unusable is labelled with why (\code{directional_status}) and the range
-#' its fit reported (\code{directional_fitted}) when the object carries
-#' them, and \code{unidentified} otherwise.  A last line names the unit and
-#' the CRS the range is a length in (\code{attr(x, "crs")}, which for
-#' lon/lat input is the projected CRS the estimate chose; for a layer with
-#' no CRS, it says the range is in that layer's own coordinate units), and
-#' whether the variogram is of the response or of its residuals on
-#' \code{predictor_vars} (\code{detrended}, \code{detrend_method}).
-#'
-#' @param x An object of class \code{sac_range}.
-#' @param ... Ignored.
-#' @return \code{x}, invisibly.
-#' @family print methods
+#' @rdname estimate_sac_range
 #' @export
 print.sac_range <- function(x, ...) {
   cat(format(as.numeric(x)), "\n")
@@ -5078,13 +5021,25 @@ print.sac_range <- function(x, ...) {
       if (is.finite(ft[[i]])) sprintf("%s (%s)", format(unname(ft[[i]])), why)
       else why
     }, character(1))
-    cat("  directional: ",
-        paste(sprintf("%s deg = %s", labs,
-                      ifelse(is.finite(d), format(unname(d)), failed)),
-              collapse = ", "),
-        sep = "")
-    if (is.finite(a)) cat(sprintf("  (ratio %.2f)", a))
-    cat("\n")
+    # As many azimuths to a line as fit in 80 columns: on one line the four
+    # ranges ran to 105 characters and scrolled sideways on a help page.
+    vals <- vapply(seq_along(d), function(i)
+      if (is.finite(d[[i]])) format(unname(d[[i]])) else failed[[i]], character(1))
+    items <- sprintf("%s deg = %s", labs, vals)
+    if (length(a) == 1L && is.finite(a))
+      items[length(items)] <- sprintf("%s  (ratio %.2f)", items[length(items)], a)
+    lead <- "  directional: "
+    pad <- strrep(" ", nchar(lead))
+    lines <- character(0); cur <- ""
+    for (i in seq_along(items)) {
+      piece <- if (i < length(items)) paste0(items[i], ",") else items[i]
+      if (nzchar(cur) && nchar(cur) + 1L + nchar(piece) > 80L - nchar(lead)) {
+        lines <- c(lines, cur); cur <- piece
+      } else cur <- if (nzchar(cur)) paste(cur, piece) else piece
+    }
+    lines <- c(lines, cur)
+    cat(paste0(c(lead, rep(pad, length(lines) - 1L)), lines, collapse = "\n"),
+        "\n", sep = "")
   }
   # What the number is a length in, and of what.  Lon/lat input is fitted in a
   # UTM or equal-area CRS picked for it, and a detrended estimate is the range
@@ -5188,7 +5143,7 @@ print.sac_range <- function(x, ...) {
 #' column is available, so that the leakage warning on geometric blocks can
 #' fire.  The range returned here sizes nothing.
 #'
-#' Skips the estimate (returning \code{NA}) when \code{gstat} is not
+#' Skips the estimate (returning \code{NA}) when \pkg{gstat} is not
 #' installed or there are fewer than 30 points (the estimator's floor on
 #' rows; it refuses fewer than 30 distinct locations itself), logging why at
 #' INFO level.  Otherwise runs \code{estimate_sac_range()} with
@@ -5232,525 +5187,634 @@ print.sac_range <- function(x, ...) {
 
 #' Create spatial cross-validation folds
 #'
-#' Builds train/test splits by random k-fold, spatial block k-fold,
-#' leave-location-out, buffered leave-one-out, nearest-neighbour distance
-#' matching (NNDM) leave-one-out or its k-fold version (kNNDM).
+#' Builds train and test splits of a layer for cross-validation, by one of six
+#' methods: random k-fold, spatial block k-fold, buffered leave-one-out,
+#' leave-location-out, nearest-neighbour distance matching (NNDM)
+#' leave-one-out, or its k-fold version (kNNDM).  It returns the splits
+#' (`folds`), one row per observation naming the fold that holds it out
+#' (`assignment`), and the settings and diagnostics of the build (`params`).
+#' Pass the result as `folds` to [cv_spatial()] or another `cv_*()` function,
+#' map it with [plot_folds()], and measure how far the held-out points sit
+#' from their training data with [fold_separation()].
+#'
+#' @section Fold methods:
+#' | Method | Held out in each fold | Needs | Suits a map that |
+#' |---|---|---|---|
+#' | `"random_kfold"` | a random 1/k of the rows | `k` | predicts among the samples, over an area they cover evenly |
+#' | `"block_kfold"` | whole blocks of a grid, or of `blocks` | `k`; `block_size` or `auto_range` to size the grid | predicts into unsampled gaps about as wide as the blocks |
+#' | `"buffered_loo"` | one point, with its neighbours within `buffer` left out of training | `buffer` | predicts at a known distance from the data |
+#' | `"leave_location_out"` | every row of one or more locations | `group_var` | predicts at sites with no measurements, from repeated measurements at others |
+#' | `"nndm"` | one point, with neighbours left out to match the prediction distances | `prediction_points`; at most 5,000 rows | predicts at known locations, with a model cheap enough to refit once per point |
+#' | `"knndm"` | `k` folds matched to the prediction distances | `prediction_points` | predicts at known locations, from a large layer or with a costly model |
 #'
 #' A cross-validated error is the error at the distances the folds put
 #' between the held-out points and their training data.  It reads low for
 #' predictions made farther from the data than the held-out points sit, and
 #' high for predictions made closer, so which folds to use depends on where
-#' the model will predict.  \code{\link{fold_separation}()} with
-#' \code{prediction_points} compares the two distances, and
-#' \code{method = "nndm"} and \code{"knndm"} build folds matched to them.
+#' the model will predict.  [fold_separation()] with `prediction_points`
+#' compares the two distances, and `method = "nndm"` and `"knndm"` build
+#' folds matched to them.
 #'
-#' For \code{block_kfold}, the default grid sizing is purely geometric and
-#' unrelated to the autocorrelation range of the data.  The wider the blocks,
-#' the farther the held-out points sit from their training data.  When blocks
-#' are smaller than the autocorrelation range, held-out points have training
-#' data within the range, and the score is the error of predicting that close
-#' to the data: it reads low for predictions made farther from the data, and
-#' is the error of a map whose locations sit as close.  Use
-#' \code{block_size} to set a minimum
-#' block edge length (in CRS units), or set \code{auto_range = TRUE} to
-#' estimate the range from an empirical variogram and use it as that minimum.
-#' When a response is given and the blocks come out smaller than the
-#' estimated range, the warning says so and what range-sized blocks would
-#' yield on this layout:
-#' the setting and the grid it builds when that gives \code{k} folds, and
-#' otherwise how many folds it gives (or that it leaves a single block), the
-#' largest block size that still gives \code{k} folds, and
-#' \code{method = "nndm"} as the design that needs no block size.
+#' `"random_kfold"` ignores geography: a held-out point keeps most of its
+#' neighbours in the training data, so the score is the error of predicting
+#' among the samples.  That is the error of a map over an area the samples
+#' cover evenly, and it reads low for predictions made farther from the data,
+#' such as a map of a whole region from clustered samples.  `"block_kfold"`
+#' holds out whole blocks, so the held-out points sit farther from their
+#' training data the wider the blocks are, and the score is the error of
+#' predicting into unsampled gaps of that size; for a map of an area the
+#' samples cover, it reads high.  `"buffered_loo"` holds out one point at a
+#' time and excludes everything within a fixed `buffer` from its training
+#' set.  `"leave_location_out"` groups by `group_var`, so all observations
+#' from a location share a fold.
 #'
-#' A point on the edge two grid cells share goes to the lower one, the cell
-#' with the lower index in the full grid (\code{params$blocks$source_row};
-#' the grid is numbered along each row from the bottom left, so the cell to
-#' the left or below).  A point is on an edge
-#' while it lies within one part in 1e10 of the largest coordinate of the
-#' points and the blocks from it (0.44 mm at a UTM northing of 4,400 km), at
-#' most a millionth of the diagonal of their bounding box and at least
-#' four times the spacing of doubles at that coordinate, so points on the
-#' grid lines of a lattice are blocked alike in any unit or origin.  A point
-#' in no cell of a clipped grid goes to the cell with the nearest centroid,
-#' and to the lower of two whose centroids are as near to one part in ten
-#' million or that margin.
+#' @section Block size and the autocorrelation range:
+#' With `block_size`, each axis of the extent gets as many blocks as leave
+#' every block at least that long, so on an axis at least as long as
+#' `block_size` the blocks are from one to just under two times this size.
+#' An axis shorter than `block_size` is spanned by one row or column of blocks
+#' as long as the extent there: a 39.8 km by 5 km extent with
+#' `block_size = 10000` gets three blocks 13.3 km wide and 5 km tall.  A size
+#' that leaves fewer than `k` blocks holding points returns that many folds,
+#' with a warning (see `k`); one that leaves a single block is an error.  Both
+#' name the largest size that still gives `k` folds.  A size in the wrong unit
+#' asks for an enormous grid, so a request above 1,000,000 blocks is refused
+#' with an error naming the grid dimensions, the extent and the CRS's units.
 #'
-#' Points so far from the origin of their coordinates that doubles there are
-#' spaced more than a millionth of the points' extent apart (0.125 at 1e15,
-#' beside a layer a few kilometres across) are held to that spacing, and so
-#' are the edges of the blocks laid over them, so a point that lies within
-#' it of an edge near the origin can fall in the next block.  With
-#' \code{method = "block_kfold"} or \code{"buffered_loo"} the folds are
-#' made, and a warning of class \code{"spatialkit_xy_imprecise"} gives the
-#' spacing and the extent.
+#' Without `block_size` or `auto_range`, the grid is sized from the extent
+#' and `block_multiplier` (or `block_nx` and `block_ny`) alone, with no
+#' regard to the autocorrelation range of the data.  The wider the blocks, the
+#' farther the held-out points sit from their training data.  When blocks are
+#' smaller than the autocorrelation range, each held-out point still has
+#' training data within the range.  The score is then the error of predicting
+#' that close to the data.  It reads low for a map whose locations lie farther
+#' from the samples, and is the error of a map whose locations lie as close.
 #'
-#' @param points_sf An sf object.  Any Z or M dimension is dropped before
-#'   folding: \code{sf::st_distance()} uses every coordinate dimension, so an
-#'   XYZ layer would otherwise have elevation folded into every buffer, block
-#'   and neighbour distance.  CRS-less points are aligned to a \code{boundary}
-#'   or \code{prediction_points} that carries a CRS.  They are reprojected when
-#'   the coordinates look like lon/lat and otherwise stamped without
-#'   reprojection, with a warning either way.  A CRS in longitude and
-#'   latitude is not stamped on coordinates outside longitude -180 to 360
-#'   and latitude -90 to 90: that is refused.
-#' @param k Integer; number of folds.  Must be a single whole number >= 1,
-#'   and is required except for the two leave-one-out methods.
-#'   A fraction, \code{NA} or a vector is an error, because a non-integer used
-#'   to truncate silently and leave the last rows in no test set at all.
-#'   Not every method honours it.  \code{"buffered_loo"} and \code{"nndm"} are
-#'   leave-one-out schemes and always return one fold per held-out point
-#'   (\code{k = n}, or \code{max_test} when that is given) regardless of what
-#'   was asked for; \code{"block_kfold"} lowers it when the grid yields fewer
-#'   than \code{k} non-empty blocks, and \code{"leave_location_out"} lowers it
-#'   when there are fewer than \code{k} distinct groups.  \code{"random_kfold"}
-#'   and \code{"knndm"} lower it only when the layer has fewer than \code{k}
-#'   rows.  \code{k = 1} is
-#'   raised to 2 by \code{"random_kfold"}, \code{"block_kfold"},
-#'   \code{"leave_location_out"} and \code{"knndm"}, since one fold has no
-#'   training set.  Read
-#'   the \code{k} element of the returned list, and do not assume the
-#'   requested value; \code{params$k_requested} keeps the value asked for.
-#'   Returning fewer folds than asked raises a warning of class
-#'   \code{"spatialkit_k_reduced"}, whose message gives both counts, the
-#'   reason and, where there is one, a setting that works; the condition
-#'   carries them as \code{k_requested} and \code{k}, so
-#'   \code{tryCatch(spatialkit_k_reduced = )} or
-#'   \code{withCallingHandlers()} can act on it without reading the text.
-#'   (Before this version a reduction was a log line only.)
-#' @param method One of \code{"random_kfold"}, \code{"block_kfold"},
-#'   \code{"buffered_loo"}, \code{"leave_location_out"}, \code{"nndm"} or
-#'   \code{"knndm"}.  See \strong{Details} for what each one does and when it
-#'   is appropriate.
-#' @param seed Optional integer RNG seed.  \code{"nndm"} is deterministic and
-#'   reads it only to draw the \code{max_test} subset; \code{"buffered_loo"}
-#'   likewise.  \code{"knndm"} uses it for the random partition among its
-#'   candidates, for ties in the packing, and above 4,000 points for the
-#'   k-means starts, so its folds are reproducible only with a seed.
-#' @param block_nx,block_ny Optional grid dimensions for block_kfold, each a
-#'   single whole number >= 1.  Give both, or give one and the other is
-#'   derived from the extent's aspect ratio so that the blocks are roughly
-#'   square.  Ignored when \code{block_size} or \code{auto_range} override
-#'   them.
-#' @param block_multiplier A single positive number, default 3.  When
-#'   neither \code{block_size} nor \code{block_nx}/\code{block_ny} is given,
-#'   the automatic grid aims for
-#'   \code{block_multiplier * k} blocks over the extent (aspect-preserving),
-#'   so each fold holds out about \code{block_multiplier} blocks.  An extent
-#'   more than about \code{block_multiplier * k} times as wide as it is tall
-#'   (or as tall as it is wide) gets a single row (or column) of that many
-#'   blocks.  With 1,
-#'   every fold is one contiguous region and the score depends heavily on
-#'   which region each fold happened to get; with many, the blocks shrink
-#'   towards single points and the scheme drifts back towards random k-fold.
-#'   3 is a compromise between those two, not a published constant.  The
-#'   size of the blocks sets how far the held-out points sit from their
-#'   training data; \code{block_size} and \code{auto_range} set it from a
-#'   distance, where this sets it from a count.
-#' @param block_size Optional positive numeric minimum block edge length,
-#'   \strong{in the units of the CRS the folds are built in}.  Takes
-#'   precedence over \code{block_nx}/\code{block_ny} and
-#'   \code{block_multiplier}.  When supplied, a whole number of blocks is
-#'   fitted across each axis of the extent: as many as leave every block at
-#'   least this long on that axis, a block shorter by no more than one part
-#'   in ten million counting as this long, so that a size of exactly the
-#'   axis over a whole number gives that number of blocks in any unit.  On
-#'   an axis at least as long as
-#'   \code{block_size} the blocks built are therefore from one to just under
-#'   two times this size.  An axis shorter than \code{block_size} cannot
-#'   hold a block that long: a single row or column spans it, and its blocks
-#'   are as long as the extent on that axis, which is less than the size
-#'   asked (a 39.8 km by 5 km extent with \code{block_size = 10000} gets
-#'   three blocks 13.3 km wide and 5 km tall).  \code{params$block_width} and
-#'   \code{params$block_height} record what was built.  A size that leaves
-#'   fewer than \code{k} blocks holding points returns that many folds,
-#'   with a warning (see \code{k}); one that leaves a single block is an
-#'   error.  Both name the largest size that still gives \code{k} folds.
+#' `block_size` sets a minimum block edge length in CRS units, and
+#' `auto_range = TRUE` estimates the range with [estimate_sac_range()] and
+#' uses it as that minimum.  When a response is given and the blocks are
+#' smaller than the estimated range, `make_folds()` warns and gives the block
+#' size of the range.  When blocks of that size leave fewer than `k` folds on
+#' this layout, the warning also names the largest size that still gives `k`
+#' folds and a method that needs no block size (`"nndm"`, or `"knndm"` above
+#' 5,000 rows).
 #'
-#'   Which CRS that is depends on the input.  Projected input is used as it
-#'   stands, so \code{block_size} is in your own CRS's units.  Geographic
-#'   (lon/lat) input is projected first by \code{\link{ensure_projected}()},
-#'   which picks a local UTM zone or, at wide extents, an equal-area
-#'   projection.  That is a CRS you did not choose, whose units are metres but
-#'   whose identity varies with the data.  \code{block_size} is then
-#'   interpreted in \emph{that} CRS.  The CRS actually used is recorded in
-#'   \code{params$crs} of the returned list; project the data yourself before
-#'   calling if you want to fix the units in advance.
+#' Sizing blocks from the autocorrelation range is the recommendation of
+#' Roberts et al. (2017) and what \pkg{blockCV} (Valavi et al. 2019)
+#' automates.  \pkg{blockCV} takes the fitted variogram's range parameter as
+#' the block size; `auto_range` takes the effective range that
+#' [estimate_sac_range()] returns, three times that parameter for an
+#' exponential fit, so its blocks are larger than \pkg{blockCV}'s from the
+#' same variogram.  The estimate is the omnidirectional range.  On a field
+#' known to be anisotropic, pass
+#' `block_size = max(attr(r, "directional_fitted"), na.rm = TRUE)` yourself
+#' after checking `attr(r, "directional_status")` (see the section
+#' "Directional ranges and anisotropy" in [estimate_sac_range()]).
 #'
-#'   A \code{block_size} in the wrong unit asks for an enormous grid, so a
-#'   request above 1,000,000 blocks is refused with an error naming the grid
-#'   dimensions, the extent and the CRS's units.
-#' @param auto_range Logical.  If \code{TRUE}, the spatial autocorrelation
-#'   range is estimated via \code{estimate_sac_range()} (the omnidirectional,
-#'   all-pairs range; the directional ranges it also fits are a diagnostic
-#'   only, so on a field known to be anisotropic pass
-#'   \code{block_size = max(attr(r, "directional_fitted"), na.rm = TRUE)}
-#'   yourself after checking \code{attr(r, "directional_status")}, see
-#'   \code{\link{estimate_sac_range}}) and used as the
-#'   minimum \code{block_size}.  Requires \code{response_var}.  An explicit
-#'   \code{block_size} takes precedence.  Default \code{FALSE}.  Sizing
-#'   blocks from the autocorrelation range is the recommendation of Roberts
-#'   et al. (2017) and what \pkg{blockCV} (Valavi et al. 2019) automates.
-#'   \pkg{blockCV} takes the fitted variogram's range
-#'   \emph{parameter} as the block size, whereas this uses the
-#'   \emph{effective} range \code{estimate_sac_range()} returns (three
-#'   times that parameter for an exponential fit), so its blocks are larger
-#'   than \pkg{blockCV}'s from the same variogram.  When no range is
-#'   identified, the geometric grid is used instead, with a warning that
-#'   gives the reason.  Range-sized blocks do not fit every layout.  On a
-#'   square extent at \code{k = 5} a range up to a third of the side gives
-#'   five folds; up to half, a 2 x 2 grid and four folds, returned with the
-#'   \code{"spatialkit_k_reduced"} warning; and above half the extent in
-#'   both directions there is room for a single block, and
-#'   \code{make_folds()} stops with an error naming the size, rather than
-#'   return one fold with an empty training set.  The warning and the error
-#'   name the largest block size that still gives \code{k} folds on this
-#'   layout and how far below the range it is; \code{method = "nndm"} is the
-#'   design that does not depend on a block size.  The message printed when
-#'   the range is used states the grid and the block size built.
-#' @param range_frac Passed through to \code{estimate_sac_range()} when
-#'   \code{auto_range = TRUE}.  A fitted range beyond the longest lag the
-#'   empirical variogram was fitted over is rejected as unidentified, and block
-#'   sizing falls back to geometry (with a warning).  A range within that
-#'   bound can still be too wide for two blocks; see \code{auto_range}.
-#'   Default 1.0.
-#' @param response_var Character(1) response column name.  Required when
-#'   \code{auto_range = TRUE}.  For \code{"block_kfold"} a name that is not a
-#'   column of \code{points_sf} is an error, whether or not
-#'   \code{auto_range} is set: with it off the response still feeds the
-#'   warning on blocks smaller than the range, which a misspelt name would
-#'   silently disable.
-#' @param predictor_vars Optional character vector of predictor column names.
-#'   Passed to \code{estimate_sac_range()} for residual variogram estimation.
-#' @param boundary Optional polygonal sf/sfc for block_kfold.  The grid is
-#'   clipped to it; a cell that the boundary only touches at a corner or
-#'   along an edge is not a block.  A point on the boundary, to the margin of
-#'   the edge rule in Details, is inside it.  A boundary without a CRS is brought into
-#'   the points' CRS: reprojected from EPSG:4326 when its coordinates look
-#'   like lon/lat, otherwise stamped, with a warning either way; a CRS in
-#'   longitude and latitude is not stamped on coordinates outside longitude
-#'   -180 to 360 and latitude -90 to 90, which is refused.  The same
-#'   goes for \code{prediction_points} and \code{blocks}.  A boundary that
-#'   mixes XY and XYZ (or XYM) geometries is read in x and y, since sf reads
-#'   a layer in the dimension of its first geometry, and so is one whose
-#'   polygons carry M (XYM or XYZM), which GEOS refuses.
-#'   A row that is empty, or has a coordinate that is not finite or lies
-#'   beyond 1e150 (read as given, and again after any move into another
-#'   CRS), covers no ground and is left out; a boundary with no such row
-#'   left is refused with an error that says so. A boundary in a geographic
-#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
-#'   the Earth, is refused with an error of class
-#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
-#'   its CRS.
-#'   A row the repair of `boundary` leaves without a polygon (a ring with no
-#'   height: every vertex on one line, or in degrees on one parallel) is
-#'   left out as well, and a boundary with no polygon left is refused.
-#' @param buffer For \code{"buffered_loo"}: a single positive number, the
-#'   distance within which the held-out point's neighbours are excluded from
-#'   its training set.  Like \code{block_size} it is in the units of the CRS
-#'   the folds are built in (\code{params$crs}), which for geographic
-#'   (lon/lat) input is the metre CRS \code{\link{ensure_projected}()}
-#'   chooses: 0.1 means 0.1 m, not 0.1 degrees.  A neighbour at the buffer
-#'   distance is excluded, and so is one over it by rounding: a squared
-#'   distance within one part in ten million of the buffer's square (a
-#'   distance about one part in twenty million over the buffer) counts as at
-#'   it, so a lattice whose spacing divides the buffer gives the same folds in
-#'   any unit or origin.  A buffer that excludes no
-#'   neighbour from any fold makes the scheme plain leave-one-out, and is
-#'   warned about.
-#' @param group_var Character(1) naming a column of \code{points_sf} that
-#'   identifies the location each observation belongs to.  Required for
-#'   \code{method = "leave_location_out"}, which keeps every observation from a
-#'   location together in the same fold.  Repeated measurements at the same
-#'   site otherwise get split across folds, and the model is scored partly on
-#'   sites it has already seen, which random k-fold reports as excellent
-#'   performance.
-#' @param prediction_points Optional \code{sf} layer of the locations you
-#'   actually intend to predict onto.  Required for \code{method = "nndm"} and
-#'   \code{method = "knndm"}.
-#'   The grid from \code{\link{predict_surface}()} is the natural choice; a
-#'   non-POINT layer (grid cells, polygons) is reduced to representative points
-#'   first, so the target distances are point-to-point.  A point-to-polygon
-#'   distance is zero for every cell that contains a training point, which
-#'   pulls the target distribution towards zero and degenerates the CV towards
-#'   plain leave-one-out.  A layer that mixes XY and XYZ (or XYM) geometries
-#'   is read in x and y, before and after it is reduced to points,
-#'   since sf reads a layer in the dimension of its first geometry.  So is a
-#'   layer whose geometries carry M (XYM or XYZM), which GEOS refuses.  The
-#'   points a layer is reduced to are read in x and y when they mix
-#'   dimensions, as those of a layer XYZ throughout that holds points and
-#'   polygons do.  A prediction point without a location (an empty point, or
-#'   a coordinate that is not finite or lies beyond 1e150), as given or once
-#'   brought into the CRS of the folds, takes no part in the target and is
-#'   not counted in \code{params$n_prediction_points}.
-#' @param min_train For \code{method = "nndm"}: the smallest fraction of the
-#'   data any fold's training set may be reduced to by neighbour exclusion.
-#'   Default \code{0.5}, as in \code{CAST::nndm()}.  Where it binds, the
-#'   distance matching stops short: the held-out points stay closer to their
-#'   training data than the prediction points are, and the error reads low
-#'   for them; see \strong{Details}.  For \code{method = "knndm"}: the
-#'   smallest fraction
-#'   of the data a fold may leave for training, so a candidate whose largest
-#'   fold holds more than \code{1 - min_train} of the rows is set aside (the
-#'   \code{maxp = 0.5} of \code{CAST::knndm()} is \code{min_train = 0.5}).
-#'   Equal folds leave \code{1 - 1/k} of the data, so a value above that is
-#'   an error.
-#' @param phi For \code{method = "nndm"}: the distance up to which the two
-#'   nearest-neighbour distance distributions are matched, in the CRS the
-#'   folds are built in.  Matching is attempted only while a held-out
-#'   point's nearest-neighbour distance is at most \code{phi}; the exclusion
-#'   that takes it past \code{phi} is the last one, so a realised distance
-#'   can exceed \code{phi} by up to one neighbour step, as in
-#'   \code{CAST::nndm()}.  In Mila et al. (2022), and in
-#'   \code{CAST::nndm()}, \eqn{\phi} is the autocorrelation range of the
-#'   outcome: beyond it observations are effectively independent, so
-#'   matching is unnecessary.  \code{\link{estimate_sac_range}()} gives such
-#'   a value.  Default \code{NULL} = the largest prediction-to-training
-#'   distance, which matches everywhere (\code{CAST}'s \code{phi = "max"}).
-#' @details
-#' \strong{Fold methods.}
-#' \code{"random_kfold"} ignores geography: a held-out point keeps most of
-#' its neighbours in the training data, so the score is the error of
-#' predicting among the samples.  That is the error of a map over an area the
-#' samples cover evenly, and it reads low for predictions made farther from
-#' the data, such as a map of a whole region from clustered samples.
-#' \code{"block_kfold"} holds out whole blocks, so the held-out points sit
-#' farther from their training data the wider the blocks are, and the score
-#' is the error of predicting into unsampled gaps of that size; for a map of
-#' an area the samples cover, it reads high.  \code{"buffered_loo"} holds out
-#' one point at a time and excludes everything within a fixed \code{buffer}.
+#' Range-sized blocks do not fit every layout.  On a square extent at
+#' `k = 5`, a range up to a third of the side gives five folds; up to half, a
+#' 2 by 2 grid and four folds, returned with the `"spatialkit_k_reduced"`
+#' warning.  Above half the extent in both directions there is room for a
+#' single block, and `make_folds()` stops with an error naming the size
+#' rather than return one fold with an empty training set.  The warning and
+#' the error name the largest block size that still gives `k` folds on this
+#' layout and how far below the range it is.  When no range is identified,
+#' the geometric grid is used instead, with a warning that gives the reason.
+#' When the range is used, a message states the grid and the block size
+#' built.
 #'
-#' \code{"leave_location_out"} groups by \code{group_var}, so all
-#' observations from a location share a fold.
+#' @section NNDM:
+#' `"nndm"` implements the distance-matching principle of Mila et al. (2022):
+#' it sizes the exclusion around each held-out point, with no fixed buffer,
+#' so that the distribution of distances from the held-out points to their
+#' training data approaches the distribution of distances from the
+#' prediction locations to the training data.
 #'
-#' \code{"nndm"} implements the distance-matching principle of Milà et al.
-#' (2022): it sizes the exclusion around each held-out point, with no arbitrary
-#' buffer, so that the resulting training-to-test distance distribution
-#' approaches the distribution of distances from your actual prediction
-#' locations to the training data.
+#' The procedure is the paper's, and it is deterministic.  Let
+#' \eqn{G_{ij}}{G_ij} be the empirical distribution of
+#' prediction-to-nearest-training distances and \eqn{G_j^*}{G_j*} the
+#' distribution of each held-out point's distance to its nearest remaining
+#' training point.  Starting from plain leave-one-out, the point with the
+#' smallest \eqn{G_j^*}{G_j*} at which the realised distribution exceeds the
+#' target (\eqn{G_j^*(r) > G_{ij}(r)}{G_j*(r) > G_ij(r)}) has its nearest
+#' training neighbour removed, and this repeats until no such point remains,
+#' within two limits.  A point is matched only while its nearest-neighbour
+#' distance is at most `phi` (default: the largest prediction distance,
+#' since a training point already farther than every prediction distance has
+#' nothing to match), so the exclusion that takes it past `phi` is its last
+#' and a realised distance can exceed `phi` by up to one neighbour step.  And
+#' no fold's training set is stripped below `min_train` of the data.
 #'
-#' The procedure is the paper's, and it is deterministic.  Let \eqn{G_{ij}}
-#' be the empirical distribution of
-#' prediction-to-nearest-training distances and \eqn{G_j^*} the distribution
-#' of each held-out point's nearest remaining training point.  Starting from
-#' plain leave-one-out, the point with the smallest \eqn{G_j^*} at which the
-#' realised distribution exceeds the target (\eqn{G_j^*(r) > G_{ij}(r)}) has
-#' its nearest training neighbour removed, and this repeats until no such
-#' point remains, subject to two limits: a point is matched only while its
-#' nearest-neighbour distance is at most \code{phi} (default: the largest
-#' prediction distance, since a training point already further than every
-#' prediction distance has nothing to match), so the exclusion that takes it
-#' past \code{phi} is its last and a realised distance can exceed \code{phi}
-#' by up to one neighbour step; and no fold's training set is stripped below
-#' \code{min_train} of the data.
+#' It differs from `CAST::nndm()` in two details, so the folds agree closely
+#' with CAST's but not exactly.  The removal rule is strict: a neighbour is
+#' removed whenever the realised distribution exceeds the target, where CAST
+#' removes one only while the realised distribution, less the point about to
+#' move, is still at or above the target.  The rule here therefore removes
+#' up to one point more per distance value, erring towards held-out distances
+#' longer than the target.  And ties in \eqn{G_j^*}{G_j*} are broken by the
+#' points' coordinates, not by their row index as in CAST, so the folds do
+#' not depend on the order of the rows (see the section "Numerical
+#' tolerances").
 #'
-#' It differs from \code{CAST::nndm()} in two details, so the folds agree
-#' closely with CAST's but not exactly.  The removal rule is strict: a
-#' neighbour is removed whenever the realised distribution exceeds the target,
-#' whereas CAST removes one only while the realised distribution, less the
-#' point about to move, is still at or above the target.  The rule here
-#' therefore removes up to one point more per distance value (a few percent
-#' more removals in all on clustered layouts), erring towards held-out
-#' distances longer than the target.
-#' And ties in \eqn{G_j^*} are broken by the points' coordinates, not by
-#' their row index as in CAST, so the folds do not depend on the order of the
-#' rows.  On gridded samples many distances tie, and the last bits of the
-#' coordinates, which move with the unit and the origin, would settle those
-#' ties.  So distances within one part in ten million of each other count as
-#' equal, when the held-out distances are counted, compared with the target
-#' and \code{phi}, and put in order; equal ones are taken by the column of
-#' the point (first coordinates within that part of the extent of the points
-#' count as one), then its second coordinate, counted the same way, then its
-#' row.  Each point's neighbours are put in order by the same rule, the
-#' package's tie rule, so of neighbours that are equally far away the same
-#' one is excluded first.  The folds are then the same in another unit or
-#' with another origin as long as no coordinate moves by more than about a
-#' two-hundred-millionth of the distance between neighbouring locations.
+#' Where neither limit binds, the realised distribution of nearest-neighbour
+#' distances is never shorter than the target:
+#' \eqn{G_j^*(r) \le G_{ij}(r)}{G_j*(r) <= G_ij(r)} up to the granularity of
+#' the neighbour distances, which is the property the method exists to
+#' deliver.  It is a statement about the distance to the one nearest
+#' training point.  A learner that draws on several neighbours (a forest, a
+#' k-nearest-neighbour mean, a kriging neighbourhood) also depends on how far
+#' the second and later neighbours are, which NNDM does not match, so on
+#' clustered samples its cross-validated error can still read low for the
+#' prediction points with the nearest-neighbour distances matched exactly.
+#' Beyond `phi` no matching is attempted.  `min_train` is different: when the
+#' prediction locations lie farther from the samples than a fold can be made
+#' to hold out (clustered samples and a prediction domain well beyond them,
+#' the layout NNDM is meant for), it stops the matching early and the
+#' realised distances stay too short.  `params$n_at_min_train` counts the
+#' folds held at the floor while still closer than the target allows, and
+#' `make_folds()` warns when that leaves more than one point's worth of
+#' excess at or below `phi`.  Lower `min_train` to match further, or read the
+#' cross-validated score as an upper bound on performance at the prediction
+#' locations.  `params$max_ecdf_excess` reports the largest remaining excess;
+#' compare `params$target_median` with `params$realised_median` as well.
 #'
-#' Where neither limit binds, the realised distribution of
-#' \emph{nearest-neighbour distances} is then never shorter than the target:
-#' \eqn{G_j^*(r) \le G_{ij}(r)} up to the granularity of the neighbour
-#' distances, which is the property the method exists to deliver.  It is a
-#' statement about the distance to the one nearest training point.  A learner
-#' that draws on several neighbours (a forest, a k-nearest-neighbour mean, a
-#' kriging neighbourhood) also depends on how far the second and later
-#' neighbours are, which NNDM does not match, so on clustered samples its
-#' cross-validated error can still read low for the prediction points with
-#' the nearest-neighbour distances matched exactly.  Beyond \code{phi} no
-#' matching is attempted, by design.  \code{min_train} is different: when the
-#' prediction locations lie
-#' further from the samples than a fold can be made to hold out (clustered
-#' samples and a prediction domain well beyond them, the layout NNDM is meant
-#' for), it stops the matching early and the realised distances stay
-#' too short.  \code{params$n_at_min_train} counts the folds that were held
-#' at the floor while still closer than the target allows, and
-#' \code{make_folds()} warns when that leaves more than one point's worth of
-#' excess at or below \code{phi}.  Lower \code{min_train} to match further, or
-#' read the cross-validated score as an upper bound on performance at the
-#' prediction locations.
-#'
-#' The match has a second side.  \code{params$max_ecdf_deficit} is the
-#' largest amount by which the target distribution runs above the realised
-#' one, the mirror of \code{params$max_ecdf_excess}: the share of prediction
-#' points within some distance of the data that the folds do not reproduce.
-#' Part of it is the granularity of the matching.  Excluding a neighbour
-#' moves a held-out point out to its next remaining neighbour, and on
-#' clustered samples that can be the next cluster, well past the prediction
-#' distances.
+#' The match has a second side.  `params$max_ecdf_deficit` is the largest
+#' amount by which the target distribution runs above the realised one, the
+#' mirror of `params$max_ecdf_excess`: the share of prediction points within
+#' some distance of the data that the folds do not reproduce.  Part of it is
+#' the granularity of the matching.  Excluding a neighbour moves a held-out
+#' point out to its next remaining neighbour, and on clustered samples that
+#' can be the next cluster, well past the prediction distances.
 #'
 #' The other part no setting reaches.  Excluding neighbours can only lengthen
-#' a held-out distance, so when the prediction points sit \emph{nearer} to
-#' the data than the samples sit to each other (prediction points among the
-#' samples, or a regular sample predicted between its nodes) the folds
-#' returned are plain leave-one-out and are still farther from their
-#' training data than the prediction points are.  The cross-validated error
-#' is then pessimistic for those locations: an upper bound on the error
-#' there.  \code{params$loo_ecdf_deficit} is the largest amount by which
-#' the target distribution runs above that of plain leave-one-out.  When it
-#' exceeds \code{params$ecdf_deficit_tol}, three times
-#' \eqn{\sqrt{1/n + 1/m}} for \eqn{n} folds and \eqn{m} prediction points
-#' (about three times the chance difference between two samples of one
-#' distribution), \code{make_folds()} raises a warning of class
-#' \code{"spatialkit_nndm_out_of_reach"} and sets
-#' \code{params$target_out_of_reach} to \code{TRUE}.
+#' a held-out distance, so when the prediction points sit nearer to the data
+#' than the samples sit to each other (prediction points among the samples,
+#' or a regular sample predicted between its nodes) the folds returned are
+#' plain leave-one-out and are still farther from their training data than
+#' the prediction points are.  The cross-validated error is then pessimistic
+#' for those prediction points: an upper bound on the error there.
+#' `params$loo_ecdf_deficit` is the largest amount by which the target
+#' distribution runs above that of plain leave-one-out.  When it exceeds
+#' `params$ecdf_deficit_tol`, three times \eqn{\sqrt{1/n + 1/m}}{sqrt(1/n +
+#' 1/m)} for \eqn{n} folds and \eqn{m} prediction points (about three times
+#' the chance difference between two samples of one distribution),
+#' `make_folds()` raises a warning of class `"spatialkit_nndm_out_of_reach"`
+#' and sets `params$target_out_of_reach` to `TRUE`.
 #'
 #' On small samples no deficit can exceed that tolerance.  A deficit is a
 #' difference of two shares, so it is at most 1, and the tolerance is 1 or
-#' more whenever \eqn{nm/(n+m) \le 9}: for nine folds or fewer whatever the
-#' number of prediction points, and for up to eighteen folds with as many
-#' prediction points.  There the same warning is raised in one case only,
-#' complete separation: every prediction point nearer to the data than any
-#' sample is to its nearest other sample, by more than one part in ten
-#' million (a deficit of exactly 1), provided
-#' the two sets are large enough for that ordering to mean something, which
-#' is taken as \code{choose(n + m, n) >= 1000} ways of interleaving them (17
-#' prediction points for 3 folds, 7 for 6 folds, 4 for 12 folds).
-#' \code{params$target_separated} records the ordering whether or not it
-#' was enough to warn, and the warning's condition carries it as
-#' \code{separated}.  With very few samples it can hold for a grid over the
-#' samples' own extent, because a few points hug the box they span; the
-#' folds are then farther than the grid all the same.  A partial shortfall
-#' on such a sample (most prediction points nearer than leave-one-out
-#' reaches, not all) is not warned about: the tolerance is 1 or more at
-#' these sizes, which no difference of shares exceeds, so only complete
-#' separation can be reported.  Compare
-#' \code{params$target_median} with \code{params$realised_median}.
+#' more whenever \eqn{nm/(n+m) \le 9}{nm/(n+m) <= 9}: for nine folds or fewer
+#' whatever the number of prediction points, and for up to eighteen folds with
+#' as many prediction points.  There the same warning is raised in one case
+#' only, complete separation: every prediction point nearer to the data than
+#' any sample is to its nearest other sample, by more than one part in ten
+#' million (a deficit of 1), provided the two sets are large enough for that
+#' ordering to mean something, taken as `choose(n + m, n) >= 1000` ways of
+#' interleaving them (17 prediction points for 3 folds, 7 for 6 folds, 4 for
+#' 12 folds).  `params$target_separated` records the ordering whether or not
+#' it was enough to warn, and the warning's condition carries it as
+#' `separated`.  With very few samples it can hold for a grid over the
+#' samples' own extent, because a few points hug the box they span; the folds
+#' are then farther than the grid all the same.  A partial shortfall on such a
+#' sample (most prediction points nearer than leave-one-out reaches, not all)
+#' is not warned about, since no difference of shares exceeds a tolerance of 1
+#' or more.  Compare `params$target_median` with `params$realised_median`.
 #'
-#' \code{params$wasserstein} is the Wasserstein distance between the target
-#' and realised distributions, in distance units, and
-#' \code{params$wasserstein_loo} the same for plain leave-one-out: equal
-#' when nothing was excluded, smaller when the matching helped.
+#' `params$wasserstein` is the Wasserstein distance between the target and
+#' realised distributions, in distance units, and `params$wasserstein_loo`
+#' the same for plain leave-one-out: equal when nothing was excluded, smaller
+#' when the matching helped.
 #'
-#' \strong{kNNDM.}  \code{"knndm"} is the k-fold version of that idea
-#' (Linnenbrink et al. 2024): \code{k} folds, and so \code{k} model fits,
-#' whose held-out distances are as close to the same target as a set of
-#' candidates allows.  It has no row limit, and is the method to use above
-#' the 5,000 rows \code{"nndm"} takes or when a model is too costly to refit
-#' once per point.  It is not an equal of NNDM below that: a fold design has
-#' far fewer degrees of freedom than one exclusion set per point, so the
-#' match is coarser.
+#' @section kNNDM:
+#' `"knndm"` is the k-fold version of NNDM (Linnenbrink et al. 2024): `k`
+#' folds, and so `k` model fits, whose held-out distances are as close to the
+#' same target as a set of candidates allows.  It has no row limit, and is
+#' the method to use above the 5,000 rows `"nndm"` takes or when a model is
+#' too costly to refit once per point.  Below that it matches less closely
+#' than NNDM, since a fold design has far fewer degrees of freedom than one
+#' exclusion set per point.
 #'
-#' The candidates are a random k-fold partition (the one
-#' \code{"random_kfold"} builds with the same \code{seed}) and, for each of
-#' up to 50 cluster counts spaced evenly on the log scale from \code{k} to
-#' one fewer than the number of distinct locations, the samples clustered on
-#' their coordinates and the clusters merged into \code{k} folds.  Few large
-#' clusters give folds that are whole regions, far from their training data;
-#' many small ones approach the random partition.  Up to 4,000 points the
-#' clustering is Ward's (\code{stats::hclust(method = "ward.D2")}), cut at
-#' each count.  Above that, where the n by n distance matrix it needs is no
-#' longer affordable, k-means first reduces the samples to 4,000 groups
-#' (Lloyd's algorithm from random sample locations, at most ten passes) and
-#' Ward's method is continued from those groups; a count above 4,000 is a
-#' k-means run of its own.  \code{params$clustering} says which
-#' (\code{"ward"} or \code{"kmeans+ward"}).  Both read the coordinates
-#' centred on the middle of their bounding box, divided by its diagonal and
-#' rounded to \eqn{2^{-30}} of it (about a billionth), as the
-#' \code{"kmeans"} partition hands them to \code{stats::kmeans()}: on a
-#' lattice many merges and many assignments tie exactly, and the last bits of
-#' the coordinates, which move with the unit and the origin, would settle
-#' them.  A point as near two k-means centres to one part in ten million
-#' goes to the lower-numbered one: a squared distance ties with the least
-#' when it is no more than the square of the least distance lengthened by a
-#' margin, plus one part in ten million of the least squared distance, the
-#' margin one part in 1e10 of the largest coordinate of the centres in that
-#' frame, at most a millionth of the diagonal of their bounding box and at
-#' least four times the spacing of doubles at that coordinate.  The clusters are then the same in another
-#' unit or with another origin, but for a location within its own rounding
-#' noise of the middle of a step.  Clusters are merged by the packing
-#' \code{"block_kfold"} uses for its blocks, largest first and each to the
-#' fold with the fewest points so far (see \strong{Fold balance}).
-#' \code{CAST::knndm()} merges clusters by a rule of its own, which this was
-#' \emph{not} checked against, so the folds are not expected to equal CAST's.
+#' The candidates are a random k-fold partition (the one `"random_kfold"`
+#' builds with the same `seed`) and, for each of up to 50 cluster counts
+#' spaced evenly on the log scale from `k` to one fewer than the number of
+#' distinct locations, the samples clustered on their coordinates and the
+#' clusters merged into `k` folds.  Few large clusters give folds that are
+#' whole areas, far from their training data; many small ones approach the
+#' random partition.  Up to 4,000 points the clustering is Ward's
+#' (`stats::hclust(method = "ward.D2")`), cut at each count.  Above that,
+#' where the n by n distance matrix it needs is too large, k-means first
+#' reduces the samples to 4,000 groups (Lloyd's algorithm from random sample
+#' locations, at most ten passes) and Ward's method is continued from those
+#' groups; a count above 4,000 is a k-means run of its own.
+#' `params$clustering` says which (`"ward"` or `"kmeans+ward"`).  Clusters are
+#' merged by the packing `"block_kfold"` uses for its blocks, largest first
+#' and each to the fold with the fewest points so far (see the section "Fold
+#' balance").  `CAST::knndm()` merges clusters by a rule of its own, which
+#' this was not checked against, so the folds are not expected to equal
+#' CAST's.
 #'
 #' Each candidate is scored by the Wasserstein distance \eqn{W} between its
 #' held-out distances (each point's distance to the nearest point of another
-#' fold) and the target distances, in the unit of the layer, and the
-#' smallest \eqn{W} is returned; of the candidates within one part in ten
-#' million of the smallest, the earliest in \code{params$candidates}.  A
-#' candidate is set aside without being scored when its largest fold leaves
-#' less than \code{min_train} of the rows for training or holds more than
-#' \code{balance_tol} times the points of its smallest; the random partition
-#' is always kept.  So \code{params$wasserstein} is never above
-#' \code{params$wasserstein_random}, the \eqn{W} of that random partition,
-#' and \code{params$candidates} lists every candidate with its cluster count,
-#' fold sizes and \eqn{W}.  \code{params$chosen} is \code{"random"} when no
-#' clustering came closer, which is the right answer for samples spread
-#' evenly over the prediction area.
-#'
-#' Read \eqn{W} against the mean target distance.  On 400 points in 12
-#' clusters predicted onto a grid over their extent (12 draws, 5 and 10
-#' folds) the folds returned had \eqn{W} at 0.32 of the mean target distance,
-#' against 0.70 to 0.72 for a random partition and 0.01 for \code{"nndm"}.
-#' A 5-nearest-neighbour learner scored 9 to 11 percent high on them, where
-#' random folds scored 23 to 25 percent low and \code{"nndm"} 6 percent low.
-#' On 2,000 points in 40 clusters of unequal size the ratio was 0.07 to
-#' 0.10, against 0.56 to 0.59 for a random partition and 0.003 to 0.006 for
-#' \code{"nndm"}; on 30,000 points of that layout it was 0.11 to 0.15, and
-#' on 100,000 points 0.27.  So the method removes most of the mismatch of a
-#' random partition and leaves more of it than NNDM does, in either
-#' direction: \eqn{W} has no sign.  On 400 evenly spread points the random
-#' partition or one close to it came back and the two scored alike (3.3 and
-#' 3.5 percent high).  With few folds a random partition is itself farther
-#' than the target, since each fold trains on \code{1 - 1/k} of the points:
-#' at \code{k = 2} on evenly spread points the mean held-out distance was 9
-#' to 53 percent above the target mean (60 draws of 100 to 1,000 points),
-#' and no candidate is nearer.
-#'
-#' Construction took 2 s at 8,000 points and 10 s at 30,000 with ten folds
-#' (37 s at 100,000) with \pkg{FNN} installed, and three to four times that
-#' without it; it grows with the number of folds.
+#' fold) and the target distances, in the unit of the layer, and the smallest
+#' \eqn{W} is returned; of the candidates within one part in ten million of
+#' the smallest, the earliest in `params$candidates`.  A candidate is set
+#' aside without being scored when its largest fold leaves less than
+#' `min_train` of the rows for training or holds more than `balance_tol`
+#' times the points of its smallest; the random partition is always kept.  So
+#' `params$wasserstein` is never above `params$wasserstein_random`, the
+#' \eqn{W} of that random partition, and `params$candidates` lists every
+#' candidate with its cluster count, fold sizes and \eqn{W}.
+#' `params$chosen` is `"random"` when no clustering came closer, as for
+#' samples spread evenly over the prediction area.  Read \eqn{W} against the
+#' mean target distance; it has no sign, so it measures the mismatch in either
+#' direction.  With few folds a random partition can itself be farther than
+#' the target, since each fold trains on `1 - 1/k` of the points.
+#' Construction time grows with the number of points and of folds.
 #'
 #' Two cases are warned about, each with a condition class.  When the
 #' prediction points sit nearer to the data than a sample is to its nearest
 #' other sample, no fold design reaches them, since a held-out point is never
-#' nearer to its training data than that; the test is the one
-#' \code{"nndm"} applies, the warning has the same class,
-#' \code{"spatialkit_nndm_out_of_reach"}, and what comes back is the random
-#' partition or a candidate as fine as one.  In the other direction, the
-#' closest candidate can still be
-#' short of the target: prediction points well beyond the samples lie farther
-#' from the data than \code{k} folds of those samples can be held apart.
-#' When the mean held-out distance of the folds returned is below the mean
-#' target distance by more than a quarter of it and by at least half of
-#' \eqn{W} (the test \code{\link{fold_separation}()} words as
-#' \code{"closer"}), \code{make_folds()} raises a warning of class
-#' \code{"spatialkit_knndm_short_of_target"} and sets
-#' \code{params$short_of_target}: the cross-validated error then tends to
-#' read low for the prediction points.  Fewer folds hold out larger regions.
-#' Short of either warning the folds can still differ from the target at
-#' some distances; \code{params$max_ecdf_excess} and
-#' \code{params$max_ecdf_deficit} give the largest difference each way, and
-#' \code{\link{fold_separation}()} reads the folds against the same
-#' prediction points fold by fold.
+#' nearer to its training data than that; the test is the one `"nndm"`
+#' applies, the warning has the same class, `"spatialkit_nndm_out_of_reach"`,
+#' and what comes back is the random partition or a candidate as fine as one.
+#' In the other direction, the closest candidate can still be short of the
+#' target: prediction points well beyond the samples lie farther from the
+#' data than `k` folds of those samples can be held apart.  When the mean
+#' held-out distance of the folds returned is below the mean target distance
+#' by more than a quarter of it and by at least half of \eqn{W} (the test
+#' [fold_separation()] words as `"closer"`), `make_folds()` raises a warning
+#' of class `"spatialkit_knndm_short_of_target"` and sets
+#' `params$short_of_target`: the cross-validated error then tends to read low
+#' for the prediction points.  Fewer folds hold out larger areas.  Short of
+#' either warning the folds can still differ from the target at some
+#' distances; `params$max_ecdf_excess` and `params$max_ecdf_deficit` give the
+#' largest difference each way, and [fold_separation()] reads the folds
+#' against the same prediction points fold by fold.
 #'
-#' An earlier version of this package drew one random radius per point from
-#' \eqn{G_{ij}} and excluded up to the order statistic \emph{closest} to it,
-#' which rounds down half the time: on a two-cluster layout the realised
-#' distribution exceeded the target by up to 0.17 (13% of folds had a
-#' nearest training point within 50 m against a target of 9%), an
-#' \emph{optimistic} cross-validation.  \code{params$max_ecdf_excess} reports
-#' the largest remaining excess; compare \code{params$target_median} with
-#' \code{params$realised_median} as well.
+#' @section Supplied blocks:
+#' A polygon layer passed as `blocks` is aligned to the points the way
+#' `boundary` is, and then brought into the CRS the folds are built in (see
+#' [spatialkit-geometry]).  A point inside more than one block is given the
+#' first (lowest row) that contains it, as for a point on the shared edge of
+#' two grid cells, and a point within the margin of a block's edge (see the
+#' section "Numerical tolerances") counts as inside it.  When the blocks that
+#' caught such a point share area instead of an edge, the layer overlaps and
+#' is not a partition, and `make_folds()` warns.  A point inside no block is
+#' assigned to the nearest one, by distance to the polygon itself; a point the
+#' same distance from two blocks, to one part in ten million or that margin,
+#' goes to the lower row.  The count of such points is warned about, unless
+#' they sit within a millionth of the extent of a block, an edge that
+#' reprojection or clipping moved by a rounding error.  Blocks that hold no
+#' point are dropped when `drop_empty_blocks = TRUE`, and `k` is lowered to
+#' the number of blocks that hold points when that is smaller.
+#'
+#' `params$n_blocks` is the number of blocks before empties were dropped and
+#' `params$blocks_used` the number after (so with `drop_empty_blocks = FALSE`
+#' the two are equal, and `sum(params$block_sizes > 0)` is how many hold
+#' points); `params$grid_nx` and `params$grid_ny` are `NA`.
+#' `params$block_scale` is the median, over the blocks that hold points, of
+#' the side of the square with the block's area.  A polygon has no single
+#' edge length, so that is the length compared with the autocorrelation range
+#' for the warning on blocks smaller than the range.
+#'
+#' Every set of cells [build_tessellation()] builds can be a block design
+#' here, including Voronoi cells around `get_voronoi_seeds(method = "kmeans")`
+#' seeds, which adapt to the density of the points.
+#'
+#' @section Fold balance:
+#' `"block_kfold"` and `"knndm"` balance the number of points per fold by
+#' packing: blocks (for `"knndm"`, clusters of the samples) are taken largest
+#' first and each goes to the fold with the fewest points so far, ties broken
+#' at random.  This is the longest-processing-time rule for multiway
+#' partitioning, and `make_folds()` offers no search over other packings.
+#' The remedy for an imbalance past `balance_tol` is the block design:
+#' smaller blocks, or blocks that adapt to the density of the points, passed
+#' through `blocks`.  Density-adaptive blocks are smaller where points are
+#' dense, so check `params$block_scale` against the autocorrelation range as
+#' you would a grid.
+#'
+#' `"knndm"` chooses its clusters, so for it `balance_tol` is a limit: a
+#' clustering whose packing exceeds it is not a candidate, and the folds
+#' returned are within it (`params$fold_sizes`, `params$balance_ratio`).
+#'
+#' The other methods do not balance point counts.  `"random_kfold"` is
+#' balanced by construction (fold sizes differ by at most one);
+#' `"buffered_loo"` and `"nndm"` hold out one point per fold;
+#' `"leave_location_out"` gives each fold the same number of locations (to
+#' within one), so folds differ by as much as the locations' sizes do.
+#'
+#' @section Numerical tolerances:
+#' A point on the edge two grid cells share goes to the lower one, the cell
+#' with the lower index in the full grid (`params$blocks$source_row`; the grid
+#' is numbered along each row from the bottom left, so the cell to the left or
+#' below).  A point is on an edge while it lies within one part in 1e10 of the
+#' largest coordinate of the points and the blocks from it (0.44 mm at a UTM
+#' northing of 4,400 km), at most a millionth of the diagonal of their
+#' bounding box and at least four times the spacing of doubles at that
+#' coordinate, so points on the grid lines of a lattice are blocked alike in
+#' any unit or origin.  A point in no cell of a clipped grid goes to the cell
+#' with the nearest centroid, and to the lower of two whose centroids are as
+#' near to one part in ten million or that margin.  The same margin decides
+#' whether a point lies on a `boundary` or inside a supplied block.
+#'
+#' A block shorter than `block_size` by no more than one part in ten million
+#' counts as that long, so a size of exactly the axis over a whole number
+#' gives that number of blocks in any unit.  A neighbour of a
+#' `"buffered_loo"` point at the buffer distance is excluded, and so is one
+#' over it by rounding: a squared distance within one part in ten million of
+#' the buffer's square (a distance about one part in twenty million over the
+#' buffer) counts as at it, so a lattice whose spacing divides the buffer
+#' gives the same folds in any unit or origin.
+#'
+#' NNDM counts distances within one part in ten million of each other as
+#' equal, when the held-out distances are counted, compared with the target
+#' and `phi`, and put in order.  Equal ones are taken by the column of the
+#' point (first coordinates within that part of the extent of the points count
+#' as one), then its second coordinate, counted the same way, then its row.
+#' Each point's neighbours are put in order by the same rule, so of
+#' neighbours that are equally far away the same one is excluded first.  The
+#' folds are then the same in another unit or with another origin as long as
+#' no coordinate moves by more than about a two-hundred-millionth of the
+#' distance between neighbouring locations.
+#'
+#' The clusterings of kNNDM read the coordinates centred on the middle of
+#' their bounding box, divided by its diagonal and rounded to
+#' 2^-30 of it (about a billionth), as the `"kmeans"` partition
+#' hands them to `stats::kmeans()`; on a lattice many merges and many
+#' assignments tie exactly, and the last bits of the coordinates, which move
+#' with the unit and the origin, would settle them.  A point as near two
+#' k-means centres to one part in ten million goes to the lower-numbered one:
+#' a squared distance ties with the least when it is no more than the square
+#' of the least distance lengthened by a margin, plus one part in ten million
+#' of the least squared distance, the margin one part in 1e10 of the largest
+#' coordinate of the centres in that frame, at most a millionth of the
+#' diagonal of their bounding box and at least four times the spacing of
+#' doubles at that coordinate.  The clusters are then the same in another unit
+#' or with another origin, but for a location within its own rounding noise of
+#' the middle of a step.
+#'
+#' Points so far from the origin of their coordinates that doubles there are
+#' spaced more than a millionth of the points' extent apart are held to that
+#' spacing, and so are the edges of the blocks laid over them (see the
+#' section "Coordinates far from the origin" in [spatialkit-geometry]).  With
+#' `method = "block_kfold"` or `"buffered_loo"` the folds are made, and a
+#' warning of class `"spatialkit_xy_imprecise"` gives the spacing and the
+#' extent.
+#'
+#' @param points_sf An sf layer of the observations.  Z and M are dropped
+#'   before folding, since distances are measured in x and y.  A layer
+#'   without a CRS is aligned to a `boundary`, `blocks` or
+#'   `prediction_points` that has one, by the rule in [spatialkit-geometry].
+#'   Rows without a location are dropped (see Value).
+#' @param k The number of folds, a single whole number of at least 1; required
+#'   except for `"buffered_loo"` and `"nndm"`, which build one fold per
+#'   held-out point (`k = n`, or `max_test` of them when it is given)
+#'   whatever `k` is.  A fraction, `NA` or a vector is an error.
+#'   `"block_kfold"` lowers `k` when fewer than `k` blocks hold points,
+#'   `"leave_location_out"` when there are fewer than `k` groups, and
+#'   `"random_kfold"` and `"knndm"` when the layer has fewer than `k` rows;
+#'   those four raise `k = 1` to 2, since one fold has no training set.  Read
+#'   the `k` element of the result rather than assume the value asked for,
+#'   which `params$k_requested` keeps.  Fewer folds than asked raise a
+#'   warning of class `"spatialkit_k_reduced"`, whose message gives both
+#'   counts, the reason and, where there is one, a setting that works; the
+#'   condition carries them as `k_requested` and `k`, so
+#'   `tryCatch(spatialkit_k_reduced = )` or `withCallingHandlers()` can act
+#'   on it without reading the text.
+#' @param method One of the six methods in the section "Fold methods":
+#'   `"random_kfold"` (default), `"block_kfold"`, `"buffered_loo"`,
+#'   `"leave_location_out"`, `"nndm"` or `"knndm"`.
+#' @param seed Optional integer RNG seed; `NULL` (default) leaves the draws
+#'   to the session's RNG state.  It draws the partition of `"random_kfold"`,
+#'   the assignment of groups to folds of `"leave_location_out"`, the packing
+#'   ties of `"block_kfold"` and `"knndm"`, the random candidate of
+#'   `"knndm"` and, above 4,000 points, its k-means starts, and the
+#'   `max_test` subset of `"buffered_loo"` and `"nndm"`, which are otherwise
+#'   deterministic.  With `auto_range = TRUE` it is also the seed of
+#'   [estimate_sac_range()], which keeps its own default of 123 when `seed`
+#'   is `NULL`.
+#' @param block_nx,block_ny Optional grid dimensions for `"block_kfold"`,
+#'   each a single whole number of at least 1.  Give both, or give one and the
+#'   other is derived from the extent's aspect ratio so that the blocks are
+#'   about square.  Ignored when `block_size` or `auto_range` set the grid.
+#' @param block_multiplier A single positive number, default 3.  When neither
+#'   `block_size` nor `block_nx`/`block_ny` is given, the grid aims for
+#'   `block_multiplier * k` blocks over the extent, keeping its aspect, so
+#'   each fold holds out about `block_multiplier` blocks; an extent more than
+#'   about `block_multiplier * k` times as wide as it is tall (or as tall as
+#'   it is wide) gets a single row (or column) of that many blocks.  With 1,
+#'   every fold is one contiguous area and the score depends on which area
+#'   each fold gets; with many, the blocks shrink towards single points and
+#'   the folds approach random k-fold.  3 is a compromise between the two, not
+#'   a published constant.
+#' @param block_size Optional positive number, the minimum block edge length,
+#'   in the units of the CRS the folds are built in (`params$crs`): your own
+#'   CRS's units for projected input, and for lon/lat input those of the
+#'   metre CRS [ensure_projected()] chooses, which varies with the data
+#'   (project the data yourself to fix the units in advance).  It takes
+#'   precedence over `block_nx`/`block_ny` and `block_multiplier`.  The
+#'   blocks built are at least this long on an axis that can hold one, and up
+#'   to just under twice as long; `params$block_width` and
+#'   `params$block_height` record them.  See the section "Block size and the
+#'   autocorrelation range" for how the grid is laid and for a size that
+#'   leaves too few blocks.
+#' @param auto_range Logical, default `FALSE`.  `TRUE` estimates the
+#'   autocorrelation range with [estimate_sac_range()] and uses it as the
+#'   minimum `block_size`; it needs `response_var`, and an explicit
+#'   `block_size` takes precedence.  With supplied `blocks` the range is only
+#'   compared with them.  See the section "Block size and the autocorrelation
+#'   range".
+#' @param range_frac Passed to [estimate_sac_range()] when
+#'   `auto_range = TRUE`: a fitted range beyond the longest lag the empirical
+#'   variogram was fitted over is refused as unidentified, and the grid falls
+#'   back to geometry, with a warning.  A range within that bound can still be
+#'   too wide for two blocks.  Default 1.
+#' @param response_var Name of the response column.  Required when
+#'   `auto_range = TRUE`.  For `"block_kfold"` a name that is not a column of
+#'   `points_sf` is an error whether or not `auto_range` is set, since the
+#'   response also feeds the warning on blocks smaller than the range, which a
+#'   misspelt name would switch off.
+#' @param predictor_vars Optional character vector of predictor column names,
+#'   passed to [estimate_sac_range()] so that the range is that of the
+#'   residuals on them.
+#' @param boundary Optional polygon layer (sf or sfc) that the block grid of
+#'   `"block_kfold"` is clipped to.  A cell the boundary only touches at a
+#'   corner or along an edge is not a block, and a point on the boundary, to
+#'   the margin in the section "Numerical tolerances", is inside it.  See
+#'   [spatialkit-geometry] for how a boundary without a CRS is read, and for
+#'   the rows of a boundary that are left out or refused.
+#' @param buffer For `"buffered_loo"`: a single positive number, the distance
+#'   within which the held-out point's neighbours are excluded from its
+#'   training set.  Like `block_size` it is in the units of the CRS the folds
+#'   are built in (`params$crs`), which for lon/lat input is the metre CRS
+#'   [ensure_projected()] chooses: 0.1 means 0.1 m, not 0.1 degrees.  A
+#'   neighbour at the buffer distance is excluded.  A buffer that excludes no
+#'   neighbour from any fold makes the scheme plain leave-one-out, with a
+#'   warning.
+#' @param group_var Name of a column of `points_sf` that identifies the
+#'   location each observation belongs to.  Required for
+#'   `method = "leave_location_out"`, which keeps every observation from a
+#'   location in one fold.  Repeated measurements at a site split across
+#'   folds score the model partly on sites it has already seen.
+#' @param prediction_points Optional sf layer of the locations the model will
+#'   predict at, such as the grid from [predict_surface()]; required for
+#'   `"nndm"` and `"knndm"`.  A layer of cells or polygons is reduced to
+#'   representative points first, so the target distances are point to
+#'   point: a point-to-polygon distance is zero for every cell that holds a
+#'   training point, which would pull the target towards zero and the folds
+#'   towards plain leave-one-out.  A layer that mixes dimensions or carries M
+#'   is read in x and y, before and after it is reduced to points
+#'   ([spatialkit-geometry]).  A prediction point without a location, as
+#'   given or once brought into the CRS of the folds, takes no part in the
+#'   target and is not counted in `params$n_prediction_points`.
+#' @param min_train For `"nndm"`: the smallest fraction of the data any
+#'   fold's training set may be reduced to by neighbour exclusion; default
+#'   0.5, as in `CAST::nndm()`.  Where it binds, the distance matching stops
+#'   short and the held-out points stay closer to their training data than
+#'   the prediction points are (see the section "NNDM").  For `"knndm"`: the
+#'   smallest fraction of the data a fold may leave for training, so a
+#'   candidate whose largest fold holds more than `1 - min_train` of the rows
+#'   is set aside (the `maxp = 0.5` of `CAST::knndm()` is `min_train = 0.5`).
+#'   Equal folds leave `1 - 1/k` of the data, so a value above that is an
+#'   error.
+#' @param phi For `"nndm"`: the distance up to which the two
+#'   nearest-neighbour distance distributions are matched, in the CRS the
+#'   folds are built in.  Matching is attempted only while a held-out point's
+#'   nearest-neighbour distance is at most `phi`; the exclusion that takes it
+#'   past `phi` is the last one, so a realised distance can exceed `phi` by
+#'   up to one neighbour step, as in `CAST::nndm()`.  In Mila et al. (2022)
+#'   and in `CAST::nndm()`, \eqn{\phi}{phi} is the autocorrelation range of
+#'   the outcome: beyond it observations are close to independent, so
+#'   matching adds nothing.  [estimate_sac_range()] gives such a value.
+#'   Default `NULL`: the largest prediction-to-training distance, which
+#'   matches everywhere (`phi = "max"` in \pkg{CAST}).
+#' @param drop_empty_blocks Logical, default `TRUE`.  With `FALSE` the blocks
+#'   that hold no point are kept and packed into folds too, but `k` is still
+#'   lowered to the number of blocks that hold points, so no fold is left
+#'   without test points.
+#' @param blocks Optional polygon layer (sf or sfc, POLYGON or MULTIPOLYGON,
+#'   at least two features) to use as the blocks of `"block_kfold"` in place
+#'   of the grid: the `$cells` of a [build_tessellation()] result, hexagons,
+#'   watersheds, administrative units, or the `$blocks` of
+#'   `blockCV::cv_spatial()`.  Each point takes the block that contains it,
+#'   and the blocks are then assigned to folds as grid cells are.
+#'   `block_size`, `block_nx`/`block_ny`, `block_multiplier` and `boundary`
+#'   have nothing to act on and are ignored (logged); `auto_range` only
+#'   compares the estimated range with the blocks.  See the section
+#'   "Supplied blocks".  Blocks that mix dimensions or carry M are read in x
+#'   and y, and `params$blocks` holds them in XY.  An error for any other
+#'   `method`.
+#' @param balance_tol A number of at least 1, default 3.  For
+#'   `"block_kfold"`: the ratio of the largest fold's point count to the
+#'   smallest's above which the folds are reported as imbalanced, with a
+#'   warning (an R condition, also logged) that names both counts; `Inf`
+#'   turns the check off.  It is the tolerance of a check, not a target the
+#'   packing aims for (see the section "Fold balance"), and
+#'   `params$balance_ratio` carries the ratio achieved.  For `"knndm"` it is
+#'   a limit: a candidate whose largest fold holds more than `balance_tol`
+#'   times the points of its smallest is set aside, so the folds returned are
+#'   within it.
+#' @param max_test For `"buffered_loo"` and `"nndm"`: optional whole number of
+#'   at least 2.  Folds are built for a random subset of that many held-out
+#'   points (drawn under `seed`), and every row stays available for training,
+#'   so each fold returned is the fold the full design has for that point.
+#'   The model is then refitted `max_test` times and not `n` times, and the
+#'   folds hold `4 * n * max_test` bytes of row indices in place of
+#'   `4 * n^2`, which lets `"buffered_loo"` run on layers its storage limit
+#'   otherwise refuses.  It does not lift the 5,000-row limit of `"nndm"`,
+#'   whose cost is the matching itself; for that there is `"knndm"`.  For
+#'   `"nndm"` the matching still runs over all `n` points and `params`
+#'   describes all of them.  [area_of_applicability()] needs every training
+#'   row in a test fold and refuses a subset.  Default `NULL`: every point is
+#'   held out once.  An error for the k-fold methods, whose number of folds
+#'   is `k`.
+#' @return A list with:
+#'   \describe{
+#'     \item{`method`}{The method used.}
+#'     \item{`k`}{The number of folds built, which can differ from the `k`
+#'       asked for (see `k`); `length(folds)` always equals it.}
+#'     \item{`folds`}{A list with one element per fold, each a list of
+#'       `train` and `test` row IDs: the values of the `..row_id` column when
+#'       the input has one, otherwise row positions.}
+#'     \item{`assignment`}{A tibble with one row per observation kept:
+#'       `row_id` (the same IDs) and `fold`, and for `"block_kfold"` a third
+#'       column, `block_id`, the row of `params$blocks` the point fell in.
+#'       With `max_test`, `fold` is `NA` for the rows not held out.}
+#'     \item{`params`}{The settings and diagnostics of the build, below.}
+#'   }
+#'
+#'   Every method's `params` carries `seed`, `k_requested` (the `k` asked
+#'   for, `NA` when none was given) and `row_probe`, a small sample of row
+#'   IDs and coordinates that every `cv_*()` function compares with the data
+#'   it is handed, so folds built from a different layer of the same size are
+#'   refused rather than applied.  The methods that work in projected space
+#'   add `crs`, the CRS the folds were built in (an `"EPSG:code"` string
+#'   where there is one, otherwise the CRS's input definition).  Every length
+#'   in `params` (`block_size`, `sac_range`, `buffer`, `median_buffer`) is in
+#'   that CRS's units, which for lon/lat input is a CRS
+#'   [ensure_projected()] chose, not one you passed.
+#'
+#'   For `"block_kfold"` the block design comes with the folds:
+#'   \itemize{
+#'     \item `blocks`: an sf layer of the block polygons in the CRS the folds
+#'       were built in.  Its rows are not the rows of the layer the blocks
+#'       came from: `drop_empty_blocks = TRUE` (the default) removes the
+#'       blocks that hold no point and renumbers the rest, so with supplied
+#'       `blocks` a nine-polygon layer of which three are empty comes back as
+#'       six rows numbered 1 to 6.  `blocks$source_row` is the row each one
+#'       came from (a grid cell's index in the full `grid_nx` by `grid_ny`
+#'       grid, or the row of the `blocks` argument), so
+#'       `blocks[params$blocks$source_row, ]` recovers them with their own
+#'       columns and in their own order.  It runs from 1 to `n_blocks` and is
+#'       the identity when nothing was dropped.
+#'     \item `n_blocks` and `blocks_used`: for a grid, `n_blocks` is
+#'       `grid_nx * grid_ny`, the cells a `boundary` clips away included, and
+#'       `blocks_used` the number of blocks returned.
+#'     \item `block_sizes`: the number of points in each block, indexed by
+#'       `block_id` (zeros are empty blocks that `drop_empty_blocks = FALSE`
+#'       kept); `fold_blocks`: a list with one integer vector per fold naming
+#'       the blocks packed into it.  Between them the folds account for every
+#'       block once, empty ones included, so a fold's territory on the map is
+#'       all of its blocks, and `table(assignment$fold)` can be traced back to
+#'       the blocks it is made of.  [plot_folds()] draws the blocks over the
+#'       data.
+#'     \item `block_width` and `block_height`: the width and height of the
+#'       grid cells built, before any clipping to a `boundary` (`NA` for
+#'       supplied `blocks`).  They are what `block_size` turned into: at least
+#'       that size on an axis long enough to hold it, and the whole extent on
+#'       an axis that is not.
+#'     \item `blocks_supplied` and `boundary_supplied`: whether the blocks
+#'       came from `blocks`, and whether a `boundary` was given.
+#'     \item `block_scale`, `balance_ratio`, `balance_tol`, `block_size`,
+#'       `block_multiplier`, `sac_range` and `auto_range`: the length compared
+#'       with the range (see the section "Supplied blocks"), the balance
+#'       achieved and allowed, and the sizing settings.
+#'   }
+#'
+#'   For `"nndm"`, `params` carries the diagnostics named in the section
+#'   "NNDM".  For `"knndm"` it carries `chosen` (`"random"` or `"clusters"`),
+#'   `n_clusters` (the number of clusters packed into the folds; `NA` for the
+#'   random partition), `clustering` (`"ward"` or `"kmeans+ward"`; `NA` when
+#'   no cluster count was tried), `candidates` (a data frame with one row per
+#'   candidate, the random partition first: `candidate`, `n_clusters`,
+#'   `largest_fold`, `balance_ratio`, `admissible` and `W`, which is `NA` for
+#'   a candidate set aside), `wasserstein`, `wasserstein_random` and
+#'   `wasserstein_loo` (the Wasserstein distance to the target of the folds
+#'   returned, of the random partition among the candidates and of plain
+#'   leave-one-out, in distance units), `fold_sizes`, `balance_ratio`,
+#'   `target_distances` and `realised_distances` (one per prediction point,
+#'   and one per row: its distance to the nearest point of another fold) with
+#'   their medians and means, and the diagnostics `"nndm"` reports under the
+#'   same names: `max_ecdf_excess`, `max_ecdf_deficit`, `loo_ecdf_deficit`,
+#'   `ecdf_deficit_tol`, `target_separated` and `target_out_of_reach`, with
+#'   `short_of_target` for the opposite case (see the section "kNNDM").  With
+#'   `max_test`, `params$max_test` records the value.
+#'
+#'   Rows without a location (an empty point, or a coordinate that is not
+#'   finite or lies beyond 1e150) are dropped before folding, with a logged
+#'   warning naming the count; they appear in no fold and in no `assignment`
+#'   row.  The bound is read on the coordinates as given, and again after the
+#'   projection for the methods that measure distance.
 #' @references
 #' Linnenbrink, J., Mila, C., Ludwig, M. and Meyer, H. (2024). kNNDM CV:
 #' k-fold nearest-neighbour distance matching cross-validation for map
@@ -5774,220 +5838,11 @@ print.sac_range <- function(x, ...) {
 #' folds for k-fold cross-validation of species distribution models.
 #' \emph{Methods in Ecology and Evolution} \strong{10}, 225-232.
 #' \doi{10.1111/2041-210X.13107}
-#' @param drop_empty_blocks Logical. Default TRUE.  With \code{FALSE} the
-#'   blocks that hold no point are kept and packed into folds too, but
-#'   \code{k} is still lowered to the number of blocks that hold points, so
-#'   no fold is left without test points.
-#' @param blocks Optional polygon layer (\code{sf} or \code{sfc}, POLYGON or
-#'   MULTIPOLYGON, at least two features) to use as the blocks of
-#'   \code{"block_kfold"} in place of the grid this function would otherwise
-#'   build: the \code{$cells} of a \code{\link{build_tessellation}()} result,
-#'   hexagons, watersheds, administrative units, the \code{$blocks} of
-#'   \code{blockCV::cv_spatial()}.  Each point takes the block that contains
-#'   it, and the blocks are then assigned to folds exactly as grid cells are.
-#'   \code{block_size}, \code{block_nx}/\code{block_ny},
-#'   \code{block_multiplier} and \code{boundary} have nothing to act on and
-#'   are ignored (logged); \code{auto_range} only compares the estimated range
-#'   against the blocks.  See \strong{Supplied blocks} below for the CRS,
-#'   overlap and coverage rules.  Blocks that mix XY and XYZ (or XYM)
-#'   polygons are read in x and y, since sf reads a layer in the dimension
-#'   of its first geometry, and \code{params$blocks} holds them in XY.  So
-#'   are blocks whose polygons carry M (XYM or XYZM), which GEOS refuses.  An
-#'   error for any other \code{method}.
-#' @param balance_tol A number of at least 1, default 3.  For \code{"block_kfold"}:
-#'   the ratio of the largest fold's point count to the smallest's above
-#'   which the folds are reported as imbalanced, with a warning (an R
-#'   condition, also logged) that names both counts.  \code{Inf} disables the
-#'   check.  The value is the tolerance of a check, not a target the packing
-#'   aims for: see \strong{Fold balance} below for what the packing can and
-#'   cannot do.  \code{params$balance_ratio} carries the ratio achieved.
-#'   For \code{"knndm"} it is a limit and not a check: a candidate whose
-#'   largest fold holds more than \code{balance_tol} times the points of its
-#'   smallest is set aside, so the folds returned are always within it.
-#' @param max_test For \code{"buffered_loo"} and \code{"nndm"}: optional
-#'   whole number of at least 2.  Folds are built for a random subset of that
-#'   many held-out points (drawn under \code{seed}), and every row stays
-#'   available for training, so each fold returned is the fold the full
-#'   design has for that point.  The model is then refitted \code{max_test}
-#'   times and not \code{n} times, and the folds hold
-#'   \code{4 * n * max_test} bytes of row indices in place of
-#'   \code{4 * n^2}, which lets \code{"buffered_loo"} run on layers its
-#'   storage limit otherwise refuses.  It does not lift the 5,000-row limit of
-#'   \code{"nndm"}, whose cost is the matching itself; for that there is
-#'   \code{"knndm"}.  Rows that are not held out have \code{NA} in
-#'   \code{assignment$fold}.  For \code{"nndm"} the matching still runs over
-#'   all \code{n} points and \code{params} describes all of them.
-#'   \code{\link{area_of_applicability}()} needs every training row in a
-#'   test fold and refuses a subset.  Default
-#'   \code{NULL}: every point is held out once.  An error for the k-fold
-#'   methods, whose number of folds is \code{k}.
-#' @section Supplied blocks:
-#' A polygon layer passed as \code{blocks} is aligned to the points the way
-#' \code{boundary} is: CRS-less points are aligned to blocks that carry a CRS
-#' (reprojected if they look like lon/lat, otherwise stamped, warning either
-#' way, and refused when the blocks are in longitude and latitude and the
-#' points lie outside longitude -180 to 360 and latitude -90 to 90), and the
-#' blocks are then brought into the CRS the folds are built in.
-#' A point inside more than one block is given the first (lowest row) that
-#' contains it, as for a point on the shared edge of two grid cells, and a
-#' point within the same margin of a block's edge (one part in 1e10 of the
-#' largest coordinate of the points and the blocks, within the bounds
-#' above) counts as inside it.  When the
-#' blocks that caught such a point share area instead of an edge, the layer
-#' overlaps and is not a partition, and this is warned about.  A point
-#' inside no block is assigned to the nearest one, by distance to the polygon
-#' itself; a point the same distance from two blocks, to one part in ten
-#' million or that margin, goes to the lower row.  The count of such points is warned
-#' about, unless they sit
-#' within a millionth of the extent of a block, which is an edge that
-#' reprojection or clipping moved by a rounding error.  Blocks that hold no
-#' point are dropped when \code{drop_empty_blocks = TRUE}, and \code{k} is
-#' lowered to the number of blocks that hold points when that is smaller.
-#' \code{params$n_blocks} is the number of blocks before empties were dropped,
-#' \code{params$blocks_used} the number after (so with
-#' \code{drop_empty_blocks = FALSE} the two are equal, and
-#' \code{sum(params$block_sizes > 0)} is how many of them hold points),
-#' \code{params$grid_nx} and
-#' \code{params$grid_ny} are \code{NA}, and \code{params$block_scale} is the
-#' median over blocks that hold points of the side of the square with the
-#' block's area.  That is the length compared against the autocorrelation range
-#' for the warning on blocks smaller than the range, since a polygon has no
-#' single edge length.
-#'
-#' The connection to the rest of the package is
-#' \code{\link{build_tessellation}()}: every shape it builds can be a block
-#' design here, including Voronoi cells around
-#' \code{\link{get_voronoi_seeds}(method = "kmeans")} seeds, which adapt to the
-#' density of the points.
-#'
-#' @section Fold balance:
-#' \code{"block_kfold"} and \code{"knndm"} balance the number of points per
-#' fold, and they do so by packing: blocks (for \code{"knndm"}, clusters of
-#' the samples) are taken largest first and each goes to the
-#' fold with the fewest points so far, ties broken at random.  This is the
-#' longest-processing-time rule for multiway partitioning.  Measured against
-#' the optimum by enumeration (two folds, up to ten blocks, heavy-tailed block
-#' sizes) it is optimal in 72 percent of cases and within two points of
-#' optimal on average; a local search with 30 random restarts moved the
-#' largest-to-smallest ratio by 0.004 on average and never brought a packing
-#' above the 3:1 tolerance below it.  An imbalance past the tolerance is
-#' therefore in the points per block, which no assignment of blocks to folds
-#' can even out, and this function offers no search over packings.  The
-#' remedy is the block design: smaller blocks, or blocks that adapt to the
-#' density of the points passed through \code{blocks}.  On clustered layouts
-#' where the geometric grid exceeded 3:1 in 22 percent of cases (median ratio
-#' 1.8, worst 6.3), Voronoi cells around 15 k-means seeds never exceeded 1.3
-#' (median 1.09).  Density-adaptive blocks are smaller where points are
-#' dense, so check \code{params$block_scale} against the autocorrelation
-#' range as you would a grid.
-#'
-#' \code{"knndm"} chooses its clusters, so for it \code{balance_tol} is a
-#' limit: a clustering whose packing exceeds it is not a candidate, and the
-#' folds returned are within it (\code{params$fold_sizes},
-#' \code{params$balance_ratio}).
-#'
-#' The other methods do not balance point counts.  \code{"random_kfold"} is
-#' balanced by construction (fold sizes differ by at most one);
-#' \code{"buffered_loo"} and \code{"nndm"} hold out one point per fold;
-#' \code{"leave_location_out"} gives each fold the same number of
-#' \emph{locations} (to within one), so folds differ by as much as the
-#' locations' sizes do.
-#'
-#' @return A list with method, k, folds, assignment, params.  The
-#'   \code{train}/\code{test} elements of each fold contain \code{..row_id}
-#'   values (equal to row positions when the input has no pre-existing
-#'   \code{..row_id} column), consistent with the \code{assignment} tibble.
-#'   The returned \code{k} is the number of folds actually built, which is not
-#'   always the \code{k} that was requested (see the \code{k} argument above),
-#'   and \code{length(folds)} always matches it.
-#'
-#'   For \code{"block_kfold"} the block design is returned with the folds.
-#'   \code{assignment} has a third column, \code{block_id}: the block each
-#'   point fell in, numbered as the rows of \code{params$blocks}, an
-#'   \code{sf} layer of the block polygons in the CRS the folds were built
-#'   in.  Those rows are \strong{not} the rows of the layer the blocks came
-#'   from: \code{drop_empty_blocks = TRUE} (the default) removes the blocks
-#'   that hold no point and renumbers the rest, so with supplied
-#'   \code{blocks} a nine-polygon layer of which three are empty comes back
-#'   as six rows numbered 1 to 6.  \code{params$blocks$source_row} is the
-#'   row each one came from in that original layer (a grid cell's index in
-#'   the full \code{grid_nx} by \code{grid_ny} grid, or the row of the
-#'   \code{blocks} argument), so
-#'   \code{blocks[params$blocks$source_row, ]} recovers them with their own
-#'   columns and in their own order.  It runs from 1 to
-#'   \code{params$n_blocks} and is the identity when nothing was dropped.
-#'   For a grid \code{params$n_blocks} is \code{grid_nx * grid_ny}, the
-#'   cells a \code{boundary} clips away included, and
-#'   \code{params$blocks_used} is the number of blocks returned.
-#'   \code{params$block_sizes} is the number of points in each block, indexed
-#'   by \code{block_id} (zeros are empty blocks that
-#'   \code{drop_empty_blocks = FALSE} kept), and \code{params$fold_blocks}
-#'   is a list with one integer vector per fold naming the blocks packed into
-#'   it.  Between them the folds account for every block exactly once,
-#'   empty ones included, so a fold's territory on the map is all of its
-#'   blocks and not merely the ones that happen to hold points.  So
-#'   \code{table(assignment$fold)} can be traced back to the blocks
-#'   it is made of, a fold can be seen to be one contiguous region or
-#'   several, and the blocks can be drawn over the data
-#'   (\code{\link{plot_folds}()} does so).
-#'
-#'   For \code{"block_kfold"}, \code{params} carries a
-#'   \code{params$blocks_supplied} that says whether the blocks came from
-#'   \code{blocks} or from a grid built here, and
-#'   \code{params$boundary_supplied} whether a \code{boundary} was given.
-#'   \code{params$block_width} and \code{params$block_height} are the width
-#'   and height of the grid cells built, before any clipping to a
-#'   \code{boundary} (\code{NA} for supplied \code{blocks}); they are what
-#'   \code{block_size} turned into: at least that size on an axis long
-#'   enough to hold it, and the whole extent on an axis that is not (see
-#'   \code{block_size}).
-#'   Every method's \code{params} carries \code{params$k_requested}, the
-#'   \code{k} that was asked for (\code{NA} when none was given), beside
-#'   the \code{k} returned, and
-#'   \code{params$row_probe}, a small sample of row IDs and coordinates
-#'   that every \code{cv_*()} compares against the data it is handed, so
-#'   folds built from a different layer of the same size are refused, never
-#'   applied silently.
-#'
-#'   For \code{"knndm"}, \code{params} carries \code{chosen}
-#'   (\code{"random"} or \code{"clusters"}), \code{n_clusters} (the number of
-#'   clusters packed into the folds; \code{NA} for the random partition),
-#'   \code{clustering} (\code{"ward"} or \code{"kmeans+ward"}; \code{NA} when
-#'   no cluster count was tried), \code{candidates} (a data frame with one row
-#'   per candidate, the random partition first: \code{candidate},
-#'   \code{n_clusters}, \code{largest_fold}, \code{balance_ratio},
-#'   \code{admissible} and \code{W}, which is \code{NA} for a candidate set
-#'   aside), \code{wasserstein}, \code{wasserstein_random} and
-#'   \code{wasserstein_loo} (the Wasserstein distance to the target of the
-#'   folds returned, of the random partition among the candidates and of
-#'   plain leave-one-out, in distance units), \code{fold_sizes},
-#'   \code{balance_ratio}, \code{target_distances} and
-#'   \code{realised_distances} (one per prediction point, and one per row:
-#'   its distance to the nearest point of another fold) with their medians
-#'   and means, and the diagnostics \code{"nndm"} reports under the same
-#'   names: \code{max_ecdf_excess}, \code{max_ecdf_deficit},
-#'   \code{loo_ecdf_deficit}, \code{ecdf_deficit_tol},
-#'   \code{target_separated} and \code{target_out_of_reach}, with
-#'   \code{short_of_target} for the opposite case (see \strong{Details}).
-#'
-#'   With \code{max_test}, \code{"buffered_loo"} and \code{"nndm"} return
-#'   that many folds, \code{assignment$fold} is \code{NA} for the rows not
-#'   held out, and \code{params$max_test} records the value.
-#'
-#'   For the methods that work in projected space, \code{params} also carries a
-#'   \code{crs} element naming the CRS the folds were built in (an
-#'   \code{"EPSG:code"} string where there is one, otherwise the CRS's input
-#'   definition).  Every length in \code{params} (\code{block_size},
-#'   \code{sac_range}, \code{buffer}, \code{median_buffer}) is in that CRS's
-#'   units, which for geographic input is a CRS
-#'   \code{\link{ensure_projected}()} chose for you, and not one you passed.
-#'
-#'   Rows without a location (an empty point, or a coordinate that is not
-#'   finite or lies beyond 1e150) are dropped before folding, with a logged
-#'   warning naming the count; they appear in no fold and in no
-#'   \code{assignment} row.  The bound is read on the coordinates as given,
-#'   and again after the projection for the methods that measure distance.
-#' @family cross-validation
+#' @seealso [plot_folds()] to map the folds, [fold_separation()] to measure
+#'   how far the held-out points sit from their training data,
+#'   [cv_spatial()] to score a model on them, and [cv_block_size_sweep()] to
+#'   cross-validate at a ladder of block sizes.
+#' @family folds
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -5996,16 +5851,24 @@ print.sac_range <- function(x, ...) {
 #'   coords = c("x", "y"), crs = 32632
 #' )
 #' folds <- make_folds(pts, k = 3, method = "block_kfold", seed = 42)
-#' folds$assignment          # fold and block membership per row
-#' lengths(folds$folds[[1]]) # train/test row-ID splits
+#' folds$assignment          # fold and block of each row
+#' lengths(folds$folds[[1]]) # the train and test row IDs of fold 1
 #' folds$params$block_sizes  # points per block; params$fold_blocks packs them
 #'
-#' # Buffered leave-one-out: neighbours within 100 units excluded from training
-#' loo <- make_folds(pts, k = 1, method = "buffered_loo", buffer = 100)
+#' # Buffered leave-one-out: neighbours within 100 m left out of training.
+#' loo <- make_folds(pts, method = "buffered_loo", buffer = 100)
+#' loo$k                     # one fold per point
 #'
-#' # Three folds matched to the distances from a prediction grid to the data
-#' grid <- st_make_grid(pts, n = c(10, 10), what = "centers")
-#' km <- make_folds(pts, k = 3, method = "knndm", prediction_points = grid,
+#' # Three folds matched to the distances from a prediction grid to
+#' # clustered samples.
+#' set.seed(2)
+#' cx <- runif(6, 0, 1e4); cy <- runif(6, 0, 1e4)
+#' xy <- do.call(rbind, lapply(1:6, function(i)
+#'   cbind(cx[i] + rnorm(15, 0, 200), cy[i] + rnorm(15, 0, 200))))
+#' cl <- st_as_sf(data.frame(x = 5e5 + xy[, 1], y = 5e6 + xy[, 2]),
+#'                coords = c("x", "y"), crs = 32632)
+#' grid <- st_make_grid(cl, n = c(20, 20), what = "centers")
+#' km <- make_folds(cl, k = 3, method = "knndm", prediction_points = grid,
 #'                  seed = 42)
 #' km$params[c("chosen", "n_clusters", "wasserstein", "wasserstein_random")]
 #' @export
@@ -8359,22 +8222,23 @@ make_folds <- function(points_sf, k,
 
 #' k-means clusters of the coordinates, for kNNDM on large samples
 #'
-#' Used to reduce a large sample to groups Ward's method can start from, and
-#' for cluster counts above the number of those groups.  Lloyd's algorithm from \code{q} distinct sample locations drawn at random,
-#' stopped after \code{iter_max} passes or when no point changes cluster.
-#' The nearest-centre step is \code{.nearest_centre()}: squared distances
-#' within \code{.TIE_TOL} of the least, plus the margin
-#' \code{.centres_tol()} on the distance, are a tie, which goes to the
-#' lower-numbered centre, with or without \pkg{FNN}.  With \pkg{FNN} it is
-#' an indexed search, so a pass costs about \code{n log q}, where
-#' \code{stats::kmeans()} compares every point with every centre
-#' (\code{n q}; at 20,000 points and 2,000 centres, 0.8 s against 0.09 s
-#' for ten passes).  \code{.knndm_folds()} hands it the coordinates in the
-#' frame of \code{.kmeans_frame()}, so a point the same distance from two
-#' centres goes to the same one in every unit and origin.  The clusters are candidates to be scored
-#' by their distance to the target, so a run that has not converged costs
-#' nothing but a slightly different candidate.  A centre that attracts no
-#' point is dropped, so fewer than \code{q} clusters can come back.
+#' Reduces a large sample to groups Ward's method can start from, and serves
+#' cluster counts above the number of those groups.  Lloyd's algorithm from
+#' \code{q} distinct sample locations drawn at random, stopped after
+#' \code{iter_max} passes or when no point changes cluster.  The
+#' nearest-centre step is \code{.nearest_centre()}: squared distances within
+#' \code{.TIE_TOL} of the least, plus the margin \code{.centres_tol()} on the
+#' distance, are a tie, which goes to the lower-numbered centre, with or
+#' without \pkg{FNN}.  With \pkg{FNN} it is an indexed search, so a pass costs
+#' about \code{n log q}, where \code{stats::kmeans()} compares every point
+#' with every centre (\code{n q}; at 20,000 points and 2,000 centres, 0.8 s
+#' against 0.09 s for ten passes).  \code{.knndm_folds()} hands it the
+#' coordinates in the frame of \code{.kmeans_frame()}, so a point the same
+#' distance from two centres goes to the same one in every unit and
+#' origin.  The clusters are candidates to be scored by their distance to the
+#' target, so a run that has not converged costs nothing but a slightly
+#' different candidate.  A centre that attracts no point is dropped, so fewer
+#' than \code{q} clusters can come back.
 #'
 #' @param xy Two-column coordinate matrix: the frame of
 #'   \code{.kmeans_frame()}.
@@ -8645,9 +8509,9 @@ make_folds <- function(points_sf, k,
 #' it and renumbers the rest, so a cell's index in the full grid is carried
 #' from the "idx" attribute: that is what \code{params$blocks$source_row}
 #' promises.  Where the boundary only touches a cell at a corner or along an
-#' edge the intersection is a zero-area POINT or LINESTRING, which used to be
-#' kept as a block of its own, packed into a fold when empty blocks were kept
-#' and able to catch a point lying exactly on the boundary as a one-point
+#' edge the intersection is a zero-area POINT or LINESTRING, which kept as a
+#' block of its own would be packed into a fold when empty blocks are kept
+#' and could catch a point lying exactly on the boundary as a one-point
 #' block.  Only the areal pieces are kept, unless there are none (points on
 #' one straight line have a region of zero area, and every piece of it is a
 #' line).
@@ -8734,8 +8598,8 @@ make_folds <- function(points_sf, k,
 #'
 #' The size a leakage warning names must be at least the range, and must read
 #' back as the number that was tried.  Rounded up to a whole unit from 10
-#' upward, and to three significant figures below it (a range of 0.3712 km
-#' used to be quoted as a block size of 1).
+#' upward, and to three significant figures below it (rounded up to a whole
+#' unit, a range of 0.3712 km would be quoted as a block size of 1).
 #'
 #' @param x A positive number.
 #' @return A number no smaller than \code{x}.
@@ -8823,9 +8687,9 @@ make_folds <- function(points_sf, k,
 #'
 #' \code{block_size} and \code{auto_range} are read only when a
 #' \code{cv_*()} function builds its own folds.  Beside supplied
-#' \code{folds} they used to be dropped without a word, so
-#' \code{cv_spatial(folds = random_folds, auto_range = TRUE)} ran on the
-#' random folds and looked like a range-sized blocked run.  \code{k} is not
+#' \code{folds} they have nothing to act on, and dropped without a word
+#' \code{cv_spatial(folds = random_folds, auto_range = TRUE)} would run on
+#' the random folds and look like a range-sized blocked run.  \code{k} is not
 #' checked: the package's own callers always pass it with their folds, and
 #' it is documented as used only when \code{folds} is \code{NULL}.  The
 #' warning carries the class \code{spatialkit_fold_args_ignored}.
@@ -8860,9 +8724,8 @@ make_folds <- function(points_sf, k,
 #' after their first.  The score is the error at the distance the folds put
 #' between the held-out points and their training data, which reads low or
 #' high only against the locations the model will predict at; the sentences
-#' say so and name the function that compares the two.  The warnings used to
-#' say "Spatial CV may leak correlated information across folds", which read
-#' blocks below the range as a defect whatever the target.
+#' say so and name the function that compares the two, and do not read blocks
+#' below the range as a defect whatever the target.
 #'
 #' @param advice Whether the advice that follows widens the blocks
 #'   (\code{TRUE}: the grid branches, whose advice comes from
@@ -8884,14 +8747,13 @@ make_folds <- function(points_sf, k,
 
 #' What following a leakage warning's advice yields on this layout
 #'
-#' The leakage warnings of \code{make_folds(method = "block_kfold")} used to
-#' end "Pass block_size = <range> or auto_range = TRUE" whatever the extent.
-#' This builds the grid that size asks for, counts the blocks that hold
-#' points, and words the advice by the outcome: the setting and what it
-#' builds when that gives \code{k} folds; otherwise how many folds it gives
-#' (or that it stops with the single-block error), the largest block size
-#' that still gives \code{k} folds and how far below the range that is, and
-#' the method that does not depend on a block size.
+#' The leakage warnings of \code{make_folds(method = "block_kfold")} end with
+#' advice that fits the extent.  This builds the grid that size asks for,
+#' counts the blocks that hold points, and words the advice by the outcome:
+#' the setting and what it builds when that gives \code{k} folds; otherwise
+#' how many folds it gives (or that it stops with the single-block error),
+#' the largest block size that still gives \code{k} folds and how far below
+#' the range that is, and the method that does not depend on a block size.
 #'
 #' @param pts Projected points.
 #' @param reg The block region.
@@ -8948,136 +8810,95 @@ make_folds <- function(points_sf, k,
 # GWR Cross-Validation (now delegates to .cv_run_folds)
 # -----------------------------------------------------------------------------
 
-#' K-fold cross-validation for GWR
+#' Cross-validate a GWR with spatial folds
 #'
 #' Refits a geographically weighted regression from scratch on each training
-#' fold and scores it on the held-out fold, so the reported error is what the
-#' model achieves at locations it did not see.  Reach for it whenever you need
-#' a defensible accuracy figure for a GWR: the in-sample \eqn{R^2} that
-#' \code{\link{model_metrics}()} reports on a \code{gwr_fit} is close to
-#' meaningless, because a local regression with a small bandwidth can track the
-#' training points almost exactly.  Bandwidth is re-selected per fold unless you
-#' fix it with \code{bandwidth}, which keeps the selection itself inside the
-#' cross-validation, with no tuning on the full data first.
+#' fold and scores it on the held-out fold, so the reported error is the
+#' model's at locations it did not see.  Use it for an accuracy figure for a
+#' GWR: the in-sample \eqn{R^2}{R^2} that [model_metrics()] reports on a
+#' `gwr_fit` says little, because a local regression with a small bandwidth
+#' can track the training points almost exactly.  The bandwidth is selected
+#' again in each fold unless `bandwidth` fixes it, so the selection itself is
+#' inside the cross-validation, with no tuning on the full data first.
 #'
-#' Folds default to spatial blocks (\code{\link{make_folds}(method =
-#' "block_kfold")}), not random ones.  A random split leaves a held-out
-#' point's neighbours in the training set, so its score is the error of
-#' predicting among the samples; blocks hold out whole areas, and
-#' \code{folds} says what their score estimates.  Use
-#' \code{\link{cv_bayes}()} for the same treatment
-#' of a Bayesian GP model, \code{\link{cv_rf}()} for a forest, and
-#' \code{\link{compare_models_cv}()} to score several backends on one set of
-#' folds.
+#' Folds default to spatial blocks (`make_folds(method = "block_kfold")`),
+#' not random ones.  A random split leaves a held-out point's neighbours in
+#' the training set, so its score is the error of predicting among the
+#' samples; blocks hold out whole areas, and `folds` says what their score
+#' estimates.  Use [cv_bayes()] for the same treatment of a Bayesian GP,
+#' [cv_rf()] for a random forest, and [compare_models_cv()] to score several
+#' backends on one set of folds.
 #'
-#' @param data_sf An sf object.
-#' @param response_var Response column name.
-#' @param predictor_vars Predictor column names.
-#' @param folds Optional fold definitions, in any of three shapes: a
-#'   \code{\link{make_folds}()} return value; a bare list of
-#'   \code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
-#'   of fold labels, one per row, which becomes leave-that-label-out splits.
-#'   The label vector is how folds built by another package are used here
-#'   (\code{blockCV::cv_spatial()} returns one as \code{$folds_ids}), since its
-#'   \code{$folds_list} holds two \emph{unnamed} vectors per fold and is
-#'   refused by name.  Train and test must be disjoint: a fold that trains on
-#'   its own test rows is not a cross-validation split and is refused with an
-#'   error.  IDs naming no row in the prepared data are dropped with
-#'   a logged count (expected when rows were removed for missing values; a sign
-#'   the folds came from other data when they were not).
-#'   With \code{folds = NULL} the score estimates the error at the distance
-#'   the block grid built here puts between the held-out points and their
-#'   training data, which overstates the error of a map where the samples
-#'   cover the area it predicts over.  The excess is how much the model's
-#'   error grows from the map's distances to the data to the block grid's,
-#'   and is small for a model whose error changes little with the distance
-#'   from the data.  \code{\link{fold_separation}()}
-#'   with \code{prediction_points} compares the held-out distances with those
-#'   of the locations the model will predict at, and
-#'   \code{make_folds(method = "knndm", prediction_points = )} builds folds
-#'   matched to them.
-#' @param k Number of folds to build when \code{folds} is \code{NULL}; not
-#'   read when \code{folds} is supplied.  Default 5.
-#' @param seed RNG seed. Default 123.
-#' @param adaptive Logical; use adaptive bandwidth. Default TRUE.
-#' @param bandwidth Optional bandwidth, applied to every fold. For
-#'   \code{adaptive = TRUE} an integer number of neighbours; for
-#'   \code{adaptive = FALSE} a distance in the units of the \strong{projected}
-#'   CRS the folds are fitted in (geographic input is projected first, so a
-#'   value in degrees is read as metres). \code{NULL} (default) selects a
-#'   bandwidth per fold from that fold's training rows, by the search
-#'   \code{\link{fit_gwr_model}()} runs (its section Bandwidth selection:
-#'   AICc, or the leave-one-location-out sum of squares when observations
-#'   share a location), and reports it in \code{fold_metrics$bandwidth}.
-#' @param kernel Kernel function type.
-#' @param boundary Optional polygonal sf/sfc for CRS alignment.
-#' @param pointize Geometry coercion strategy.
-#' @param block_size Optional minimum block edge length (projected CRS
-#'   units) for the blocks built when \code{folds} is \code{NULL}; see
-#'   \code{\link{make_folds}()}.  It is a size you choose and is not
-#'   compared with the autocorrelation range unless one can be estimated, in
-#'   which case a smaller size is warned about.  Beside supplied
-#'   \code{folds} it has nothing to size and raises a warning (class
-#'   \code{spatialkit_fold_args_ignored}).
-#' @param auto_range Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
-#'   estimate the autocorrelation range and use it as the minimum block size.
-#'   Default \code{FALSE}.  \code{TRUE} beside supplied \code{folds} raises
-#'   the same warning as \code{block_size}.
-#' @param parallel Accepted so that every \code{cv_*()} function takes the
-#'   same arguments, but the GWR folds always run one after another in this
-#'   R process, where the warnings \code{predict()} raises for each fold are
-#'   collected into one.  A value asking for more than one core
-#'   raises a warning saying so.  Default \code{FALSE}.
+#' @inheritParams cv_spatial
+#' @param seed Seed for building the folds when `folds` is `NULL`, and for
+#'   the one seed drawn per fold before it is fitted.  With a seed, the
+#'   caller's random stream is restored afterwards.  Default 123.
+#' @param adaptive Logical; use an adaptive bandwidth, a number of
+#'   neighbours, rather than a fixed distance.  Default `TRUE`.
+#' @param bandwidth Optional bandwidth, applied to every fold.  For
+#'   `adaptive = TRUE` a whole number of neighbours; for `adaptive = FALSE` a
+#'   distance in the units of the projected CRS the folds are fitted in
+#'   (lon/lat input is projected first, so a value in degrees is read as
+#'   metres).  `NULL` (default) selects a bandwidth in each fold from that
+#'   fold's training rows, by the search [fit_gwr_model()] runs (its section
+#'   "Bandwidth selection": AICc, or the leave-one-location-out sum of squares
+#'   when observations share a location), and reports it in
+#'   `fold_metrics$bandwidth`.
+#' @param kernel The kernel that weights each location's neighbours:
+#'   `"bisquare"` (default), `"gaussian"`, `"tricube"`, `"boxcar"` or
+#'   `"exponential"`, as in [fit_gwr_model()].
+#' @param parallel Accepted so that every `cv_*()` function takes the same
+#'   arguments, but the GWR folds always run one after another in this R
+#'   process, where the warnings `predict()` raises for each fold are
+#'   collected into one.  A value asking for more than one core raises a
+#'   warning saying so.  Default `FALSE`.
 #' @param metrics Optional scoring function of your own, a
-#'   \code{function(y, yhat)} returning a named numeric vector; its names
-#'   become columns of \code{fold_metrics} (per fold) and \code{overall}
-#'   (pooled) beside the built-in ones.  See \strong{Your own metrics} on
-#'   \code{\link{cv_spatial}()} for the contract.
+#'   `function(y, yhat)` returning a named numeric vector; its names become
+#'   columns of `fold_metrics` (per fold) and `overall` (pooled) beside the
+#'   built-in ones.  See the section "Your own metrics" in [cv_spatial()] for
+#'   the contract.
 #' @inheritSection model_metrics Percentage errors on responses with zeros
-#' @return A list with \code{overall}, \code{fold_metrics},
-#'   \code{predictions}, \code{folds}, \code{n_folds_attempted},
-#'   \code{n_folds_succeeded}, \code{fold_status}, \code{orphan_rows},
-#'   \code{n_unknown_ids}, \code{n_dropped}, \code{formula} and
-#'   \code{adaptive}.  The two
-#'   fold counts make a run where every fold failed visible in the return
-#'   value itself, beyond the warning, since \code{overall} is a
-#'   well-formed all-\code{NA} row either way, and \code{fold_status} (one
-#'   row per fold: \code{fold}, \code{status}, \code{message}) says why each
-#'   missing fold is missing.  See \code{\link{cv_spatial}} for the five
-#'   statuses and for \code{orphan_rows}.  \code{Adj_R2} is \code{NA}
-#'   in both \code{overall} and \code{fold_metrics}: the pooled predictions
-#'   have no single parameter count, and a GWR's effective parameter count is
-#'   not its predictor count (see \code{\link{cv_spatial}}).  A held-out
-#'   location whose local regression cannot be estimated has \code{yhat}
-#'   \code{NA}, and one beyond the reach of its fold's fit is predicted and
+#' @return A list with the elements [cv_spatial()] returns (`overall`,
+#'   `fold_metrics`, `predictions`, `folds`, `n_folds_attempted`,
+#'   `n_folds_succeeded`, `fold_status`, `orphan_rows`, `n_unknown_ids` and
+#'   `n_dropped`; see its Value for each, and for the five fold statuses),
+#'   plus:
+#'   \describe{
+#'     \item{`formula`}{The model formula, as text.}
+#'     \item{`adaptive`}{Whether the bandwidth was adaptive.}
+#'   }
+#'   `fold_metrics` also carries each fold's `bandwidth`.  `Adj_R2` is `NA` in
+#'   both `overall` and `fold_metrics`: the pooled predictions have no single
+#'   parameter count, and a GWR's effective parameter count is not its
+#'   predictor count.
+#'
+#'   A held-out location whose local regression cannot be estimated has
+#'   `yhat` `NA`, and one beyond the reach of its fold's fit is predicted and
 #'   scored; each case raises one warning for the whole run (classes
-#'   \code{"spatialkit_gwr_not_estimable"} and
-#'   \code{"spatialkit_gwr_extrapolation"}), with the totals over the folds
-#'   that had any.  See \code{\link{predict.gwr_fit}}.  Where a fold's
-#'   fit took the response about a centre (a response at a large offset;
-#'   see \code{\link{fit_gwr_model}}), \code{predictions} also carries
-#'   \code{y_centre} (that centre, 0 in the rows of a fold fitted on the raw
-#'   response), \code{yhat_centred} and \code{y_train_mean_centred}
-#'   (\code{yhat} and \code{y_train_mean} less the centre, to the spread a
-#'   double rounds away at the response's size), and the metrics are those
-#'   of the centred values, as \code{\link{model_metrics}()} computes them.
+#'   `"spatialkit_gwr_not_estimable"` and `"spatialkit_gwr_extrapolation"`),
+#'   with the totals over the folds that had any.  See [predict.gwr_fit()].
+#'   Where a fold's fit took the response about a centre (a response at a
+#'   large offset; see [fit_gwr_model()]), `predictions` also carries
+#'   `y_centre` (that centre, 0 in the rows of a fold fitted on the raw
+#'   response), `yhat_centred` and `y_train_mean_centred` (`yhat` and
+#'   `y_train_mean` less the centre, to the spread a double rounds away at the
+#'   response's size), and the metrics are those of the centred values, as
+#'   [model_metrics()] computes them.
 #' @family cross-validation
-#' @examples
-#' if (requireNamespace("sp", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   n <- 60
-#'   dat <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-#'                elev = rnorm(n)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
-#'     2 * dat$elev + rnorm(n)
-#'   cv <- cv_gwr(dat, "price", "elev", k = 3, bandwidth = 30)
-#'   print(cv$overall)       # pooled over the held-out rows of every fold
-#'   cv$fold_metrics         # and fold by fold
-#' }
+#' @examplesIf requireNamespace("sp", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' n <- 60
+#' dat <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              elev = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
+#'   2 * dat$elev + rnorm(n)
+#' cv <- cv_gwr(dat, "price", "elev", k = 3, bandwidth = 30)
+#' cv$overall          # pooled over the held-out rows of every fold
+#' cv$fold_metrics     # and fold by fold
 #' @export
 cv_gwr <- function(data_sf, response_var, predictor_vars,
                    folds = NULL, k = 5, seed = 123,
@@ -9237,186 +9058,138 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 # Bayesian Cross-Validation (now delegates to .cv_run_folds)
 # -----------------------------------------------------------------------------
 
-#' K-fold cross-validation for the Bayesian spatial model
+#' Cross-validate a Bayesian GP with spatial folds
 #'
-#' Refits the Gaussian-process model of
-#' \code{\link{fit_bayesian_spatial_model}()} on each training fold and scores
-#' it on the held-out fold.  Beyond the point-prediction metrics the other CV
-#' wrappers report, this one scores the whole predictive \emph{distribution}:
-#' \code{predictive_coverage} says what fraction of held-out observations fell
-#' inside the 50/80/95% intervals, and \code{mean_CRPS} rates sharpness and
-#' calibration together.  That is the reason to reach for it.  A Bayesian model
-#' is usually chosen for its uncertainty, and only held-out coverage shows
-#' whether those intervals are honest at locations the model has not seen.
+#' Refits the Gaussian-process model of [fit_bayesian_spatial_model()] on
+#' each training fold and scores it on the held-out fold.  Besides the
+#' point-prediction metrics the other `cv_*()` functions report, it scores
+#' the whole predictive distribution: `predictive_coverage` gives the share of
+#' held-out observations inside the 50, 80 and 95 percent intervals, and
+#' `mean_CRPS` rates sharpness and calibration together.  A Bayesian model is
+#' often chosen for its uncertainty, and held-out coverage shows whether
+#' those intervals are honest at locations the model has not seen.
 #'
-#' It is the most expensive wrapper in the package by a wide margin: every fold
-#' is a full MCMC run.  Use few folds, and \code{parallel = TRUE} if you have
-#' the cores.  For a cheap first pass on the same question, cross-validate a
-#' forest with \code{\link{cv_rf}()} and come back here once the predictor set
-#' has settled.
+#' Every fold is a full MCMC run, so this is the slowest of the `cv_*()`
+#' functions.  Use few folds, and `parallel = TRUE` if you have the cores.
+#' For a quicker first pass on the same question, cross-validate a random
+#' forest with [cv_rf()] and come back here once the predictor set has
+#' settled.
 #'
-#' @param data_sf An sf object.
-#' @param response_var Response column name.
-#' @param predictor_vars Predictor column names.
-#' @param folds Optional fold definitions, in any of three shapes: a
-#'   \code{\link{make_folds}()} return value; a bare list of
-#'   \code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
-#'   of fold labels, one per row, which becomes leave-that-label-out splits.
-#'   The label vector is how folds built by another package are used here
-#'   (\code{blockCV::cv_spatial()} returns one as \code{$folds_ids}), since its
-#'   \code{$folds_list} holds two \emph{unnamed} vectors per fold and is
-#'   refused by name.  Train and test must be disjoint: a fold that trains on
-#'   its own test rows is not a cross-validation split and is refused with an
-#'   error.  IDs naming no row in the prepared data are dropped with
-#'   a logged count (expected when rows were removed for missing values; a sign
-#'   the folds came from other data when they were not).
-#'   With \code{folds = NULL} the score estimates the error at the distance
-#'   the block grid built here puts between the held-out points and their
-#'   training data, which overstates the error of a map where the samples
-#'   cover the area it predicts over.  The excess is how much the model's
-#'   error grows from the map's distances to the data to the block grid's,
-#'   and is small for a model whose error changes little with the distance
-#'   from the data.  \code{\link{fold_separation}()}
-#'   with \code{prediction_points} compares the held-out distances with those
-#'   of the locations the model will predict at, and
-#'   \code{make_folds(method = "knndm", prediction_points = )} builds folds
-#'   matched to them.
-#' @param k Number of folds to build when \code{folds} is \code{NULL}; not
-#'   read when \code{folds} is supplied.  Default 5.
-#' @param seed RNG seed. Default 123.  It seeds fold construction \strong{and},
-#'   through a per-fold draw, each fold's Stan sampler, so two seeds give
-#'   different posteriors even on identical \code{folds}. A \code{seed} in
-#'   \code{fit_args} overrides the per-fold draw with one fixed sampler seed.
-#' @param boundary Optional polygonal sf/sfc for CRS alignment.
-#' @param pointize Geometry coercion strategy.
-#' @param fit_args Named list of extra arguments for fit_bayesian_spatial_model().
-#'   A user-supplied \code{gp_k} is respected in every fold; when omitted, the
-#'   GP rank is auto-selected per training fold.  \code{compute_loo},
-#'   \code{boundary}, and \code{pointize} are always overridden by the CV
-#'   internals.  A categorical or ordinal \code{family}
-#'   (\code{brms::categorical()}, \code{cumulative}, \code{sratio},
-#'   \code{cratio}, \code{acat}) is refused before anything is fitted: its
-#'   prediction is a probability per response category, and every score
-#'   here needs one number per row.
-#' @param summary "mean" or "median" for posterior predictions.
-#' @param compute_pred_intervals Logical; compute predictive intervals.
+#' @inheritParams cv_spatial
+#' @param seed Seed for building the folds when `folds` is `NULL` and,
+#'   through one seed drawn per fold, for each fold's Stan sampler, so two
+#'   seeds give different posteriors even on identical `folds`.  A `seed` in
+#'   `fit_args` overrides the per-fold draw with one fixed sampler seed.
+#'   Default 123.
+#' @param fit_args Named list of extra arguments for
+#'   [fit_bayesian_spatial_model()].  A `gp_k` given here is used in every
+#'   fold; without one, the GP rank is chosen in each training fold.
+#'   `compute_loo`, `boundary` and `pointize` are always set by the
+#'   cross-validation.  A categorical or ordinal `family`
+#'   (`brms::categorical()`, `cumulative`, `sratio`, `cratio`, `acat`) is
+#'   refused before anything is fitted: its prediction is a probability per
+#'   response category, and every score here needs one number per row.
+#' @param summary `"mean"` (default) or `"median"`: the summary of the
+#'   posterior predictive draws used as each held-out row's prediction.
+#' @param compute_pred_intervals Logical, default `TRUE`: draw the posterior
+#'   predictive distribution of the held-out rows.  `FALSE` skips the draws
+#'   and saves time, and leaves the `coverage_*` columns, `CRPS`, `n_draws`,
+#'   `predictive_coverage` and `predictions$yhat_sd` `NA`.
 #' @param coverage_levels Numeric vector of the nominal coverage levels to
-#'   score, as proportions strictly between 0 and 1 (\code{0.95}, not
-#'   \code{95}), each given once; anything else is an error.  Each becomes a
-#'   column \code{coverage_<percent>} of \code{fold_metrics}, named at full
-#'   precision (\code{0.975} gives \code{coverage_97.5}).
-#' @param block_size Optional minimum block edge length (projected CRS
-#'   units) for the blocks built when \code{folds} is \code{NULL}; see
-#'   \code{\link{make_folds}()}.  Beside supplied \code{folds} it has
-#'   nothing to size and raises a warning (class
-#'   \code{spatialkit_fold_args_ignored}).
-#' @param auto_range Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
-#'   estimate the autocorrelation range and use it as the minimum block size.
-#'   Default \code{FALSE}.  \code{TRUE} beside supplied \code{folds} raises
-#'   the same warning as \code{block_size}.
-#' @param parallel Logical or positive integer.  If \code{TRUE},
-#'   auto-detect the number of cores and fit folds in parallel via
-#'   \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
-#'   on Windows).  If an integer > 1, use that many cores.  Default
-#'   \code{FALSE} (sequential).  Bayesian folds with full MCMC runs
-#'   are the primary beneficiary of this option.  Mind the memory: every
-#'   fold compiles its own Stan model, and one compilation can take several
-#'   GB (3.6 GB was measured), so \code{parallel = n} runs \code{n} of them
-#'   at once.  A compiler killed for lack of memory fails its fold with
-#'   rstan's \code{"invalid connection"} error, which \code{fold_status}
-#'   records; use fewer cores if you see it.
+#'   score, as proportions strictly between 0 and 1 (`0.95`, not `95`), each
+#'   given once; anything else is an error.  Each becomes a column
+#'   `coverage_<percent>` of `fold_metrics`, named at full precision (`0.975`
+#'   gives `coverage_97.5`).
+#' @param parallel Logical or positive integer.  `TRUE` detects the number of
+#'   cores and fits the folds in parallel with `parallel::mclapply()` (macOS
+#'   and Linux; sequential on Windows); an integer above 1 uses that many
+#'   cores.  Default `FALSE` (sequential).  Mind the memory: every fold
+#'   compiles its own Stan model, and one compilation can take several GB, so
+#'   `parallel = n` runs `n` of them at once.  A compiler killed for lack of
+#'   memory fails its fold with \pkg{rstan}'s `"invalid connection"` error,
+#'   which `fold_status` records; use fewer cores if you see it.
 #' @param metrics Optional scoring function of your own, a
-#'   \code{function(y, yhat)} returning a named numeric vector; its names
-#'   become columns of \code{fold_metrics} (per fold) and \code{overall}
-#'   (pooled) beside the built-in ones.  See \strong{Your own metrics} on
-#'   \code{\link{cv_spatial}()} for the contract.  \code{yhat} is the
-#'   posterior predictive \code{summary} (mean or median) of each held-out
-#'   row; a score that needs the draws belongs in \code{predictive_coverage}
-#'   and \code{CRPS}, which this function computes itself.
+#'   `function(y, yhat)` returning a named numeric vector; its names become
+#'   columns of `fold_metrics` (per fold) and `overall` (pooled) beside the
+#'   built-in ones.  See the section "Your own metrics" in [cv_spatial()] for
+#'   the contract.  `yhat` is the posterior predictive `summary` (mean or
+#'   median) of each held-out row; a score that needs the draws belongs in
+#'   `predictive_coverage` and `CRPS`, which this function computes itself.
 #' @section Warnings from the folds:
-#' \code{\link{fit_bayesian_spatial_model}()} warns about a fit under four
-#' condition classes: \code{spatialkit_gp_basis_size},
-#' \code{spatialkit_gp_resolution}, \code{spatialkit_convergence} and
-#' \code{spatialkit_gp_adequacy} (see its \strong{Warnings}).  Each fold is
-#' a fit, and none of those warnings says which fold it came from, so they
-#' are collected as the folds run and each class is raised once after the
-#' last fold, under this function's name and with the same class.  Each
-#' warning names the folds and carries \code{folds} (their labels) and
-#' \code{fold_messages} (every fold's own text, named by fold) as fields of
-#' the condition.  The convergence warning covers the folds that were
-#' scored and gives the checks each failed, also as the field
-#' \code{failed}; the other three quote the first fold's own text.  Each
-#' fold's own line is in the log.  Warnings that Stan or \pkg{brms} raise
-#' themselves are not collected and are passed on.
+#' [fit_bayesian_spatial_model()] warns about a fit under four condition
+#' classes: `spatialkit_gp_basis_size`, `spatialkit_gp_resolution`,
+#' `spatialkit_convergence` and `spatialkit_gp_adequacy` (see its section
+#' "Warnings").  Each fold is a fit, and none of those warnings says which
+#' fold it came from, so they are collected as the folds run and each class is
+#' raised once after the last fold, under this function's name and with the
+#' same class.  Each warning names the folds and carries `folds` (their
+#' labels) and `fold_messages` (every fold's own text, named by fold) as
+#' fields of the condition.  The convergence warning covers the folds that
+#' were scored and gives the checks each failed, also as the field `failed`;
+#' the other three quote the first fold's own text.  Each fold's own line is
+#' in the log.  Warnings that Stan or \pkg{brms} raise themselves are not
+#' collected and are passed on.
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @inheritSection model_metrics Which metrics survive a non-Gaussian response
-#' @return A list with \code{overall}, \code{fold_metrics},
-#'   \code{predictions}, \code{folds}, \code{n_folds_attempted},
-#'   \code{n_folds_succeeded}, \code{fold_status}, \code{orphan_rows},
-#'   \code{n_unknown_ids}, \code{n_dropped}, \code{formula},
-#'   \code{predictive_coverage} and \code{coverage_levels} (the nominal
-#'   levels, named by their \code{coverage_*} column).
-#'   The two fold counts make a run where every fold failed visible in the
-#'   return value itself, beyond the warning, and \code{fold_status} (one
-#'   row per fold: \code{fold}, \code{status}, \code{message}) keeps the
-#'   reason each missing fold is missing, including the error text of a fold
-#'   whose sampler failed, where a long run's console output would not.
-#'   See \code{\link{cv_spatial}} for the five statuses and for
-#'   \code{orphan_rows}.  \code{predictions} carries,
-#'   beyond the columns its siblings share, \code{yhat_sd}: the posterior
-#'   predictive standard deviation of each held-out row, from the same draws
-#'   that give the coverage below (\code{NA} when
-#'   \code{compute_pred_intervals = FALSE} or the draws failed for that fold).
-#'   \code{overall$Adj_R2} is always \code{NA}, as for every \code{cv_*()}:
-#'   see \code{\link{cv_spatial}}.
-#'   \code{fold_metrics} carries, beyond the columns its siblings share,
-#'   \code{gp_k}, \code{gp_n_basis}, \code{n_draws}, \code{CRPS}, the
-#'   \code{coverage_*} columns, \code{convergence_ok} and
-#'   \code{gp_adequacy}.  \code{convergence_ok} is \code{TRUE} or
-#'   \code{FALSE} as \code{\link{fit_bayesian_spatial_model}()} judged that
-#'   fold's sampler (divergent transitions, R-hat, effective sample size and
-#'   E-BFMI; see its \code{check_convergence}), \code{NA}
-#'   when \code{fit_args} sets \code{check_convergence = FALSE}.  A fold that
-#'   did not converge is scored like the others, so a run with any
-#'   \code{FALSE} raises one warning of class \code{spatialkit_convergence}
-#'   naming those folds and the checks each failed.
-#'   \code{gp_adequacy} is what that fold's posterior said about its
-#'   Gaussian-process basis (\code{"ok"}, \code{"below_resolution"},
-#'   \code{"unresolved_short_range"}, \code{"no_signal_above_floor"} or
-#'   \code{"not_checked"}; see "What the basis resolves" in
-#'   \code{\link{fit_bayesian_spatial_model}}).  A fold whose basis was
-#'   found too coarse is scored like the others too.  See \strong{Warnings
-#'   from the folds}.
-#'   The \code{predictive_coverage} entries (one per
-#'   \code{coverage_levels} value, plus \code{mean_CRPS}) are averages across
-#'   folds \strong{weighted by each fold's \code{n_pred}}, because the per-fold
-#'   values in \code{fold_metrics} are themselves means over that fold's test
-#'   rows; an unweighted average would not be the pooled quantity when fold
-#'   sizes differ, which for spatially blocked folds they routinely do.
+#' @return A list with the elements [cv_spatial()] returns (`overall`,
+#'   `fold_metrics`, `predictions`, `folds`, `n_folds_attempted`,
+#'   `n_folds_succeeded`, `fold_status`, `orphan_rows`, `n_unknown_ids` and
+#'   `n_dropped`; see its Value for each, and for the five fold statuses),
+#'   plus:
+#'   \describe{
+#'     \item{`formula`}{The model formula, as text.}
+#'     \item{`predictive_coverage`}{One entry per `coverage_levels` value,
+#'       plus `mean_CRPS`: averages across folds weighted by each fold's
+#'       `n_pred`.  The per-fold values in `fold_metrics` are means over that
+#'       fold's test rows, so an unweighted average would not be the pooled
+#'       quantity when fold sizes differ, as they do for spatial blocks.}
+#'     \item{`coverage_levels`}{The nominal levels, named by their
+#'       `coverage_*` column.}
+#'   }
+#'   `fold_status` keeps the error text of a fold whose sampler failed.
+#'   `predictions` also carries `yhat_sd`, the posterior predictive standard
+#'   deviation of each held-out row, from the same draws that give the
+#'   coverage (`NA` when `compute_pred_intervals = FALSE` or the draws failed
+#'   for that fold).  `overall$Adj_R2` is always `NA`, as for every
+#'   `cv_*()`.
+#'
+#'   `fold_metrics` also carries `gp_k`, `gp_n_basis`, `n_draws`, `CRPS`, the
+#'   `coverage_*` columns, `convergence_ok` and `gp_adequacy`.
+#'   `convergence_ok` is `TRUE` or `FALSE` as [fit_bayesian_spatial_model()]
+#'   judged that fold's sampler (divergent transitions, R-hat, effective
+#'   sample size and E-BFMI; see its `check_convergence`), and `NA` when
+#'   `fit_args` sets `check_convergence = FALSE`.  A fold that did not
+#'   converge is scored like the others, so a run with any `FALSE` raises one
+#'   warning of class `spatialkit_convergence` naming those folds and the
+#'   checks each failed.  `gp_adequacy` is what that fold's posterior said
+#'   about its Gaussian-process basis (`"ok"`, `"below_resolution"`,
+#'   `"unresolved_short_range"`, `"no_signal_above_floor"` or
+#'   `"not_checked"`; see "What the basis resolves" in
+#'   [fit_bayesian_spatial_model()]).  A fold whose basis was found too
+#'   coarse is scored like the others too; see the section "Warnings from the
+#'   folds".
 #' @family cross-validation
 #' @examples
 #' \dontrun{
 #' # Not run: fits with Stan, which needs a working C++ toolchain and takes
-#' # minutes of MCMC -- both outside what an example may assume.
-#' if (requireNamespace("brms", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   n <- 60
-#'   dat <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-#'                elev = rnorm(n)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
-#'     2 * dat$elev + rnorm(n)
-#'   # Two short chains per fold keep this to a few minutes and leave the
-#'   # posterior rough, so the intervals below will run narrow; a run to
-#'   # report uses brms's defaults (chains = 4, iter = 2000).
-#'   cv <- cv_bayes(dat, "price", "elev", k = 2,
-#'                  fit_args = list(chains = 2, iter = 1000))
-#'   print(cv$overall)
-#'   cv$predictive_coverage  # coverage at 50/80/95% plus mean CRPS
-#' }
+#' # minutes of MCMC.
+#' library(sf)
+#' set.seed(1)
+#' n <- 60
+#' dat <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              elev = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
+#'   2 * dat$elev + rnorm(n)
+#' # Two short chains per fold keep this to a few minutes and leave the
+#' # posterior rough, so the intervals below will run narrow; a run to
+#' # report uses the defaults of brms (chains = 4, iter = 2000).
+#' cv <- cv_bayes(dat, "price", "elev", k = 2,
+#'                fit_args = list(chains = 2, iter = 1000))
+#' cv$overall
+#' cv$predictive_coverage  # coverage at 50, 80 and 95 percent, and mean CRPS
 #' }
 #' @export
 cv_bayes <- function(data_sf, response_var, predictor_vars,
@@ -9726,233 +9499,243 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 # Unified CV (model-agnostic)
 # -----------------------------------------------------------------------------
 
-#' Model-agnostic spatial cross-validation
+#' Cross-validate any learner with spatial folds
 #'
-#' Run K-fold CV for any model that returns a \code{spatial_fit} object.
-#' This is the extensibility point: to plug in a new model type, supply
-#' a \code{fit_fn(train_sf)} that returns a \code{spatial_fit}.
+#' You supply `fit_fn(train_sf)`, which fits on one fold's training rows and
+#' returns a `spatial_fit`; `cv_spatial()` builds or takes the folds, calls
+#' `fit_fn` once per fold, predicts the held-out rows and returns pooled and
+#' per-fold scores.  [cv_rf()] is a wrapper over it.
 #'
 #' @section Name collision with blockCV:
 #' The \pkg{blockCV} package exports a function of the same name that does
-#' the opposite job: \code{blockCV::cv_spatial()} \emph{builds} spatial
-#' folds, where this function \emph{runs} a cross-validation over folds it is
-#' given.  With both packages attached, whichever was attached last masks the
-#' other; \code{spatialkit::cv_spatial()} always resolves to this one.  The
-#' two cooperate: \code{blockCV::cv_spatial()} returns
-#' its fold assignment as \code{$folds_ids}, a vector of fold labels, and
-#' that vector is accepted directly as the \code{folds} argument here and in
-#' every other \code{cv_*()} function.  Fold construction is
-#' \pkg{blockCV}'s home ground and this package does not try to match its
-#' breadth there; what this package adds is the path from irregular points
-#' through data-drawn regions to a cross-validated, compared model.
+#' the opposite job: `blockCV::cv_spatial()` builds spatial folds, where this
+#' function runs a cross-validation over folds it is given.  With both
+#' packages attached, whichever was attached last masks the other;
+#' `spatialkit::cv_spatial()` always resolves to this one.  The two work
+#' together: `blockCV::cv_spatial()` returns its fold assignment as
+#' `$folds_ids`, a vector of fold labels, and that vector is accepted as the
+#' `folds` argument here and in every other `cv_*()` function.
 #'
-#' @param data_sf An sf object.
-#' @param response_var Response column name.
-#' @param predictor_vars Predictor column names.
+#' @param data_sf An sf layer with the response and the predictors.
+#' @param response_var Name of the response column.
+#' @param predictor_vars Character vector of predictor column names.
 #' @param fit_fn A function of one argument, the training slice of
-#'   \code{data_sf}, returning a \code{spatial_fit} built with
-#'   \code{\link{new_spatial_fit}()}.  It is called once per fold on the
-#'   training rows only, so anything done inside it (scaling, tuning, an inner
-#'   variable sweep) is already nested and leak-free.  The \code{subclass} it
-#'   stamps must have a \code{predict.<subclass>()} method registered, because
-#'   that is how each fold is scored.  The fit models \code{response_var}
-#'   (its \code{response_var} is the call's): a fold whose fit models
-#'   another column fails, with the two names in \code{fold_status}, since
-#'   its predictions are scored against \code{response_var}.
-#' @param folds Optional fold definitions, in any of three shapes: a
-#'   \code{\link{make_folds}()} return value; a bare list of
-#'   \code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
-#'   of fold labels, one per row, which becomes leave-that-label-out splits.
-#'   The label vector is how folds built by another package are used here
-#'   (\code{blockCV::cv_spatial()} returns one as \code{$folds_ids}), since its
-#'   \code{$folds_list} holds two \emph{unnamed} vectors per fold and is
-#'   refused by name.  Train and test must be disjoint: a fold that trains on
-#'   its own test rows is not a cross-validation split and is refused with an
-#'   error.  IDs naming no row in the prepared data are dropped with
-#'   a logged count.
-#'   Built via \code{block_kfold} when \code{NULL}.
-#'   With \code{folds = NULL} the score estimates the error at the distance
+#'   `data_sf`, returning a `spatial_fit` built with [new_spatial_fit()].  It
+#'   is called once per fold on the training rows only, so anything done
+#'   inside it (scaling, tuning, an inner variable sweep) is already nested and
+#'   leak-free.  The `subclass` it stamps must have a `predict.<subclass>()`
+#'   method registered, since that is how each fold is scored.  The fit
+#'   models `response_var` (its `response_var` is the call's): a fold whose
+#'   fit models another column fails, with the two names in `fold_status`,
+#'   since its predictions are scored against `response_var`.
+#' @param folds Optional fold definitions, in one of three shapes: a
+#'   [make_folds()] result; a bare list of `list(train =, test =)` pairs of
+#'   `..row_id` values; or a vector of fold labels, one per row, which becomes
+#'   leave-that-label-out splits.  The label vector is how folds built by
+#'   another package are used here: `blockCV::cv_spatial()` returns one as
+#'   `$folds_ids`, while its `$folds_list` holds two unnamed vectors per fold
+#'   and is refused by name.  Train and test must be disjoint; a fold that
+#'   trains on its own test rows is not a cross-validation split and is
+#'   refused with an error.  IDs naming no row of the prepared data are
+#'   dropped with a logged count (expected when rows were removed for missing
+#'   values; a sign the folds came from other data when they were not).  When
+#'   `NULL`, the folds are `make_folds(method = "block_kfold")`, built with
+#'   `k`, `seed`, `boundary`, `block_size` and `auto_range`.
+#'   With `folds = NULL` the score estimates the error at the distance
 #'   the block grid built here puts between the held-out points and their
 #'   training data, which overstates the error of a map where the samples
 #'   cover the area it predicts over.  The excess is how much the model's
 #'   error grows from the map's distances to the data to the block grid's,
 #'   and is small for a model whose error changes little with the distance
-#'   from the data.  \code{\link{fold_separation}()}
-#'   with \code{prediction_points} compares the held-out distances with those
-#'   of the locations the model will predict at, and
-#'   \code{make_folds(method = "knndm", prediction_points = )} builds folds
-#'   matched to them.
-#' @param k Number of folds to build when \code{folds} is \code{NULL}; not
-#'   read when \code{folds} is supplied.
-#' @param seed RNG seed.
-#' @param boundary Optional boundary for fold construction.
-#' @param pointize Geometry coercion strategy.
-#' @param predict_args Extra arguments for predict().
-#' @param fold_info_fn Optional \code{function(fit, test_sf, y, yhat)}
-#'   returning a named list (or a named vector) of per-fold extras (a
-#'   bandwidth, a tuning value, anything read off the fitted object), added
-#'   as columns of \code{fold_metrics}.  It sees the fit and the held-out
-#'   layer, which
-#'   \code{metrics} does not; it is applied per fold only, and its values
-#'   are not pooled.  An element \code{..per_row} that is a data frame with
-#'   one row per held-out observation is spliced into \code{predictions}
-#'   instead (\code{NA} in the rows of a fold that returned none; one of the
-#'   wrong length is dropped and logged); its columns must be named, once,
-#'   and not reuse a column \code{predictions} already has (\code{..row_id},
-#'   \code{fold}, \code{y}, \code{yhat}, \code{y_train_mean}).  Every
+#'   from the data.  [fold_separation()] with `prediction_points` compares
+#'   the held-out distances with those of the locations the model will
+#'   predict at, and `make_folds(method = "knndm", prediction_points = )`
+#'   builds folds matched to them.
+#' @param k Number of folds to build when `folds` is `NULL`; not read when
+#'   `folds` is supplied.  Default 5.
+#' @param seed Seed for building the folds when `folds` is `NULL`, and for
+#'   the one seed drawn per fold before `fit_fn` runs, so a learner that draws
+#'   random numbers gives the same scores on every run, sequential or
+#'   parallel.  With a seed, the caller's random stream is restored
+#'   afterwards.  Default 123; `NULL` draws the per-fold seeds from the
+#'   session's RNG state, and advances it.
+#' @param boundary Optional polygon layer (sf or sfc).  Data without a CRS are
+#'   aligned to it, and the blocks built when `folds` is `NULL` are clipped to
+#'   it (see [make_folds()] and [spatialkit-geometry]).
+#' @param pointize How a feature that is not a point is reduced to one before
+#'   fitting: a mode of [coerce_to_points()].  Default `"auto"`.
+#' @param predict_args A list of extra arguments for `predict()` on each
+#'   fold's fit.
+#' @param fold_info_fn Optional `function(fit, test_sf, y, yhat)` returning a
+#'   named list (or a named vector) of per-fold extras (a bandwidth, a tuning
+#'   value, anything read off the fitted object), added as columns of
+#'   `fold_metrics`.  It sees the fit and the held-out layer, which `metrics`
+#'   does not; it is applied per fold only, and its values are not pooled.
+#'   An element `..per_row` that is a data frame with one row per held-out
+#'   observation is spliced into `predictions` instead (`NA` in the rows of a
+#'   fold that returned none; one of the wrong length is dropped and logged);
+#'   its columns must be named, once, and not reuse a column `predictions`
+#'   already has (`..row_id`, `fold`, `y`, `yhat`, `y_train_mean`).  Every
 #'   other element must be named, hold one value, and not reuse a column
-#'   \code{fold_metrics} already has;
-#'   anything else is an error.  A \code{fold_info_fn} that throws on a fold
-#'   is logged, its columns are \code{NA} for that fold, and
-#'   \code{fold_status$message} says so; the fold is kept.
-#' @param p Number of predictors for Adj R² (NULL to skip).  Only meaningful
-#'   for models with a fixed global parameter count; pass NULL for models
-#'   with spatially varying coefficients (e.g. GWR).
-#' @param block_size Optional minimum block edge length (projected CRS
-#'   units) for the blocks built when \code{folds} is \code{NULL}; see
-#'   \code{\link{make_folds}()}.  Beside supplied \code{folds} it has
-#'   nothing to size and raises a warning (class
-#'   \code{spatialkit_fold_args_ignored}).
-#' @param auto_range Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
-#'   estimate the autocorrelation range and use it as the minimum block size.
-#'   Default \code{FALSE}.  \code{TRUE} beside supplied \code{folds} raises
-#'   the same warning as \code{block_size}.
-#' @param parallel Logical or positive integer.  If \code{TRUE},
-#'   auto-detect the number of cores and fit folds in parallel via
-#'   \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
-#'   on Windows).  If an integer > 1, use that many cores.  Default
-#'   \code{FALSE} (sequential).  A learner that runs OpenMP code (a
-#'   function of GWmodel, or an xgboost built with GNU libgomp) can hang the
-#'   forked workers once it has run in the session; keep such a
-#'   \code{fit_fn} sequential.
-#' @param metrics Optional scoring function of your own; see \strong{Your
-#'   own metrics} below.  Default \code{NULL}: the built-in metrics only.
-#' @param .caller Internal. The name the messages carry, so a wrapper such as
-#'   \code{\link{cv_rf}} reports itself in place of \code{cv_spatial()}.
+#'   `fold_metrics` already has; anything else is an error.  A
+#'   `fold_info_fn` that throws on a fold is logged, its columns are `NA` for
+#'   that fold, and `fold_status$message` says so; the fold is kept.
+#' @param p Number of predictors for the per-fold adjusted
+#'   \eqn{R^2}{R^2}, or `NULL` to skip it.  It applies only to models with
+#'   one global parameter count; pass `NULL` for models with spatially
+#'   varying coefficients, such as GWR.
+#' @param block_size Optional minimum block edge length, in the units of the
+#'   CRS the folds are built in, for the blocks built when `folds` is `NULL`;
+#'   see [make_folds()].  It is a size you choose and is compared with the
+#'   autocorrelation range only when one can be estimated, in which case a
+#'   smaller size is warned about.  Beside supplied `folds` it has nothing to
+#'   size and raises a warning of class `spatialkit_fold_args_ignored`.
+#' @param auto_range Logical, default `FALSE`.  `TRUE` with `folds = NULL`
+#'   estimates the autocorrelation range and uses it as the minimum block
+#'   size.  `TRUE` beside supplied `folds` raises the same warning as
+#'   `block_size`.
+#' @param parallel Logical or positive integer.  `TRUE` detects the number of
+#'   cores and fits the folds in parallel with `parallel::mclapply()` (macOS
+#'   and Linux; sequential on Windows); an integer above 1 uses that many
+#'   cores.  Default `FALSE` (sequential).  A learner that runs OpenMP code (a
+#'   function of \pkg{GWmodel}, or an \pkg{xgboost} built with GNU libgomp)
+#'   can hang the forked workers once it has run in the session; keep such a
+#'   `fit_fn` sequential.
+#' @param metrics Optional scoring function of your own; see the section
+#'   "Your own metrics".  Default `NULL`: the built-in metrics only.
+#' @param .caller For package wrappers; do not set it.
 #' @section Your own metrics:
-#' The built-in columns (\code{RMSE}, \code{MAE}, \code{MAPE},
-#' \code{SMAPE}, \code{R2}, \code{Adj_R2}) are the Gaussian regression
-#' set, and the section below says which of them survive a count or a
-#' bounded response.  \code{metrics} is the way to score what they cannot: a
-#' \code{function(y, yhat)} that returns a named numeric vector (a named
-#' list of scalars, or a one-row data frame, also serve), for example a
-#' Poisson deviance, a log score on a probability, or a loss with your own
-#' weights.  It is applied twice, in the same way the built-in metrics are:
-#' once per fold, to that fold's held-out rows, so each name becomes a column
-#' of \code{fold_metrics}; and once to the pooled out-of-sample predictions
-#' of every fold, so each name becomes a column of \code{overall}.  Only the
-#' pairs the built-in metrics use reach the function (both \code{y} and
-#' \code{yhat} finite), so its columns describe the same rows as
-#' \code{RMSE}, and \code{n_pred} counts them.
+#' The built-in columns (`RMSE`, `MAE`, `MAPE`, `SMAPE`, `R2`, `Adj_R2`) are
+#' the Gaussian regression set; see "Which metrics survive a non-Gaussian
+#' response" in [model_metrics()] for which of them hold up on a count or a
+#' bounded response.  `metrics` scores what they cannot: a
+#' `function(y, yhat)` that returns a named numeric vector (a named list of
+#' scalars, or a one-row data frame, also serve), for example a Poisson
+#' deviance, a log score on a probability, or a loss with your own weights.
+#' It is applied twice, as the built-in metrics are: once per fold, to that
+#' fold's held-out rows, so each name becomes a column of `fold_metrics`; and
+#' once to the pooled out-of-sample predictions of every fold, so each name
+#' becomes a column of `overall`.  Only the pairs the built-in metrics use
+#' reach the function (both `y` and `yhat` finite), so its columns describe
+#' the same rows as `RMSE`, and `n_pred` counts them.
 #'
 #' The contract: every element named, names unique and not one of the
 #' built-in column names, one number per name.  The built-in names include
-#' the per-fold extras of the backend or of your \code{fold_info_fn}
-#' (\code{bandwidth} for \code{cv_gwr()}; \code{CRPS}, \code{coverage_*},
-#' \code{gp_k}, \code{gp_n_basis} and \code{n_draws} for \code{cv_bayes()}),
-#' and \code{mean_CRPS}, which \code{compare_models_cv()} writes.  Anything
-#' else is an error,
-#' because a scoring function that returns the wrong shape is a mistake to
-#' surface instead of a fold to skip.  A function that \emph{throws} on a
-#' fold is logged and its columns are \code{NA} for that fold (and for
-#' \code{overall}, if it throws on the pooled predictions); a fold is never
+#' the per-fold extras of the backend or of your `fold_info_fn` (`bandwidth`
+#' for `cv_gwr()`; `CRPS`, `coverage_*`, `gp_k`, `gp_n_basis` and `n_draws`
+#' for `cv_bayes()`), and `mean_CRPS`, which `compare_models_cv()` writes.
+#' Anything else is an error, since a scoring function that returns the wrong
+#' shape is a mistake to report, not a fold to skip.  A function that throws
+#' on a fold is logged and its columns are `NA` for that fold (and for
+#' `overall`, if it throws on the pooled predictions); a fold is never
 #' dropped for it.  When no fold produced a prediction the empty
-#' \code{fold_metrics} frame still carries the function's columns, typed,
-#' provided the function can be called on zero-length input.
+#' `fold_metrics` frame still carries the function's columns, typed, provided
+#' the function can be called on zero-length input.
 #'
-#' \code{fold_info_fn} is the per-fold half of the same mechanism, with
-#' access to the fitted object and the held-out layer; \code{metrics} sees
-#' only the two vectors but is also pooled.  \code{compare_models_cv()}
-#' hands one \code{metrics} to every backend, so the columns are comparable
-#' across the rows of its \code{overall}.
+#' `fold_info_fn` is the per-fold half of the same mechanism, with access to
+#' the fitted object and the held-out layer; `metrics` sees only the two
+#' vectors but is also pooled.  `compare_models_cv()` hands one `metrics` to
+#' every backend, so the columns are comparable across the rows of its
+#' `overall`.
 #' @section Warnings a learner raises in every fold:
-#' A warning from a fold's fit or from its \code{predict()} reaches the
-#' caller as it is raised, so a learner that warns in every fold warns once
-#' per fold.  Two groups of the package's own warnings are collected over the
-#' folds instead and raised once per call, under this function's name and
-#' with the class they had:
+#' A warning from a fold's fit or from its `predict()` reaches the caller as
+#' it is raised, so a learner that warns in every fold warns once per fold.
+#' Two groups of the package's own warnings are collected over the folds
+#' instead and raised once per call, under this function's name and with the
+#' class they had:
 #' \itemize{
-#'   \item the two in which \code{predict()} on a GWR counts locations
-#'     (\code{"spatialkit_gwr_not_estimable"} and
-#'     \code{"spatialkit_gwr_extrapolation"}), with the totals over the folds
-#'     that had any, as \code{\link{cv_gwr}()} raises them (see
-#'     \code{\link{predict.gwr_fit}});
-#'   \item the four \code{\link{fit_bayesian_spatial_model}()} raises about
-#'     a fit, naming the folds, as \code{\link{cv_bayes}()} raises them (see
-#'     \strong{Warnings from the folds} there).
+#'   \item the two in which `predict()` on a GWR counts locations
+#'     (`"spatialkit_gwr_not_estimable"` and
+#'     `"spatialkit_gwr_extrapolation"`), with the totals over the folds that
+#'     had any, as [cv_gwr()] raises them (see [predict.gwr_fit()]);
+#'   \item the four [fit_bayesian_spatial_model()] raises about a fit, naming
+#'     the folds, as [cv_bayes()] raises them (see the section "Warnings from
+#'     the folds" there).
 #' }
-#' With \code{parallel} above one core a fold's warnings are raised after
-#' the folds have run, once per distinct text; one of the package's own
-#' classes keeps its class and its fields.
+#' With `parallel` above one core a fold's warnings are raised after the folds
+#' have run, once per distinct text; one of the package's own classes keeps
+#' its class and its fields.
 #' @inheritSection model_metrics Percentage errors on responses with zeros
-#' @return A list with \code{overall}, \code{fold_metrics}, \code{predictions},
-#'   \code{folds}, the two fold counts \code{n_folds_attempted} and
-#'   \code{n_folds_succeeded}, and four elements that say what happened to
-#'   the difference between them and to the rows: \code{fold_status},
-#'   \code{orphan_rows}, \code{n_unknown_ids} and \code{n_dropped}.  The
-#'   counts are reported deliberately: a
-#'   \code{fit_fn} that fails on every fold otherwise looks like a successful
-#'   run that happened to score \code{NA}, so compare them before trusting
-#'   \code{overall}.  \code{fold_status} is a data.frame with one row per
-#'   fold supplied (\code{fold}, \code{status} and \code{message}), where
-#'   \code{status} is \code{"ok"} (\code{message} is empty unless
-#'   \code{fold_info_fn} failed on the fold); \code{"error"} (the fit or its
-#'   \code{predict()} threw; \code{message} is the error text);
-#'   \code{"skipped"} (nothing scorable: too few matched rows, a prediction
-#'   of the wrong length, or no finite observed/predicted pair);
-#'   \code{"dropped"} (an empty test set, or fewer than two training rows,
-#'   once incomplete rows were removed, so the fold never reached the fitter);
-#'   or \code{"worker_error"} (a parallel worker died, for example killed for
-#'   lack of memory).  Each fold runs in its own worker, so a failure costs
-#'   that fold only, and an error that stops a sequential run (a
-#'   \code{metrics} or \code{fold_info_fn} return value of the wrong shape)
-#'   stops a parallel one too, naming the fold.  Every fold missing
-#'   from \code{fold_metrics} has its reason there, which matters most when
-#'   the console output of a long run is gone.  When some folds, but not
-#'   all, end as \code{"error"}, \code{"skipped"} or \code{"worker_error"},
-#'   the function warns, naming them and how many rows \code{overall}
-#'   covers: it is pooled over the folds that produced predictions, and the
-#'   fold that fails is often the hardest to predict, so it may flatter the
-#'   model.  (A \code{"dropped"} fold has its own warning.)
-#'   \code{orphan_rows} holds the
-#'   \code{..row_id}s of rows in the data that no fold names (they enter no
-#'   training set and are never scored; non-empty only when the folds were
-#'   built on a different or subsetted layer), and \code{n_unknown_ids}
-#'   counts the distinct row IDs the folds name that the data does not have.
-#'   Each such row is named by every fold, once as a test row and once in
-#'   each other fold's training set, and this counts the row, not the
-#'   mentions (expected when rows were removed for missing values).
-#'   \code{n_dropped} is how many rows \code{prep_model_data()} removed for
-#'   missing or non-finite values or a bad geometry before any fold was
-#'   fitted.  The \code{fold} column of
-#'   \code{fold_metrics}, \code{predictions} and \code{fold_status} carries
-#'   the fold's index in the \code{folds} object that was supplied, so it
-#'   lines up with \code{make_folds()$assignment$fold} even when some folds
-#'   were unusable and dropped.  Splits that already carry a \code{fold_id},
-#'   as the \code{folds} of a \code{cv_*()} result do, keep it: handing
-#'   one run's \code{folds} to another labels each fold as the first run
-#'   and \code{\link{fold_separation}()} do, a dropped fold's gap
-#'   included.  \code{R2} is out-of-sample \eqn{R^2}: the
-#'   total sum of squares is taken about the mean of the \emph{training} rows
-#'   (in \code{overall}, each held-out row about its own fold's training
-#'   mean), the null prediction available when the fold is predicted, and
-#'   not about the held-out rows' own mean, a null model that would know the
-#'   test data.  On spatial blocks the two can differ widely; \code{R2} is
-#'   below 0 when the model predicts worse than the training mean.
-#'   \code{\link{model_metrics}(newdata = )} uses the same baseline.
-#'   \code{overall$Adj_R2} is always \code{NA}: the
-#'   pooled out-of-sample predictions come from \code{k} separately fitted
-#'   models and have no single parameter count to adjust for.  The per-fold
-#'   \code{fold_metrics$Adj_R2} carries the adjusted value when \code{p} is
-#'   supplied, and is \code{NA} otherwise.  A \code{fit_fn} that returns a
-#'   \code{gwr_fit} of a response at a large offset gives \code{predictions}
-#'   the columns \code{y_centre}, \code{yhat_centred} and
-#'   \code{y_train_mean_centred} (see \code{\link{cv_gwr}()}).
+#' @return A list with:
+#'   \describe{
+#'     \item{`overall`}{One row of metrics pooled over the held-out rows of
+#'       every fold that produced predictions.}
+#'     \item{`fold_metrics`}{One row per fold that produced predictions:
+#'       `fold`, `n_train`, `n_test`, `n_pred`, the metrics, and the columns
+#'       of `fold_info_fn` and `metrics`.}
+#'     \item{`predictions`}{One row per held-out row scored: `..row_id`,
+#'       `fold`, `y`, `yhat` and `y_train_mean`, the mean response of that
+#'       fold's training rows.}
+#'     \item{`folds`}{The splits as run, each with its `fold_id`.}
+#'     \item{`n_folds_attempted`, `n_folds_succeeded`}{The folds supplied (or
+#'       built) and the folds scored.  A `fit_fn` that fails on every fold
+#'       otherwise looks like a run that scored `NA`, so compare the two
+#'       before reading `overall`.}
+#'     \item{`fold_status`}{A data frame with one row per fold supplied:
+#'       `fold`, `status` and `message`.  `status` is one of
+#'       \itemize{
+#'         \item `"ok"`: `message` is empty unless `fold_info_fn` failed on
+#'           the fold;
+#'         \item `"error"`: the fit or its `predict()` threw, and `message` is
+#'           the error text;
+#'         \item `"skipped"`: nothing to score (too few matched rows, a
+#'           prediction of the wrong length, or no finite pair of observed and
+#'           predicted values);
+#'         \item `"dropped"`: an empty test set, or fewer than two training
+#'           rows once incomplete rows were removed, so the fold never reached
+#'           the fitter;
+#'         \item `"worker_error"`: a parallel worker died, for example killed
+#'           for lack of memory.
+#'       }
+#'       Every fold missing from `fold_metrics` has its reason here, after the
+#'       console output of a long run is gone.}
+#'     \item{`orphan_rows`}{The `..row_id`s of rows in the data that no fold
+#'       names: they enter no training set and are never scored.  It is empty
+#'       unless the folds were built on a different or subsetted layer.}
+#'     \item{`n_unknown_ids`}{The number of distinct row IDs the folds name
+#'       that the data do not have (expected when rows were removed for
+#'       missing values).  Each such row is named by every fold, once as a
+#'       test row and once in each other fold's training set, and this counts
+#'       the row, not the mentions.}
+#'     \item{`n_dropped`}{The number of rows [prep_model_data()] removed for
+#'       missing or non-finite values or a bad geometry before any fold was
+#'       fitted.}
+#'   }
+#'
+#'   Each fold runs in its own worker, so a failure costs that fold only, and
+#'   an error that stops a sequential run (a `metrics` or `fold_info_fn`
+#'   return value of the wrong shape) stops a parallel one too, naming the
+#'   fold.  When some folds, but not all, end as `"error"`, `"skipped"` or
+#'   `"worker_error"`, the function warns, naming them and how many rows
+#'   `overall` covers: it is pooled over the folds that produced predictions,
+#'   and the fold that fails is often the hardest to predict, so it may
+#'   flatter the model.  A `"dropped"` fold has its own warning.
+#'
+#'   The `fold` column of `fold_metrics`, `predictions` and `fold_status`
+#'   carries the fold's index in the `folds` object that was supplied, so it
+#'   lines up with `make_folds()$assignment$fold` even when some folds were
+#'   unusable and dropped.  Splits that already carry a `fold_id`, as the
+#'   `folds` of a `cv_*()` result do, keep it: handing one run's `folds` to
+#'   another labels each fold as the first run and [fold_separation()] do, a
+#'   dropped fold's gap included.
+#'
+#'   `R2` is the out-of-sample \eqn{R^2}{R^2}: the total sum of squares is
+#'   taken about the mean of the training rows (in `overall`, each held-out
+#'   row about its own fold's training mean), the null prediction available
+#'   when the fold is predicted, and not about the held-out rows' own mean,
+#'   a null model that would know the test data.  On spatial blocks the two
+#'   can differ widely; `R2` is below 0 when the model predicts worse than
+#'   the training mean.  `model_metrics(newdata = )` uses the same baseline.
+#'   `overall$Adj_R2` is always `NA`: the pooled out-of-sample predictions
+#'   come from `k` separately fitted models and have no single parameter
+#'   count to adjust for.  The per-fold `fold_metrics$Adj_R2` carries the
+#'   adjusted value when `p` is supplied, and is `NA` otherwise.  A `fit_fn`
+#'   that returns a `gwr_fit` of a response at a large offset gives
+#'   `predictions` the columns `y_centre`, `yhat_centred` and
+#'   `y_train_mean_centred` (see [cv_gwr()]).
 #' @family cross-validation
-#' @seealso \code{\link{new_spatial_fit}()} for the constructor a \code{fit_fn}
-#'   must use; \code{\link{cv_gwr}()}, \code{\link{cv_bayes}()} and
-#'   \code{\link{cv_rf}()} for the built-in backends, which are thin wrappers
-#'   over this function.
+#' @seealso [new_spatial_fit()] for the constructor a `fit_fn` must use;
+#'   [cv_gwr()], [cv_bayes()] and [cv_rf()] for the built-in backends.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -9987,7 +9770,7 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'
 #' cv <- cv_spatial(site, "price", "elev", fit_fn = lm_fit, k = 3, seed = 1)
 #' cv$overall
-#' # Compare these before trusting the metrics above; fold_status says why
+#' # Compare these before reading the metrics above; fold_status says why
 #' # any fold is missing from fold_metrics.
 #' c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
 #' cv$fold_status

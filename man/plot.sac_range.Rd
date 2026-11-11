@@ -7,8 +7,7 @@
 \method{plot}{sac_range}(x, ...)
 }
 \arguments{
-\item{x}{An object of class \code{sac_range}, as returned by
-\code{\link{estimate_sac_range}()}.}
+\item{x}{A \code{sac_range} object, as returned by \code{\link[=estimate_sac_range]{estimate_sac_range()}}.}
 
 \item{...}{Ignored.}
 }
@@ -16,62 +15,50 @@
 A \code{ggplot} object.
 }
 \description{
-Draws the empirical variogram that \code{\link{estimate_sac_range}()}
-attaches to its result, with the fitted model and the effective range
-overlaid where a range was identified, and a subtitle saying why not where
-it was not.  A variogram that never reaches a sill, or that has no spatial
-structure at the lags resolved, is the single most useful thing to
-\emph{see} when a range comes back \code{NA}, so those cases are drawn
-rather than refused.
+Draws the empirical variogram that \code{\link[=estimate_sac_range]{estimate_sac_range()}} attaches to its
+result, as a \pkg{ggplot2} object, with the fitted model and the effective
+range overlaid where a range was identified, and a subtitle that gives the
+reason where it was not.  A variogram that never reaches a sill, or that
+has no spatial structure at the lags resolved, is drawn as well, since the
+curve shows why the range came back \code{NA}.
 }
 \details{
-Nothing is recomputed: the plot reads the \code{variogram},
-\code{variogram_model}, \code{crs} and \code{rejected_reason}
-attributes the estimate already carries.  The variogram is the one over
-all point pairs; a result stored by an earlier version, whose range could
-be that of the widest of four directions (\code{anisotropy_used}
-\code{TRUE}), is titled with its azimuth.  The
-distance axis is in the units of the CRS the variogram was actually fitted
-in, which \code{estimate_sac_range()} may have chosen itself for lon/lat
-input.
+Nothing is recomputed: the plot reads the \code{variogram}, \code{variogram_model},
+\code{crs} and \code{rejected_reason} attributes the estimate carries.  The
+variogram is the one over all point pairs.  The distance axis is in the
+units of the CRS the variogram was fitted in, which
+\code{\link[=estimate_sac_range]{estimate_sac_range()}} chooses itself for lon/lat input.
 }
 \examples{
-if (requireNamespace("gstat", quietly = TRUE) &&
-    requireNamespace("ggplot2", quietly = TRUE)) {
-  library(sf)
-  # An exponential field with range parameter 150 (effective range about
-  # 450 m) and a nugget of half the sill, so the fitted model, the nugget
-  # and the range line all have something to show.
-  set.seed(3)
-  n <- 250
-  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-  D  <- as.matrix(dist(xy))
-  xy$z <- as.numeric(t(chol(exp(-D / 150) + diag(0.5, n))) \%*\% rnorm(n))
-  pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-  r <- estimate_sac_range(pts, response_var = "z")
-  plot(r)
+\dontshow{if (requireNamespace("gstat", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+# An exponential field with range parameter 150 (effective range about
+# 450 m) and a nugget of half the sill, so the fitted model, the nugget and
+# the range line all have something to show.
+set.seed(3)
+n <- 250
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+D  <- as.matrix(dist(xy))
+xy$z <- as.numeric(t(chol(exp(-D / 150) + diag(0.5, n))) \%*\% rnorm(n))
+pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+r <- estimate_sac_range(pts, response_var = "z")
+plot(r)
 
-  # A field whose variogram never reaches a sill: the plot still draws it,
-  # and the subtitle says why no range is marked.
-  xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
-  r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
-                           response_var = "trend")
-  plot(r2)
-}
+# A field whose variogram never reaches a sill: the plot still draws it,
+# and the subtitle says why no range is marked.
+xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
+r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
+                         response_var = "trend")
+plot(r2)
+\dontshow{\}) # examplesIf}
 }
 \seealso{
-\code{\link{plot.spatial_fit}(type = "variogram")}, which draws
-the same picture for a fitted model's residuals.
+\code{\link[=estimate_sac_range]{estimate_sac_range()}}, which makes the object, and
+\code{\link[=plot.spatial_fit]{plot.spatial_fit()}} with \code{type = "variogram"}, which draws the same
+picture for a fitted model's residuals.
 
-Other plotting:
-\code{\link[=plot.aoa]{plot.aoa()}},
-\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
-\code{\link[=plot.feature_selection]{plot.feature_selection()}},
-\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
-\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
-\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
-\code{\link[=plot_calibration]{plot_calibration()}},
-\code{\link[=plot_cv_metrics]{plot_cv_metrics()}},
-\code{\link[=plot_folds]{plot_folds()}}
+Other spatial autocorrelation:
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=sac_nugget]{sac_nugget()}}
 }
-\concept{plotting}
+\concept{spatial autocorrelation}

@@ -149,7 +149,7 @@ test_that("plot_folds' subtitle gives no unit for folds built without a CRS", {
                                     block_size = 300, seed = 1))
   expect_true(is.na(fb$params$crs))
   sub_b <- plot_folds(fb, pts_na)$labels$subtitle
-  expect_match(sub_b, "Block size 300\n")
+  expect_match(sub_b, "^Blocks [0-9.,]+ x [0-9.,]+, block_size 300\n")
   expect_false(grepl("NA units", sub_b))
   fl <- suppressWarnings(make_folds(pts_na, k = 80, method = "buffered_loo", buffer = 150))
   sub_l <- plot_folds(fl, pts_na)$labels$subtitle

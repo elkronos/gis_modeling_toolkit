@@ -451,14 +451,9 @@ selection and subsequent selection bias in performance evaluation.
 Other cross-validation:
 \code{\link[=area_of_applicability]{area_of_applicability()}},
 \code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
 \code{\link[=cv_gwr]{cv_gwr()}},
 \code{\link[=cv_rf]{cv_rf()}},
 \code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=fold_separation]{fold_separation()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=sac_nugget]{sac_nugget()}}
+\code{\link[=gwr_model_selection]{gwr_model_selection()}}
 }
 \concept{cross-validation}
