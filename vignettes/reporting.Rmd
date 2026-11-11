@@ -1,28 +1,27 @@
 ---
-title: "What to save, and what to report"
+title: "Exporting and reporting results"
 description: >
-  What leaves the session: grouping an existing layer, membership lookups, exporting the regions, which six numbers to report, and how to report a cell value.
+  Write the cells to a file others can join to, and report the numbers that say how far a cell value or a map can be trusted.
 author: "Justin Chase"
-date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
   rmarkdown::html_vignette:
     toc: true
     fig_width: 6
     fig_height: 4
 vignette: >
-  %\VignetteIndexEntry{What to save, and what to report}
+  %\VignetteIndexEntry{Exporting and reporting results}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
 
 ```{r setup, include=FALSE}
-# Everything in this vignette runs on the hard dependencies. ggplot2 draws one
-# map and gstat estimates one range; both are Suggests, so those two chunks are
+# Everything in this article runs on the hard dependencies. ggplot2 draws one
+# map and gstat estimates one range; both are Suggests, so those chunks are
 # gated and the rest runs anywhere.
-# `eval` gates CHUNKS only: knitr does not apply it to inline `r ...` code,
-# which runs regardless. Any inline reference to something a gated chunk
-# defines has to guard itself -- `r if (has_gstat) x else NA` -- or the
-# vignette fails to build where the package is missing instead of skipping.
+# `eval` gates chunks only: knitr does not apply it to inline `r ...` code,
+# which runs regardless. An inline reference to something a gated chunk
+# defines has to guard itself, as in `r if (has_gstat) x else NA`, or the
+# article fails to build where the package is missing.
 has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
 has_gstat  <- requireNamespace("gstat",   quietly = TRUE)
 
@@ -35,25 +34,21 @@ knitr::opts_chunk$set(
 )
 ```
 
-The other vignettes each take one decision: how many cells, which fold scheme,
-which diagnostic. This one starts after those are settled. You have regions and
-a validated model, and two things have to leave your session: the regions, in a
-form someone else can open and join to, and the numbers that say how far the
-map they are looking at can be trusted.
+This article covers what leaves your session once the cells and the model are
+settled: the cells as a file, the values in them, the model's score with the
+checks that bound it, and what to save to rerun the analysis.
 
-*Everything here runs on the hard dependencies, with two exceptions that skip
-themselves with a note when absent: **ggplot2** draws the one map, and
-**gstat** fits the variogram in the second half.*
+*This article needs two optional packages: `ggplot2` for the map and `gstat`
+for the autocorrelation range. Where one is missing, the chunks that use it
+are skipped with a note.*
 
-## The regions as a file someone else can use
+## The cells as a file someone else can use
 
-North Carolina's counties, with the 1974 SIDS rate per thousand births, and a
-hexagonal grid of regions drawn from where the counties are rather than from
-the county boundaries themselves. Twelve cells are asked for; a grid clipped
-to an irregular outline returns more, and the count that comes back is the
-one to quote.
+The example is North Carolina's counties, with the 1974 SIDS rate per 1,000
+births, and hexagonal cells laid over the county centres rather than the
+county boundaries.
 
-```{r regions}
+```{r cells}
 library(sf)
 library(spatialkit)
 
@@ -63,82 +58,68 @@ counties$rate <- 1000 * counties$SID74 / counties$BIR74
 
 centres  <- coerce_to_points(counties)
 boundary <- clip_target_for(centres, expand = 0.01)
-regions  <- build_tessellation(centres, method = "hex", approx_n_cells = 12,
+hex      <- build_tessellation(centres, method = "hex", approx_n_cells = 12,
                                boundary = boundary)$cells
-nrow(regions)
+nrow(hex)
 ```
 
-`approx_n_cells` is approximate, as its name says: hexagons over this bounding
-box came out at `r nrow(regions)` for a request of 12, and some of them will
-hold no counties at all.
+The boundary is the bounding box of the county centres, grown by 1 percent of
+its longer side (`clip_target_for()`). Hexagons over it came out at
+`r nrow(hex)` for a request of 12, so quote the count that comes back.
 
-### Grouping a layer you already have
+Each county goes to the cell it overlaps most (`largest = TRUE`, which
+`vignette("cells")` explains), and `summarize_by_cell()` reduces the counties
+to one row per cell. Passing `cells_sf` keeps the geometry, and keeps the
+cells that hold no county with `NA` values.
 
-`assign_features_to_polygons()` is usually shown on points, but it takes
-polygons too. `largest = TRUE` gives each county to the region it overlaps
-most, which is what makes the result a grouping: one row per county, never a
-county split across two rows.
-
-```{r group}
-grouped <- assign_features_to_polygons(counties, regions,
+```{r summarise}
+grouped <- assign_features_to_polygons(counties, hex,
                                        polygon_id_col = "cell_id",
                                        largest = TRUE)
-
-c(counties_in = nrow(counties), rows_out = nrow(grouped),
-  regions_used = length(unique(stats::na.omit(grouped$cell_id))))
-range(table(grouped$cell_id))
-```
-
-`r nrow(counties)` counties in, `r nrow(grouped)` rows out, spread over
-`r length(unique(stats::na.omit(grouped$cell_id)))` of the `r nrow(regions)`
-regions, from `r min(table(grouped$cell_id))` to
-`r max(table(grouped$cell_id))` counties each. That row-count equality is the
-property to check after any grouping: `sf::st_join()` would have duplicated
-every county that touches two regions, and the counts per region would then be
-wrong by however many counties straddle a border.
-
-`summarize_by_cell()` reduces the grouped layer to one row per region, and
-passing `cells_sf` keeps the geometry and the empty regions:
-
-```{r aggregate}
 cells <- summarize_by_cell(grouped, response_var = "rate", id_col = "cell_id",
-                           cells_sf = regions, conf_level = 0.95)
-
+                           cells_sf = hex, conf_level = 0.95)
 names(cells)
-sum(is.na(cells$n))
 ```
 
-The three `..pooled_` columns are each region's pooled value, its weight on
-the region's own mean and the mean it is pulled toward; `summarize_by_cell()`
-adds them by default, `estimate = "mean"` leaves them out, and "Reporting a
-cell value" below reads them. `r sum(is.na(cells$n))` of the `r nrow(cells)`
-regions are empty, carrying `NA` rather than being silently dropped. A region
-with no data in it is a fact about the map, and one worth keeping: it is where
-the model has nothing to stand on.
+```{r outline, include=FALSE}
+# The same request with the state outline as the boundary, for the sentence
+# below.
+outline <- build_tessellation(centres, method = "hex", approx_n_cells = 12,
+                              boundary = st_union(counties))$cells
+outline_used  <- assign_features_to_polygons(counties, outline,
+                                             polygon_id_col = "cell_id",
+                                             largest = TRUE)
+outline_empty <- sum(!outline$cell_id %in% outline_used$cell_id)
+```
 
-```{r map, eval=has_ggplot, fig.height=3.6, fig.alt="The North Carolina counties grouped into seventeen hexagonal regions, each shaded by the mean 1974 SIDS rate of the counties inside it. County outlines show underneath. Five regions along the edges hold no county and are grey."}
+The box also covers ground outside the state, with no county centre, so
+`r sum(is.na(cells$n))` of the `r nrow(cells)` cells hold no county. With the
+state outline as `boundary`, the same request gives `r nrow(outline)` cells,
+`r if (outline_empty == 0) "none of them empty" else paste(outline_empty, "of them empty")`.
+
+```{r map, eval=has_ggplot, fig.height=3, fig.alt=sprintf("The North Carolina counties grouped into %d hexagonal cells, each shaded by the mean 1974 SIDS rate of the counties inside it. County outlines show underneath. %d cells hold no county and are grey.", nrow(cells), sum(is.na(cells$n)))}
 library(ggplot2)
 
 ggplot() +
   geom_sf(data = cells, aes(fill = resp_mean_rate), colour = "white") +
   geom_sf(data = counties, fill = NA, colour = "grey70", linewidth = 0.2) +
   scale_fill_viridis_c(name = "SIDS rate\nper 1,000", na.value = "grey92") +
-  labs(title = "Counties grouped into data-drawn regions",
-       subtitle = sprintf("%d regions, %d populated; grey = no county inside",
+  labs(title = "Counties grouped into hexagonal cells",
+       subtitle = sprintf("%d cells, %d with a county; grey = no county inside",
                           nrow(cells), sum(!is.na(cells$n)))) +
   theme_void()
 ```
 
 ```{r no-ggplot, echo=FALSE, eval=!has_ggplot, results='asis'}
-cat("*(The map needs ggplot2, which is not installed here.)*\n")
+cat("*(The map needs `ggplot2`, which is not installed here.)*\n")
 ```
 
 ### Is this location inside?
 
-The question the regions get asked most often once they leave your session is
-whether some new location falls in one. That is the same function with
-`keep_unassigned = TRUE`, which returns one row per location and `NA` for
-anything outside every region.
+Someone holding the cells may want to know whether a new location falls in
+one. `assign_features_to_polygons()` with `keep_unassigned = TRUE` answers
+that: it returns one row per location, with `NA` for a location outside every
+cell.
 
 ```{r membership}
 sites <- st_as_sf(
@@ -147,94 +128,277 @@ sites <- st_as_sf(
              lat  = c( 35.78,  34.23,  35.00,  36.85)),
   coords = c("lon", "lat"), crs = 4326)
 
-inside <- assign_features_to_polygons(st_transform(sites, st_crs(regions)),
-                                      regions, polygon_id_col = "cell_id",
+inside <- assign_features_to_polygons(sites, cells, polygon_id_col = "cell_id",
                                       keep_unassigned = TRUE)
 st_drop_geometry(inside)
 ```
 
-`r sum(!is.na(inside$cell_id))` of the `r nrow(inside)` sit inside a region.
-The default is `keep_unassigned = FALSE`, which drops them instead; that is the
-right default when you are aggregating, and the wrong one when you are
-answering a membership question, because a dropped row looks like a location
-you never asked about.
+`r sum(!is.na(inside$cell_id))` of the `r nrow(inside)` sites fall inside a
+cell. The default, `keep_unassigned = FALSE`, drops the locations outside
+every cell, with a warning, and lists their rows in
+`attr(, "unassigned")$which`. That suits aggregation. For a membership
+question keep them, so the answer has one row per location you asked about.
 
-Two details decide whether the answer is meaningful. The locations have to be
-in the regions' CRS, which is why `st_transform()` is there: the regions are in
-whatever projection `ensure_projected()` chose, and lon/lat degrees compared
-against metres will put everything outside. And a point on a shared border
-falls in both cells, so `tie_break` decides which one it is recorded in; see
-`?assign_features_to_polygons` for the rules.
+The sites can stay in lon/lat. `assign_features_to_polygons()` moves them
+into the cells' CRS for the join and returns them in the CRS they arrived in.
+A point on a border two cells share falls in both, and `tie_break` decides
+which one it is recorded in; `?assign_features_to_polygons` gives the rules.
 
 ### IDs that survive a reprojection
 
 The `cell_id` a tessellation carries is already derived from the geometry, so
-it does not change when the input points arrive in another order. What it is
-not is portable: a file that has been reprojected, re-sorted and re-read
-elsewhere has no memory of how it was built. `ensure_stable_poly_id()` derives
-an ID from the geometry itself, in a common CRS, so the same region gets the
-same ID from whoever computes it, in whatever projection the file is in by
-then. The exception is fine cells stacked within about a centimetre of the
-same longitude, which a reprojection can swap (see `?ensure_stable_poly_id`);
-regions this size are nowhere near it.
+it does not change when the input points arrive in another order.
+`ensure_stable_poly_id()` sorts the cells by the centroid of each, measured in
+longitude and latitude, and numbers them in that order. Anyone who runs it on
+the same set of cells gets the same IDs, whatever projection their copy is
+in, even without your `cell_id` column. Add or remove a cell and the numbers
+after it shift. Fine cells stacked within about a centimetre of the same
+longitude can swap (see `?ensure_stable_poly_id`); cells this size are nowhere
+near that.
 
 ```{r stable-ids}
-regions$src <- seq_len(nrow(regions))
+hex$src <- seq_len(nrow(hex))
 
-from_projected <- ensure_stable_poly_id(regions[, "src"])
-from_lonlat    <- ensure_stable_poly_id(st_transform(regions[, "src"], 4326))
+from_projected <- ensure_stable_poly_id(hex[, "src"])
+from_lonlat    <- ensure_stable_poly_id(st_transform(hex[, "src"], 4326))
 
 identical(from_projected$poly_id[order(from_projected$src)],
           from_lonlat$poly_id[order(from_lonlat$src)])
 ```
 
-Use that column, not the row position, as the key anything downstream joins on.
+Join on the `poly_id` column that `ensure_stable_poly_id()` adds, not on the
+row position.
 
 ### Writing it out
 
-The regions are an ordinary `sf` layer, so `sf::st_write()` handles them. The
-format matters more than it looks:
+The cells are an ordinary `sf` layer, so `sf::st_write()` writes them; the
+format decides which columns come back intact. The layer written here carries
+the stable IDs:
 
 ```{r export}
-dir <- tempfile(); dir.create(dir)
+dir <- tempfile()
+dir.create(dir)
+out <- ensure_stable_poly_id(cells)
 
-st_write(cells, file.path(dir, "regions.gpkg"), quiet = TRUE)
-gpkg <- st_read(file.path(dir, "regions.gpkg"), quiet = TRUE)
+st_write(out, file.path(dir, "cells.gpkg"), quiet = TRUE)
+gpkg <- st_read(file.path(dir, "cells.gpkg"), quiet = TRUE)
 
-suppressWarnings(st_write(cells, file.path(dir, "regions.shp"), quiet = TRUE))
-shp <- st_read(file.path(dir, "regions.shp"), quiet = TRUE)
+st_write(out, file.path(dir, "cells.shp"), quiet = TRUE)
+shp <- st_read(file.path(dir, "cells.shp"), quiet = TRUE)
 
 attr_names <- function(x) setdiff(names(x), attr(x, "sf_column"))
-kept <- function(x) length(intersect(attr_names(x), attr_names(cells)))
+same_name  <- function(x) intersect(attr_names(x), attr_names(out))
 
-c(columns = length(attr_names(cells)),
-  GeoPackage = kept(gpkg), Shapefile = kept(shp))
-```
-
-```{r export-names, echo=FALSE}
+c(columns = length(attr_names(out)),
+  GeoPackage = length(same_name(gpkg)), shapefile = length(same_name(shp)))
 attr_names(shp)
 ```
 
-A shapefile field name is capped at ten characters, so the standard errors,
-confidence bounds and pooled values arrive as `X__s_rs_`, `X__c_l__` and
-`X__pld__`: of the
-`r length(setdiff(names(cells), attr(cells, "sf_column")))` columns
-`summarize_by_cell()` produced, `r length(intersect(setdiff(names(shp), attr(shp, "sf_column")), setdiff(names(cells), attr(cells, "sf_column"))))`
-survive the trip. GeoPackage keeps every one of them, and renames only the
-geometry column, which is a GeoPackage convention. Write a GeoPackage unless
-something downstream can only read shapefiles, and if it can only read
-shapefiles, rename the columns yourself first so you choose the abbreviations.
+```{r export-names, include=FALSE}
+# The shapefile keeps the columns in their order, so its field names line up
+# with the layer's column names.
+stopifnot(length(attr_names(shp)) == length(attr_names(out)))
+as_written <- stats::setNames(attr_names(shp), attr_names(out))
+code_list  <- function(x) knitr::combine_words(x, before = "`",
+                                                 oxford_comma = FALSE)
+```
 
-## The numbers the run already recorded
+A shapefile field name is capped at ten characters. Of the
+`r length(attr_names(out))` columns, only `r code_list(same_name(shp))` keep
+their names. The rest come back abbreviated: the cell mean `resp_mean_rate`
+as `` `r as_written[["resp_mean_rate"]]` ``, its standard error as
+`` `r as_written[["..se_resp_rate"]]` `` and the pooled value as
+`` `r as_written[["..pooled_resp_rate"]]` ``. The GeoPackage keeps every
+column under its own name and renames only the geometry column, a GeoPackage
+convention. Write a GeoPackage unless something downstream reads only
+shapefiles. For a shapefile, choose the short names yourself and save the
+list of them beside it:
 
-Nothing below is recomputed for the report. Each of these is written into the
-object at the time the decision was made, which is the point: a report
-assembled from `$params` and `$info` describes the run that happened rather
-than a reconstruction of it.
+```{r export-shp}
+short <- c(mean   = "resp_mean_rate",     se     = "..se_resp_rate",
+           ci_lo  = "..ci_lo_resp_rate",  ci_hi  = "..ci_hi_resp_rate",
+           pooled = "..pooled_resp_rate", pool_w = "..pooled_w_resp_rate")
+for_shp <- out[, c("poly_id", "cell_id", "n", short)]
+names(for_shp)[match(short, names(for_shp))] <- names(short)
 
-The counties carry a real response, but a weak one, so the rest of this
-vignette runs on a simulated field over the same county centres, with a known
-correlation length of 120 km:
+st_write(for_shp, file.path(dir, "cells-short.shp"), quiet = TRUE)
+write.csv(data.frame(field = names(short), column = short),
+          file.path(dir, "cells-short-fields.csv"), row.names = FALSE)
+```
+
+## Reporting a cell mean
+
+Report the standard error that `summarize_by_cell()` gives beside each cell
+mean, with the count `n`. A mean of a few observations and a mean of many are
+different claims, and printed side by side they look the same.
+
+```{r se-example}
+populated <- cells[!is.na(cells$n), ]
+range(populated$n)
+range(populated$..se_resp_rate, na.rm = TRUE)
+```
+
+Here the cells hold `r min(populated$n)` to `r max(populated$n)` counties,
+and their standard errors run from
+`r sprintf("%.2f", min(populated$..se_resp_rate, na.rm = TRUE))` to
+`r sprintf("%.2f", max(populated$..se_resp_rate, na.rm = TRUE))` per 1,000
+births. For a cell's own mean, the default `deff = 1` standard error holds
+when the cell's observations are spread through it. Any other `deff`
+(`"kish"`, `"variogram"` or a number above 1) gives the standard error of the cell mean as an estimate of the
+statewide mean. `vignette("cells")` explains the difference, and
+`?summarize_by_cell` gives the rules.
+
+## Reporting a pooled cell value
+
+`summarize_by_cell()` returns by default, beside each cell's mean, a pooled
+value: the cell's mean pulled toward the mean of the observations in the 8
+nearest cells (nearest by the centroid of their observations). This section
+builds cells sized for that value on a simulated layer and reads off what a
+report of them has to carry. The layer is 600 points on a square 20 km on a
+side, with a smooth field plus noise:
+
+```{r value-fixture}
+set.seed(7)
+sx <- runif(600, 0, 2e4)
+sy <- runif(600, 0, 2e4)
+obs <- st_as_sf(
+  data.frame(x = 4e5 + sx, y = 4e6 + sy,
+             yield = 50 + 6 * sin(sx / 3000) + 6 * cos(sy / 2500) +
+               rnorm(600, sd = 3)),
+  coords = c("x", "y"), crs = 32617)
+```
+
+By default `resolution_profile()` sets the count from a size of 4.5
+observations per cell, scores it for the pooled value and draws
+density-weighted cells; the calls below leave all three at their defaults.
+`get_voronoi_seeds()` given the selection returns the centres that were
+scored, so the summary describes the same cells.
+
+```{r value-pipeline}
+prof  <- resolution_profile(obs, "yield")
+sel   <- select_resolution(prof)
+seeds <- get_voronoi_seeds(n = sel, sample_points = obs)
+tess  <- build_tessellation(seeds, method = "voronoi", quiet = TRUE)
+asg   <- assign_features_to_polygons(obs, tess$cells,
+                                     polygon_id_col = "cell_id")
+vals  <- summarize_by_cell(asg, "yield", id_col = "cell_id",
+                           cells_sf = tess$cells, obs_level = 0.90)
+
+st_drop_geometry(vals)[1:4, c("cell_id", "n", "resp_mean_yield",
+                              "..pooled_resp_yield", "..pooled_w_resp_yield",
+                              "..obs_lo_resp_yield", "..obs_hi_resp_yield")]
+```
+
+`estimate = "mean"` in the summary gives the plain means alone;
+`vignette("resolution")` covers the other ways to set the count.
+
+Three attributes of `vals` record the run. `attr(vals, "pooled")` says what
+was fitted and what each interval covers, `attr(vals, "count_rule")` how the
+count was set and whether these are the cells and rows it was scored on, and
+`attr(vals, "intervals")` gives one sentence per interval family:
+
+```{r value-records}
+attr(vals, "pooled")
+attr(vals, "count_rule")
+```
+
+A report of cell values reads four things off them.
+
+- Which value it is. `..pooled_resp_yield` is the pooled value and
+  `resp_mean_yield` the plain mean. Both estimate the cell's true mean: the
+  expected value of one further observation located in the cell the way its
+  observations were. Neither is the average of a surface over the cell's
+  area. Give `n` beside either.
+- The own weight. `..pooled_w_resp_yield` is the share of the pooled value
+  that is the cell's own mean; the rest is the mean it is pulled toward. A
+  cell of two observations has a smaller weight than a cell of ten, so its
+  value says more about its surroundings and less about itself. The own
+  weight is no regression weight: for a regression on cell values use the
+  plain mean with `cell_weight`.
+- What the interval covers. `..obs_lo_*` and `..obs_hi_*` are a range for one
+  further observation in the cell, located like the data. The statement holds
+  on average over observations and not cell by cell, and the two offsets are
+  the same in every cell. No interval for the cell's true mean is returned.
+  `..ci_*`, from `conf_level`, is an interval for a mean and never a range for
+  an observation. The table in `attr(vals, "intervals")` gives the sentence
+  for each family in the frame.
+- Where the value applies. A cell's value and interval describe the part of
+  the cell where its observations lie, and a Voronoi cell can reach far past
+  them. A cell with no observation has `NA`. Away from the observations no
+  interval here is calibrated.
+
+The lines of a report can be written from the three records, so that they
+describe the run that happened:
+
+```{r value-report}
+rec <- attr(vals, "pooled")$columns$resp_yield
+iv  <- attr(vals, "intervals")
+cr  <- attr(vals, "count_rule")
+say <- function(...) cat(strwrap(paste0("- ", ...), width = 76, exdent = 2),
+                         sep = "\n")
+
+say(sprintf("cells: %d, set by a %s of %s observations per cell; checked: %s",
+            cr$cells, cr$rule, format(cr$obs_per_cell_asked), cr$check$cells))
+say(sprintf(paste("value: the cell mean pooled toward its %d nearest cells;",
+                  "median own weight %.2f"),
+            rec$neighbours, rec$own_weight))
+say(sprintf("%s: %g%% for %s", iv$columns[1], 100 * iv$level[1], iv$covers[1]))
+say(sprintf(paste("leave-one-out mean squared error %.3g against %.3g for one",
+                  "mean; structured: %s"),
+            rec$loo, rec$loo_one_cell, rec$structured))
+say(sprintf("%.1f%% of observations are the only one in their cell",
+            100 * rec$share_alone))
+```
+
+`structured` is `FALSE` when one mean for the whole layer predicts a left-out
+observation about as well as the cells do or better, or when an F test finds
+the cell means no different from one mean; `?summarize_by_cell` gives the
+thresholds, and `vignette("cells")` shows the warning that comes with it.
+
+`cell_values_at()` gives the value at other locations, with each location's
+distance from the nearest observation. `dist_ratio` is that distance over the
+layer's spacing (the median distance from an observation's location to the
+nearest other), and it is the number to report beside a value read at a place
+that is not an observation. Passing the seeds the cells were built on
+(`seeds$cell_id <- tess$index` gives each seed its cell) extends each Voronoi
+cell past the clipped edge, so a location outside every cell takes the
+cell of its nearest seed. Without `seeds`, such a location comes back with
+`filled = TRUE` and, in `filled_from`, the cell its value was taken from. The
+third location below lies outside the layer:
+
+```{r value-at}
+seeds$cell_id <- tess$index
+elsewhere <- st_as_sf(
+  data.frame(x = 4e5 + c(5000, 12000, 26000), y = 4e6 + c(5000, 9000, 10000)),
+  coords = c("x", "y"), crs = 32617)
+at <- cell_values_at(elsewhere, vals, asg, "yield", id_col = "cell_id",
+                     seeds = seeds)
+
+shown <- c("cell_id", "value", "obs_lo", "obs_hi", "filled", "dist_ratio")
+num   <- c("value", "obs_lo", "obs_hi", "dist_ratio")
+at[num] <- lapply(at[num], round, 2)
+at[, shown]
+outside <- at[3, ]
+```
+
+The third location gets a value and an interval like the others, with no
+warning; its `dist_ratio` of about `r round(outside$dist_ratio)` is what shows
+that it lies far from every observation. On simulated layers of clustered
+observations, some held out at random and some as a block, the interval at
+0.90 held 91.5 percent of held-out observations with a `dist_ratio` below 1
+and 69.5 percent of those above 8. The script is
+[`dev/sim-pooled-values.R`](https://github.com/elkronos/gis_modeling_toolkit/blob/main/dev/sim-pooled-values.R)
+in the package's GitHub repository, and `?cell_values_at` gives its settings
+and the classes between.
+
+## Reporting a model's score
+
+### A model to report on
+
+The counties carry a real response, but a weak one, so this part runs on a
+simulated field over the same county centres. The field has an exponential
+covariance with range parameter 120 km, so its correlation falls to 5 percent
+at about 360 km, three times the range parameter.
 
 ```{r fixture}
 set.seed(42)
@@ -248,9 +412,11 @@ pts$elev <- rnorm(nrow(pts))
 pts$z    <- 0.8 * pts$elev + 2 * field + rnorm(nrow(pts), sd = 0.3)
 ```
 
+The model is a linear trend surface in the coordinates plus `elev`, written
+with `new_spatial_fit()` so the article needs no optional package;
+`vignette("models")` explains the pattern.
+
 ```{r learner}
-# A learner with no optional dependencies: a linear trend surface in the
-# coordinates, plus the one covariate.
 trend_fit <- function(train_sf, ...) {
   d  <- st_drop_geometry(train_sf)
   co <- st_coordinates(train_sf)
@@ -269,6 +435,8 @@ predict.trend_fit <- function(object, newdata = NULL, ...) {
 }
 residuals.trend_fit <- function(object, ...) stats::residuals(object$engine)
 fitted.trend_fit    <- function(object, ...) stats::fitted(object$engine)
+# Registered so that spatialkit's own calls find the methods wherever this
+# code runs; at the top level of a script they are found without it.
 for (.g in c("predict", "residuals", "fitted"))
   registerS3method(.g, "trend_fit", get(paste0(.g, ".trend_fit")))
 
@@ -278,22 +446,28 @@ cv    <- cv_spatial(pts, "z", "elev", trend_fit, folds = folds)
 fit   <- trend_fit(pts)
 ```
 
-## A worked report
+### A worked report
 
-Six items. Every one is read out of an object the run already produced.
+Three lines of the report below are read from objects the run already made:
+the folds from `folds`, and the score and the row accounting from `cv`. The
+others come from checks run for the report: `residual_morans_i()` and
+`area_of_applicability()` on the fitted model and, where `gstat` is
+installed, `estimate_sac_range()` on the data, set beside the block size.
 
 ```{r report}
-m <- function(x) format(round(as.numeric(x)), big.mark = ",", scientific = FALSE)
+m <- function(x) format(round(as.numeric(x)), big.mark = ",",
+                        scientific = FALSE)
 
 report <- list(
-  folds = sprintf("%s, k = %d, %d x %d blocks of %s m (%s)",
+  folds = sprintf("%s, k = %d, %d by %d blocks of %s by %s m (asked for %s m)",
                   folds$method, folds$k, folds$params$grid_nx,
-                  folds$params$grid_ny, m(folds$params$block_size),
-                  folds$params$crs),
+                  folds$params$grid_ny, m(folds$params$block_width),
+                  m(folds$params$block_height), m(folds$params$block_size)),
   score = sprintf("RMSE %.2f (per fold %.2f to %.2f), R2 %.3f",
                   cv$overall$RMSE, min(cv$fold_metrics$RMSE),
                   max(cv$fold_metrics$RMSE), cv$overall$R2),
-  coverage = sprintf("%d of %d folds scored, %d rows dropped, %d orphan, %d unknown id",
+  coverage = sprintf(paste("%d of %d folds scored, %d rows dropped,",
+                           "%d orphan, %d unknown id"),
                      cv$n_folds_succeeded, cv$n_folds_attempted, cv$n_dropped,
                      length(cv$orphan_rows), cv$n_unknown_ids)
 )
@@ -309,262 +483,182 @@ report$residuals <- sprintf("Moran's I %.3f (z = %.1f, p = %.3g, %s null)",
 surface <- predict_surface(fit, n_cells = 1500, covariates = pts,
                            boundary = counties)
 aoa <- area_of_applicability(surface, model = fit, folds = folds)
-report$applicability <- sprintf("%d of %d prediction cells outside (DI > %.3f)",
+report$applicability <- sprintf("%d of %d grid points outside (DI > %.3f)",
                                 aoa$n_outside, aoa$n_new, aoa$threshold)
 ```
 
 ```{r report-range, eval=has_gstat}
 sac <- estimate_sac_range(pts, "z")
-report$range <- sprintf("estimated range %s m against blocks of %s m",
-                        m(sac), m(folds$params$block_size))
+edge <- min(folds$params$block_width, folds$params$block_height)
+report$range <- sprintf(paste("estimated range %s m against a narrowest",
+                              "block edge of %s m"),
+                        m(signif(sac, 2)), m(edge))
 ```
 
 ```{r report-print}
-cat(paste0("- ", names(report), ": ", unlist(report)), sep = "\n")
+for (line in names(report)) say(line, ": ", report[[line]])
 ```
 
-Read together, those lines say the run failed two of its own checks, the score
-and the residuals, which is what a report is for.
+The folds line leaves out the CRS; `st_crs(pts)$wkt` gives it in full, and a
+layer written with `st_write()` carries it.
+
+Two lines show a failed model. The cross-validated R² of
+`r sprintf("%.3f", cv$overall$R2)` is below zero: the trend surface predicts
+the held-out blocks worse than the mean of each fold's training rows does.
+Moran's I of `r sprintf("%.2f", mi$observed)` on the residuals
+(`r sprintf("z = %.1f", mi$z)`) says why: most of the structure in `z` is the
+field, and a plane in the coordinates cannot represent it. At that point you
+fit a spatial model rather than report this one; `vignette("models")`
+compares the backends.
 
 ```{r block-vs-range, echo=FALSE, results='asis', eval=has_gstat}
 # Which way the score errs for this map: the held-out distances of the folds
-# against the distances from the surface's cells to the same training data.
+# against the distances from the surface's grid points to the same training
+# data.
 reading <- attr(fold_separation(folds, pts, sac = sac, prediction_points = surface),
                 "target")$reading
 says <- c(
-  matched = "the held-out points sit about as far from their training data as the cells do, so the score is the error of this map.",
-  closer  = "the held-out points sit closer to their training data than the cells do, so the score tends to read low for this map; wider blocks, or `make_folds(method = \"knndm\", prediction_points = surface)`, match it.",
-  farther = "the held-out points sit farther from their training data than the cells do, so the score tends to read high for this map; narrower blocks, or `make_folds(method = \"knndm\", prediction_points = surface)`, match it.",
+  matched = "the held-out points sit about as far from their training data as the grid points do, so the score is the error of this map.",
+  closer  = "the held-out points sit closer to their training data than the grid points do, so the score tends to read low for this map; wider blocks, or `make_folds(method = \"knndm\", prediction_points = surface)`, match it.",
+  farther = "the held-out points sit farther from their training data than the grid points do, so the score tends to read high for this map; narrower blocks, or `make_folds(method = \"knndm\", prediction_points = surface)`, match it.",
   mixed   = "the two sets of distances cross, so they give no single direction.")
+blocks <- if (edge < sac)
+  "the blocks are narrower than the range, and a held-out point is still correlated with nearby training data" else
+  "the blocks are at least as wide as the range"
 cat(sprintf(paste0(
-  "The range line is not a third. The blocks are %s m across and the ",
-  "correlation reaches about %s m, so ",
-  "training and test data sit inside one correlation length of each other, ",
-  "and the score is the error of predicting that close to the data. Whether ",
-  "that is the error of the map depends on where the map predicts. Against ",
-  "the cells of the surface above, `fold_separation()` reads `%s`: %s\n"),
-  m(folds$params$block_size), m(sac), reading, says[[reading]]))
+  "The narrowest block edge is %s m and the estimated range about %s m, so %s. ",
+  "Whether that makes the score optimistic depends on how far the map's grid points ",
+  "sit from the data. `fold_separation()` compares the two against the grid ",
+  "points of the surface above and reads `%s`: %s ",
+  "`vignette(\"spatial-cross-validation\")` explains the four readings.\n"),
+  m(edge), m(signif(sac, 2)), blocks, reading, says[[reading]]))
 ```
 
 ```{r block-vs-range-nogstat, echo=FALSE, results='asis', eval=!has_gstat}
-cat("The block size is read against the estimated autocorrelation range,",
-    "which needs gstat. Blocks narrower than the range leave training and test",
-    "data inside one correlation length of each other, and the score is the",
-    "error of predicting that close to the data: the error of a map only where",
-    "its locations sit as close. `fold_separation()` with the map's cells as",
-    "`prediction_points` says which way the score errs for that map.\n")
+cat("*(The range line needs `gstat`, which is not installed here. The range",
+    "line sets the block size beside the estimated autocorrelation range, and",
+    "`fold_separation()` with the map's cells as `prediction_points` says",
+    "which way the score errs for that map;",
+    "`vignette(\"spatial-cross-validation\")` explains the readings.)*\n")
 ```
-
-The cross-validated R2 of `r sprintf("%.3f", cv$overall$R2)` is below zero,
-which says the trend surface predicts held-out blocks worse than their own mean
-does, and Moran's I of `r sprintf("%.2f", mi$observed)` on the residuals
-(`r sprintf("z = %.1f", mi$z)`) says why: most of the structure in `z` is the
-field, and a plane in the coordinates cannot represent it. That is the point at
-which you fit something spatial rather than report this.
 
 The applicability line reads `r aoa$n_outside` of `r aoa$n_new` here because
-`predict_surface()` joined the covariate from the nearest observation, so no
-grid cell holds a combination the model never saw. On a real covariate raster
-it will not be zero; `vignette("diagnostics")` works through what to do when it
-is not.
+`predict_surface()` joined the covariate from the nearest observation, so
+every grid point carries an `elev` value from a training row. With predictor values
+sampled from a real covariate raster it need not be zero;
+`vignette("models")` covers what to do when it is not. `n_cells = 1500` asks
+for about 1,500 grid points over the bounding box of the data, and
+`boundary = counties` keeps the `r aoa$n_new` inside the state.
 
-## What each line is for
+`aoa$aoa` is the surface with the `DI` and `AOA` columns added, so writing it
+out keeps each point's flag beside its prediction:
 
-```{r report-table, echo=FALSE, results='asis'}
-cat(
-"| Report | From | Because |\n",
-"|---|---|---|\n",
-"| The fold scheme, the block size and the estimated range, in named CRS units, and how the folds compare with the map | `folds$params`, `fold_separation()` | A cross-validation score means nothing without the geometry that produced it: it is the error at the distance the folds put between the held-out points and their training data, which reads low for a map that predicts farther from the data and high for one that predicts closer (Milà et al. 2022) |\n",
-"| The metric **with its per-fold spread**, not the pooled value alone | `cv$fold_metrics`, `plot_cv_metrics()` | 0.9 in four folds and 14 in one is a model that fails in one region, and the pooled number cannot tell that from uniform mediocrity |\n",
-"| Residual Moran's I with its null | `residual_morans_i()` | It is the check on whether the spatial structure the model was built for actually got modelled |\n",
-"| The share of the prediction area outside the area of applicability | `area_of_applicability()` | A fitted model returns a number everywhere, including ground nothing like its training data, and the CV score does not apply there (Meyer and Pebesma 2021) |\n",
-"| Interval coverage, for a model with intervals | `cv_bayes()`, `plot_calibration()` | Good point predictions routinely come with badly calibrated intervals, so RMSE alone can prefer the model whose uncertainty is wrong (Heaton et al. 2019) |\n",
-"| Rows dropped, folds that failed, orphan and unknown IDs | `cv$n_dropped`, `cv$orphan_rows`, `cv$fold_status` | A score computed over 80 percent of the data is not a score over the data, and nothing else in the output says so |\n",
-sep = "")
+```{r surface-out}
+st_write(aoa$aoa, file.path(dir, "surface.gpkg"), quiet = TRUE)
 ```
 
-Two of the six are about what the number does **not** cover, which is the part
-that gets left out. The area of applicability bounds the map in space and the
-dropped-row counts bound it in sample: without them a reader has a figure and
-no idea what it was computed over.
+### What each line is for
 
-For the aggregates themselves, report the standard error that comes with each
-cell mean rather than the mean alone. `summarize_by_cell()` computes it with
-the observation count beside it. For per-region values like the map above,
-that is the default `deff = 1` standard error used here (or the block-kriging
-variance, `kr_var`, from `kriging_adequacy()`). A `deff` setting widens it for
-within-cell autocorrelation, which is right only when the regional means feed
-a claim about the population (here statewide) mean; `?summarize_by_cell` says
-which is which. A cell mean from two observations and one from thirteen are
-different claims, and printed side by side they look identical.
+| Line | From | Because |
+|---|---|---|
+| folds | `folds$method`, `folds$k`, `folds$params` | A cross-validated score is the error at the distance the folds put between held-out points and their training data (Milà et al. 2022), so a reader needs the fold geometry to know which map the score describes. |
+| score | `cv$overall`, `cv$fold_metrics` | The pooled score cannot tell a model that fails in one block from one with the same error in every block; the range over folds can. `plot_cv_metrics()` draws it. |
+| coverage | `cv$n_folds_succeeded`, `cv$n_folds_attempted`, `cv$n_dropped`, `cv$orphan_rows`, `cv$n_unknown_ids` | A score computed over 80 percent of the data is not a score over the data. The run warns about it, but the warning ends with the session; these fields carry it into the report. |
+| residuals | `residual_morans_i()` | Checks whether the model captured the spatial structure in the response; a high I means it did not. |
+| applicability | `area_of_applicability()` | A fitted model returns a number everywhere, including ground nothing like its training data, and the cross-validated score does not apply there (Meyer and Pebesma 2021). |
+| range | `estimate_sac_range()`, `folds$params`, `fold_separation()` | Blocks narrower than the range leave held-out points correlated with their training data; `fold_separation()` says what that means for the map. |
+| interval coverage, for a model with intervals; not in this report | `cv_bayes()`, `plot_calibration()` | Good point predictions routinely come with badly calibrated intervals, so RMSE alone can prefer the model whose uncertainty is wrong (Heaton et al. 2019). |
 
-```{r se-example}
-populated <- cells[!is.na(cells$n), ]
-summary(populated$n)
-range(populated$..se_resp_rate, na.rm = TRUE)
-```
-
-## Reporting a cell value
-
-`summarize_by_cell()` returns by default, beside each cell's mean, a pooled
-value: the mean pulled toward the mean of the 8 cells around it. This section
-builds cells sized for that value on a simulated layer and reads off what a
-report of them has to carry. The layer is 600 points on a square of
-20 km, with a smooth field plus noise:
-
-```{r value-fixture}
-set.seed(7)
-sx <- runif(600, 0, 2e4)
-sy <- runif(600, 0, 2e4)
-obs <- st_as_sf(
-  data.frame(x = 4e5 + sx, y = 4e6 + sy,
-             yield = 50 + 6 * sin(sx / 3000) + 6 * cos(sy / 2500) +
-               rnorm(600, sd = 3)),
-  coords = c("x", "y"), crs = 32617)
-```
-
-The count comes from a size, 4.5 observations per cell, scored for the pooled
-value, in density-weighted cells. Those are the defaults, so the calls name
-none of them. The cells are the ones that were scored, and the summary reports
-the same cell value:
-
-```{r value-pipeline}
-prof  <- resolution_profile(obs, "yield")
-sel   <- select_resolution(prof)
-seeds <- get_voronoi_seeds(method = "kmeans", n = sel, sample_points = obs)
-tess  <- build_tessellation(seeds, method = "voronoi", quiet = TRUE)
-asg   <- assign_features_to_polygons(obs, tess$cells,
-                                     polygon_id_col = "cell_id")
-vals  <- summarize_by_cell(asg, "yield", id_col = "cell_id",
-                           cells_sf = tess$cells, obs_level = 0.90)
-
-st_drop_geometry(vals)[1:4, c("cell_id", "n", "resp_mean_yield",
-                              "..pooled_resp_yield", "..pooled_w_resp_yield",
-                              "..obs_lo_resp_yield", "..obs_hi_resp_yield")]
-```
-
-Each earlier default is one argument away: `estimate = "mean"` in the summary
-for the plain means alone, `estimate = NULL, obs_per_cell = NULL` in the
-profile for the ladder of counts, `criterion = "cp"` for Mallows' Cp on that
-ladder, and `partition = "kmeans"` in the profile and the seeding functions
-for k-means cells.
-
-Two attributes of the frame hold the wording. `attr(, "pooled")` says what was
-fitted and what each interval covers, and `attr(, "count_rule")` says how the
-count was set and whether these are the cells and rows it was scored on:
-
-```{r value-records}
-attr(vals, "pooled")
-attr(vals, "count_rule")
-```
-
-A report of cell values reads four things off them.
-
-- **The value, and which one it is.** `..pooled_resp_yield` is the pooled
-  value and `resp_mean_yield` the plain mean. Both estimate the cell's level:
-  the expected value of one further observation located in the cell the way
-  its observations were. Neither is the average of a surface over the cell's
-  area. Give `n` beside either.
-- **The own weight.** `..pooled_w_resp_yield` is the share of the pooled value
-  that is the cell's own mean; the rest is the mean of its neighbours. A cell
-  of two observations has a smaller weight than a cell of ten, so its value
-  says more about its surroundings and less about itself. It is not a
-  regression weight; for a regression on cell values use the plain mean with
-  `cell_weight`.
-- **The interval, and what it covers.** `..obs_lo_*` and `..obs_hi_*` are a
-  range for one further observation in the cell, located like the data. The
-  statement holds on average over observations and not cell by cell, and the
-  two offsets are the same in every cell. It is not an interval for the
-  cell's level: none is returned. `..ci_*`, from `conf_level`, is an interval
-  for a mean and never a range for an observation. The table in
-  `attr(vals, "intervals")` gives the sentence for each family in the frame.
-- **Where the value applies.** A cell's value and interval describe the part
-  of the cell where its observations lie, and a Voronoi cell can reach far
-  past them. A cell with no observation has `NA`. Away from the observations
-  no interval here is calibrated.
-
-The lines of a report can be written from the two records, so that they
-describe the run that happened:
-
-```{r value-report}
-rec <- attr(vals, "pooled")$columns$resp_yield
-iv  <- attr(vals, "intervals")
-cr  <- attr(vals, "count_rule")
-
-cat(
-  sprintf("- cells: %d, set by a %s of %s observations per cell; checked: %s",
-          cr$cells, cr$rule, format(cr$obs_per_cell_asked), cr$check$cells),
-  sprintf("- value: the cell mean pooled toward its %d nearest cells; median own weight %.2f",
-          rec$neighbours, rec$own_weight),
-  sprintf("- %s: %g%% for %s", iv$columns[1], 100 * iv$level[1], iv$covers[1]),
-  sprintf("- leave-one-out error %.3g against %.3g for one mean; structured: %s",
-          rec$loo, rec$loo_one_cell, rec$structured),
-  sprintf("- %.1f%% of observations are the only one in their cell",
-          100 * rec$share_alone),
-  sep = "\n")
-```
-
-`cell_values_at()` gives the value at other locations, with each location's
-distance from the nearest observation. `dist_ratio` is that distance over the
-layer's typical spacing, and it is the number to report beside a value read
-at a place that is not an observation. The third location below lies outside
-the layer:
-
-```{r value-at}
-seeds$cell_id <- tess$index
-elsewhere <- st_as_sf(
-  data.frame(x = 4e5 + c(5000, 12000, 26000), y = 4e6 + c(5000, 9000, 10000)),
-  coords = c("x", "y"), crs = 32617)
-cell_values_at(elsewhere, vals, asg, "yield", id_col = "cell_id",
-               seeds = seeds)
-```
-
-It gets a value and an interval like the others, because every location has a
-nearest seed. Nothing flags it: the `dist_ratio` beside it does. On simulated
-layers the interval at 0.90 held 91.5 percent of held-out observations with a
-`dist_ratio` below 1 and 69.5 percent of those above 8
-(`dev/sim-pooled-values.R` in the package's repository; `?cell_values_at` gives
-the settings and the classes between).
+The applicability line bounds the score in space and the coverage line bounds
+it in sample. Without them a reader has a figure and no idea what it was
+computed over.
 
 ## What to save
 
-Enough to rerun it, which is less than it sounds:
+To rerun the analysis, save:
 
-- the seed (`folds$params$seed`) and the fold assignment (`folds$assignment`),
-- the regions, with `ensure_stable_poly_id()` applied, as a GeoPackage,
-- `folds$params` and the fit's `$info`, which hold every decision made for you,
-- the session's package versions.
+- `folds$params` (the seed, block size, grid and CRS of the folds) and the
+  fold assignment, `folds$assignment`. Pass `make_folds()` a seed: without
+  one, `folds$params$seed` is `NULL` and the folds differ on every call.
+- For the package's own fitters, the fit's `$info`, which records the
+  settings of the fit; a learner you write yourself records only what it puts
+  there.
+- The cells, with `ensure_stable_poly_id()` applied, as a GeoPackage.
+- The summary of cell values as an R object, or the report lines written from
+  it. Its three records are attributes, and `st_write()` writes only columns.
+- The package versions (`sessionInfo()` in your own script).
 
-The regions are the one output that cannot be regenerated from the others
-without care. `get_voronoi_seeds()` and the k-means sweep in
-`determine_optimal_levels()` are seeded, so they repeat, but only at the same
-seed and the same package version. Save the layer.
+```{r save-records}
+st_write(vals, file.path(dir, "cell-values.gpkg"), quiet = TRUE)
+saveRDS(vals, file.path(dir, "cell-values.rds"))
+
+records <- c("pooled", "count_rule", "intervals")
+kept <- function(x) sum(records %in% names(attributes(x)))
+c(GeoPackage = kept(st_read(file.path(dir, "cell-values.gpkg"), quiet = TRUE)),
+  RDS        = kept(readRDS(file.path(dir, "cell-values.rds"))))
+```
+
+### Functions that take a seed
+
+These are the exported functions with a seed argument, and its default:
+
+```{r seeds-table, echo=FALSE, results='asis'}
+# Every exported function with a seed argument, read from its signature.
+seeded <- do.call(rbind, lapply(sort(getNamespaceExports("spatialkit")), function(f) {
+  fn <- getExportedValue("spatialkit", f)
+  if (!is.function(fn)) return(NULL)
+  arg <- intersect(c("seed", "set_seed"), names(formals(fn)))
+  if (!length(arg)) return(NULL)
+  value <- eval(formals(fn)[[arg]])
+  data.frame(fun = f, arg = arg,
+             default = if (is.null(value)) "NULL" else format(value))
+}))
+seeded <- seeded[order(seeded$default != "NULL", seeded$fun), ]
+unseeded <- seeded$fun[seeded$default == "NULL"]
+cat("| Function | Argument | Default |\n|---|---|---|\n",
+    sprintf("| `%s()` | `%s` | `%s` |\n", seeded$fun, seeded$arg, seeded$default),
+    sep = "")
+```
+
+`r knitr::combine_words(paste0(unseeded, "()"), before = "\x60", oxford_comma = FALSE)` default to
+`NULL` and draw from the session's random stream, so two calls differ unless
+you pass a seed or call `set.seed()` first. The others fix a seed by default.
+
+The IDs need no seed. A tessellation's `cell_id` does not depend on the order
+of the input points, and `ensure_stable_poly_id()` gives the same IDs in any
+projection (see [IDs that survive a reprojection](#ids-that-survive-a-reprojection)).
+
+The cells themselves are the one output that cannot be regenerated from the
+others without care. The Voronoi cells of the pooled values come from
+`resolution_profile()`, which fits its centres under `seed`
+(`r formals(resolution_profile)$seed` by default; `attr(vals, "count_rule")`
+records it), and `get_voronoi_seeds()` given the selection returns those
+centres. Given a bare number, `get_voronoi_seeds()` draws from the session's
+random stream unless you pass `set_seed`. Even a seeded rerun matches only
+under the same package version, so save the layer.
 
 ## Next
 
-`vignette("getting-started")` is the shortest path through the pipeline that
-produced all of this. `vignette("diagnostics")` covers the residual and
-applicability checks the table asks you to report, and
-`vignette("spatial-cross-validation")` covers fold geometry and how to read a
-CV result down to the last row.
+The next article in reading order is `vignette("spatialkit_nc_demo")`, the
+whole pipeline on a simulated field over North Carolina. This article relied
+on `?assign_features_to_polygons`, `?ensure_stable_poly_id`,
+`?summarize_by_cell`, `?cell_values_at`, `?cv_spatial`,
+`?residual_morans_i`, `?area_of_applicability`, `?estimate_sac_range` and
+`?fold_separation`. `vignette("glossary")` defines the terms it uses.
 
 ## References
 
 Heaton, M. J., Datta, A., Finley, A. O., et al. (2019). A case study
 competition among methods for analyzing large spatial data. *Journal of
-Agricultural, Biological and Environmental Statistics* 24, 398-425.
+Agricultural, Biological and Environmental Statistics* 24(3), 398–425.
 <https://doi.org/10.1007/s13253-018-00348-w>
 
 Meyer, H. and Pebesma, E. (2021). Predicting into unknown space? Estimating
 the area of applicability of spatial prediction models. *Methods in Ecology
-and Evolution* 12(9), 1620-1633.
+and Evolution* 12(9), 1620–1633.
 <https://doi.org/10.1111/2041-210X.13650>
 
 Milà, C., Mateu, J., Pebesma, E. and Meyer, H. (2022). Nearest neighbour
-distance matching Leave-One-Out Cross-Validation for map validation. *Methods
-in Ecology and Evolution* 13, 1304-1316.
+distance matching leave-one-out cross-validation for map validation.
+*Methods in Ecology and Evolution* 13(6), 1304–1316.
 <https://doi.org/10.1111/2041-210X.13851>
-
-```{r session, echo=FALSE}
-sessionInfo()
-```
