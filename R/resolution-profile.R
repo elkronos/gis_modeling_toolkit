@@ -478,16 +478,32 @@
                     cap, .per_cell_text(n / cap),
                     data = list(obs_per_cell = sizes[many], wanted = as.integer(wanted[many]),
                                 used = cap, reason = "more cells than can be placed"))
+    # Where the finest size asks for more cells than k-means can place, the
+    # finest level is the most it can, and the warning names that bound: it
+    # said "60 points at obs_per_cell = 3 support at most 5 ... the 5 cells
+    # that size gives" of a size that asks for 20 on 5 distinct locations.
+    held <- want > cap
+    held_by <- if (n_distinct < n_points) "the distinct locations allow"
+               else "k-means can fit to the points"
     if (!supported)
       .warn_classed("spatialkit_not_supported",
                     paste0("resolution_profile(): cells no wider than the autocorrelation ",
-                           "range (%.0f) would need at least %.0f of them, but %d %s ",
-                           "at obs_per_cell = %s support at most %d. The data cannot ",
-                           "support a tessellation that respects their own ",
+                           "range (%.0f) would need at least %.0f of them, but %s. The data ",
+                           "cannot support a tessellation that respects their own ",
                            "correlation structure; the profile scores %s so ",
                            "the cost of each level is still visible."),
-                    range_eff, floor_raw, n, support_what, size_text(s_min), finest,
-                    if (length(levels) == 1L) sprintf("the %d cells that size gives", levels)
+                    range_eff, floor_raw,
+                    if (held)
+                      sprintf(paste0("obs_per_cell = %s asks for %d cells of the %d %s, and ",
+                                     "k-means can place at most %d on %s"),
+                              size_text(s_min), as.integer(want), n, support_what, cap, place_on)
+                    else sprintf("%d %s at obs_per_cell = %s support at most %d",
+                                 n, support_what, size_text(s_min), finest),
+                    if (length(levels) == 1L && held) sprintf("the %d cells %s", levels, held_by)
+                    else if (length(levels) == 1L) sprintf("the %d cells that size gives", levels)
+                    else if (held)
+                      sprintf("the %d to %d cells the sizes give, the finest held to the %d %s",
+                              min(levels), max(levels), finest, held_by)
                     else sprintf("the %d to %d cells the sizes give", min(levels), max(levels)),
                     data = list(reason = "floor above ceiling", n = n,
                                 min_cell_n = NA_integer_, obs_per_cell = s_min))
@@ -903,7 +919,8 @@
 #' that respects their own correlation structure; that is reported as a
 #' finding (a warning of class \code{spatialkit_not_supported}, and
 #' \code{attr(x, "bounds")$supported} is \code{FALSE}) and the ladder runs
-#' from 2 to the ceiling, so the profile still shows what each level costs.
+#' from 2 to the ceiling (or the \code{levels} asked for are scored, as
+#' given), so the profile still shows what each level costs.
 #' A floor equal to the ceiling would leave one level and nothing to compare
 #' it with, so that ladder starts at 2 as well.  On a layer larger than
 #' \code{sample_n} the ceiling is also held to half the subsample's scored
@@ -1716,7 +1733,9 @@
 #'   Like the other columns read off the fitted cells, the last two count
 #'   rows of the subsample when the layer is larger than \code{sample_n}:
 #'   the cells of the layer then hold about \code{n_response / n_scored}
-#'   times as many scored rows as \code{cell_resp_mean} shows.
+#'   times as many scored rows as \code{cell_resp_mean} shows (under
+#'   \code{select_on = "split"}, \code{split$n_response / n_scored}: both
+#'   count the rows of the selection half).
 #'   Columns a missing input leaves undefined are \code{NA}.  Attributes:
 #'   \code{bounds} (a list with \code{floor}, \code{ceiling},
 #'   \code{ceiling_from} (\code{"min_cell_n"}, \code{"min_cell_n (rows with a
@@ -2809,20 +2828,43 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                      else sprintf("every point at min_cell_n = %d", min_cell_n)
       # On a subsample `cell_resp_mean` counts subsample rows, and the cells of
       # the layer hold more by this factor (12.3 against 167 in the case above).
-      per_layer <- if (n < n_all && isTRUE(n_scored > 0L)) n_support / n_scored else NA_real_
+      # Under the split both count the selection half's rows: `n_scored` is
+      # that half's rows of the subsample, so the layer's are that half's too
+      # (`n_sel_resp`).  Over the rows of both halves the factor came out about
+      # twice as large.  With no scored row of the subsample there is no
+      # factor, and the sentence that gives it is left out: it printed
+      # "about NA times as many".
+      split_rows <- !is.na(n_sel_resp)
+      per_layer <- if (n < n_all && isTRUE(n_scored > 0L))
+        (if (split_rows) n_sel_resp else n_support) / n_scored else NA_real_
       if (all_ceiling != ceiling_L) {
         msg <- if (identical(ceiling_from, "sample_n"))
-          sprintf(paste0("resolution_profile(): %d of the %d points of the subsample carry %s ",
-                         "(%d of the layer's %d), so the ceiling is %d cells, two scored ",
+          sprintf(paste0("resolution_profile(): %s, so the ceiling is %d cells, two scored ",
                          "subsample rows per cell, not the %d that %s would give. `sample_n` ",
                          "sets this ceiling, not `min_cell_n`: the layer's %d rows with %s ",
                          "support %d cells at min_cell_n = %d, and a larger `sample_n` raises ",
-                         "the ceiling towards that. `cell_resp_mean` counts the scored rows ",
-                         "of the subsample per occupied cell; the cells of the layer hold ",
-                         "about %.3g times as many."),
-                  n_scored, n, rows_carry, n_support, n_all, ceiling_L, all_ceiling, all_what,
+                         "the ceiling towards that.%s"),
+                  # Under the split the ceiling counts the selection half's
+                  # rows of the subsample, the rows the criteria read: "0 of
+                  # the 500 points of the subsample carry a response" was said
+                  # of a subsample in which about half of them did, all in the
+                  # estimation half.
+                  if (split_rows)
+                    sprintf(paste0("%d of the %d points of the subsample carry %s in the ",
+                                   "selection half, the half the criteria read under ",
+                                   "select_on = \"split\" (%d of the layer's %d carry %s ",
+                                   "in either half)"),
+                            n_scored, n, rows_carry, n_support, n_all, rows_carry)
+                  else
+                    sprintf("%d of the %d points of the subsample carry %s (%d of the layer's %d)",
+                            n_scored, n, rows_carry, n_support, n_all),
+                  ceiling_L, all_ceiling, all_what,
                   n_support, rows_carry, as.integer(min(by_support, k_cap_all)), min_cell_n,
-                  per_layer)
+                  if (is.finite(per_layer))
+                    sprintf(paste0(" `cell_resp_mean` counts the scored rows of the subsample ",
+                                   "per occupied cell; the cells of the layer hold about %.3g ",
+                                   "times as many."), per_layer)
+                  else "")
         else
           sprintf(paste0("resolution_profile(): %d of the %d points carry %s, so the ceiling ",
                          "is %d cells, not the %d that %s would give: the cell means the ",
@@ -2851,6 +2893,13 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     # R warnings with a class, not log lines: `supported = FALSE` changes what
     # every count read off the profile means, and a log line reaches neither
     # tryCatch() nor options(warn = 2).
+    # A ladder the caller set is scored as given, and said to be.
+    given_text <- function()
+      sprintf("The %d level%s asked for in `levels` (%s) %s scored as given",
+              length(levels), if (length(levels) == 1L) "" else "s",
+              if (length(levels) == 1L) sprintf("%d cells", levels)
+              else sprintf("%d to %d cells", min(levels), max(levels)),
+              if (length(levels) == 1L) "is" else "are")
     if (too_few) {
       # The largest min_cell_n that leaves two cells.  Below one there is none:
       # a single scored row was told to "lower `min_cell_n` (at most 0 here)".
@@ -2868,13 +2917,7 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                                  as.integer(by_support), if (by_support == 1) "" else "s"),
                     if (levels_given) "no cell count meets `min_cell_n`"
                     else "there is no ladder of cell counts to choose from",
-                    # A ladder the caller set is scored as given, and said to be.
-                    if (levels_given)
-                      sprintf("The %d level%s asked for in `levels` (%s) %s scored as given",
-                              length(levels), if (length(levels) == 1L) "" else "s",
-                              if (length(levels) == 1L) sprintf("%d cells", levels)
-                              else sprintf("%d to %d cells", min(levels), max(levels)),
-                              if (length(levels) == 1L) "is" else "are")
+                    if (levels_given) given_text()
                     else "The profile scores 2 cells so that level is still visible",
                     if (k_cap_all < 2L) "A tessellation needs points at two locations or more."
                     else if (half < 1L)
@@ -2884,23 +2927,40 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                                  support_what),
                     data = list(reason = ceiling_from, n = n_support, min_cell_n = min_cell_n))
     } else if (!supported)
+      # The bound named is the one that sets the data's ceiling, by the test
+      # `ceiling_from` takes, and a ladder the caller set is said to be
+      # scored as given.  The warning used to name min_cell_n whichever bound
+      # held ("60 points at min_cell_n = 9 support at most 5", where 9 allows
+      # 6 and 5 distinct locations set the 5), and said "the profile runs
+      # from 2 to 6" over the levels 4 and 5 the caller had asked for.
       .warn_classed("spatialkit_not_supported",
                     paste0("resolution_profile(): cells no wider than the autocorrelation ",
-                           "range (%.0f) would need at least %.0f of them, but %d %s ",
-                           "at min_cell_n = %d support at most %d. The data cannot ",
-                           "support a tessellation that respects their own ",
-                           "correlation structure; the profile runs from 2 to %d so ",
-                           "the cost of each level is still visible."),
-                    range_eff, floor_raw, n_support, support_what, min_cell_n,
-                    max(2L, as.integer(data_ceiling)), ceiling_L,
+                           "range (%.0f) would need at least %.0f of them, but %s. The data ",
+                           "cannot support a tessellation that respects their own ",
+                           "correlation structure; %s so the cost of each level is still ",
+                           "visible."),
+                    range_eff, floor_raw,
+                    if (by_support <= k_cap_all)
+                      sprintf("%d %s at min_cell_n = %d support at most %d", n_support,
+                              support_what, min_cell_n, as.integer(data_ceiling))
+                    else if (k_cap_all < n_uniq_all)
+                      sprintf(paste0("k-means can fit at most %d cells to the %d points, one ",
+                                     "short of the points"), k_cap_all, n_all)
+                    else
+                      sprintf("the %d points sit on %d distinct locations, which allow at most %d cells",
+                              n_all, n_uniq_all, k_cap_all),
+                    if (levels_given) sub("^The", "the", given_text())
+                    else sprintf("the profile runs from 2 to %d", ceiling_L),
                     data = list(reason = "floor above ceiling", n = n_support,
                                 min_cell_n = min_cell_n))
     else if (floor_raw > ceiling_L)
       .log_warn(paste0("resolution_profile(): cells no wider than the autocorrelation ",
                        "range (%.0f) need at least %.0f of them, which the %d %s ",
                        "support, but k-means on the %d-point subsample can fit at ",
-                       "most %d; raise `sample_n`. The profile runs from 2 to %d."),
-                range_eff, floor_raw, n_support, support_what, n, ceiling_L, ceiling_L)
+                       "most %d; raise `sample_n`. %s."),
+                range_eff, floor_raw, n_support, support_what, n, ceiling_L,
+                if (levels_given) given_text()
+                else sprintf("The profile runs from 2 to %d", ceiling_L))
     # With range_floor = FALSE, the default, the ladder starts at 2 whatever the
     # range, and the floor is only reported.  The range is an estimate.  It is
     # re-estimated on every subset, and a floor that applies on one fold and
@@ -5395,11 +5455,20 @@ select_resolution <- function(profile,
     if (max(scored) < max(ladder))
       return("the last level the criterion is computable at")
     if (size_ladder && !size_held) return("the finest size offered (obs_per_cell)")
+    # Where min_cell_n and the distinct locations set the same ceiling
+    # (`ceiling_from` names min_cell_n then), the label names the locations:
+    # neither `levels` past the ceiling nor a lower min_cell_n moves a bound
+    # the locations set, and the hint of the min_cell_n label offered both
+    # (45 rows on 5 stations at min_cell_n = 9).
+    at_cap <- is.list(bounds) &&
+      startsWith(as.character(bounds$ceiling_from %||% ""), "min_cell_n") &&
+      isTRUE(bounds$ceiling >= min(bounds$n_distinct %||% NA_integer_,
+                                   (bounds$n %||% NA_integer_) - 1L))
     if (is.list(bounds) && identical(as.integer(max(ladder)), as.integer(bounds$ceiling)))
-      return(if (identical(bounds$ceiling_from, "distinct locations") &&
+      return(if ((identical(bounds$ceiling_from, "distinct locations") || at_cap) &&
                  isTRUE(bounds$ceiling < (bounds$n_distinct %||% NA_integer_)))
                "the support ceiling (one short of the points, the most k-means can fit)"
-             else if (identical(bounds$ceiling_from, "distinct locations"))
+             else if (identical(bounds$ceiling_from, "distinct locations") || at_cap)
                "the support ceiling (as many cells as the distinct locations allow)"
              else if (identical(bounds$ceiling_from, "sample_n") &&
                       isTRUE((bounds$n_scored %||% NA_integer_) < (bounds$n_sample %||% NA_integer_)))

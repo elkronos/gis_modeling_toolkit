@@ -7944,6 +7944,50 @@ old behaviour where there is a way.
   the IDs, as `assign_features_to_polygons()` refuses them. Layers whose
   cells all have their own ID give the same results as before.
 
+* **Under `select_on = "split"` on a subsample, the warning of class
+  `spatialkit_response_ceiling` called the selection half's rows of the
+  subsample that carry a response all the subsample's rows that carry one,
+  and with none of them it printed "about NA times as many".**  The
+  criteria read the selection half, so the ceiling counts that half's rows:
+  "0 of the 500 points of the subsample carry a response" was said of a
+  subsample in which about half did, all in the estimation half, and with
+  a response on half the rows at random it gave 141 where 271 carry one.
+  The message now says that the count is of the selection half and gives
+  the layer's rows with a response in either half. The factor by which the
+  layer's cells hold more scored rows than `cell_resp_mean` shows is taken
+  from the layer's selection half (`split$n_response`), where it took both
+  halves and came out about twice as large, and the sentence that gives it
+  is left out when no row of the subsample is scored, with or without the
+  split, and `?resolution_profile` gives that factor under the split. The
+  ceiling and the condition's fields do not change.
+
+* **`resolution_profile()`'s warning of class `spatialkit_not_supported`
+  for a range floor above the ceiling said "the profile runs from 2 to"
+  the ceiling over the levels given in `levels`, and named `min_cell_n` or
+  the size as the bound where the distinct locations set it.**  With
+  `levels = c(4, 5)` it now says the levels asked for are scored as given;
+  on 60 rows at 5 stations it says the 5 distinct locations allow at most
+  5 cells, where it said "60 points at min_cell_n = 9 support at most 5"
+  of a `min_cell_n` that allows 6; and on a ladder of sizes whose finest
+  size asks for more cells than k-means can place it names the size's
+  count and the locations, where it called the 5 cells the locations
+  allow "the 5 cells that size gives" of a size that asks for 20. The log
+  line for a subsample too small to reach the floor says the same of given
+  `levels`, and so does `?resolution_profile`. The rule, the levels and the
+  condition's fields do not change.
+
+* **Where `min_cell_n` and the distinct locations set the same ceiling,
+  an optimum at the ceiling was labelled "the support ceiling (n /
+  min_cell_n)", and the note advised `levels` past it and a lower
+  `min_cell_n`, neither of which moves it.**  On 45 rows at 5 stations
+  the ceiling is 5 cells by both bounds: `levels = c(2, 5, 7, 9)` scores 2
+  and 5 only, and `min_cell_n = 3` leaves the ceiling at 5. The `edge` of
+  `select_resolution()`, its print, `summary()` and the
+  `spatialkit_bound_chosen` warning of the functions that take the count
+  now name "the support ceiling (as many cells as the distinct locations
+  allow)", which offers no remedy. `attr(, "bounds")$ceiling_from` is
+  unchanged.
+
 ## Documentation
 
 * The README, the vignettes, the help's examples, the scripts in

@@ -589,6 +589,26 @@ test_that("a range floor above the finest level of a ladder of sizes is not supp
                         obs_per_cell = 4.5))
   # The floor is reported and not applied: the level is the size's.
   expect_identical(r$value$levels, 667L)
+  # A finest size held to the distinct locations: the warning names the
+  # cells the size asks for and the locations, not "the cells that size
+  # gives" (BUG-153).  50 stations visited six times, a size that asks for
+  # 60 cells.
+  st <- .cl_layer(300, 325)
+  sf::st_geometry(st) <- sf::st_geometry(st)[rep(1:50, 6)]
+  rs <- .cl_catch(.cl_profile(st, obs_per_cell = 5, sac = 2000))
+  ws <- .cl_of(rs, "spatialkit_not_supported")
+  expect_length(ws, 1L)
+  bs <- attr(rs$value, "bounds")
+  expect_identical(bs$ceiling_from, "distinct locations")
+  expect_identical(rs$value$levels, 50L)
+  expect_identical(conditionMessage(ws[[1L]]),
+                   sprintf(paste0("resolution_profile(): cells no wider than the autocorrelation ",
+                                  "range (2000) would need at least %d of them, but obs_per_cell = 5 ",
+                                  "asks for 60 cells of the 300 points, and k-means can place at most ",
+                                  "50 on the layer's 50 distinct locations. The data cannot support a ",
+                                  "tessellation that respects their own correlation structure; the ",
+                                  "profile scores the 50 cells the distinct locations allow so the ",
+                                  "cost of each level is still visible."), bs$floor))
   # A range the size's cells are narrower than is supported.
   ok <- .cl_catch(.cl_profile(pts, obs_per_cell = 4.5, sac = 20000))
   expect_length(.cl_of(ok, "spatialkit_not_supported"), 0L)

@@ -314,7 +314,9 @@ compare levels by rather than a width), \code{rss}, \code{cp},
 Like the other columns read off the fitted cells, the last two count
 rows of the subsample when the layer is larger than \code{sample_n}:
 the cells of the layer then hold about \code{n_response / n_scored}
-times as many scored rows as \code{cell_resp_mean} shows.
+times as many scored rows as \code{cell_resp_mean} shows (under
+\code{select_on = "split"}, \code{split$n_response / n_scored}: both
+count the rows of the selection half).
 Columns a missing input leaves undefined are \code{NA}.  Attributes:
 \code{bounds} (a list with \code{floor}, \code{ceiling},
 \code{ceiling_from} (\code{"min_cell_n"}, \code{"min_cell_n (rows with a
@@ -732,7 +734,8 @@ the floor exceeds the ceiling the data cannot support a tessellation
 that respects their own correlation structure; that is reported as a
 finding (a warning of class \code{spatialkit_not_supported}, and
 \code{attr(x, "bounds")$supported} is \code{FALSE}) and the ladder runs
-from 2 to the ceiling, so the profile still shows what each level costs.
+from 2 to the ceiling (or the \code{levels} asked for are scored, as
+given), so the profile still shows what each level costs.
 A floor equal to the ceiling would leave one level and nothing to compare
 it with, so that ladder starts at 2 as well.  On a layer larger than
 \code{sample_n} the ceiling is also held to half the subsample's scored

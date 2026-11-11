@@ -369,6 +369,15 @@ test_that("the edge labels and their hints: a ladder of sizes has its own, every
   # The same bounds without sizes: the labels of today.
   auto <- utils::modifyList(sized, list(obs_per_cell = NULL, ceiling_from = "min_cell_n"))
   expect_identical(.ladder_edge(133L, lv, lv, auto), "the support ceiling (n / min_cell_n)")
+  # min_cell_n alone binds where the locations allow more cells; where they
+  # allow the same number the label names them, and its hint offers nothing
+  # that cannot move them (BUG-161).
+  expect_identical(.ladder_edge(133L, lv, lv,
+                                utils::modifyList(auto, list(n_distinct = 400L, n = 1200L))),
+                   "the support ceiling (n / min_cell_n)")
+  expect_identical(.ladder_edge(133L, lv, lv,
+                                utils::modifyList(auto, list(n_distinct = 133L, n = 1200L))),
+                   "the support ceiling (as many cells as the distinct locations allow)")
   expect_identical(.ladder_edge(67L, lv, lv, auto), "the first level of the ladder")
   expect_identical(.ladder_edge(133L, lv, lv, NULL), "the last level of the ladder")
   hint <- " `obs_per_cell` sets the sizes offered; how small a cell may be is the caller's choice."
