@@ -4177,7 +4177,7 @@ estimate_sac_range <- function(points_sf, response_var,
           detrended <- TRUE
           detrend_method <- "reml"
           .log_info(paste0("estimate_sac_range(): REML detrending on %s fitted ",
-                           "on %d point(s)%s: range parameter %.1f, nugget ",
+                           "on %d point(s)%s: range parameter %.4g, nugget ",
                            "proportion %.2f."),
                     paste(predictor_vars, collapse = " + "), reml_fit$n_used,
                     if (isTRUE(reml_fit$subsampled)) " (random subsample)" else "",
@@ -4858,7 +4858,7 @@ estimate_sac_range <- function(points_sf, response_var,
       .log_warn(
         paste0("estimate_sac_range(): the empirical variogram decreases with ",
                "distance over its shorter lags, so no range is identified ",
-               "from it (the fit reported %.0f). That shape is what a periodic ",
+               "from it (the fit reported %.4g). That shape is what a periodic ",
                "(hole-effect) structure produces, or a variance that differs ",
                "between a dense cluster and the rest of the layer; an ",
                "unremoved trend makes a variogram rise without a sill, which ",
@@ -4879,9 +4879,9 @@ estimate_sac_range <- function(points_sf, response_var,
       # refusal is lifted by a larger range_frac, not by a larger cutoff.
       # plot() captions the case the same way.
       .log_warn(
-        paste0("estimate_sac_range(): fitted range (%.0f) exceeds the largest ",
+        paste0("estimate_sac_range(): fitted range (%.4g) exceeds the largest ",
                "range `range_frac` accepts (%.4g = %s x the largest lag fitted, ",
-               "%.0f), although it lies within that lag. Returning NA: a range ",
+               "%.4g), although it lies within that lag. Returning NA: a range ",
                "above that share of the lags is treated as unidentified. Raise ",
                "`range_frac` (at 1 it accepts any range within the lags), or set ",
                "a block size explicitly."),
@@ -4892,8 +4892,8 @@ estimate_sac_range <- function(points_sf, response_var,
       # lags already run to the farthest pair of the points used, and a value
       # above 1 is refused.  With n_max the points used are a subsample.
       .log_warn(
-        paste0("estimate_sac_range(): fitted range (%.0f) exceeds the largest ",
-               "lag the variogram was fitted over (%.4g = %s x cutoff %.0f); the ",
+        paste0("estimate_sac_range(): fitted range (%.4g) exceeds the largest ",
+               "lag the variogram was fitted over (%.4g = %s x cutoff %.4g); the ",
                "empirical variogram never reached a sill, so the range is ",
                "unidentified rather than long. Returning NA. %s, or set a ",
                "block size explicitly. (A variogram that is flat from the ",
@@ -4968,14 +4968,14 @@ estimate_sac_range <- function(points_sf, response_var,
              "of %.1f (%s). Each direction sees about a quarter of the ",
              "point pairs and the windows are fixed to the coordinate axes, ",
              "so this spread is expected on an isotropic field too; the ",
-             "all-directions estimate (%.1f) is used. If the field is known ",
+             "all-directions estimate (%.4g) is used. If the field is known ",
              "to be anisotropic, size blocks from the longest directional ",
              "range instead: max(attr(range, \"directional_fitted\"), ",
              "na.rm = TRUE), after checking attr(range, ",
              "\"directional_status\"), since a direction that is not \"ok\" ",
              "has no identified range."),
       anisotropy,
-      paste(sprintf("%d\u00b0 = %.1f", dir_az[dir_ok], dir_ranges[dir_ok]),
+      paste(sprintf("%d\u00b0 = %.4g", dir_az[dir_ok], dir_ranges[dir_ok]),
             collapse = ", "),
       effective_range)
   if (isTRUE(nugget_at_bound))
@@ -6423,8 +6423,8 @@ make_folds <- function(points_sf, k,
         # Supplied blocks cannot be resized; the range still feeds the
         # leakage diagnostic made on the blocks further down.
         message(sprintf(
-          "make_folds(block_kfold): estimated spatial autocorrelation range = %.1f CRS units; the supplied `blocks` are used as given, so the range is only compared against them.",
-          sac_range
+          "make_folds(block_kfold): estimated spatial autocorrelation range = %s CRS units; the supplied `blocks` are used as given, so the range is only compared against them.",
+          .fmt_len(sac_range)
         ))
       } else if (is.finite(sac_range) && sac_range > 0) {
         # auto_range sets block_size only if the caller didn't supply one
@@ -6439,8 +6439,8 @@ make_folds <- function(points_sf, k,
           # design.
           built <- .block_dims_from_size(bb, block_size)
           message(sprintf(
-            "make_folds(block_kfold): estimated spatial autocorrelation range = %.1f CRS units; using as minimum block size. Over the %s extent that is a %s x %s grid of blocks %s wide and %s tall.",
-            sac_range, .block_extent_chr(bb),
+            "make_folds(block_kfold): estimated spatial autocorrelation range = %s CRS units; using as minimum block size. Over the %s extent that is a %s x %s grid of blocks %s wide and %s tall.",
+            .fmt_len(sac_range), .block_extent_chr(bb),
             format(built$nx, scientific = FALSE), format(built$ny, scientific = FALSE),
             format(signif(as.numeric(bb["xmax"] - bb["xmin"]) / built$nx, 4)),
             format(signif(as.numeric(bb["ymax"] - bb["ymin"]) / built$ny, 4))
@@ -6451,16 +6451,16 @@ make_folds <- function(points_sf, k,
           # as the range is in the branch above, so say what is built.
           built <- .block_dims_from_size(bb, block_size)
           message(sprintf(
-            "make_folds(block_kfold): estimated spatial autocorrelation range = %.1f CRS units; the `block_size` given (%s) is used as minimum block size, so the range is only compared against it. Over the %s extent that is a %s x %s grid of blocks %s wide and %s tall.",
-            sac_range, format(as.numeric(block_size)), .block_extent_chr(bb),
+            "make_folds(block_kfold): estimated spatial autocorrelation range = %s CRS units; the `block_size` given (%s) is used as minimum block size, so the range is only compared against it. Over the %s extent that is a %s x %s grid of blocks %s wide and %s tall.",
+            .fmt_len(sac_range), format(as.numeric(block_size)), .block_extent_chr(bb),
             format(built$nx, scientific = FALSE), format(built$ny, scientific = FALSE),
             format(signif(as.numeric(bb["xmax"] - bb["xmin"]) / built$nx, 4)),
             format(signif(as.numeric(bb["ymax"] - bb["ymin"]) / built$ny, 4))
           ))
           if (block_size < sac_range)
             .warn_and_log(
-              "make_folds(): block_size (%.1f) < estimated autocorrelation range (%.1f). %s %s",
-              block_size, sac_range, .blocks_below_range(),
+              "make_folds(): block_size (%s) < estimated autocorrelation range (%s). %s %s",
+              .fmt_len(block_size), .fmt_len(sac_range), .blocks_below_range(),
               .block_range_advice(pts, reg, bb, sac_range, k, mention_auto = FALSE)
             )
         }
@@ -6524,16 +6524,16 @@ make_folds <- function(points_sf, k,
         if (!isTRUE(auto_range) && is.finite(sac_range) && sac_range > 0 &&
             block_size < sac_range) {
           .warn_and_log(
-            "make_folds(): block_size (%.1f) < estimated autocorrelation range (%.1f). %s %s",
-            block_size, sac_range, .blocks_below_range(),
+            "make_folds(): block_size (%s) < estimated autocorrelation range (%s). %s %s",
+            .fmt_len(block_size), .fmt_len(sac_range), .blocks_below_range(),
             .block_range_advice(pts, reg, bb, sac_range, k, mention_auto = FALSE)
           )
         }
         # If the caller also supplied explicit block_nx/block_ny, warn about override
         if (!is.null(block_nx) || !is.null(block_ny)) {
           .log_warn(
-            "make_folds(block_kfold): block_size (%.1f) overrides explicit block_nx/block_ny.",
-            block_size
+            "make_folds(block_kfold): block_size (%s) overrides explicit block_nx/block_ny.",
+            .fmt_len(block_size)
           )
         }
         nx <- size_dims$nx
@@ -6578,8 +6578,8 @@ make_folds <- function(points_sf, k,
             # here.  .block_range_advice() builds the grid the advice asks
             # for and says what comes back.
             .warn_and_log(
-              "make_folds(): block dimension (%.1f) < autocorrelation range (%.1f). %s %s",
-              min_cell, sac_range, .blocks_below_range(),
+              "make_folds(): block dimension (%s) < autocorrelation range (%s). %s %s",
+              .fmt_len(min_cell), .fmt_len(sac_range), .blocks_below_range(),
               .block_range_advice(pts, reg, bb, sac_range, k)
             )
           }
@@ -6609,8 +6609,8 @@ make_folds <- function(points_sf, k,
           min_cell <- min(split_cells)
           if (min_cell < sac_range) {
             .warn_and_log(
-              "make_folds(): block_nx/block_ny yield blocks smaller than autocorrelation range (%.1f). %s %s",
-              sac_range, .blocks_below_range(),
+              "make_folds(): block_nx/block_ny yield blocks smaller than autocorrelation range (%s). %s %s",
+              .fmt_len(sac_range), .blocks_below_range(),
               .block_range_advice(pts, reg, bb, sac_range, k)
             )
           }
@@ -6754,9 +6754,9 @@ make_folds <- function(points_sf, k,
         if (n_far > 0L)
           .warn_and_log(paste0("make_folds(block_kfold): %d of %d points fall ",
                                "outside every supplied block (the farthest by ",
-                               "%.1f units); each has been assigned to the ",
+                               "%s units); each has been assigned to the ",
                                "nearest block."),
-                        n_far, nrow(pts), max(d_min[is.finite(d_min)]))
+                        n_far, nrow(pts), .fmt_len(max(d_min[is.finite(d_min)])))
         pts$..block_id[na_idx] <- nearest
       }
     }
@@ -6936,8 +6936,9 @@ make_folds <- function(points_sf, k,
       if (is.finite(sac_range) && sac_range > 0 && is.finite(block_scale) &&
           block_scale < sac_range) {
         .warn_and_log(
-          "make_folds(): the supplied blocks (median scale %.1f) are smaller than the autocorrelation range (%.1f). %s For the error farther from the data, supply blocks at least %.0f units across.",
-          block_scale, sac_range, .blocks_below_range(advice = FALSE), ceiling(sac_range)
+          "make_folds(): the supplied blocks (median scale %s) are smaller than the autocorrelation range (%s). %s For the error farther from the data, supply blocks at least %s units across.",
+          .fmt_len(block_scale), .fmt_len(sac_range), .blocks_below_range(advice = FALSE),
+          format(.block_size_at_least(as.numeric(sac_range)), scientific = FALSE, trim = TRUE)
         )
       }
     }
@@ -7490,8 +7491,8 @@ make_folds <- function(points_sf, k,
           n, n_g, deficit_tol))
 
     .log_info(paste0("make_folds(nndm): %d folds%s. Target prediction-to-training ",
-                     "distance: median %.1f. Realised test-to-training distance: ",
-                     "median %.1f, excluding a median of %.1f training point(s) ",
+                     "distance: median %.4g. Realised test-to-training distance: ",
+                     "median %.4g, excluding a median of %.1f training point(s) ",
                      "per fold (%d removals in total; largest remaining excess ",
                      "of realised over target ECDF %.3f, largest deficit %.3f)."),
               n,
@@ -7705,8 +7706,8 @@ make_folds <- function(points_sf, k,
         else "")
     }
     .log_info(paste0("make_folds(knndm): %d folds from %s. Target ",
-                     "prediction-to-data distance: median %.1f. Held-out-to-",
-                     "training distance: median %.1f. Wasserstein distance to ",
+                     "prediction-to-data distance: median %.4g. Held-out-to-",
+                     "training distance: median %.4g. Wasserstein distance to ",
                      "the target %.4g (random partition %.4g, leave-one-out ",
                      "%.4g). %d cluster count(s) tried by %s clustering, %d ",
                      "set aside by min_train or balance_tol."),
@@ -8612,6 +8613,19 @@ make_folds <- function(points_sf, k,
                 data = list(held_out_mean = held_out_mean,
                             target_mean = target_mean))
 }
+
+
+#' A length in CRS units, for a message
+#'
+#' Four significant digits, as the block widths and extents of the same
+#' messages are given, so the figure reads the same in any unit: a fixed
+#' number of decimals printed a range of 0.00038 units as 0.0.
+#'
+#' @param x A number (an estimate_sac_range() result loses its attributes).
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+.fmt_len <- function(x) format(signif(as.numeric(x)[1L], 4))
 
 
 #' The extent of a bbox, for a message

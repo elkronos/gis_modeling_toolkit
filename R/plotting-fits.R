@@ -558,8 +558,8 @@ plot.sac_range <- function(x, ...) {
       sprintf("Hollow points, dashed line: %s. Filled points, solid line: %s.",
               overlay_label, tolower(what)),
       if (both_ok)
-        sprintf("Residual sill is %.0f%% of the response sill; effective ranges %.0f (residuals) and %.0f (response).",
-                100 * s_res / s_resp, as.numeric(sac), as.numeric(overlay))
+        sprintf("Residual sill is %.0f%% of the response sill; effective ranges %s (residuals) and %s (response).",
+                100 * s_res / s_resp, .fmt_len(sac), .fmt_len(overlay))
       else sprintf("Sills not compared: %s.",
                    if (!same_pairs)
                      sprintf(paste0("the two variograms are not over the same ",
@@ -582,8 +582,8 @@ plot.sac_range <- function(x, ...) {
   if (is.finite(sac)) {
     p <- p + ggplot2::geom_vline(xintercept = as.numeric(sac),
                                  linetype = "dotted", colour = "#B2182B") +
-      ggplot2::labs(subtitle = sprintf("Effective range = %.1f %s",
-                                       as.numeric(sac), vg_units))
+      ggplot2::labs(subtitle = sprintf("Effective range = %s %s",
+                                       .fmt_len(sac), vg_units))
   } else if (!is.null(attr(sac, "rejected_range"))) {
     # A variogram that never reaches a sill is the single most useful thing to
     # SEE, so draw it and label why no range is marked, rather than refusing.
@@ -597,9 +597,9 @@ plot.sac_range <- function(x, ...) {
           # Not produced any more: a result stored by a version that fitted
           # the model with gstat's iterative fit can carry it.
           sprintf(paste0("No effective range: the fit stopped at gstat's ",
-                         "iteration limit, so the range it reports (%.0f) is ",
+                         "iteration limit, so the range it reports (%s) is ",
                          "where the optimiser halted, not a fitted parameter."),
-                  attr(sac, "rejected_range"))
+                  .fmt_len(attr(sac, "rejected_range")))
         else if (isTRUE(grepl("^no variogram model", reason)))
           # Fewer than three lag bins hold point pairs, so nothing was
           # fitted and there is no model line to draw.  (A flat variogram
@@ -612,9 +612,9 @@ plot.sac_range <- function(x, ...) {
           # without a sill.
           sprintf(paste0("No effective range: the semivariance falls with ",
                          "distance over the shorter lags, so the fitted range ",
-                         "(%.0f) is not identified (periodic structure, or a ",
+                         "(%s) is not identified (periodic structure, or a ",
                          "variance that differs across the layer)."),
-                  attr(sac, "rejected_range"))
+                  .fmt_len(attr(sac, "rejected_range")))
         else if (identical(reason, "fitted range exceeds the largest lag fitted") &&
                  isTRUE(attr(sac, "rejected_range") <= attr(sac, "cutoff_dist")))
           # The bound is range_frac x the largest lag, and the estimate does
@@ -622,17 +622,17 @@ plot.sac_range <- function(x, ...) {
           # lag can only have been refused by a range_frac below 1, and
           # "exceeds the largest lag fitted (651) ... never reached a sill"
           # was then false on both counts for a range of 646.
-          sprintf(paste0("No effective range: the fitted range (%.0f) is ",
-                         "within the largest lag fitted (%.0f) but above the ",
+          sprintf(paste0("No effective range: the fitted range (%s) is ",
+                         "within the largest lag fitted (%s) but above the ",
                          "share of it that `range_frac` accepts."),
-                  attr(sac, "rejected_range"),
-                  attr(sac, "cutoff_dist"))
+                  .fmt_len(attr(sac, "rejected_range")),
+                  .fmt_len(attr(sac, "cutoff_dist")))
         else if (identical(reason, "fitted range exceeds the largest lag fitted"))
-          sprintf(paste0("No effective range: the fitted range (%.0f) ",
-                         "exceeds the largest lag fitted (%.0f), so the ",
+          sprintf(paste0("No effective range: the fitted range (%s) ",
+                         "exceeds the largest lag fitted (%s), so the ",
                          "variogram never reached a sill."),
-                  attr(sac, "rejected_range"),
-                  attr(sac, "cutoff_dist"))
+                  .fmt_len(attr(sac, "rejected_range")),
+                  .fmt_len(attr(sac, "cutoff_dist")))
         else if (identical(reason, "fitted range is below the shortest lag fitted") &&
                  is.numeric(attr(sac, "rejected_range"))) {
           # The distance the range fell short of is recorded on the refusal:

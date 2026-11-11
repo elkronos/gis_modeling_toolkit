@@ -8384,6 +8384,29 @@ old behaviour where there is a way.
   already did. A range past the largest lag keeps the old warning. The
   value (NA), `rejected_range` and `rejected_reason` do not change.
 
+* **Distances in CRS units were printed with a fixed number of decimals,
+  so in a large unit they read 0.**  On a layer in UTM with
+  `+to_meter=1000000`, `estimate_sac_range()` warned "fitted range (0)
+  exceeds the largest lag the variogram was fitted over (0.0006598 = 1 x
+  cutoff 0)" of a range of 0.002639 and a lag of 0.0006598.  Every distance
+  in CRS units in a warning, log line, print or plot caption is now
+  printed with four significant digits, as the largest lag and the block
+  widths already were: the range, the largest lag and the cutoff in
+  `estimate_sac_range()`'s warnings and log lines (also passed on by
+  `make_folds(auto_range = TRUE)`, `kriging_adequacy()`, `sac_nugget()`,
+  `resolution_profile()` and `summarize_by_cell()`); the range, the block
+  size, the block dimension, the scale of supplied blocks and the distance
+  of a point outside them in `make_folds()`'s block messages, and the
+  median distances of its `nndm` and `knndm` log lines; the ranges and lags
+  in `plot()` of an `estimate_sac_range()` result and of a fit's residual
+  variogram; the range in `resolution_profile()`'s support warnings and
+  print; and the range in the prints and plot of `cv_block_size_sweep()`
+  and the print of `kriging_adequacy()`.  The size `make_folds()` advises
+  for supplied blocks smaller than the range is the range rounded up as
+  its other advice rounds it, not up to a whole unit, which advised blocks
+  of 1 unit for a range of 0.0004.  Percentages and counts keep their
+  formats, and no value or rule changes.
+
 ## Documentation
 
 * The README, the vignettes, the help's examples, the scripts in

@@ -227,6 +227,7 @@ test_that("make_folds() compares supplied blocks with the range in the CRS's uni
   }
   # Blocks of 2000 m by 1000 m (a scale of 1414.2) under a range of about
   # 1986 m: the warning says so, and gives the size the range asks for.
+  # Lengths are printed with four significant digits (BUG-256).
   base <- run(L$pts, L$cells)
   expect_length(base$w, 1L)
   # The range comes from a variogram fit, whose last bits move with the
@@ -234,8 +235,8 @@ test_that("make_folds() compares supplied blocks with the range in the CRS's uni
   r0 <- as.numeric(base$f$params$sac_range)
   expect_gt(r0, 1500); expect_lt(r0, 2500)
   expect_match(base$w, sprintf(
-    "median scale 1414.2) are smaller than the autocorrelation range (%.1f)", r0),
-    fixed = TRUE)
+    "median scale 1414) are smaller than the autocorrelation range (%s)",
+    format(signif(r0, 4))), fixed = TRUE)
   expect_match(base$w, sprintf("supply blocks at least %.0f units across.", ceiling(r0)),
                fixed = TRUE)
   for (by in c(1e-6, 0.304801, 2000)) {
@@ -244,9 +245,8 @@ test_that("make_folds() compares supplied blocks with the range in the CRS's uni
     # In a unit of 1000 km the blocks were read as 1414 units across and no
     # warning came.
     expect_length(s$w, 1L)
-    # The message prints its figures with one decimal, so in a unit of
-    # 1000 km they read 0.0; only the larger units are read back here.
-    if (by < 0.01) next
+    # Four significant digits read the same in every unit, 1000 km
+    # included, where one decimal printed 0.0 (BUG-256).
     scale <- as.numeric(sub(".*median scale ([^)]+)\\).*", "\\1", s$w))
     range <- as.numeric(sub(".*autocorrelation range \\(([^)]+)\\)\\..*", "\\1", s$w))
     across <- as.numeric(sub(".*supply blocks at least ([^ ]+) units across\\.$", "\\1", s$w))

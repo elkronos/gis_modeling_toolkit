@@ -520,11 +520,11 @@
     if (!supported)
       .warn_classed("spatialkit_not_supported",
                     paste0("resolution_profile(): cells no wider than the autocorrelation ",
-                           "range (%.0f) would need at least %.0f of them, but %s. The data ",
+                           "range (%s) would need at least %.0f of them, but %s. The data ",
                            "cannot support a tessellation that respects their own ",
                            "correlation structure; the profile scores %s so ",
                            "the cost of each level is still visible."),
-                    range_eff, floor_raw,
+                    .fmt_len(range_eff), floor_raw,
                     if (held)
                       sprintf(paste0("obs_per_cell = %s asks for %d cells of the %d %s, and ",
                                      "k-means can place at most %d on %s"),
@@ -2983,11 +2983,11 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       # from 2 to 6" over the levels 4 and 5 the caller had asked for.
       .warn_classed("spatialkit_not_supported",
                     paste0("resolution_profile(): cells no wider than the autocorrelation ",
-                           "range (%.0f) would need at least %.0f of them, but %s. The data ",
+                           "range (%s) would need at least %.0f of them, but %s. The data ",
                            "cannot support a tessellation that respects their own ",
                            "correlation structure; %s so the cost of each level is still ",
                            "visible."),
-                    range_eff, floor_raw,
+                    .fmt_len(range_eff), floor_raw,
                     if (by_support <= k_cap_all)
                       sprintf("%d %s at min_cell_n = %d support at most %d", n_support,
                               support_what, min_cell_n, as.integer(data_ceiling))
@@ -3003,10 +3003,10 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                                 min_cell_n = min_cell_n))
     else if (floor_raw > ceiling_L)
       .log_warn(paste0("resolution_profile(): cells no wider than the autocorrelation ",
-                       "range (%.0f) need at least %.0f of them, which the %d %s ",
+                       "range (%s) need at least %.0f of them, which the %d %s ",
                        "support, but k-means on the %d-point subsample can fit at ",
                        "most %d; raise `sample_n`. %s."),
-                range_eff, floor_raw, n_support, support_what, n, ceiling_L,
+                .fmt_len(range_eff), floor_raw, n_support, support_what, n, ceiling_L,
                 if (levels_given) given_text()
                 else sprintf("The profile runs from 2 to %d", ceiling_L))
     # With range_floor = FALSE, the default, the ladder starts at 2 whatever the
@@ -3910,8 +3910,8 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
                 if (isTRUE(n_rsp > 0L)) paste(if (n_div == 1L) "row" else "rows", carry)
                 else "points",
                 if (!is.finite(b$range)) "2 (no range)"
-                else paste0(if (is.na(b$floor)) sprintf("beyond integer range from range %.0f", b$range)
-                            else sprintf("%d from range %.0f", b$floor, b$range),
+                else paste0(if (is.na(b$floor)) sprintf("beyond integer range from range %s", .fmt_len(b$range))
+                            else sprintf("%d from range %s", b$floor, .fmt_len(b$range)),
                             ", not applied"),
                 if (!isTRUE(b$supported) && identical(b$ceiling_from, "fewer than two distinct locations"))
                   "  -- the points sit on one location: not supported"
@@ -3923,8 +3923,8 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
     cat(sprintf("  ladder      : %d to %d cells (floor %s, ceiling %d%s)%s\n",
                 min(x$levels), max(x$levels),
                 if (!is.finite(b$range)) "2 (no range)"
-                else paste0(if (is.na(b$floor)) sprintf("beyond integer range from range %.0f", b$range)
-                            else sprintf("%d from range %.0f", b$floor, b$range),
+                else paste0(if (is.na(b$floor)) sprintf("beyond integer range from range %s", .fmt_len(b$range))
+                            else sprintf("%d from range %s", b$floor, .fmt_len(b$range)),
                             if (isFALSE(b$range_floor)) ", not applied" else ""),
                 b$ceiling,
                 # With no location repeated the cap is one short of the points
@@ -4008,7 +4008,7 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
               else
                 paste0(sprintf("nugget %.3g%s, partial sill %.3g, range %s", vg$nugget,
                                if (bound) " (at the fit's lower bound)" else "", vg$psill,
-                               if (is.finite(vg$range)) sprintf("%.0f", vg$range)
+                               if (is.finite(vg$range)) .fmt_len(vg$range)
                                else "unidentified"),
                        if (!is.null(noise)) paste0("; ", noise)
                        else if (cp_none && zero) paste0("; ", zero_text)

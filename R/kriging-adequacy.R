@@ -1550,7 +1550,7 @@ print.kriging_adequacy <- function(x, ...) {
               attr(x, "sill"), attr(x, "nugget"),
               100 * attr(x, "nugget") / attr(x, "sill"),
               if (isTRUE(attr(x, "range_identified")))
-                sprintf("%.1f", attr(x, "range"))
+                .fmt_len(attr(x, "range"))
               else if (is.character(attr(x, "rejected_reason")) &&
                        !is.na(attr(x, "rejected_reason")))
                 sprintf("not identified (%s)", attr(x, "rejected_reason"))

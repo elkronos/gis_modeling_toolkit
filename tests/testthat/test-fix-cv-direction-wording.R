@@ -642,8 +642,8 @@ test_that("make_folds()'s five warnings on blocks below the range say what the s
     "supplied blocks" = function()
       make_folds(pts, k = 5, method = "block_kfold", response_var = "z",
                  blocks = blocks, seed = 1))
-  heads <- c("make_folds\\(\\): block_size \\(100\\.0\\) < estimated autocorrelation range",
-             "make_folds\\(\\): block_size \\(100\\.0\\) < estimated autocorrelation range",
+  heads <- c("make_folds\\(\\): block_size \\(100\\) < estimated autocorrelation range",
+             "make_folds\\(\\): block_size \\(100\\) < estimated autocorrelation range",
              "make_folds\\(\\): block dimension \\([0-9.]+\\) < autocorrelation range",
              "make_folds\\(\\): block_nx/block_ny yield blocks smaller than autocorrelation range",
              "make_folds\\(\\): the supplied blocks \\(median scale [0-9.]+\\) are smaller than the autocorrelation range")

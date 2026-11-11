@@ -1611,8 +1611,8 @@ test_that("a range inside the lags refused by range_frac below 1 is not said to 
     expect_false(grepl("exceeds the largest lag", line, fixed = TRUE), info = paste("cutoff", cf))
     expect_false(grepl("Raise `cutoff`", line, fixed = TRUE), info = paste("cutoff", cf))
     expect_true(grepl(sprintf(paste0(
-      "fitted range (%.0f) exceeds the largest range `range_frac` accepts (%.4g = 0.2 x ",
-      "the largest lag fitted, %.0f), although it lies within that lag. Returning NA"),
+      "fitted range (%.4g) exceeds the largest range `range_frac` accepts (%.4g = 0.2 x ",
+      "the largest lag fitted, %.4g), although it lies within that lag. Returning NA"),
       attr(r, "rejected_range"), 0.2 * attr(r, "cutoff_dist"), attr(r, "cutoff_dist")),
       line, fixed = TRUE), info = paste("cutoff", cf))
     expect_true(grepl("Raise `range_frac` (at 1 it accepts any range within the lags), or set a block size explicitly.",

@@ -626,7 +626,7 @@ print.block_size_sweep <- function(x, ...) {
   # exceeds the fits made when a size builds fewer than k folds.
   cat(sprintf("Cross-validation %s against block size (%d fits, k = %d, sizes in %s)\n",
               metric, .sweep_fits_made(x), attr(x, "k"), attr(x, "crs") %||% "CRS units"))
-  if (is.finite(r)) cat(sprintf("  estimated autocorrelation range: %.1f\n", r))
+  if (is.finite(r)) cat(sprintf("  estimated autocorrelation range: %s\n", .fmt_len(r)))
   else cat("  autocorrelation range: not identified\n")
   df <- as.data.frame(x)
   df$block_size <- ifelse(is.na(df$block_size), "random", format(signif(df$block_size, 4)))
@@ -704,7 +704,7 @@ plot.block_size_sweep <- function(x, ...) {
     ggplot2::labs(
       title = sprintf("Cross-validated %s against block size", metric),
       subtitle = if (is.finite(r))
-        sprintf("Estimated autocorrelation range %.0f (dotted)", r)
+        sprintf("Estimated autocorrelation range %s (dotted)", .fmt_len(r))
       else "Autocorrelation range not identified; no marker drawn",
       caption = paste(c(
         if (nrow(rnd)) sprintf("Dashed: random folds, %s = %.3g", metric, rnd$value[1L]),

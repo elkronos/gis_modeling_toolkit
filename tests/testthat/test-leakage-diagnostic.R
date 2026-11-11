@@ -78,7 +78,8 @@ test_that("a hand-set block_size below the range warns too, without auto_range",
                                      seed = 7, response_var = "z",
                                      block_size = 100))
   expect_length(res$warnings, 1L)
-  expect_match(res$warnings, "block_size \\(100\\.0\\) < estimated autocorrelation range")
+  # Four significant digits (BUG-256): 100, not 100.0.
+  expect_match(res$warnings, "block_size \\(100\\) < estimated autocorrelation range")
   # ... and a block_size above it does not.
   res2 <- collect_warnings(make_folds(pts, k = 5, method = "block_kfold",
                                       seed = 7, response_var = "z",
