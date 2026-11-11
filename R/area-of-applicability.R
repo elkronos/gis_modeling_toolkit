@@ -1372,7 +1372,9 @@
 #' \code{newdata} (grid polygons, say) is reduced to representative points
 #' first, as \code{\link{coerce_to_points}} would. If exactly one side carries
 #' a CRS the other is brought into it: reprojected when its coordinates look
-#' like longitude/latitude, stamped otherwise, with a warning either way. This
+#' like longitude/latitude, stamped otherwise, with a warning either way; a
+#' CRS in longitude and latitude is not stamped on coordinates outside
+#' longitude -180 to 360 and latitude -90 to 90, which is refused. This
 #' is done because degrees fed into a metre-space index silently understate the
 #' distances. The location index is a map distance and refuses training data
 #' in a geographic CRS. Both layers are read in x and y for the location: a

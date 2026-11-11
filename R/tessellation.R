@@ -2168,7 +2168,10 @@ create_grid_polygons <- function(
   crs_out <- NULL
   if (!is.null(crs)) {
     stamped <- is.na(sf::st_crs(boundary))
-    boundary <- .transform_or_stamp(boundary, crs, "boundary", "create_grid_polygons")
+    # A boundary stamped with a geographic `crs` and a y between 90 and 180
+    # reaches the test below, which names its row (lat_max = 180).
+    boundary <- .transform_or_stamp(boundary, crs, "boundary", "create_grid_polygons",
+                                    lat_max = 180)
     # A boundary without a CRS is stamped with `crs`: its coordinates are
     # those given, now read in that CRS, so a geographic one is tested for a
     # latitude beyond 90 here, before any move (.boundary_located()).
@@ -3010,7 +3013,10 @@ build_tessellation <- function(
     points_sf <- .transform_or_stamp(points_sf, crs, "points_sf", "build_tessellation")
     if (!is.null(boundary)) {
       stamped <- is.na(sf::st_crs(boundary))
-      boundary <- .transform_or_stamp(boundary, crs, "boundary", "build_tessellation")
+      # A y between 90 and 180 reaches the test below, which names its row
+      # (lat_max = 180).
+      boundary <- .transform_or_stamp(boundary, crs, "boundary", "build_tessellation",
+                                      lat_max = 180)
       # A boundary without a CRS is stamped with `crs`, and a geographic one
       # is tested for a latitude beyond 90 before it is moved
       # (.boundary_located()), as a boundary given in it is.

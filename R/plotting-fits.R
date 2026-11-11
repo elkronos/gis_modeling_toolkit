@@ -683,7 +683,12 @@ plot.sac_range <- function(x, ...) {
 #' @param points_sf The \code{sf} layer the folds were built from.  Drawn in
 #'   x and y: a layer whose geometries mix XY with XYZ or XYM (as
 #'   \code{rbind()} of an XY and an XYZ layer gives) is drawn without its Z
-#'   and M, and so are \code{boundary} and the blocks.
+#'   and M, and so are \code{boundary} and the blocks.  A row without a
+#'   location (a coordinate that is not finite or lies beyond 1e150, or a
+#'   point that \code{make_folds()} left out of every fold because it is
+#'   empty or the CRS the folds were built in cannot place it) is not
+#'   drawn, and neither is a row of \code{boundary} with such a coordinate;
+#'   one warning says how many.
 #' @param boundary Optional polygonal \code{sf}/\code{sfc} to draw underneath.
 #' @param blocks Logical; draw the block polygons when \code{folds} carries
 #'   them.  Default \code{TRUE}.
@@ -737,6 +742,44 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
     stop("plot_folds(): no points matched the fold assignment; were `folds` ",
          "built from a different layer?", call. = FALSE)
 
+  # A row without a location (.unlocated_features(): a coordinate that is
+  # not finite or lies beyond 1e150) is left out of `points_sf` and of
+  # `boundary`, read as given before any move and left out after it.  So is
+  # a point with no fold that make_folds() left out by its own rule: an
+  # empty point, or one the CRS the folds were built in cannot place (a
+  # latitude beyond 90, which make_folds() drops "once projected").  One
+  # warning says how many rows are not drawn.  Drawn in the fold colour for
+  # NA, a point at 1e200 made the map 1e200 wide, every other point at one
+  # spot, with ggplot2's bare "Position guide is perpendicular to the
+  # intended axis", one at Inf gave it an infinite x range in silence, and
+  # one at latitude 95 ran the map past the pole.  .typed_points() and
+  # .xy_if_mixed() keep every row and its x and y, so `dat` is read row by
+  # row as `points_sf` was given.
+  geom <- sf::st_geometry(dat)
+  no_fold <- is.na(dat$.fold) & !.unlocated_features(geom)
+  left_out <- no_fold & sf::st_is_empty(geom)
+  fold_crs <- folds$params$crs
+  fold_crs <- if (is.character(fold_crs) && length(fold_crs) == 1L && !is.na(fold_crs))
+    tryCatch(sf::st_crs(fold_crs), error = function(e) sf::NA_crs_) else sf::NA_crs_
+  cand <- which(no_fold & !left_out)
+  if (length(cand) && !is.na(fold_crs) && !is.na(sf::st_crs(dat)) &&
+      !isTRUE(sf::st_crs(dat) == fold_crs)) {
+    moved <- tryCatch(.transform_keep_unlocated(geom[cand], fold_crs),
+                      error = function(e) NULL)
+    if (!is.null(moved)) left_out[cand] <- !.located_rows(moved)
+  }
+  lay <- .plot_drop_unlocated(
+    list(points_sf = dat,
+         boundary = if (inherits(boundary, c("sf", "sfc"))) boundary),
+    caller = "plot_folds",
+    also = list(points_sf = left_out),
+    what = paste0("a coordinate that is not finite or lies beyond 1e150",
+                  if (any(left_out))
+                    ", or a point make_folds() left out of every fold as empty or not placed in the CRS of the folds"))
+  off <- attr(lay, "drop")
+  dat <- lay$points_sf
+  if (inherits(boundary, c("sf", "sfc"))) boundary <- lay$boundary
+
   # coord_sf() brings layers that carry a CRS into one, but a CRS-less layer
   # beside one that has a CRS aborts at PRINT time with sf's bare "cannot
   # transform sfc object with missing crs".  make_folds() produces that mix
@@ -766,9 +809,10 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
     if (is.null(x) || is.na(plot_crs) || !is.na(sf::st_crs(x))) return(x)
     .transform_or_stamp(x, plot_crs, what = what, caller = "plot_folds")
   }
-  dat <- align(dat, "points_sf")
+  dat <- .plot_keep_located(align(dat, "points_sf"), off$points_sf)
   blk <- align(blk, "folds$params$blocks")
-  if (!is.null(boundary)) boundary <- align(boundary, "boundary")
+  if (!is.null(boundary))
+    boundary <- .plot_keep_located(align(boundary, "boundary"), off$boundary)
 
   p <- ggplot2::ggplot()
   if (!is.null(boundary))

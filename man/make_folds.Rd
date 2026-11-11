@@ -37,7 +37,9 @@ XYZ layer would otherwise have elevation folded into every buffer, block
 and neighbour distance.  CRS-less points are aligned to a \code{boundary}
 or \code{prediction_points} that carries a CRS.  They are reprojected when
 the coordinates look like lon/lat and otherwise stamped without
-reprojection, with a warning either way.}
+reprojection, with a warning either way.  A CRS in longitude and
+latitude is not stamped on coordinates outside longitude -180 to 360
+and latitude -90 to 90: that is refused.}
 
 \item{k}{Integer; number of folds.  Must be a single whole number >= 1,
 and is required except for the two leave-one-out methods.
@@ -58,8 +60,8 @@ the \code{k} element of the returned list, and do not assume the
 requested value; \code{params$k_requested} keeps the value asked for.
 Returning fewer folds than asked raises a warning of class
 \code{"spatialkit_k_reduced"}, whose message gives both counts, the
-reason and a setting that works; the condition carries them as
-\code{k_requested} and \code{k}, so
+reason and, where there is one, a setting that works; the condition
+carries them as \code{k_requested} and \code{k}, so
 \code{tryCatch(spatialkit_k_reduced = )} or
 \code{withCallingHandlers()} can act on it without reading the text.
 (Before this version a reduction was a log line only.)}
@@ -209,7 +211,9 @@ clipped to it; a cell that the boundary only touches at a corner or
 along an edge is not a block.  A point on the boundary, to the margin of
 the edge rule in Details, is inside it.  A boundary without a CRS is brought into
 the points' CRS: reprojected from EPSG:4326 when its coordinates look
-like lon/lat, otherwise stamped, with a warning either way.  The same
+like lon/lat, otherwise stamped, with a warning either way; a CRS in
+longitude and latitude is not stamped on coordinates outside longitude
+-180 to 360 and latitude -90 to 90, which is refused.  The same
 goes for \code{prediction_points} and \code{blocks}.  A boundary that
 mixes XY and XYZ (or XYM) geometries is read in x and y, since sf reads
 a layer in the dimension of its first geometry, and so is one whose
@@ -701,7 +705,9 @@ the largest remaining excess; compare \code{params$target_median} with
 A polygon layer passed as \code{blocks} is aligned to the points the way
 \code{boundary} is: CRS-less points are aligned to blocks that carry a CRS
 (reprojected if they look like lon/lat, otherwise stamped, warning either
-way), and the blocks are then brought into the CRS the folds are built in.
+way, and refused when the blocks are in longitude and latitude and the
+points lie outside longitude -180 to 360 and latitude -90 to 90), and the
+blocks are then brought into the CRS the folds are built in.
 A point inside more than one block is given the first (lowest row) that
 contains it, as for a point on the shared edge of two grid cells, and a
 point within the same margin of a block's edge (one part in 1e10 of the

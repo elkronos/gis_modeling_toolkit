@@ -42,16 +42,28 @@
 #' assumption is not. The lon/lat heuristic runs first, exactly as
 #' `ensure_projected()` does: coordinates that look like degrees are taken as
 #' EPSG:4326 and REPROJECTED; only when they do not is the target stamped. Both
-#' branches warn.
+#' branches warn.  A target in longitude and latitude is not stamped on
+#' coordinates that cannot be in it: that is refused.
 #'
 #' @param x An sf or sfc object.
 #' @param crs Target CRS (anything `sf::st_crs()` accepts).
 #' @param what Label naming `x` in the warning.
 #' @param caller Calling function name, for the warning.
-#' @return `x` reprojected to, or stamped with, `crs`.
+#' @param geo_remedy Words appended to the refusal's remedy (after "Set the
+#'   CRS of `what` with sf::st_crs()"), or NULL.
+#' @param lat_max The latitude, north or south, beyond which a CRS-less `x`
+#'   is refused a target in longitude and latitude.  90 by default.  A
+#'   caller that tests the rows of the stamped layer for a latitude beyond
+#'   90 and names them (create_grid_polygons() and build_tessellation(),
+#'   for `boundary`) passes 180, so that its refusal names the row.
+#' @return `x` reprojected to, or stamped with, `crs`.  A CRS-less `x` with
+#'   an x outside -180 to 360 or a y beyond `lat_max` north or south is
+#'   refused when `crs` is in longitude and latitude: its coordinates cannot
+#'   be in that CRS.
 #' @keywords internal
 #' @noRd
-.transform_or_stamp <- function(x, crs, what = "input", caller = "spatialkit") {
+.transform_or_stamp <- function(x, crs, what = "input", caller = "spatialkit",
+                                geo_remedy = NULL, lat_max = 90) {
   if (is.null(crs)) return(x)
   # An NA target means "leave the coordinates in whatever space they are in":
   # build_tessellation() passes it for CRS-less points that the lon/lat
@@ -87,6 +99,29 @@
     lbl <- tryCatch(sf::st_crs(crs)$input, error = function(e) NULL)
     lbl <- if (is.character(lbl) && length(lbl) == 1L && !is.na(lbl) && nzchar(lbl))
       sprintf("the target CRS ('%s')", lbl) else "the target CRS"
+    # A target in longitude and latitude is not stamped on coordinates that
+    # cannot be in it: an x outside longitude -180 to 360, or a y beyond 90
+    # north or south.  The stamp drew metres at "latitude" 4e6, and sf added
+    # its bare "bounding box has potentially an invalid value range for
+    # longlat data" after the warning above.  A caller that tests the rows
+    # of the stamped layer for a latitude beyond 90 and refuses them by row
+    # (the builders, for `boundary`, with class spatialkit_cells_degenerate)
+    # passes lat_max = 180, so that a y between 90 and 180 reaches that
+    # refusal.  The box is the one .looks_like_lonlat() read, of the
+    # coordinates that have a location.
+    bb <- ll$bb
+    if (.is_longlat(sf::st_crs(crs)) && !is.null(bb) &&
+        all(is.finite(bb)) &&
+        (bb[["xmin"]] < -180 || bb[["xmax"]] > 360 ||
+         bb[["ymin"]] < -lat_max || bb[["ymax"]] > lat_max))
+      stop(sprintf(paste0(
+        "%s(): `%s` has no CRS and its coordinates lie outside longitude -180 ",
+        "to 360 and latitude -90 to 90 (xmin=%.6g, xmax=%.6g, ymin=%.6g, ",
+        "ymax=%.6g), so they cannot be in %s, which is in longitude and ",
+        "latitude. Set the CRS of `%s` with sf::st_crs()%s."),
+        caller, what, bb[["xmin"]], bb[["xmax"]], bb[["ymin"]], bb[["ymax"]],
+        lbl, what, if (is.null(geo_remedy)) "" else paste0(", ", geo_remedy)),
+        call. = FALSE)
     .warn_and_log(
       "%s(): `%s` has no CRS and its coordinates do not look like lon/lat, so it cannot be reprojected; stamping %s WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set the input CRS with sf::st_crs().",
       caller, what, lbl)

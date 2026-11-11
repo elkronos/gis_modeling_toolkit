@@ -290,7 +290,9 @@
 #'   takes the same nearest feature.  A grid still without a CRS after that
 #'   is treated as \code{boundary} is: taken as EPSG:4326 and reprojected
 #'   when its coordinates look like lon/lat, otherwise stamped with the fit's
-#'   CRS, with a warning either way.  A grid of polygons
+#'   CRS, with a warning either way.  A fit's CRS in longitude and latitude
+#'   is not stamped on coordinates outside longitude -180 to 360 and
+#'   latitude -90 to 90: that is refused.  A grid of polygons
 #'   (\code{\link{create_grid_polygons}()} output, say) is reduced to one
 #'   representative point per cell, as \code{\link{coerce_to_points}()} does,
 #'   so covariates are taken at the location predicted for; \code{boundary}
@@ -323,7 +325,8 @@
 #'   it are dropped.  Put through the same CRS replay and reprojection as
 #'   \code{grid}.  One still without a CRS after the replay is taken as
 #'   EPSG:4326 and reprojected when its coordinates look like lon/lat, and
-#'   is otherwise stamped with the fit's CRS, with a warning either way.
+#'   is otherwise stamped with the fit's CRS, with a warning either way, or
+#'   refused as \code{grid} is.
 #'   Read in x and y: a boundary whose geometries mix XY with XYZ or XYM, or
 #'   carry M, is read without its Z and M.
 #' @param covariates Optional \code{sf} layer carrying the model's predictors.

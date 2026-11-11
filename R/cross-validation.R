@@ -5221,7 +5221,9 @@ print.sac_range <- function(x, ...) {
 #'   and neighbour distance.  CRS-less points are aligned to a \code{boundary}
 #'   or \code{prediction_points} that carries a CRS.  They are reprojected when
 #'   the coordinates look like lon/lat and otherwise stamped without
-#'   reprojection, with a warning either way.
+#'   reprojection, with a warning either way.  A CRS in longitude and
+#'   latitude is not stamped on coordinates outside longitude -180 to 360
+#'   and latitude -90 to 90: that is refused.
 #' @param k Integer; number of folds.  Must be a single whole number >= 1,
 #'   and is required except for the two leave-one-out methods.
 #'   A fraction, \code{NA} or a vector is an error, because a non-integer used
@@ -5241,8 +5243,8 @@ print.sac_range <- function(x, ...) {
 #'   requested value; \code{params$k_requested} keeps the value asked for.
 #'   Returning fewer folds than asked raises a warning of class
 #'   \code{"spatialkit_k_reduced"}, whose message gives both counts, the
-#'   reason and a setting that works; the condition carries them as
-#'   \code{k_requested} and \code{k}, so
+#'   reason and, where there is one, a setting that works; the condition
+#'   carries them as \code{k_requested} and \code{k}, so
 #'   \code{tryCatch(spatialkit_k_reduced = )} or
 #'   \code{withCallingHandlers()} can act on it without reading the text.
 #'   (Before this version a reduction was a log line only.)
@@ -5355,7 +5357,9 @@ print.sac_range <- function(x, ...) {
 #'   along an edge is not a block.  A point on the boundary, to the margin of
 #'   the edge rule in Details, is inside it.  A boundary without a CRS is brought into
 #'   the points' CRS: reprojected from EPSG:4326 when its coordinates look
-#'   like lon/lat, otherwise stamped, with a warning either way.  The same
+#'   like lon/lat, otherwise stamped, with a warning either way; a CRS in
+#'   longitude and latitude is not stamped on coordinates outside longitude
+#'   -180 to 360 and latitude -90 to 90, which is refused.  The same
 #'   goes for \code{prediction_points} and \code{blocks}.  A boundary that
 #'   mixes XY and XYZ (or XYM) geometries is read in x and y, since sf reads
 #'   a layer in the dimension of its first geometry, and so is one whose
@@ -5747,7 +5751,9 @@ print.sac_range <- function(x, ...) {
 #' A polygon layer passed as \code{blocks} is aligned to the points the way
 #' \code{boundary} is: CRS-less points are aligned to blocks that carry a CRS
 #' (reprojected if they look like lon/lat, otherwise stamped, warning either
-#' way), and the blocks are then brought into the CRS the folds are built in.
+#' way, and refused when the blocks are in longitude and latitude and the
+#' points lie outside longitude -180 to 360 and latitude -90 to 90), and the
+#' blocks are then brought into the CRS the folds are built in.
 #' A point inside more than one block is given the first (lowest row) that
 #' contains it, as for a point on the shared edge of two grid cells, and a
 #' point within the same margin of a block's edge (one part in 1e10 of the
@@ -6177,8 +6183,8 @@ make_folds <- function(points_sf, k,
       .warn_k_reduced(k_requested, k, paste0(
         "make_folds(random_kfold): returning %d folds, not the k = %d asked ",
         "for: the layer has %d rows with usable coordinates and every fold ",
-        "holds out at least one. This is leave-one-out; pass k <= %d for ",
-        "fewer, larger folds."), k, k_requested, n, n)
+        "holds out at least one. This is leave-one-out%s"), k, k_requested, n,
+        .k_fewer_folds_hint(n, "for fewer, larger folds"))
     row_ids <- points_sf$..row_id
     idx <- sample.int(n, n)
     sizes <- rep(floor(n / k), k)
@@ -7098,8 +7104,9 @@ make_folds <- function(points_sf, k,
       .warn_k_reduced(k_requested, k, paste0(
         "make_folds(leave_location_out): returning %d folds, not the k = %d ",
         "asked for: `%s` has %d distinct groups and a group is never split ",
-        "across folds. This is leave-one-group-out; pass k <= %d to hold out ",
-        "several groups per fold."), k, k_requested, group_var, n_g, n_g)
+        "across folds. This is leave-one-group-out%s"), k, k_requested,
+        group_var, n_g,
+        .k_fewer_folds_hint(n_g, "to hold out several groups per fold"))
 
     grp_fold <- sample(rep(seq_len(k), length.out = n_g))
     # Positional lookup via match(), never by name: name-indexing is what
@@ -7460,22 +7467,34 @@ make_folds <- function(points_sf, k,
 
     if (k < 2L) k <- 2L
     if (k > n) k <- n
-    if (!is.na(k_requested) && k < k_requested)
+    k_cut <- !is.na(k_requested) && k < k_requested
+    # k folds hold 1/k of the rows each when they are equal, so no k-fold
+    # design leaves a training set above 1 - 1/k of the data.  A min_train
+    # past that asks for something no candidate can give.  More folds help
+    # only up to one per row: where even n folds fall short, the advice
+    # names the lower min_train alone.
+    k_min <- .knndm_k_min(min_train)
+    if (!.knndm_k_meets(k, min_train))
+      stop(sprintf(paste0(
+        "make_folds(knndm): min_train = %s cannot be met with k = %d folds%s: ",
+        "equal folds hold 1/%d of the rows each, which leaves a training set ",
+        "of %s of the data at most. Use min_train <= %s%s"),
+        format(min_train), k,
+        if (k_cut) sprintf(paste0(" (the k = %d asked for, cut to the %d ",
+                                  "rows with usable coordinates)"),
+                           k_requested, n) else "",
+        k, format(signif(1 - 1 / k, 3)),
+        format(.signif_down(1 - 1 / k, 3L)),
+        if (k_min <= n) ", or more folds." else "."), call. = FALSE)
+    # Said after the refusal above, which would make "returning n folds"
+    # false.
+    if (k_cut)
       .warn_k_reduced(k_requested, k, paste0(
         "make_folds(knndm): returning %d folds, not the k = %d asked for: ",
         "the layer has %d rows with usable coordinates and every fold holds ",
-        "out at least one. This is leave-one-out; pass k <= %d for fewer, ",
-        "larger folds."), k, k_requested, n, n)
-    # k folds hold 1/k of the rows each when they are equal, so no k-fold
-    # design leaves a training set above 1 - 1/k of the data.  A min_train
-    # past that asks for something no candidate can give.
-    if ((1 - min_train) < 1 / k - 1e-9)
-      stop(sprintf(paste0(
-        "make_folds(knndm): min_train = %s cannot be met with k = %d folds: ",
-        "equal folds hold 1/%d of the rows each, which leaves a training set ",
-        "of %s of the data at most. Use min_train <= %s, or more folds."),
-        format(min_train), k, k, format(signif(1 - 1 / k, 3)),
-        format(.signif_down(1 - 1 / k, 3L))), call. = FALSE)
+        "out at least one. This is leave-one-out%s"), k, k_requested, n,
+        .k_fewer_folds_hint(n, "for fewer, larger folds", k_min = k_min,
+                            min_train = min_train))
 
     xy      <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
     row_ids <- pts$..row_id
@@ -7672,6 +7691,58 @@ make_folds <- function(points_sf, k,
   .warn_classed("spatialkit_k_reduced", fmt, ...,
                 data = list(k_requested = as.integer(k_requested),
                             k = as.integer(k)))
+}
+
+#' The advice that ends a warning that k was cut to the rows or groups
+#'
+#' \code{k = n} gives the same one-per-fold folds as the cut, so fewer,
+#' larger folds need \code{k <= n - 1}.  Under kNNDM's \code{min_train} a
+#' k below \code{k_min} is refused, so the advice starts there.  Where no
+#' k gives fewer folds (\code{n = 2}, since \code{k = 1} is raised to 2,
+#' or \code{k_min} above \code{n - 1}), the advice is left out.
+#'
+#' @param n The number of rows or groups the cut stopped at.
+#' @param what What fewer folds give, ending the sentence.
+#' @param k_min The smallest k that \code{min_train} allows (kNNDM only).
+#' @param min_train kNNDM's \code{min_train}, named where it sets
+#'   \code{k_min}.
+#' @return The end of the message, from "; pass k" or ".".
+#' @keywords internal
+#' @noRd
+.k_fewer_folds_hint <- function(n, what, k_min = 2, min_train = NULL) {
+  hi <- n - 1
+  lo <- max(2, k_min)
+  if (hi < lo) return(".")
+  if (lo == 2) return(sprintf("; pass k <= %d %s.", hi, what))
+  why <- sprintf(" (min_train = %s needs k >= %d)", format(min_train), lo)
+  if (lo == hi) sprintf("; pass k = %d %s%s.", hi, what, why)
+  else sprintf("; pass k from %d to %d %s%s.", lo, hi, what, why)
+}
+
+#' Whether k equal kNNDM folds can leave min_train of the rows to train on
+#'
+#' Equal folds hold \code{1/k} of the rows each, so the training set is at
+#' most \code{1 - 1/k} of the data.  The one test of this, read by the
+#' refusal of \code{make_folds(method = "knndm")} and by the advice of its
+#' k-reduction warning.
+#' @keywords internal
+#' @noRd
+.knndm_k_meets <- function(k, min_train) {
+  !((1 - min_train) < 1 / k - 1e-9)
+}
+
+#' The smallest k (at least 2) that meets kNNDM's min_train
+#'
+#' The fold count is monotone in the test of \code{.knndm_k_meets()}, so the
+#' closed form is checked against that test and moved by one where the
+#' last bits of the division put it on the wrong side.
+#' @keywords internal
+#' @noRd
+.knndm_k_min <- function(min_train) {
+  k <- max(2, ceiling(1 / ((1 - min_train) + 1e-9)))
+  while (k > 2 && .knndm_k_meets(k - 1, min_train)) k <- k - 1
+  while (!.knndm_k_meets(k, min_train)) k <- k + 1
+  k
 }
 
 

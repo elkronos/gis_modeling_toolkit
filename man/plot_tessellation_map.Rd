@@ -71,7 +71,9 @@ overlay.}
 \item{boundary_col, boundary_size}{Colour and line width of the boundary
 outline.}
 
-\item{labels}{Logical; draw per-cell labels. Default FALSE.}
+\item{labels}{Logical; draw per-cell labels. Default FALSE.  A cell is
+labelled when its label is not NA and it has a location; when no cell
+has both, the labels are skipped with a log line.}
 
 \item{label_col}{Name of the COLUMN holding the label text.  Default
 \code{NULL}: the first of \code{"grid_id"}, \code{"cell_id"},
@@ -98,7 +100,11 @@ CRS borrowed from the first overlay that carries one, so a CRS-less grid
 drawn with located features still lines up. Any layer that arrives without
 a CRS is brought into the plot's CRS instead of being dropped: reprojected
 when its coordinates look like longitude/latitude, otherwise stamped with a
-warning, since a stamp assumes the coordinates were already in that CRS.}
+warning, since a stamp assumes the coordinates were already in that CRS.
+A plot CRS in longitude and latitude is not stamped on coordinates that
+cannot be in it (an x outside -180 to 360, or a y beyond 90 north or
+south): the call stops and asks for the layer's CRS or a projected
+\code{target_crs}.}
 
 \item{title, subtitle, caption}{Plot annotations.}
 
@@ -120,6 +126,13 @@ Every layer is drawn in x and y: a layer whose geometries mix XY with XYZ
 or XYM (as \code{rbind()} of an XY and an XYZ layer gives) is drawn
 without its Z and M.  The labels are placed in x and y, also on cells
 whose geometries carry M (XYM or XYZM).
+
+A row of any layer with a coordinate that is not finite or lies beyond
+1e150 has no location: it is left out of the map, with one warning that
+says how many rows of which argument were not drawn.  A row the plot's
+CRS cannot place in full is drawn as the move leaves it (empty, or
+without the vertices it cannot place), with a warning of class
+\code{spatialkit_rows_unplaced} that names it.
 }
 \examples{
 if (requireNamespace("ggplot2", quietly = TRUE)) {

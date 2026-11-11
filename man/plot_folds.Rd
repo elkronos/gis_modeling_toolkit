@@ -12,7 +12,12 @@ plot_folds(folds, points_sf, boundary = NULL, blocks = TRUE)
 \item{points_sf}{The \code{sf} layer the folds were built from.  Drawn in
 x and y: a layer whose geometries mix XY with XYZ or XYM (as
 \code{rbind()} of an XY and an XYZ layer gives) is drawn without its Z
-and M, and so are \code{boundary} and the blocks.}
+and M, and so are \code{boundary} and the blocks.  A row without a
+location (a coordinate that is not finite or lies beyond 1e150, or a
+point that \code{make_folds()} left out of every fold because it is
+empty or the CRS the folds were built in cannot place it) is not
+drawn, and neither is a row of \code{boundary} with such a coordinate;
+one warning says how many.}
 
 \item{boundary}{Optional polygonal \code{sf}/\code{sfc} to draw underneath.}
 

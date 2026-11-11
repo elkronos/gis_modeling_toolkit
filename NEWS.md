@@ -2159,7 +2159,8 @@ old behaviour where there is a way.
   `predict_surface()`, `fold_separation()`, `resolution_profile()`,
   `summarize_by_cell()`, `create_grid_polygons()`, `plot_folds()`, the
   `predict()` methods of the GWR, random forest and Bayesian fits, and
-  `plot_tessellation_map()` for a layer without a CRS.  So does a row of
+  `plot_tessellation_map()` for every layer it moves into the plot's CRS,
+  with a CRS of its own or without one.  So does a row of
   a projected layer with a coordinate beyond 1e10 that a move to a CRS in
   degrees empties.  The warning names the CRS the layer was in ("a
   location in EPSG:3857"), and longitude and latitude for a lon/lat layer
@@ -2168,6 +2169,54 @@ old behaviour where there is a way.
   report the locations and seeds they place in their own words.  The rows
   come back as they did; layers the target CRS places in full raise no new
   warning and give the same results.
+
+* **`plot_tessellation_map()` and `plot_folds()` drew rows without a
+  location.**  A cell, boundary, seed or feature with a coordinate at `Inf`
+  gave the map an infinite x range in silence, and one at 1e200 (beyond
+  the package's 1e150 bound) a map 1e200 wide where every other row shrank
+  to a point, with ggplot2's bare "Position guide is perpendicular to the
+  intended axis".  `plot_folds()` drew the point `make_folds()` had just
+  dropped as without a location, at that coordinate.  Such a row is now
+  left out of its layer, read as given before any move into the plot's
+  CRS, with one warning naming the argument and the count ("not drawing 1
+  row(s) of `features_sf` without a location").  `plot_folds()` also
+  leaves out a `boundary` row with such a coordinate, and a point with no
+  fold that `make_folds()` left out as empty or because the CRS the folds
+  were built in cannot place it (a latitude beyond 90), which it drew at
+  that latitude.  A move into another CRS emptied the same rows before,
+  so the map no longer depends on whether a move happens.  Layers without
+  such rows are drawn as before.
+
+* **`plot_tessellation_map(labels = TRUE)` handed ggplot2 a label for a
+  cell with an NA ID or an empty geometry**, and ggplot2 warned at print
+  "Removed 1 row containing missing values or values outside the scale
+  range (`geom_text()`)" (12 rows when every ID was NA).  A cell is now
+  labelled when it has a label and a location; when no cell has both, the
+  labels are skipped with a log line, as they are when there is no ID
+  column.
+
+* **A layer without a CRS whose coordinates cannot be longitude and
+  latitude was stamped with a CRS in longitude and latitude.**
+  `plot_tessellation_map(target_crs = 4326)` on CRS-less cells in metres
+  found that they do not look like longitude and latitude, then stamped
+  EPSG:4326 on them all the same: the map was drawn at "latitude"
+  4,000,000, and sf added its bare "bounding box has potentially an
+  invalid value range for longlat data".  A layer without a CRS is now
+  refused a CRS in longitude and latitude when it has an x outside -180
+  to 360 or a y beyond 90 north or south.  The refusal names the
+  argument, its coordinates' box and the target CRS, and asks for the
+  layer's CRS (or, in `plot_tessellation_map()`, a projected
+  `target_crs`).  It applies where a layer without a CRS is brought into
+  the CRS of another layer or argument by the shared alignment:
+  `plot_tessellation_map()`, `plot_folds()`, `make_folds()` and the
+  `cv_*()` functions, `area_of_applicability()`, `predict_surface()`,
+  `fold_separation()`, `kriging_adequacy()`, `resolution_profile()`,
+  `summarize_by_cell()`, `cell_values_at()`,
+  `create_voronoi_polygons()`, `create_grid_polygons()` and
+  `build_tessellation()`.  In `create_grid_polygons(crs =)` and
+  `build_tessellation(crs =)` a `boundary` with a y between 90 and 180 is
+  still stamped, and refused by the row's latitude as before.  A target
+  CRS that is projected is still stamped with a warning.
 
 * **A row of a lon/lat layer with a vertex at a latitude beyond 90 shaped
   the projection `ensure_projected()` chose for the other rows.**  No CRS
@@ -2716,7 +2765,7 @@ old behaviour where there is a way.
   `"random_kfold"` with more folds than rows, `"block_kfold"` with fewer
   than `k` occupied cells and `"leave_location_out"` with more folds than
   groups now raise a warning of class `spatialkit_k_reduced`, which carries
-  `k_requested` and `k` and gives a setting that works.
+  `k_requested` and `k` and, where there is one, gives a setting that works.
   `params$k_requested` records the `k` asked for, and `params$block_width`
   and `params$block_height` the cells built.  `cv_block_size_sweep()` gathers
   the reductions of its sizes into one warning, and its table gains the
@@ -5459,6 +5508,26 @@ old behaviour where there is a way.
   it says that there the gain is that of averaging the locations a cell is
   kriged from (`kr_n_used`), its own among them, over averaging its own
   alone.
+
+* **`make_folds()` advised fold counts that give the same folds or none,
+  and kNNDM warned of folds it then refused to build.**  Where it cut `k` to
+  the number of rows (`"random_kfold"`, `"knndm"`) or of groups
+  (`"leave_location_out"`), the `spatialkit_k_reduced` warning advised `k <=`
+  that number, which gives the same one-per-fold folds: 5 rows and `k = 10`
+  said "pass k <= 5".  It now names one fewer ("pass k <= 4"), and with 2
+  rows or 2 groups, where no smaller `k` exists, it gives no advice.  Under
+  `"knndm"` it names the range from the smallest `k` that `min_train`
+  allows: 8 rows, `k = 10` and `min_train = 0.85` say "pass k = 7 for
+  fewer, larger folds (min_train = 0.85 needs k >= 7)", and where no `k`
+  below the number of rows meets `min_train` it gives no advice.
+  `make_folds(method = "knndm")` with more folds than rows and a `min_train`
+  above `1 - 1/n` warned "returning 8 folds" and then stopped with an error
+  that ended "Use min_train <= 0.875, or more folds.", though no more folds
+  were possible.  It now tests `min_train` before it warns, so such a call
+  stops with the error alone; the error names the `k` asked for and the
+  rows it was cut to, and offers more folds only where one fold per row
+  would meet `min_train` ("Use min_train <= 0.875." otherwise).  The folds
+  returned, `k` and the condition's fields are unchanged.
 
 * **Cp took a nugget at the fit's lower bound as its noise variance, and one
   that the closest pairs of points contradict.**  `resolution_profile()`
