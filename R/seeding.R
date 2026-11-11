@@ -1,8 +1,8 @@
-#' Generate seed points for Voronoi tessellation
+#' Place seeds for a Voronoi tessellation
 #'
-#' Creates an sf POINT layer of "seed" locations. Multiple strategies are
-#' supported: user-provided points, uniform random sampling within a boundary,
-#' or k-means clustering of a sampling cloud.
+#' Creates an sf POINT layer of seed locations, one per cell of the Voronoi
+#' tessellation built on them: k-means centres of a cloud of points, points
+#' drawn uniformly inside a boundary, or points you provide.
 #'
 #' Seeds lie inside the ground they stand for (k-means seeds inside the
 #' hull of the points they were fitted to, random seeds inside the
@@ -36,61 +36,57 @@
 #' study area nearer another seed has no cell, `NA` in `index`, and a
 #' warning of class `spatialkit_unassigned` gives the number.
 #'
+#' @section Sampling inside the boundary:
+#' Seeds drawn by `method = "random"`, and the cloud `method = "kmeans"`
+#' draws when no `sample_points` are given, are sampled inside `boundary`.
+#' Its rows are repaired with [sf::st_make_valid()] before they are unioned.
+#' In longitude and latitude the union runs with s2, and a row s2 still
+#' refuses (crossing edges, a vertex listed twice) is repaired again, with
+#' crossing edges split as GEOS splits them in a projected CRS; a row s2
+#' refuses even then stops the call with an error of class
+#' `"spatialkit_cells_degenerate"` that names it and says to transform
+#' `boundary` to a projected CRS.
+#'
+#' In longitude and latitude, a boundary whose bounding box is over 10,000
+#' times its area (small pieces far apart), which sf does not sample whole,
+#' is sampled piece by piece, the points shared among the pieces in
+#' proportion to their areas; a piece whose own box is over 10,000 times its
+#' area stops the call with an error that says to transform `boundary` to a
+#' projected CRS. A boundary whose bounding box has no height or no width
+#' (three vertices on one parallel) is refused. In longitude and latitude s2
+#' reads the edges as great circles, which leave the bounding box read from
+#' the coordinates, and \pkg{sf} (without \pkg{lwgeom}) draws in that box: a
+#' boundary whose box has less than half its area on the sphere (three
+#' vertices on or near one parallel) is refused too. That error, and the
+#' error for a box with no height whose vertices lie on one parallel other
+#' than the equator, say to transform `boundary` to a projected CRS in which
+#' a parallel is a curve, such as the one [ensure_projected()] picks for it
+#' (a polar one, such as EPSG:3413 or 3031, for a ring around a pole), where
+#' the region has an area and lies in its box.
+#'
+#' sf draws the points in the bounding box and keeps those inside, so it
+#' draws the number asked for times the ratio of the box to the area. In any
+#' CRS, a boundary that would take more than 10^6 points drawn in its box,
+#' or 10 times the points asked for if more (small pieces far apart, a thin
+#' strip at a slant), is sampled piece by piece in the same way (or whole,
+#' in draws of at most 10^6 points in its box, where that takes less time),
+#' and a piece that would still take more is drawn in such draws. Where the
+#' points drawn in all would exceed 2e7 (or 10 times the points asked for,
+#' if more), the call stops before any draw with an error that gives the
+#' ratio and says to pass `sample_points` (`method = "kmeans"`, whose cloud
+#' is `max(2000, 50 * n)` points) or to ask for fewer seeds.
+#'
 #' @param boundary Optional polygonal sf object defining the sampling area.
-#'   One that mixes XY and XYZ (or XYM) geometries is read without Z and M,
-#'   since sf reads a layer in the dimension of its first geometry. So is one whose
-#'   geometries carry M (XYM or XYZM), which GEOS refuses. Where seeds or
-#'   the k-means cloud are sampled inside it, its rows are repaired with
-#'   [sf::st_make_valid()] before they are unioned. In
-#'   longitude and latitude the union runs with s2, and a row s2 still
-#'   refuses (crossing edges, a vertex listed twice) is repaired again, with
-#'   crossing edges split as GEOS splits them in a projected CRS; a row s2
-#'   refuses even then stops the call with an error of class
-#'   `"spatialkit_cells_degenerate"` that names it and says to transform
-#'   `boundary` to a projected CRS.
-#'   A row that is empty, or has a coordinate that is not finite or lies
-#'   beyond 1e150 (read as given, and again after any move into another
-#'   CRS), covers no ground and is left out; a boundary with no such row
-#'   left is refused with an error that says so. A boundary in a geographic
-#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
-#'   the Earth, is refused with an error of class
-#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
-#'   its CRS.
-#'   A row the repair leaves without a polygon (a ring with no height:
-#'   every vertex on one line, or in degrees on one parallel) is left out
-#'   as well, and a boundary with no polygon left is refused. In
-#'   longitude and latitude, a boundary whose bounding box is over 10,000
-#'   times its area (small pieces far apart), which sf does not sample whole,
-#'   is sampled piece by piece, the points shared among the pieces in
-#'   proportion to their areas; a piece whose own box is over 10,000 times
-#'   its area stops the call with an error that says to transform
-#'   `boundary` to a projected CRS. A boundary whose bounding box has no
-#'   height or no width (three vertices on one parallel) is refused. In
-#'   longitude and latitude s2 reads the edges as great circles, which
-#'   leave the bounding box read from the coordinates, and sf (without the
-#'   lwgeom package) draws in that box: a boundary whose box has less than
-#'   half its area on the sphere (three vertices on or near one parallel)
-#'   is refused too. That error, and the error for a box with no height
-#'   whose vertices lie on one parallel other than the equator, say to
-#'   transform `boundary` to a projected CRS in which a parallel is a
-#'   curve, such as the one [ensure_projected()] picks for it (a polar one,
-#'   such as EPSG:3413 or 3031, for a ring around a pole), where the
-#'   region has an area and lies in its box.
-#'   sf draws the points in the bounding box and keeps those inside, so it
-#'   draws the number asked for times the ratio of the box to the area. In
-#'   any CRS, a boundary that would take more than 10^6 points drawn in its
-#'   box, or 10 times the points asked for if more (small pieces far apart,
-#'   a thin strip at a slant), is sampled piece by piece in the same way
-#'   (or whole, in draws of at most 10^6 points in its box, where that takes
-#'   less time), and a piece that would still take more is drawn in such
-#'   draws. Where the points drawn in all would exceed 2e7 (or 10 times the
-#'   points asked for, if more), the call stops before any draw with an
-#'   error that gives the ratio and says to pass `sample_points`
-#'   (`method = "kmeans"`, whose cloud is `max(2000, 50 * n)` points) or to
-#'   ask for fewer seeds.
-#' @param method One of "kmeans", "random", "provided".
+#'   Rows without a location, rows the repair leaves without a polygon,
+#'   vertices at a latitude beyond 90 and mixed dimensions are handled as
+#'   "Boundaries" in [spatialkit-geometry] says; "Sampling inside the
+#'   boundary" gives how points are drawn in it.
+#' @param method How to place the seeds: `"kmeans"` (default; cluster
+#'   centres of `sample_points`, or of points drawn in `boundary`),
+#'   `"random"` (uniform in `boundary`) or `"provided"` (the points in
+#'   `seeds`).
 #' @param n Integer; number of seeds to return. Required for
-#'   `method = "kmeans"` and `method = "random"`. **Ignored** for
+#'   `method = "kmeans"` and `method = "random"`. Ignored for
 #'   `method = "provided"`, where every row of `seeds` is returned; a mismatch
 #'   between `n` and `nrow(seeds)` is reported as a warning.
 #'
@@ -98,9 +94,9 @@
 #'   k-means cannot produce more centres than there are distinct positions in
 #'   the sampling cloud, nor as many centres as there are rows. When `n`
 #'   exceeds either ceiling it is clamped, with a warning naming the count
-#'   actually used. `n = nrow(sample_points)` is the common case, and yields
-#'   `nrow(sample_points) - 1` seeds. Check `nrow()` on the result; do not
-#'   assume `n`.
+#'   used. Asking for as many seeds as there are points
+#'   (`n = nrow(sample_points)`) gives `nrow(sample_points) - 1`. Check
+#'   `nrow()` on the result; do not assume `n`.
 #'
 #'   Besides a number, `n` accepts what the level-selection step returned:
 #'   the integer vector of ranked candidates from [determine_optimal_levels()]
@@ -143,7 +139,7 @@
 #'   same. `sample_points`, when given, is then only
 #'   assigned to them (for `attr(, "kmeans")`) and gives the cover, and
 #'   `boundary` only
-#'   sets the CRS and the cover (see "Details");
+#'   sets the CRS and the cover;
 #'   `kmeans_nstart`, `kmeans_iter` and `set_seed` are not used, and neither
 #'   are `partition`, `init` and the density settings: the centres are of
 #'   the kind the profile was built with, and naming another here is a
@@ -178,10 +174,8 @@
 #'   without Z and M before it is projected or clustered, since sf reads a
 #'   layer in the dimension of its first geometry.
 #' @param kmeans_nstart The number of starts, of which the best is kept.
-#'   `NULL` (default) is the kind's own number: 3 for `partition =
-#'   "density"` and 10 for `partition = "kmeans"`, the default of earlier
-#'   versions. `kmeans_nstart = 10` gives the density kind the starts it had
-#'   when 10 was the default. Under `partition = "kmeans"` from random starts
+#'   `NULL` (default) uses 3 starts for `partition = "density"` and 10 for
+#'   `partition = "kmeans"`. Under `partition = "kmeans"` from random starts
 #'   it is `nstart` of [stats::kmeans()]. A fresh partition is not the one
 #'   [resolution_profile()] scored a count on; pass the selection or profile
 #'   itself as `n` for that one (see `n`). Under `partition = "density"`,
@@ -189,14 +183,20 @@
 #'   number, so a number that is not whole, which `partition = "kmeans"`
 #'   takes, stops a call that names no kind. It is not read by `method =
 #'   "random"` or `"provided"`.
-#' @param kmeans_iter Integer; iter.max for kmeans(). Default 100. Under
+#' @param kmeans_iter Integer; `iter.max` for [stats::kmeans()]. Default
+#'   100 for both kinds ([voronoi_seeds_kmeans()] uses 50 for plain k-means
+#'   by default). Under
 #'   `partition = "density"` it is the most steps of Lloyd's iteration a
 #'   start takes. Under `partition = "density"`, and with `init =
 #'   "kmeans++"`, it has to be a positive whole number, and a kept start that
 #'   was cut off at it is a warning of class `"spatialkit_not_converged"`
 #'   (`partition = "kmeans"` from random starts keeps the warning
 #'   [stats::kmeans()] gives).
-#' @param set_seed Optional integer RNG seed.
+#' @param set_seed Optional integer seed for the random draws. Default
+#'   `NULL`: the draws come from the session's random-number stream, so
+#'   [set.seed()] before the call makes it reproducible. A number gives the
+#'   same seeds every time and leaves the caller's stream as it was.
+#'   ([voronoi_seeds_kmeans()] defaults to 456 instead.)
 #' @param partition For `method = "kmeans"`: what the seeds minimise.
 #'   `"density"` (default) is the sum of squared distances from the points
 #'   of the cloud to their nearest seed, each point weighted by its local
@@ -207,17 +207,15 @@
 #'   below that the counts are about as uneven as under `"kmeans"`.
 #'   `"kmeans"` is the same sum unweighted: compact cells, with several
 #'   times the points in a cell of a dense place that a cell of a sparse
-#'   place holds. It is the run of earlier versions, whose default it was:
-#'   [stats::kmeans()] from 10 random starts on the rows as they come, with
-#'   the coordinates centred, divided by the diagonal of their bounding box
-#'   and rounded to 2^-30 of it, so that the seeds do not move with the unit
-#'   or the origin; on gridded locations they can differ from those of
-#'   earlier versions, and where the locations span less than a kilometre a
-#'   change of unit or origin can still move them (see "The partition" in
-#'   [resolution_profile()]). The
+#'   place holds. It is [stats::kmeans()] from 10 random starts on the rows
+#'   as they come, with the coordinates centred, divided by the diagonal of
+#'   their bounding box and rounded to 2^-30 of it, so that the seeds do not
+#'   move with the unit or the origin; where the locations span less than a
+#'   kilometre a change of unit or origin can still move them (see "The
+#'   partition" in [resolution_profile()]). The
 #'   density kind follows the
 #'   density of `sample_points`; a cloud this function draws inside
-#'   `boundary` is uniform and has none to follow. Without the 'FNN' package
+#'   `boundary` is uniform and has none to follow. Without the \pkg{FNN} package
 #'   the density kind finds its weights by comparing every pair of distinct
 #'   locations, so its time grows with the square of their number; the seeds
 #'   are the same, and nothing stops the call. See "The partition" in
@@ -227,9 +225,8 @@
 #'   `"kmeans++"` (the seeds one at a time, each in proportion to its squared
 #'   distance from those already drawn, times its weight under `partition =
 #'   "density"`). `NULL` (default) is each kind's own rule: `"random"` for
-#'   `partition = "kmeans"`, the run this function has always made, and
-#'   `"kmeans++"` for `partition = "density"`. Under `partition = "kmeans"`
-#'   from random starts the cloud is clustered in the order its rows come
+#'   `partition = "kmeans"` and `"kmeans++"` for `partition = "density"`.
+#'   Under `partition = "kmeans"` from random starts the cloud is clustered in the order its rows come
 #'   in; with `init = "kmeans++"`, and under `partition = "density"`, the
 #'   rows are put in coordinate order first, so the seeds do not depend on
 #'   their order.
@@ -289,7 +286,7 @@
 #'   [summarize_by_cell()] checks its result against it. A count given as a
 #'   number, or read off a profile without an estimate by `cp` or `elbow`,
 #'   has no record.
-#' @family tessellation
+#' @family cell building
 #' @examples
 #' library(sf)
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
@@ -297,10 +294,9 @@
 #' ))), crs = 32632))
 #' get_voronoi_seeds(bnd, method = "random", n = 5, set_seed = 1)
 #'
-#' # Seeds from a cloud with one dense place: density-weighted k-means by
-#' # default, from 3 starts; partition = "kmeans" gives the k-means run of
-#' # earlier versions.  The points each seed's cell holds, under each kind,
-#' # with more seeds than dense places:
+#' # Seeds from a cloud with one dense place: density-weighted k-means (the
+#' # default, 3 starts) against plain k-means.  The fewest and most points a
+#' # seed's cell holds under each kind, with more seeds than dense places:
 #' set.seed(2)
 #' cloud <- st_as_sf(data.frame(x = c(rnorm(150, 30, 5), runif(50, 0, 100)),
 #'                              y = c(rnorm(150, 30, 5), runif(50, 0, 100))),
@@ -310,8 +306,9 @@
 #' km   <- get_voronoi_seeds(bnd, method = "kmeans", n = 20,
 #'                           sample_points = cloud, set_seed = 1,
 #'                           partition = "kmeans")
-#' rbind(density = sort(attr(dens, "kmeans")$size),
-#'       kmeans  = sort(attr(km, "kmeans")$size))   # points per seed
+#' sizes <- list(density = attr(dens, "kmeans")$size,
+#'               kmeans  = attr(km, "kmeans")$size)
+#' sapply(sizes, range)   # fewest and most points per seed
 #' @export
 get_voronoi_seeds <- function(boundary = NULL,
                               method = c("kmeans", "random", "provided"),
@@ -1272,7 +1269,7 @@ get_voronoi_seeds <- function(boundary = NULL,
 }
 
 
-#' K-means seed generation from point coordinates
+#' Place seeds at k-means cluster centres
 #'
 #' Places `k` seed points at k-means cluster centres of the observed
 #' coordinates, so seeds (and the Voronoi cells built from them) follow the
@@ -1312,7 +1309,7 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' `partition` says what the seeds minimise. `"kmeans"` is the sum of
 #' squared distances from the points to their nearest seed, from `nstart`
 #' random starts by [stats::kmeans()] (Hartigan-Wong) unless `init` says
-#' otherwise; it was the default of earlier versions. The seeds
+#' otherwise. The seeds
 #' follow the square root of the point density, so the cells are compact,
 #' smaller where the points are dense, and a cell in a dense place still
 #' holds several times the points of a cell in a sparse place. `"density"`
@@ -1334,8 +1331,8 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' with no point at counts from about a fifth of the points up, mostly from
 #' `init = "random"`; that is a warning of class `"spatialkit_empty_cells"`.
 #' "The partition" in
-#' [resolution_profile()] gives the details and a simulated comparison of
-#' the two kinds.
+#' [resolution_profile()] gives the details and a comparison of the two
+#' kinds.
 #'
 #' The centres lie inside the points, so their own hull is smaller than the
 #' data's. The result carries the convex hull of `points_sf` as
@@ -1371,10 +1368,9 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   stream is left as it was. Pass `NULL` to draw the k-means starts from
 #'   the session's stream instead (the default of [get_voronoi_seeds()]).
 #' @param nstart The number of starts, of which the best is kept. `NULL`
-#'   (default) is the kind's own number: 3 for `partition = "density"` and
-#'   10 for `partition = "kmeans"`, the default of earlier versions. A number
-#'   is run under either kind and either `init`: `nstart = 10` gives the
-#'   density kind the starts it had when 10 was the default.
+#'   (default) uses 3 starts for `partition = "density"` and 10 for
+#'   `partition = "kmeans"`. A number is run under either kind and either
+#'   `init`.
 #' @param partition What the seeds minimise. `"density"` (default): the sum
 #'   of squared distances from the points to their nearest seed, each point
 #'   weighted by its local density to the power `density_power`; compact
@@ -1382,14 +1378,12 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   each once `k` is above the number of dense places, and counts about as
 #'   uneven as `"kmeans"` gives below that. `"kmeans"`: the same sum
 #'   unweighted; compact cells whose counts are several times higher in
-#'   dense places than in sparse ones. It is the run of earlier versions,
-#'   whose default it was: [stats::kmeans()] from 10 random starts on the
-#'   rows as they come, with the coordinates centred, divided by the
-#'   diagonal of their bounding box and rounded to 2^-30 of it, so that the
-#'   seeds do not move with the unit or the origin; on gridded locations
-#'   they can differ from those of earlier versions, and where the locations
-#'   span less than a kilometre a change of unit or origin can still move
-#'   them (see "The partition" in [resolution_profile()]). Without the 'FNN' package the density kind
+#'   dense places than in sparse ones. It is [stats::kmeans()] from 10
+#'   random starts on the rows as they come, with the coordinates centred,
+#'   divided by the diagonal of their bounding box and rounded to 2^-30 of
+#'   it, so that the seeds do not move with the unit or the origin; where
+#'   the locations span less than a kilometre a change of unit or origin can
+#'   still move them (see "The partition" in [resolution_profile()]). Without the \pkg{FNN} package the density kind
 #'   finds its weights by comparing every pair of distinct locations, so its
 #'   time grows with the square of their number; the seeds are the same, and
 #'   nothing stops the call. See "Details".
@@ -1398,8 +1392,7 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   one at a time, each in proportion to its squared distance from those
 #'   already drawn, times its weight under `partition = "density"`). `NULL`
 #'   (default) is each kind's own rule: `"random"` for `partition =
-#'   "kmeans"`, the run this function has always made, and `"kmeans++"` for
-#'   `partition = "density"`. Under `partition = "kmeans"` from random
+#'   "kmeans"` and `"kmeans++"` for `partition = "density"`. Under `partition = "kmeans"` from random
 #'   starts the points are clustered in the order their rows come in; with
 #'   `init = "kmeans++"`, and under `partition = "density"`, the rows are put
 #'   in coordinate order first, so the seeds do not depend on their order.
@@ -1418,7 +1411,7 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   "kmeans++"`, a kept start that was cut off at the limit is a warning of
 #'   class `"spatialkit_not_converged"`; `partition = "kmeans"` from random
 #'   starts keeps the warning [stats::kmeans()] gives.
-#' @return An sf object of **at most** `k` cluster-centre POINTs (fewer when
+#' @return An sf object of at most `k` cluster-centre POINTs (fewer when
 #'   `k` is clamped, see `k`), with `seed_id` and
 #'   `method = "kmeans"` columns matching [get_voronoi_seeds()], and
 #'   `attr(, "cover")`, the convex hull of the coordinates of `points_sf`
@@ -1440,7 +1433,7 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   `attr(, "count_rule")`, with `scored_cells` `TRUE` for the scored
 #'   centres and `FALSE` for refitted centres and for centres this call fits
 #'   itself at that count (see [get_voronoi_seeds()]).
-#' @family tessellation
+#' @family cell building
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -1451,7 +1444,7 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' seeds <- voronoi_seeds_kmeans(pts, k = 8)   # density-weighted, 3 starts
 #' nrow(seeds)   # at most 8: one seed per non-empty cluster
 #' seeds         # the cluster centres, as an sf POINT layer in the points' CRS
-#' # The k-means seeds of earlier versions: 10 random starts.
+#' # Plain k-means from 10 random starts.
 #' voronoi_seeds_kmeans(pts, k = 8, partition = "kmeans")
 #' @export
 voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
@@ -1636,82 +1629,42 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
 }
 
 
-#' Random seed generation within a polygonal boundary
+#' Place seeds at random inside a boundary
 #'
 #' Draws `k` seed points uniformly at random inside `boundary`, ignoring where
 #' the observations are. Reach for this when the cells should cover the study
 #' area evenly (so that sparsely sampled ground still gets its own cells and
 #' is visibly under-sampled in the results) instead of concentrating
 #' resolution where the data already are, which is what
-#' [voronoi_seeds_kmeans()] does. It is also the honest choice for a null or
-#' sensitivity comparison: re-running an analysis over several random seedings
-#' shows how much of a result depends on one particular tessellation.
+#' [voronoi_seeds_kmeans()] does. It also suits a null or sensitivity
+#' comparison: rerunning an analysis over several random seedings shows how
+#' much of a result depends on one tessellation.
 #'
 #' Seeds are drawn uniformly inside the polygon. When a draw falls short of `k`
 #' it is topped up with further uniform draws from the same polygon, so the
 #' result has exactly `k` seeds; only a geometry that still yields too few
 #' after ten top-ups returns fewer, and that shortfall is logged.
 #'
-#' @param boundary An sf or sfc polygonal object. One that mixes XY and XYZ
-#'   (or XYM) geometries is read without Z and M, since sf reads a layer in
-#'   the dimension of its first geometry. So is one whose
-#'   geometries carry M (XYM or XYZM), which GEOS refuses. Rows that GEOS
-#'   (in a projected CRS) or s2 (in longitude and latitude) refuses are
-#'   repaired before the rows are unioned, as in [get_voronoi_seeds()];
-#'   valid rows are used as they are.
-#'   A row that is empty, or has a coordinate that is not finite or lies
-#'   beyond 1e150 (read as given, and again after any move into another
-#'   CRS), covers no ground and is left out; a boundary with no such row
-#'   left is refused with an error that says so. A boundary in a geographic
-#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
-#'   the Earth, is refused with an error of class
-#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
-#'   its CRS.
-#'   A row the repair leaves without a polygon (a ring with no height:
-#'   every vertex on one line, or in degrees on one parallel) is left out
-#'   as well, and a boundary with no polygon left is refused. In
-#'   longitude and latitude, a boundary whose bounding box is over 10,000
-#'   times its area (small pieces far apart), which sf does not sample whole,
-#'   is sampled piece by piece, the points shared among the pieces in
-#'   proportion to their areas; a piece whose own box is over 10,000 times
-#'   its area stops the call with an error that says to transform
-#'   `boundary` to a projected CRS. A boundary whose bounding box has no
-#'   height or no width (three vertices on one parallel) is refused. In
-#'   longitude and latitude s2 reads the edges as great circles, which
-#'   leave the bounding box read from the coordinates, and sf (without the
-#'   lwgeom package) draws in that box: a boundary whose box has less than
-#'   half its area on the sphere (three vertices on or near one parallel)
-#'   is refused too. That error, and the error for a box with no height
-#'   whose vertices lie on one parallel other than the equator, say to
-#'   transform `boundary` to a projected CRS in which a parallel is a
-#'   curve, such as the one [ensure_projected()] picks for it (a polar one,
-#'   such as EPSG:3413 or 3031, for a ring around a pole), where the
-#'   region has an area and lies in its box.
-#'   sf draws the points in the bounding box and keeps those inside, so it
-#'   draws `k` times the ratio of the box to the area. In any CRS, a
-#'   boundary that would take more than 10^6 points drawn in its box, or
-#'   10 `k` if more (small pieces far apart, a thin strip at a slant), is
-#'   sampled piece by piece in the same way (or whole, in draws of at most
-#'   10^6 points in its box, where that takes less time), and a piece that
-#'   would still take more is drawn in such draws. Where the points drawn
-#'   in all would exceed 2e7 (or 10 `k`, if more), the call stops before
-#'   any draw with an error that gives the ratio and says to ask for fewer
-#'   seeds.
+#' @param boundary An sf or sfc polygonal object, the area the seeds are
+#'   drawn in. Rows without a location, rows the repair leaves without a
+#'   polygon, vertices at a latitude beyond 90 and mixed dimensions are
+#'   handled as "Boundaries" in [spatialkit-geometry] says. The seeds are
+#'   drawn as "Sampling inside the boundary" in [get_voronoi_seeds()]
+#'   describes, with `k` as the number of points asked for; the error for a
+#'   boundary that would take too many draws says to ask for fewer seeds.
 #' @param k Integer; number of random seeds.
 #' @param set_seed Optional integer RNG seed. Default `NULL`: the seeds are
 #'   drawn from the session's random-number stream, so consecutive calls give
 #'   different seedings and [set.seed()] before a call makes it reproducible.
 #'   Pass a number to get the same seeds whatever that stream holds; the
-#'   caller's stream is then left as it was. The default used to be 456,
-#'   which made every call return the same "random" seeding, even inside a
-#'   loop over [set.seed()].
+#'   caller's stream is then left as it was.
 #' @return An sf object of `k` random POINTs (fewer only in the degenerate
 #'   case above), with `seed_id` and `method = "random"` columns matching
 #'   [get_voronoi_seeds()], and `attr(, "cover")`, the polygons of `boundary`:
 #'   [build_tessellation()] clips the cells to it (grown by 2 percent of its
 #'   diagonal) when no `boundary` is passed there, so the cells fill the area
 #'   the seeds were drawn in and not only the seeds' own hull.
-#' @family tessellation
+#' @family cell building
 #' @examples
 #' library(sf)
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(

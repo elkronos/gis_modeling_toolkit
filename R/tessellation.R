@@ -12,7 +12,7 @@
 #' TRUE": UTM points read from a CSV with a UTM boundary, or projected points
 #' with a boundary read from a file that lost its .prj.  A CRS-less points
 #' layer that does not look like lon/lat cannot be put in a GEOGRAPHIC
-#' boundary's CRS -- stamping degrees onto UTM numbers is wrong -- so that is
+#' boundary's CRS (stamping degrees onto UTM numbers is wrong), so that is
 #' refused with a message that says what to do.  The mirror case, a CRS-less
 #' boundary given with points in a GEOGRAPHIC CRS, is read in that CRS when
 #' its coordinates fit the lon/lat envelope and refused otherwise (see
@@ -562,9 +562,8 @@
 #' The cover's convex hull (points) or its polygons, grown by 2 percent of
 #' its diagonal, the margin a hull of the generators themselves gets.  The
 #' margin is what keeps every observation inside after the cover has been
-#' through a CRS change: an unbuffered hull of 2,628 North Carolina tracts,
-#' built in their CRS and used in the seeds', left 5 of them outside at 10
-#' seeds.  Generators the cover does not hold keep their ground: their hull
+#' through a CRS change; an unbuffered hull built in the cover's CRS and
+#' used in the seeds' can leave observations outside.  Generators the cover does not hold keep their ground: their hull
 #' is added, so the cells are never smaller than the ones the generators'
 #' own hull gave.
 #'
@@ -791,33 +790,32 @@
 # Clip Target
 # -----------------------------------------------------------------------------
 
-#' Build a polygonal clip target from points and/or a boundary
+#' Build the area to tessellate within, from points or a boundary
 #'
-#' Resolves a single polygon to tessellate within. With a `boundary` it is
-#' that boundary (optionally buffered by `expand`); without one it is the
-#' axis-aligned bounding box of `points_sf` (the rectangle in the working
-#' CRS), again optionally buffered, or a small buffer around the points when
-#' they all share one x or one y, or nearly so (the short side of their
-#' bounding box below a millionth of the long side, or below about 1.5e-154,
-#' a length whose square doubles cannot hold). When every point sits at one
-#' location, or the share of their spread the buffer would take (5 percent,
-#' or a fractional `expand`) is below that length, the box has no extent to
-#' take a share of, and the target is a disk of radius 1 unit of the CRS
-#' around it (1 m in a metre CRS, 1 km in a
-#' kilometre CRS), unless `expand` is 1 or more, which is then the radius;
-#' the message says so. Pass `boundary` for a target of real size.
-#' Reach for this function to build the `boundary` that
-#' `method = "hex"` and `"square"` require, to check that a study-area
-#' polygon actually contains the observations before tessellating, or to
-#' pass the same envelope to [create_voronoi_polygons()] and
-#' [create_grid_polygons()] so that two tessellations of one dataset cover
-#' identical ground.
+#' Builds the polygon layer to tessellate within. With a `boundary` it is
+#' that boundary, row for row (optionally buffered by `expand`). Without one
+#' it is the axis-aligned bounding box of `points_sf` in the working CRS,
+#' again optionally buffered. Points that all share one x or one y, or
+#' nearly so (the short side of their bounding box below a millionth of the
+#' long side, or below about 1.5e-154, a length whose square doubles cannot
+#' hold), get a small buffer around them instead. When every point sits at
+#' one location, or the share of their spread the buffer would take (5
+#' percent, or a fractional `expand`) is below that length, the box has no
+#' extent to take a share of, and the target is a disk of radius 1 unit of
+#' the CRS around it (1 m in a metre CRS, 1 km in a kilometre CRS), unless
+#' `expand` is 1 or more, which is then the radius; the message says so.
+#' Pass `boundary` for a target of real size.
+#'
+#' Use it to build the `boundary` that `method = "hex"` and `"square"`
+#' require, to check that a study-area polygon contains the observations
+#' before tessellating, or to pass the same envelope to
+#' [create_voronoi_polygons()] and [create_grid_polygons()] so that two
+#' tessellations of one dataset cover the same ground.
 #'
 #' It is not the target [build_tessellation()] derives on its own:
 #' `method = "voronoi"` without a boundary clips to the convex hull of the
 #' points (or of their `cover`, for seeds) buffered by 2 percent of its
-#' diagonal, and there `expand` is always
-#' a distance. A bounding box over a non-rectangular point cloud includes
+#' diagonal, and there `expand` is always a distance. A bounding box over a non-rectangular point cloud includes
 #' corners with no data, so a hex or square grid laid over it has cells that
 #' hold no points; pass the study-area polygon when there is one.
 #'
@@ -843,34 +841,23 @@
 #'   does: coordinates that look like lon/lat are taken as EPSG:4326 and
 #'   reprojected, anything else is stamped with the points' CRS. With lon/lat
 #'   points it is read as lon/lat when its coordinates fit the lon/lat
-#'   envelope, and refused with an error otherwise. A boundary that mixes XY
-#'   and XYZ (or XYM) geometries is read without Z and M, since sf reads a
-#'   layer in the dimension of its first geometry. So is one whose
-#'   geometries carry M (XYM or XYZM), which GEOS refuses.
-#'   A row that is empty, or has a coordinate that is not finite or lies
-#'   beyond 1e150 (read as given, and again after any move into another
-#'   CRS), covers no ground and is left out; a boundary with no such row
-#'   left is refused with an error that says so. A boundary in a geographic
-#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
-#'   the Earth, is refused with an error of class
-#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
-#'   its CRS.
-#'   A row the repair of `boundary` leaves without a polygon (a ring with no
-#'   height: every vertex on one line, or in degrees on one parallel) is
-#'   left out as well, and a boundary with no polygon left is refused.
-#' @param expand Numeric expansion distance or fraction (0–1 = fraction of
-#'   extent). Absolute values are expressed in the units of the CRS the clip
-#'   target is built in. Because [sf::st_buffer()] interprets `dist` as
-#'   **metres** for lon/lat data while the fraction-of-extent form is derived
-#'   from a bounding box measured in **degrees**, lon/lat input is projected to
-#'   a local projected CRS first (see `@return`), so both forms agree.
+#'   envelope, and refused with an error otherwise.
+#'   Rows without a location, rows the repair leaves without a polygon,
+#'   vertices at a latitude beyond 90 and mixed dimensions are handled as
+#'   "Boundaries" in [spatialkit-geometry] says.
+#' @param expand A single non-negative number. Below 1 it is a fraction of
+#'   the longer side of the bounding box (of `boundary` when one is given,
+#'   otherwise of `points_sf`); 1 or more is a distance in the units of the
+#'   CRS the target is built in. Default 0 (no buffer). Lon/lat input is
+#'   first projected to a local projected CRS (see Value), so both forms are
+#'   in that CRS's units.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
 #' @return An sf polygon layer representing the clip target. For lon/lat input
 #'   the layer is returned in the automatically selected local projected CRS,
 #'   not the input CRS; a message reports this unless `quiet = TRUE`.
-#' @family spatial data preparation
+#' @family cell building
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -1323,22 +1310,20 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 # Voronoi Tessellation
 # -----------------------------------------------------------------------------
 
-#' Create Voronoi polygons from points with CRS handling and optional clipping
+#' Build Voronoi cells around points
 #'
-#' Assigns every location in the study area to its nearest input point, giving
-#' one cell per point. This is the tessellation to reach for when the
-#' observations themselves define the regions of interest (sampling sites,
-#' monitoring stations, service points), because cell size then adapts to
-#' sampling density instead of being imposed by a fixed grid: dense areas get
-#' small cells and sparse areas large ones. Prefer [create_grid_polygons()]
-#' instead when you need equal-area cells or a resolution independent of where
-#' the data happen to be.
+#' Gives every location in the study area to its nearest input point, so
+#' each point gets one cell. Use it when the observations themselves define
+#' the cells (sampling sites, monitoring stations, service points): cell size
+#' then follows sampling density, with small cells where the points are dense
+#' and large ones where they are sparse. Use [create_grid_polygons()] instead
+#' for equal-area cells, or for a resolution that does not depend on where
+#' the data are.
 #'
-#' The heavy lifting is [sf::st_voronoi()].  What this adds is the surrounding
-#' bookkeeping: projecting lon/lat input, building and buffering an envelope
-#' so edge cells are bounded, clipping to `boundary`, restoring the
-#' point-to-cell correspondence that `st_voronoi()` scrambles, and stamping
-#' stable `cell_id` values.
+#' [sf::st_voronoi()] builds the diagram. This function projects lon/lat
+#' input, builds and buffers an envelope so edge cells are bounded, clips to
+#' `boundary`, restores the point-to-cell correspondence that `st_voronoi()`
+#' scrambles, and numbers the cells with stable `cell_id` values.
 #'
 #' The generators are the points' vertices, not the features. A MULTIPOINT
 #' feature with several vertices therefore gets one cell per vertex, and its
@@ -1353,9 +1338,8 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' its diagonal, so every observation has a cell. Seeds are different: k-means
 #' centres, random points in a study area and the centres a resolution
 #' profile scored all lie inside the ground they stand for, and cells clipped
-#' to the hull of the seeds leave the edge of that ground uncovered (on 3,000
-#' uniform points, 72 percent of them at 4 seeds, 25 percent at 25 and 4
-#' percent at 100). The boundary is therefore derived from the `cover` when
+#' to the hull of the seeds leave the edge of that ground uncovered. The
+#' boundary is therefore derived from the `cover` when
 #' there is one: the argument, or the cover the seeding functions attach to
 #' their result. A layer that looks like seeds and has neither a boundary nor
 #' a cover (seeds bound with `rbind()`, which drops the attribute, or built
@@ -1401,21 +1385,10 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   refused with an error. A CRS-less boundary given with lon/lat points (or
 #'   with CRS-less points taken as lon/lat) is read as lon/lat when its
 #'   coordinates fit the lon/lat envelope, and refused with an error
-#'   otherwise. A boundary that mixes XY and XYZ (or XYM) geometries is read
-#'   without Z and M, since sf reads a layer in the dimension of its first
-#'   geometry. So is one whose
-#'   geometries carry M (XYM or XYZM), which GEOS refuses.
-#'   A row that is empty, or has a coordinate that is not finite or lies
-#'   beyond 1e150 (read as given, and again after any move into another
-#'   CRS), covers no ground and is left out; a boundary with no such row
-#'   left is refused with an error that says so. A boundary in a geographic
-#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
-#'   the Earth, is refused with an error of class
-#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
-#'   its CRS.
-#'   A row the repair of `boundary` leaves without a polygon (a ring with no
-#'   height: every vertex on one line, or in degrees on one parallel) is
-#'   left out as well, and a boundary with no polygon left is refused.
+#'   otherwise.
+#'   Rows without a location, rows the repair leaves without a polygon,
+#'   vertices at a latitude beyond 90 and mixed dimensions are handled as
+#'   "Boundaries" in [spatialkit-geometry] says.
 #' @param cover Optional sf or sfc layer the cells have to hold, read when
 #'   there is no `boundary`: the observations (points), or a polygon. The
 #'   boundary is then derived from it instead of from `points_sf`: the convex
@@ -1442,7 +1415,7 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   grown boundary, so they reach `expand` beyond the study area, and a point
 #'   up to `expand` outside it gets a cell and an `index` value. The grown
 #'   boundary is the one returned as `boundary`.
-#' @param clip Logical; intersect cells with boundary.
+#' @param clip Logical; clip the cells to the boundary. Default `TRUE`.
 #' @param keep_duplicates Logical. With \code{FALSE} (the default), points
 #'   are merged before the diagram is built when they round to one point in
 #'   coordinates centred on the middle of their bounding box, divided by its
@@ -1463,18 +1436,12 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   to degrees can put at one point, and sf's spherical engine (s2) refuses
 #'   such a cell. [assign_features_to_polygons()] joins the cells of the
 #'   centres a profile scored in the CRS they were built in, while they
-#'   carry the record that says so (`scored_cells = TRUE`). `sf::st_area()`,
-#'   `sf::st_union()`, and a join of rows in degrees to other cells (cells
-#'   without the record, such as those of a count given as a number or those
-#'   a verb that drops attributes has stripped of it, and cells whose record
-#'   says `scored_cells = FALSE`, such as those of centres refitted to every
-#'   point) go to s2 and stop on such a cell: transform the cells to a
-#'   projected CRS first. [assign_features_to_polygons()] then stops with an
-#'   error of class `"spatialkit_cells_degenerate"` that names the cells s2
-#'   refuses, the cause and that transform; its largest-overlap join of
-#'   polygon features repairs such cells instead, with a warning.
-#'   [summarize_by_cell()] with `area = TRUE`, which takes the areas of such
-#'   cells, stops with the same error before any summary.
+#'   carry the record that says so (`scored_cells = TRUE`).
+#'   `sf::st_area()` and `sf::st_union()` stop on such a cell in degrees
+#'   with s2's error. The package's other joins and measures of it stop with
+#'   an error of class `"spatialkit_cells_degenerate"` ("Polygons in
+#'   degrees" in [spatialkit-geometry] gives the exceptions). Transform the
+#'   cells to a projected CRS first.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
@@ -1546,7 +1513,7 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   \code{\link{assign_features_to_polygons}()} copies it to the rows it
 #'   assigns, and \code{\link{summarize_by_cell}()} checks its result
 #'   against it.
-#' @family tessellation
+#' @family cell building
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -2074,37 +2041,31 @@ create_voronoi_polygons <- function(
 #' Create square or hexagonal grid polygons over a boundary
 #'
 #' Lays a regular grid of equal-area cells over `boundary` and clips it to that
-#' boundary. Reach for this rather than [create_voronoi_polygons()] when cell
-#' size should be a decision you make, instead of one dictated by where the
-#' observations happen to be. That is the case when you need per-cell rates
-#' comparable across the map, or a resolution that stays fixed as the sample
-#' grows. Hexagons (`type = "hex"`) avoid the axis-aligned artefacts of squares
-#' and give every cell the same distance to all six neighbours, which matters
-#' for anything that reads neighbourhoods.
+#' boundary. Use it rather than [create_voronoi_polygons()] when you set the
+#' cell size yourself instead of letting the observations set it: per-cell
+#' rates comparable across the map, or a resolution that stays fixed as the
+#' sample grows. Hexagons (`type = "hex"`) avoid the axis-aligned artefacts of
+#' squares and put all six neighbours of a cell at the same distance.
 #'
-#' Size the grid with exactly one of `target_cells` (roughly how many cells you
-#' want, the package derives the rest), `cellsize` (a fixed edge length in CRS
-#' units) or `n` (a fixed number of columns and rows). See `@param cellsize`
-#' for what happens when more than one is given.
+#' Size the grid with exactly one of `target_cells` (roughly how many cells
+#' you want; the package derives the rest), `cellsize` (a fixed edge length
+#' in CRS units) or `n` (a fixed number of columns and rows). When more than
+#' one is given, `cellsize` wins over the other two and `n` wins over
+#' `target_cells`; each argument ignored is named in a logged warning.
 #'
-#' @param boundary Polygonal sf or sfc object. One that mixes XY and XYZ (or
-#'   XYM) geometries is read without Z and M, since sf reads a layer in the
-#'   dimension of its first geometry. So is one whose
-#'   geometries carry M (XYM or XYZM), which GEOS refuses.
-#'   A row that is empty, or has a coordinate that is not finite or lies
-#'   beyond 1e150 (read as given, and again after any move into another
-#'   CRS), covers no ground and is left out; a boundary with no such row
-#'   left is refused with an error that says so. A boundary in a geographic
-#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
-#'   the Earth, is refused with an error of class
-#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
-#'   its CRS.
-#'   A row the repair of `boundary` leaves without a polygon (a ring with no
-#'   height: every vertex on one line, or in degrees on one parallel) is
-#'   left out as well, and a boundary with no polygon left is refused.
+#' @param boundary Polygonal sf or sfc object, the study area the grid is
+#'   laid over and clipped to.
+#'   Rows without a location, rows the repair leaves without a polygon,
+#'   vertices at a latitude beyond 90 and mixed dimensions are handled as
+#'   "Boundaries" in [spatialkit-geometry] says.
 #'   A boundary without a CRS that `crs` stamps with a geographic CRS is
 #'   tested for its latitude in the same way.
-#' @param target_cells Optional approximate desired number of cells.  The cell
+#' @param target_cells Optional approximate desired number of cells. Besides
+#'   a number it accepts what `approx_n_cells` of [build_tessellation()]
+#'   accepts and reads it the same way: the ranked levels of
+#'   [determine_optimal_levels()] (the first is used), a
+#'   [select_resolution()] result (its `$best`) or a [resolution_profile()],
+#'   with the warnings and errors described there. The cell
 #'   \emph{size} is derived from it as \code{sqrt(area / target_cells)}, where
 #'   \code{area} is that of the boundary's bounding box, so square grids get
 #'   square cells; for hex grids the count is adjusted for hexagonal packing
@@ -2113,16 +2074,17 @@ create_voronoi_polygons <- function(
 #'   the boundary lies; the count can, because hexagon rows are 0.87
 #'   \code{cellsize} apart while columns are \code{cellsize} apart (about 10
 #'   percent on a moderately elongated box, up to 1.7 times on a strip
-#'   narrower than one hexagon).  The word "approximate" is load bearing: a
-#'   grid of square cells over an elongated bounding box needs more of them
-#'   than a grid of rectangles would (a 1000 x 1 strip at
-#'   \code{target_cells = 9} yields cells of side 10.5 and about 95 of them),
-#'   and clipping to an irregular boundary moves the count again.  Pass
-#'   \code{cellsize} when the count matters more than the shape.
+#'   narrower than one hexagon).  The count is approximate: square cells
+#'   over an elongated bounding box need more cells than rectangles would (a
+#'   1000 x 1 strip at \code{target_cells = 9} gives cells of side 10.5 and
+#'   about 95 of them), and clipping to an irregular boundary moves the
+#'   count again.  Pass \code{cellsize} when the count matters more than the
+#'   shape.
 #' @param type Grid type: `"square"` (the default) or `"hex"`.
 #' @param cellsize Optional numeric cell size (length 1 or 2), in the units of
-#'   the working CRS. Takes precedence over `n`: if both are supplied,
-#'   `cellsize` is used, `n` is ignored and a warning is logged. Supply exactly
+#'   the working CRS. Takes precedence over `n` and `target_cells`: if
+#'   either is also supplied, `cellsize` is used, the other is ignored and a
+#'   warning is logged. Supply exactly
 #'   one of `target_cells`, `cellsize` and `n`.  For `type = "hex"` a hexagon
 #'   is defined by a single edge-to-edge distance, so only `cellsize[1]` is
 #'   used and a differing `cellsize[2]` is ignored with a logged warning.
@@ -2146,12 +2108,14 @@ create_voronoi_polygons <- function(
 #'   from it is what the hexagons are built with. Ignored (with a logged
 #'   warning) when `cellsize` is also supplied. Passing both would otherwise
 #'   truncate the grid to `n[1]` x `n[2]` cells anchored at the bounding-box
-#'   corner, covering only part of the boundary.
-#' @param clip Logical; clip grid to boundary. In a projected or CRS-less
+#'   corner, covering only part of the boundary. Wins over `target_cells`,
+#'   which is then ignored with a logged warning.
+#' @param clip Logical; clip the grid to the boundary. Default `TRUE`. In a
+#'   projected or CRS-less
 #'   grid, a cell that meets the boundary only within a margin of the cell's
 #'   edge (the margin `cellsize` gives: one part in 1e10 of the largest
 #'   coordinate of the boundary, within its bounds; a
-#'   cell whose edge lies on the boundary's edge but for rounding) is
+#'   cell whose edge lies on the boundary's edge up to rounding) is
 #'   dropped, rather than kept as a sliver. The call stops when the clip
 #'   leaves no cell, as it does when the lattice has none: in degrees with
 #'   s2 on, a boundary edge that spans more than 180 degrees of longitude is
@@ -2192,8 +2156,15 @@ create_voronoi_polygons <- function(
 #'   boundary in kilometres, say) asks for a grid that cannot be built, and
 #'   this refuses it with a message before memory is exhausted. Set to
 #'   \code{Inf} to disable.
-#' @return An sf polygon layer with poly_id column.
-#' @family tessellation
+#' @return An sf polygon layer with one column, `poly_id`, numbering the
+#'   cells in the order [sf::st_make_grid()] lays them (row by row from the
+#'   bottom left). The numbering differs from that of
+#'   [create_grid_polygons_cached()] and [ensure_stable_poly_id()], which
+#'   sort cells by position; pass the result to [ensure_stable_poly_id()] for
+#'   IDs that do not depend on how the grid was built. Use one builder
+#'   throughout an analysis, since a summary keyed on the IDs of one drawn on
+#'   the cells of the other puts the values on the wrong cells.
+#' @family cell building
 #' @examples
 #' library(sf)
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
@@ -2202,9 +2173,9 @@ create_voronoi_polygons <- function(
 #' grid_sq  <- create_grid_polygons(bnd, target_cells = 100, type = "square")
 #' grid_hex <- create_grid_polygons(bnd, target_cells = 100, type = "hex")
 #' nrow(grid_sq)
-#' # Hex counts run above target because clipping keeps every hexagon that
-#' # merely overhangs the boundary; the inflation is proportionally larger
-#' # at small target_cells.
+#' # The hex count runs above the target: clipping keeps every hexagon that
+#' # overhangs the boundary, and that adds more, in proportion, at a small
+#' # target_cells.
 #' nrow(grid_hex)
 #' @export
 create_grid_polygons <- function(
@@ -2311,6 +2282,18 @@ create_grid_polygons <- function(
       stop("create_grid_polygons(): 'n' must be integer >= 1.", call. = FALSE)
   }
 
+  # `target_cells` takes what `approx_n_cells` of build_tessellation() takes:
+  # a number, the ranked levels of determine_optimal_levels() (the first is
+  # used), a select_resolution() result or a resolution_profile().  A plain
+  # number is checked below as before; anything else is read here as a
+  # count, by the rule build_tessellation() applies, and only the count is
+  # kept (.without_refit(): the seeds of a selection are not needed).
+  if (!is.null(target_cells) &&
+      !(is.numeric(target_cells) && length(target_cells) == 1L &&
+        is.null(attributes(target_cells))))
+    target_cells <- .without_refit(
+      .resolve_cell_count(target_cells, "target_cells", "create_grid_polygons"))$n
+
   # Derive n and/or cellsize
   #
   # `cellsize_supplied` records whether the CALLER fixed the cell size, as
@@ -2342,6 +2325,15 @@ create_grid_polygons <- function(
       target_cells <- NULL
     }
   } else if (!is.null(n)) {
+    # `n` sizes the grid and `target_cells` is dropped, so say so, as the
+    # `cellsize` branch above does for both.
+    if (!is.null(target_cells)) {
+      .log_warn(paste0("create_grid_polygons(): both `n` and `target_cells` ",
+                       "were supplied; `n` wins and `target_cells` (%s) is ",
+                       "ignored. Pass one or the other."),
+                format(target_cells))
+      target_cells <- NULL
+    }
     cellsize <- c(w / n[1], h / n[2])
   } else {
     if (is.null(target_cells) || !is.finite(target_cells) || target_cells < 1)
@@ -2595,7 +2587,7 @@ create_grid_polygons <- function(
 #' The number of square cells along each side of a grid
 #'
 #' \code{sf::st_make_grid()} counts \code{ceiling(span / cellsize)} cells on
-#' a side, so a side that is a whole number of cells but for rounding gains a
+#' a side, so a side that is a whole number of cells up to rounding gains a
 #' row or column.  A side that exceeds a whole number of cells by no more
 #' than the margin of an edge (\code{.edge_tol(bb)}) is that number here,
 #' the rule \code{.block_occupied_fast()} applies to a quotient.  The margin
@@ -2619,7 +2611,7 @@ create_grid_polygons <- function(
 #' Drop the parts of grid cells that lie within the margin of the cell's edge
 #'
 #' After the clip of a lattice to a boundary, a cell whose edge lies on the
-#' boundary's edge but for rounding meets the boundary in a strip no wider
+#' boundary's edge up to rounding meets the boundary in a strip no wider
 #' than that rounding.  Such a part lies wholly within \code{tol} of the
 #' cell's edge, so it does not meet the cell shrunk by \code{tol}.  Only
 #' parts whose area is at most the cell's bounding-box perimeter times
@@ -2658,133 +2650,186 @@ create_grid_polygons <- function(
 # Unified Tessellation Builder
 # -----------------------------------------------------------------------------
 
-#' Build a tessellation (Voronoi, Delaunay triangles, hex grid, or square grid)
+#' Build Voronoi, triangle, hex or square cells from points
 #'
-#' The single entry point for turning a point pattern into analysis regions, and
-#' the first step of the package's pipeline.  It wraps the four tessellation
-#' methods behind one interface that handles CRS projection, clipping and stable
-#' cell identifiers consistently, and returns the cell layer together with the
-#' point-to-cell index that \code{\link{assign_features_to_polygons}()} and
-#' \code{\link{summarize_by_cell}()} consume.  Prefer it to the individual
-#' constructors whenever you might want to compare methods: the return shape
-#' does not change with \code{method}, so swapping \code{"voronoi"} for
-#' \code{"hex"} costs one argument.
+#' Builds the cells the rest of the pipeline works on. It wraps the four tessellation methods behind one interface that handles
+#' CRS projection, clipping and stable cell IDs the same way, and returns the
+#' cells together with the point-to-cell index. The return shape does not
+#' change with `method`, so comparing `"voronoi"` with `"hex"` takes one
+#' argument. [create_voronoi_polygons()] and [create_grid_polygons()] are its
+#' parts; [assign_features_to_polygons()] and [summarize_by_cell()] take its
+#' cells next.
 #'
-#' Which method to reach for.  \code{"voronoi"} gives one cell per point, so
-#' resolution follows sampling density.  That is the choice when the
-#' observations themselves define the regions.  \code{"hex"} and
-#' \code{"square"} give equal-area cells on a fixed grid, so cell size is a
-#' decision you make, and the data does not make it for you; hexagons avoid the
-#' axis-aligned artefacts of squares and have uniform neighbour distances.
-#' \code{"triangles"} returns the Delaunay triangulation, useful for
-#' interpolation and adjacency work; it is not meant as an aggregation unit.
-#' Points on one circle, such as the four corners of each square of a
-#' lattice, have more than one Delaunay triangulation; they are triangulated
-#' in coordinates centred on the middle of their bounding box, divided by its
-#' diagonal and rounded to 2^-30 of it, so they are split the same way in any
-#' unit or origin, but for a point that lies within its own rounding noise of
-#' the middle of such a step.
-#' \code{\link{determine_optimal_levels}()} suggests a cell count from the
-#' elbow of the WSS curve of the points' k-means clustering, and returns
-#' \code{NA}, which \code{approx_n_cells} refuses, when the curve has none.
+#' @section Choosing a method:
+#' `"voronoi"` gives one cell per point, so the resolution follows sampling
+#' density. Use it when the observations themselves define the cells, or on
+#' seeds placed with [get_voronoi_seeds()] to set the count. `"hex"` and
+#' `"square"` give equal-area cells on a fixed grid, so you set the cell size
+#' and the data do not; hexagons avoid the axis-aligned artefacts of squares
+#' and put all six neighbours of a cell at the same distance. `"triangles"`
+#' returns the Delaunay triangulation, for interpolation and adjacency work;
+#' it is not meant as an aggregation unit.
 #'
-#' \code{"voronoi"} and \code{"triangles"} are built on the points' vertices:
-#' a MULTIPOINT feature with several vertices gets one cell (or triangle
-#' corner) per vertex, and its \code{index} entry is the smallest
-#' \code{cell_id} among the cells it touches.  See
-#' \code{\link{create_voronoi_polygons}()}.
+#' `"voronoi"` and `"triangles"` are built on the points' vertices: a
+#' MULTIPOINT feature with several vertices gets one cell (or triangle
+#' corner) per vertex, and its `index` entry is the smallest `cell_id` among
+#' the cells it touches (see [create_voronoi_polygons()]). Points on one
+#' circle, such as the four corners of each square of a lattice, have more
+#' than one Delaunay triangulation. They are triangulated in coordinates
+#' centred on the middle of their bounding box, divided by its diagonal and
+#' rounded to multiples of 2^-30 of it, so they are split the same way in
+#' any unit or origin, except for a point with a coordinate within rounding
+#' error of the midpoint between two such multiples.
+#'
+#' @section Setting the cell count from a profile or selection:
+#' `approx_n_cells` accepts, besides a number, what the level-selection step
+#' returned: the integer vector of ranked candidates from
+#' [determine_optimal_levels()] (its first element is used; its `NA` is
+#' refused with a note on where it came from), a [select_resolution()] result
+#' (its `$best`), or a [resolution_profile()]. A profile built without an
+#' `estimate` is read with `select_resolution()` by `cp`; one built with
+#' `estimate` is read by `criterion = "auto"`, the rule that goes with its
+#' estimate: a size for pooled values, the lowest leave-one-out error for
+#' plain means. The count used is returned as `params$approx_n_cells` and
+#' where it came from as `params$approx_n_cells_from` (`NULL` for a plain
+#' number).
+#'
+#' A count read off a selection or a profile raises a warning of class
+#' `"spatialkit_bound_chosen"` when its optimum sits on a bound of the ladder
+#' and one of class `"spatialkit_no_structure"` when one cell for the whole
+#' layer scores as well (for a count set by a size: when cells of that size
+#' predict no better than one mean; the count stands). A profile without an
+#' estimate and with no `cp` to read is an error (class
+#' `"spatialkit_no_default_criterion"` when another criterion is finite). See
+#' [resolution_profile()].
+#'
+#' A count read off a profile or selection is a number of k-means cells:
+#' every one occupied, and small where the points are dense. A lattice lays
+#' that many equal cells over the whole boundary, so on clustered points many
+#' of them hold no point; on evenly spread points it matches.
+#' `params$cells_occupied` and `params$cells_empty` report how the points
+#' filled the grid, and a count that came from a profile or selection warns
+#' when fewer than three quarters of it are occupied. For cells that follow
+#' the points, seed a Voronoi tessellation with
+#' `get_voronoi_seeds(method = "kmeans", n = <the selection>, sample_points = <the points>)`:
+#' given the `select_resolution()` result or the profile itself, it returns
+#' the centres of the partition the profile scored, whose Voronoi cells are
+#' the cells the criteria judged (refitted to every point when the profile,
+#' without an estimate, was fitted to a subsample). Seeds made that way carry
+#' the hull of `sample_points` as their cover, so the cells built on them hold
+#' every point; made with neither `sample_points` nor a boundary, they carry
+#' the hull of the points the profile was computed on.
+#'
+#' @section Coordinate reference systems:
+#' When exactly one of `points_sf` and `boundary` has a CRS, the other is
+#' interpreted in it, with a warning. CRS-less points, and a CRS-less boundary
+#' given with projected points, are read as [harmonize_crs()] does; CRS-less
+#' points that do not look like lon/lat cannot take a geographic boundary's
+#' CRS and are refused with an error. A CRS-less boundary given with lon/lat
+#' points is read as lon/lat when its coordinates fit the lon/lat envelope,
+#' and refused with an error otherwise. When neither has one, both are read
+#' by the lon/lat test of [ensure_projected()]: taken as EPSG:4326 and
+#' projected when the points look like degrees (a boundary whose coordinates
+#' do not fit the lon/lat envelope is then refused with an error), otherwise
+#' left in the same unnamed planar space. A boundary without a CRS that `crs`
+#' stamps with a geographic CRS is tested for a latitude beyond 90 as well.
+#'
+#' Whenever the local projected CRS of [ensure_projected()] is picked for
+#' lon/lat points, or CRS-less ones taken as lon/lat (no `crs`, or a
+#' geographic one), a hex or square grid with a boundary is laid in it unless
+#' it distorts areas across the boundary by more than 1 percent (Web Mercator
+#' over a near-global extent, say). The grid is then laid, and the points
+#' indexed, in the equal-area CRS `ensure_projected(purpose = "area")` picks
+#' for the boundary, with a logged warning, as [create_grid_polygons()] does,
+#' so the cells stay equal-area.
+#'
+#' Seeds that carry the record of how their count was set
+#' (`attr(, "count_rule")`) were scored in the CRS the profile worked in, each
+#' row in the cell of its nearest centre. When the record says they are the
+#' centres it scored and holds them (the seeds of a [select_resolution()]
+#' result, or those a seeding function returns for one), `method = "voronoi"`
+#' builds their cells in that CRS, with no `crs` or a geographic one, whatever
+#' CRS the seeds arrive in, and returns them there or in the geographic `crs`;
+#' see "Seeds a profile scored" in [create_voronoi_polygons()]. Voronoi cells
+#' built in another projected CRS, named in `crs`, are the nearest-seed cells
+#' of that CRS, so a row near a boundary can fall in the neighbouring cell,
+#' and [summarize_by_cell()] then reports that the cells are not the ones
+#' scored. Voronoi cells returned in a geographic `crs` can hold two corners
+#' at one point where four seeds stand the same distance from a corner
+#' (gridded locations), which sf's spherical engine (s2) refuses; "Polygons
+#' in degrees" in [spatialkit-geometry] says what still stops on them.
+#'
+#' @section Points on edges and outside every cell:
+#' The edge of a cell has a margin of one part in 1e10 of the largest
+#' coordinate of the cells, at most a millionth of the diagonal of their
+#' bounding box and at least four times the spacing of doubles at that
+#' coordinate. A point within that margin of a cell's edge is in that cell,
+#' and a point in two or more cells (on a shared edge, or within that margin
+#' of it) takes the smallest `cell_id` among them, so a lattice point on a
+#' cell edge takes the same cell in any unit or origin.
+#'
+#' A point outside every cell is snapped to the nearest cell only when it is
+#' within a thousandth of the median cell width of it, and a point the same
+#' distance from two cells, to one part in ten million, takes the smaller
+#' `cell_id`. For cells in degrees the distances of the snap are taken on the
+#' sphere, in metres, whatever [sf::sf_use_s2()] says, and the width is taken
+#' as an arc of the sphere, as the margin is. Points outside the study area
+#' are left as `NA`, so a summary built from `index` counts only the points
+#' the tessellation covers. When any point is `NA`, a warning of class
+#' `"spatialkit_unassigned"` gives the number
+#' (`tryCatch(spatialkit_unassigned = )` catches it; the condition carries
+#' `n` and `total`).
+#'
+#' For `"voronoi"` and seeds (a layer a seeding function returned, the seeds
+#' of a [select_resolution()] result, or points given with a `cover`),
+#' `index` holds the cell each seed generates, whether the seed lies inside
+#' the boundary or not: a k-means seed outside a boundary that is not convex
+#' has its cell, the part of the study area nearer it than any other seed.
+#' Only a seed whose cell the clip removed whole, or one without a location
+#' (an empty geometry, or a coordinate that is not finite or lies beyond
+#' 1e150), is `NA`, and the warning then names seeds. See
+#' [create_voronoi_polygons()].
+#'
+#' For `"voronoi"` and `"triangles"`, points so far from the origin of their
+#' CRS that doubles there are spaced more than a millionth of their extent
+#' apart (0.125 at 1e15, beside a layer a few kilometres across) have the
+#' cells' edges and their own cells read at that rounding; the cells are
+#' built, and a warning of class `"spatialkit_xy_imprecise"` gives the
+#' spacing and the extent. For `"hex"` and `"square"` the grid's warning says
+#' the same of the boundary (see [create_grid_polygons()]).
 #'
 #' @param points_sf An sf object with POINT/MULTIPOINT geometry. Points that
 #'   mix XY and XYZ (or XYM), or that carry M, are read in x and y, since sf
 #'   reads a layer in the dimension of its first geometry and GEOS refuses M.
-#' @param boundary Polygonal sf/sfc study area. **Required** for
+#' @param boundary Polygonal sf/sfc study area. Required for
 #'   `method = "hex"` and `method = "square"`, which have no extent of their
-#'   own to lay a grid over and error without it; supply the study-area polygon,
-#'   or build one from the points with [clip_target_for()]. **Optional** for
+#'   own to lay a grid over and stop without it; pass the study-area polygon,
+#'   or build one from the points with [clip_target_for()]. Optional for
 #'   `method = "voronoi"` and `method = "triangles"`, which derive their extent
 #'   from the points themselves (for `"voronoi"`, from `cover` when there is
-#'   one) and use `boundary` only to clip the result when
-#'   `clip = TRUE`. When `points_sf` holds seeds and not the observations,
-#'   pass the study area here or the observations as `cover`: seeds lie
-#'   inside the data, and cells clipped to the seeds' own hull leave its edge
-#'   uncovered. When exactly one of `points_sf` and `boundary` has a CRS,
-#'   the other is interpreted in it, with a warning. CRS-less points, and a
-#'   CRS-less boundary given with projected points, are read as
-#'   [harmonize_crs()] does; CRS-less points that do not look like lon/lat
-#'   cannot take a geographic boundary's CRS and are refused with an error. A
-#'   CRS-less boundary given with lon/lat points is read as lon/lat when its
-#'   coordinates fit the lon/lat envelope, and refused with an error
-#'   otherwise. When neither has one, both are read by the lon/lat heuristic
-#'   of [ensure_projected()]: taken as EPSG:4326 and projected when the points
-#'   look like degrees (a boundary whose coordinates do not fit the lon/lat
-#'   envelope is then refused with an error), otherwise left in the same
-#'   unnamed planar space. A boundary that mixes XY and XYZ (or XYM)
-#'   geometries is read without Z and M, since sf reads a layer in the
-#'   dimension of its first geometry. So is one whose
-#'   geometries carry M (XYM or XYZM), which GEOS refuses.
-#'   A row that is empty, or has a coordinate that is not finite or lies
-#'   beyond 1e150 (read as given, and again after any move into another
-#'   CRS), covers no ground and is left out; a boundary with no such row
-#'   left is refused with an error that says so. A boundary in a geographic
-#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
-#'   the Earth, is refused with an error of class
-#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
-#'   its CRS.
-#'   A row the repair of `boundary` leaves without a polygon (a ring with no
-#'   height: every vertex on one line, or in degrees on one parallel) is
-#'   left out as well, and a boundary with no polygon left is refused.
-#'   A boundary without a CRS that `crs` stamps with a geographic CRS is
-#'   tested for its latitude in the same way.
-#' @param method One of "voronoi", "triangles", "hex", "square".
-#' @param approx_n_cells Approximate number of cells.  Read by
-#'   \code{method = "hex"} and \code{"square"} only: \code{"voronoi"} grows
-#'   one cell per input point and \code{"triangles"} one triangle per
-#'   neighbouring triple, so neither has a count to set, and both warn that the
-#'   argument was ignored.  For a Voronoi cell count, place the seeds with
-#'   \code{\link{get_voronoi_seeds}()} and tessellate those, passing the
-#'   study area as \code{boundary} or the observations as \code{cover}
-#'   (seeds made from a boundary or from \code{sample_points} carry their
-#'   cover with them).  For hex
-#'   grids the target is adjusted for packing density; the actual count after
-#'   clipping to an irregular boundary may differ noticeably.  Besides a
-#'   number, this accepts what the level-selection step returned: the integer
-#'   vector of ranked candidates from \code{\link{determine_optimal_levels}()}
-#'   (its first element is used; its \code{NA} is refused with a note on
-#'   where it came from), a \code{\link{select_resolution}()} result
-#'   (its \code{$best}), or a \code{\link{resolution_profile}()}.  A profile
-#'   built without an \code{estimate} is read with
-#'   \code{select_resolution()} by \code{cp}; one built with
-#'   \code{estimate} is read by \code{criterion = "auto"}, the rule that
-#'   goes with its estimate: a size for pooled values, the lowest
-#'   leave-one-out error for plain means.  The count used
-#'   is returned as \code{params$approx_n_cells} and where it came from as
-#'   \code{params$approx_n_cells_from} (\code{NULL} for a plain number).
-#'   A count read off a selection or a profile raises a warning of class
-#'   \code{"spatialkit_bound_chosen"} when its optimum sits on a bound of the
-#'   ladder and one of class \code{"spatialkit_no_structure"} when one cell
-#'   for the whole layer scores as well (for a count set by a size: when
-#'   cells of that size predict no better than one mean; the count stands);
-#'   a profile without an estimate and with no \code{cp} to read
-#'   is an error (class \code{"spatialkit_no_default_criterion"} when another
-#'   criterion is finite).  See \code{\link{resolution_profile}()}.
-#'   A count read off a profile or selection is a number of k-means cells:
-#'   every one occupied, and small where the points are dense.  A lattice
-#'   lays that many equal cells over the whole boundary, so on clustered
-#'   points many of them hold no point (about half, on six clusters in a
-#'   square); on evenly spread points it matches.  \code{params$cells_occupied}
-#'   and \code{params$cells_empty} report how the points filled the grid, and
-#'   a count that came from a profile or selection warns when fewer than
-#'   three quarters of it are occupied.  For cells that follow the points,
-#'   seed a Voronoi tessellation with
-#'   \code{get_voronoi_seeds(method = "kmeans", n = <the selection>, sample_points = <the points>)}:
-#'   given the \code{select_resolution()} result or the profile itself, it
-#'   returns the centres of the partition the profile scored, whose Voronoi
-#'   cells are the cells the criteria judged (refitted to every point when
-#'   the profile, without an estimate, was fitted to a subsample).  Seeds
-#'   made that way carry the
-#'   hull of \code{sample_points} as their cover, so the cells built on them
-#'   hold every point; made with neither \code{sample_points} nor a boundary,
-#'   they carry the hull of the points the profile was computed on.
+#'   one) and use `boundary` only to clip the result when `clip = TRUE`. When
+#'   `points_sf` holds seeds and not the observations, pass the study area
+#'   here or the observations as `cover`: seeds lie inside the data, and cells
+#'   clipped to the seeds' own hull leave its edge uncovered. "Coordinate
+#'   reference systems" says how a boundary in another CRS, or with none, is
+#'   read. Rows without a location, rows the repair leaves without a polygon,
+#'   vertices at a latitude beyond 90 and mixed dimensions are handled as
+#'   "Boundaries" in [spatialkit-geometry] says.
+#' @param method One of `"voronoi"` (default), `"triangles"`, `"hex"` or
+#'   `"square"`; see "Choosing a method".
+#' @param approx_n_cells Approximate number of cells. Read by `method = "hex"`
+#'   and `"square"` only: `"voronoi"` grows one cell per input point and
+#'   `"triangles"` one triangle per neighbouring triple, so neither has a
+#'   count to set, and both warn that the argument was ignored. For a Voronoi
+#'   cell count, place the seeds with [get_voronoi_seeds()] and tessellate
+#'   those, passing the study area as `boundary` or the observations as
+#'   `cover` (seeds made from a boundary or from `sample_points` carry their
+#'   cover with them). For hex grids the target is adjusted for packing
+#'   density; the count after clipping to an irregular boundary can differ
+#'   from it. A selection, a profile or the ranked levels of
+#'   [determine_optimal_levels()] are read as "Setting the cell count from a
+#'   profile or selection" says. [determine_optimal_levels()] returns `NA`,
+#'   which this argument refuses, when its WSS curve has no elbow.
 #' @param cellsize Numeric cell size, in the units of the working CRS.  Read by
 #'   \code{method = "hex"} and \code{"square"} only; the other two methods warn
 #'   that it was ignored.  When both \code{cellsize} and \code{approx_n_cells}
@@ -2828,7 +2873,7 @@ create_grid_polygons <- function(
 #'   `params$expand`). With `clip = TRUE` the cells are clipped to the grown
 #'   boundary, which is the one returned as `boundary`: cells reach `expand`
 #'   beyond the study area, and a point up to `expand` outside it is indexed.
-#' @param clip Logical; clip to boundary.
+#' @param clip Logical; clip the cells to the boundary. Default `TRUE`.
 #' @param keep_duplicates Logical. With \code{FALSE} (the default), points
 #'   are merged before a Voronoi diagram or a Delaunay triangulation is built
 #'   when they round to one point in coordinates centred on the middle of
@@ -2845,74 +2890,29 @@ create_grid_polygons <- function(
 #'   densified, so Voronoi cells are nearest-point cells on the ground and
 #'   grid cells are laid in metres rather than degrees. The exception is a hex
 #'   or square grid sized by `cellsize`, which is in degrees and so is laid in
-#'   degrees. Whenever that local CRS is picked for lon/lat points, or
-#'   CRS-less ones taken as lon/lat (no `crs`, or a geographic one), a hex or
-#'   square grid with a boundary is laid in it unless it
-#'   distorts areas across the boundary by more than 1 percent (Web Mercator
-#'   over a near-global extent, say); the grid is then laid, and the points
-#'   indexed, in the equal-area CRS `ensure_projected(purpose = "area")` picks
-#'   for the boundary, with a logged warning, as [create_grid_polygons()]
-#'   does, so the cells stay equal-area. Seeds that carry the record of how
-#'   their count was set (`attr(, "count_rule")`) were scored in the CRS the
-#'   profile worked in, each row in the cell of its nearest centre. When the
-#'   record says they are the centres it scored and holds them (the seeds of
-#'   a [select_resolution()] result, or those a seeding function returns for
-#'   one), `method = "voronoi"` builds their cells in that CRS, with no
-#'   `crs` or a geographic one, whatever CRS the seeds arrive in, and
-#'   returns them there or in the geographic `crs`; see
-#'   [create_voronoi_polygons()], section "Seeds a profile scored". Voronoi
-#'   cells built in another projected CRS, named here, are the nearest-seed
-#'   cells of that CRS, so a row near a boundary can fall in the
-#'   neighbouring cell, and [summarize_by_cell()] then reports that the
-#'   cells are not the ones scored. Voronoi cells returned in a geographic
-#'   `crs` can hold two corners at one point where four seeds stand the same
-#'   distance from a corner (gridded locations), which sf's spherical engine
-#'   (s2) refuses; [create_voronoi_polygons()] says what still stops on them.
+#'   degrees. "Coordinate reference systems" gives the equal-area grid, the
+#'   CRS of seeds a profile scored, and what s2 refuses in degrees.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
 #' @return A list with components:
 #'   \describe{
 #'     \item{`cells`}{An sf polygon layer, one row per cell. It always carries
-#'       a `cell_id` column; the `"hex"` and `"square"` methods additionally
-#'       carry `poly_id`, which holds the same values.}
+#'       a `cell_id` column; the `"hex"` and `"square"` methods also carry
+#'       `poly_id`, which holds the same values and follows the numbering of
+#'       [create_grid_polygons()], not that of
+#'       [create_grid_polygons_cached()]. Pass `polygon_id_col = "cell_id"`
+#'       to [assign_features_to_polygons()] and `id_col = "cell_id"` to
+#'       [summarize_by_cell()] and [cell_values_at()] to keep that name
+#'       through the pipeline. With the defaults, Voronoi and triangle cells,
+#'       which carry only `cell_id`, have their IDs read from `cell_id` and
+#'       returned as `poly_id`.}
 #'     \item{`index`}{Integer vector of `cell_id` values, one per row of
 #'       `points_sf`, and `NA` for a point that falls inside no cell, that is,
-#'       one outside the study area. A point within a margin of one part in
-#'       1e10 of the largest coordinate of the cells from a cell's edge, at
-#'       most a millionth of the diagonal of their bounding box and at
-#'       least four times the spacing of doubles at that coordinate, is in
-#'       that cell, and a point in two or more cells (on a shared edge, or
-#'       within that margin of it) takes the smallest `cell_id` among them, so
-#'       a lattice point on a cell edge takes the same cell in any unit or
-#'       origin. A point outside every cell is snapped to the nearest cell
-#'       only when it is within a thousandth of the median cell width of it,
-#'       and a point the same distance from two cells, to one part in ten
-#'       million, takes the smaller `cell_id`. For cells in degrees the
-#'       distances of the snap are taken on the sphere, in metres, whatever
-#'       [sf::sf_use_s2()] says, and the width is taken as an arc of the
-#'       sphere, as the margin is. That leaves points outside the
-#'       study area as `NA`. A summary built from `index` therefore counts only the
-#'       points the tessellation actually covers. When any point is `NA`, a
-#'       warning of class `"spatialkit_unassigned"` gives the number
-#'       (`tryCatch(spatialkit_unassigned = )` catches it; the condition
-#'       carries `n` and `total`). For `"voronoi"` and seeds (a layer a
-#'       seeding function returned, the seeds of a [select_resolution()]
-#'       result, or points given with a `cover`), `index` holds the cell each
-#'       seed generates, whether the seed lies inside the boundary or not: a
-#'       k-means seed outside a boundary that is not convex has its cell,
-#'       the part of the study area nearer it than any other seed. Only a
-#'       seed whose cell the clip removed whole, or without a location (an
-#'       empty geometry, or a coordinate that is not finite or lies beyond
-#'       1e150), is `NA`, and the warning then names seeds. See
-#'       [create_voronoi_polygons()]. For `"voronoi"` and `"triangles"`,
-#'       points so far from the origin of their CRS that doubles there are
-#'       spaced more than a millionth of their extent apart (0.125 at 1e15,
-#'       beside a layer a few kilometres across) have the cells' edges and
-#'       their own cells read at that rounding; the cells are built, and a
-#'       warning of class `"spatialkit_xy_imprecise"` gives the spacing and
-#'       the extent. For `"hex"` and `"square"` the grid's warning says the
-#'       same of the boundary (see [create_grid_polygons()]).}
+#'       one outside the study area. For seeds it holds the cell each seed
+#'       generates. "Points on edges and outside every cell" gives the rules
+#'       for points on an edge, points snapped to a cell, seeds and the
+#'       warnings.}
 #'     \item{`boundary`}{The boundary used (possibly derived and/or
 #'       reprojected, and for `"voronoi"` grown by `expand`).}
 #'     \item{`method`}{The method actually used.}
@@ -2954,7 +2954,7 @@ create_grid_polygons <- function(
 #'       copies the record to the rows it assigns, and [summarize_by_cell()]
 #'       checks its result against it.}
 #'   }
-#' @family tessellation
+#' @family cell building
 #' @examples
 #' library(sf)
 #' set.seed(1)

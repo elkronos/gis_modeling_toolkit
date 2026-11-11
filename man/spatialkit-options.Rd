@@ -79,6 +79,7 @@ options(old)
 \code{\link[=resolution_profile]{resolution_profile()}} for the work its fits do.
 
 Other options and caches:
+\code{\link[=clear_grid_cache]{clear_grid_cache()}},
 \code{\link{spatialkit-conditions}}
 }
 \concept{options and caches}

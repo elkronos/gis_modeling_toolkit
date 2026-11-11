@@ -431,6 +431,7 @@ for the work limits, \link{spatialkit-geometry} for the rules behind the
 geometry classes, and \code{vignette("troubleshooting", package = "spatialkit")} for the messages met most often.
 
 Other options and caches:
+\code{\link[=clear_grid_cache]{clear_grid_cache()}},
 \code{\link{spatialkit-options}}
 }
 \concept{options and caches}

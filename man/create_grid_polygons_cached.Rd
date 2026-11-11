@@ -24,16 +24,21 @@ geographic CRS with a latitude beyond 90 degrees, is refused, as in
 \code{\link[=create_grid_polygons]{create_grid_polygons()}}; a boundary shares its cache entry with its
 rows that have a location.}
 
-\item{target_cells}{Approximate desired number of cells. Default \code{NULL},
-as in \code{\link[=create_grid_polygons]{create_grid_polygons()}}, so the grid can be sized by \code{cellsize}
-or \code{n} passed through \code{...} instead.}
+\item{target_cells}{Approximate desired number of cells, or what
+\code{target_cells} of \code{\link[=create_grid_polygons]{create_grid_polygons()}} accepts besides a number (a
+selection, a profile or ranked levels, read as a count first). Default
+\code{NULL}, as in \code{\link[=create_grid_polygons]{create_grid_polygons()}}, so the grid can be sized by
+\code{cellsize} or \code{n} passed through \code{...} instead.}
 
 \item{type}{Grid type: \code{"square"} (the default) or \code{"hex"}, matching
 \code{\link[=create_grid_polygons]{create_grid_polygons()}}.}
 
-\item{...}{Additional arguments forwarded to create_grid_polygons().}
+\item{...}{Further arguments to \code{\link[=create_grid_polygons]{create_grid_polygons()}}, such as
+\code{cellsize}, \code{n} or \code{crs}.}
 
-\item{cache_env}{Environment for memoized grids. Default .gmt_cache.}
+\item{cache_env}{Environment the grids are kept in. The default is the
+package's own cache, which \code{\link[=clear_grid_cache]{clear_grid_cache()}} empties; pass a new
+environment to keep a separate cache.}
 
 \item{max_entries}{Maximum number of grids the cache holds.  Default 50.
 Once full, adding a grid evicts the one added earliest, so a loop over
@@ -42,17 +47,18 @@ grid) rather than every grid it ever built for the life of the session.
 \code{\link{clear_grid_cache}} empties it outright.}
 }
 \value{
-An sf data frame with a stable poly_id column.  The rows are
-re-ordered and re-numbered by \code{\link{ensure_stable_poly_id}},
-which \code{\link{create_grid_polygons}} does not do: the same cell
-therefore carries a different \code{poly_id} depending on which of the two
-builders produced it.  Use one builder throughout an analysis; joining a
+An sf data frame with a stable \code{poly_id} column. The rows are
+re-ordered and re-numbered by \code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}}, which
+\code{\link[=create_grid_polygons]{create_grid_polygons()}} does not do: the same cell therefore carries a
+different \code{poly_id} depending on which of the two builders produced
+it.  Use one builder throughout an analysis; joining a
 summary keyed on IDs from one onto geometries from the other draws the
 values on the wrong polygons.
 }
 \description{
-Builds a grid via \code{create_grid_polygons()} and memoizes the result
-so repeated calls with the same inputs return instantly.
+Builds a grid with \code{\link[=create_grid_polygons]{create_grid_polygons()}}, gives it stable IDs with
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}}, and keeps it, so a repeat call with the same
+arguments returns the kept grid.
 }
 \details{
 A grid returned in degrees (a geographic \code{crs} passed through \code{...}) is
@@ -83,8 +89,11 @@ same_cell <- match(st_as_text(st_geometry(g2)), st_as_text(st_geometry(g)))
 all(g2$poly_id == g$poly_id[same_cell])
 }
 \seealso{
-Other tessellation:
+\code{\link[=clear_grid_cache]{clear_grid_cache()}} to empty the cache.
+
+Other cell building:
 \code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=clip_target_for]{clip_target_for()}},
 \code{\link[=create_grid_polygons]{create_grid_polygons()}},
 \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
 \code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}},
@@ -92,11 +101,5 @@ Other tessellation:
 \code{\link[=plot_tessellation_map]{plot_tessellation_map()}},
 \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}},
 \code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
-
-Other package options and caches:
-\code{\link[=clear_fitted_cache]{clear_fitted_cache()}},
-\code{\link[=clear_grid_cache]{clear_grid_cache()}},
-\code{\link[=spatialkit_quiet]{spatialkit_quiet()}}
 }
-\concept{package options and caches}
-\concept{tessellation}
+\concept{cell building}

@@ -1,21 +1,134 @@
-#' Assign features to polygons and attach a polygon ID
+#' Assign features to cells and attach a cell ID
 #'
-#' Joins an sf layer of input features to a polygon layer via spatial join.
+#' Gives every feature the ID of the polygon it falls in and returns the
+#' features, one row each, with that ID column added. Features in several
+#' polygons are settled by `tie_break`, and features in none are dropped or
+#' kept by `keep_unassigned`.
 #'
-#' This is the second step of the package's pipeline: it labels every
-#' observation with the cell it falls in, which is what
-#' [summarize_by_cell()] then aggregates over. Prefer it to [sf::st_join()]
-#' when the join has to be *unambiguous*. It resolves features matching
-#' several polygons by an explicit `tie_break` rule instead of silently
-#' duplicating rows, so the assigned layer keeps one row per input feature
-#' and cell-level counts mean what they say.
+#' This is the step before [summarize_by_cell()], which aggregates over the
+#' IDs. Unlike [sf::st_join()], it settles a feature that matches several
+#' polygons by an explicit `tie_break` rule instead of duplicating the row,
+#' so the assigned layer keeps one row per input feature and each feature is
+#' counted in one cell. How the input layers are read in general (CRS,
+#' dimensions, rows without a location) is in [spatialkit-geometry].
 #'
+#' @section Ties and unassigned features:
+#' Features that fall inside no polygon are counted on the attribute
+#' `"unassigned"`: a list with `n`, `which` (their row positions in
+#' `features_sf`) and `n_rows`. With `keep_unassigned = FALSE` they are not
+#' in the result, and a warning of class `"spatialkit_unassigned"` gives
+#' their number (`tryCatch(spatialkit_unassigned = )` catches it without
+#' matching the message; the condition carries `n` and `total`). The usual
+#' causes are a polygon layer that stops short of the data (a coastline
+#' drawn at another scale, a tessellation of seeds built without a
+#' `boundary` or `cover`; see [build_tessellation()]) and points outside
+#' the study area. A feature with empty geometry, or with a coordinate
+#' that is not finite or lies beyond 1e150, or in a geographic CRS a
+#' vertex at a latitude beyond 90 degrees (read as given, before any
+#' move into the polygons' CRS), has no location to assign: it matches no
+#' polygon, and the warning says how many of them there are. With
+#' `keep_unassigned = TRUE` they are kept with an
+#' `NA` ID and no warning is raised, unless every feature is unassigned.
+#' A polygon of `polygons_sf` with a coordinate that is not finite or lies
+#' beyond 1e150 (read as given) has no location either: it takes no
+#' feature, and the features inside the rest of its ring are unassigned.
+#'
+#' The attribute `"ties"` records how many features matched more than one
+#' polygon (with `largest`, overlapped several by exactly the same area)
+#' and had the `tie_break` rule decide for them: a list with `n`,
+#' `which` (their row positions in `features_sf`), `rule`, `n_rows`
+#' (the number of rows returned, which the record was made for) and, when
+#' the rule gave some of them no polygon (see `tie_break`), `unresolved`,
+#' the row positions of those among `which`. A large
+#' `n` means the polygon layer overlaps, and per-cell counts built from the
+#' result depend on the rule. The record describes the rows this call
+#' returned and does not survive subsetting: `joined[i, ]`, like
+#' `dplyr::filter()`, `slice()` or `arrange()` of it, is a plain layer
+#' with no `"ties"` attribute, so nothing reports the parent's count
+#' for a different set of rows. `sf::st_drop_geometry()` keeps the record,
+#' since the rows are the same; see \code{\link{[.spatialkit_rows}} for
+#' what binding such data frames does. The `"unassigned"` record is
+#' stamped and removed the same way.
+#'
+#' @section Cells from a resolution profile:
+#' When `polygons_sf` carries `attr(, "count_rule")`, the record of how
+#' its cell count was set (cells from [build_tessellation()] on seeds
+#' placed from a [select_resolution()] result or from a profile built with
+#' an `estimate`), the result carries the same record.
+#' [summarize_by_cell()] reads it and checks that the rows and cells it is
+#' given are the ones the count was scored on. It is a plain attribute: a
+#' row subset keeps it and `dplyr::mutate()`, `dplyr::select()` and
+#' `dplyr::arrange()` drop it, which is why the summary also looks for it
+#' on its `cells_sf`. The profile scores a feature that is not a point at
+#' one point of it (`coerce_to_points(, "auto")`), in the cell of the
+#' nearest centre; this function gives a polygon feature to the cell it
+#' overlaps most. A feature that straddles a cell boundary can therefore
+#' be assigned to another cell than the one it was scored in, and the
+#' summary does not compare the two for such a layer. To assign the
+#' features as they were scored, assign their points:
+#' `assign_features_to_polygons(coerce_to_points(features_sf, "auto"), polygons_sf)`.
+#'
+#' When that record says the cells are the ones the profile scored
+#' (`scored_cells` is `TRUE`: the cells [build_tessellation()] builds on a
+#' selection's seeds, or on the seeds a seeding function returns for one)
+#' and holds the centres it scored (`count_rule$scored$centres`), a point
+#' on the edge between two or more of those cells is given the cell
+#' [resolution_profile()] scored it in: that of its nearest centre,
+#' measured in the CRS the record names, and of centres the same distance
+#' away the lower-numbered one (a distance counts as the same as the least
+#' when its square is no more than the square of the least distance
+#' lengthened by a margin, plus one part in ten million of the least
+#' squared distance; the margin is one part in 1e10 of the largest
+#' coordinate of the centres, at most a millionth of the diagonal of their
+#' bounding box and at least four times the spacing of doubles at that
+#' coordinate). Such points occur on
+#' gridded locations (raster cell centres, a regular sampling grid), where
+#' a row can lie the same distance from two centres and the polygons hold
+#' it in either cell or in both. The rows each cell holds are then the rows
+#' its count was scored on, and [summarize_by_cell()]'s check of them reads
+#' `"match"`. A point counts as on the edge when it lies within a margin of
+#' both cells: one part in 1e10 of the largest coordinate of the cells,
+#' 0.44 mm at a UTM northing of 4,400 km, at most a millionth of the
+#' diagonal of their bounding box and at least four times the spacing of
+#' doubles at that coordinate. For a point that two centres tie
+#' for while the cell holding it is that of the strictly nearer one, the
+#' margin also takes in the point's distance from the boundary between the
+#' two, measured in the CRS the record names: midway between centres far
+#' apart the tie reaches about 1.25e-8 of their distance from the boundary,
+#' which can exceed that margin.
+#' [build_tessellation()] draws such cells in the CRS the record names,
+#' around the centres as the record holds them, whatever CRS the seeds came
+#' back in (unless its `crs` names another projected CRS), so their corners
+#' carry only the rounding of that computation, far less than the margin.
+#' Cells it returns in a
+#' geographic `crs` are moved back into the record's CRS for the join (see
+#' "Joins in longitude and latitude"). In a UTM zone the round trip through degrees moves a corner by
+#' about 2e-9 m; in the equal-area CRS the profile works in for a layer
+#' wider than a zone it can move one by more than the margin (how far
+#' depends on the PROJ build), so a point on such an edge can keep the
+#' polygon that holds it, and the summary's check then reads `"differ"`. A
+#' point farther from its nearest centre's cell keeps the polygon that
+#' holds it, and so do features that are not points, points without a CRS
+#' beside a record with one or with a CRS beside a record without one, and
+#' a join in longitude and latitude (polygons
+#' in degrees beside a record in degrees). A centre's cell
+#' is the one cell that holds it and no other centre; a centre outside a
+#' boundary that clipped its cell away from it has the cell, among those
+#' that hold no centre, whose inside is nearest it. Cells built from other
+#' seeds leave most centres without a cell, and their points to the
+#' polygons. Polygons without the record, such as polygons
+#' the caller brings, and cells whose record says `scored_cells` is
+#' `FALSE` or `NA` (other cells built from the count, such as a lattice
+#' sized by it) are placed by the polygons alone.
+#'
+#' @section Joins in longitude and latitude:
 #' The join runs in the CRS of `polygons_sf` whenever that CRS is projected,
 #' so cell edges are the straight lines the cells were drawn with and overlap
 #' areas are planar. Cells in lon/lat whose record of their count says they
 #' are the cells a profile scored, and holds its centres in a projected CRS
 #' (the Voronoi cells [build_tessellation()] builds on the centres a profile
-#' scored and returns in a geographic `crs`; see Value), were drawn in the
+#' scored and returns in a geographic `crs`; see "Cells from a resolution
+#' profile"), were drawn in the
 #' record's CRS, and the join runs there. A copy of `features_sf` is
 #' transformed for it, and the features come back with the coordinates they
 #' arrived with. Otherwise (other polygons in lon/lat, such as a hex or
@@ -26,7 +139,8 @@
 #' that is not valid there, such as one with two corners it reads as one
 #' point or with edges that cross; cells returned in lon/lat can hold two
 #' corners that differ only by rounding and fall on one point in degrees
-#' (see `crs` in [create_voronoi_polygons()]). A join by `predicate` then
+#' (see "Polygons in degrees" in [spatialkit-geometry]). A join by
+#' `predicate` then
 #' stops with an error of class `"spatialkit_cells_degenerate"` that gives
 #' the rows of the polygons s2 refuses (the condition carries them as
 #' `rows`), names the cause and says to transform `polygons_sf` to a
@@ -46,12 +160,9 @@
 #' polygons s2 refused as they arrived; with s2 on (sf's default), the join
 #' by `predicate` meets those polygons too. When s2 refused no polygon of
 #' either layer as it arrived, the error says to pass `largest = FALSE` or to
-#' project both layers. Whether s2 refuses such a piece follows the last bits
-#' of the vertices s2 computes for it, which differ between platforms and s2
-#' versions: a figure eight pinched on the edge of a polygon of the other
-#' layer can give a piece that s2 refuses on macOS on arm64 and accepts on
-#' Linux on x86-64. Where s2 accepts the piece, the join runs and gives each
-#' feature the polygon of its largest overlap.
+#' project both layers. Whether s2 refuses such a piece can differ between
+#' platforms and s2 versions. Where s2 accepts the piece, the join runs and
+#' gives each feature the polygon of its largest overlap.
 #' In longitude and latitude the largest-overlap join
 #' runs on s2, and the areas `tie_break` compares are measured on the sphere
 #' with s2, whatever [sf::sf_use_s2()] says, as the package's other areas in
@@ -60,6 +171,7 @@
 #' degrees, so the largest-overlap join's error for a polygon s2 refuses also
 #' offers `largest = FALSE`.
 #'
+#' @section Z and M coordinates:
 #' sf reads a layer in the dimension of its first geometry, so s2, GEOS and
 #' [sf::st_transform()] read a layer that mixes XY and XYZ (or XYM)
 #' geometries wrongly; `rbind()` of an XY and an XYZ layer gives one. When
@@ -75,6 +187,7 @@
 #' geometry: with the CRS they were given, or moved from lon/lat with
 #' [sf::st_transform()], which keeps their M.
 #'
+#' @section Coordinates far from the origin:
 #' Layers so far from the origin of their coordinates that doubles there are
 #' spaced more than a millionth of the extent of the two layers apart (0.125
 #' at 1e15, beside a layer a few kilometres across) are joined with their
@@ -85,7 +198,8 @@
 #'
 #' @param features_sf An sf object containing features to assign. A layer
 #'   whose geometries mix dimensions or carry M (XYM or XYZM) is joined in x
-#'   and y, and the rows returned keep their Z and M (see Details).
+#'   and y, and the rows returned keep their Z and M (see "Z and M
+#'   coordinates").
 #' @param polygons_sf An sf or sfc polygonal layer. Polygons whose
 #'   geometries mix dimensions or carry M (XYM or XYZM) are read in x and y.
 #' @param polygon_id_col Name of the polygon identifier column: the column of
@@ -143,7 +257,7 @@
 #'   In longitude and latitude with s2 on (sf's default), where s2 refuses
 #'   a polygon of either layer as it arrived, the join by \code{predicate}
 #'   meets that refusal too, and the error names the polygons and the
-#'   transform instead (see Details).
+#'   transform instead (see "Joins in longitude and latitude").
 #'   In longitude and latitude the validity check, the repair and the
 #'   overlaps run on s2 whatever \code{sf::sf_use_s2()} says; with s2 off
 #'   the join by \code{predicate} runs with GEOS, and the error that names
@@ -176,12 +290,13 @@
 #'   measures as cancelling) is measured on a copy repaired with
 #'   \code{sf::st_make_valid()}, with a warning, and returned as it arrived;
 #'   in degrees, one s2 refuses even repaired (a bowtie) stops the call with
-#'   the error of class \code{"spatialkit_cells_degenerate"} (see Details).
-#'   \code{"first"} keeps the first match, the polygon that comes first
-#'   in the rows of \code{polygons_sf} (original order-dependent
-#'   behavior). On cells built from the centres a profile scored, a point on
-#'   the edge between two of them is placed by the profile's rule whichever
-#'   is given (see Value).
+#'   the error of class \code{"spatialkit_cells_degenerate"} (see "Joins in
+#'   longitude and latitude").
+#'   \code{"first"} keeps the polygon that comes first in the rows of
+#'   \code{polygons_sf}, so the result depends on their order. On cells
+#'   built from the centres a profile scored, a point on the edge between
+#'   two of them is placed by the profile's rule whichever is given (see
+#'   "Cells from a resolution profile").
 #' @param quiet Logical; suppress this function's \code{message()}s (the one
 #'   naming a fallback ID column). It does not silence R warnings. Default
 #'   \code{FALSE}.
@@ -203,116 +318,6 @@
 #'   with an x outside -180 to 360 or a y beyond 90 north or south cannot be
 #'   in degrees, and the call stops with an error that names `features_sf`
 #'   or `polygons_sf` and gives its box.
-#'
-#'   Features that fall inside no polygon are counted on the attribute
-#'   `"unassigned"`: a list with `n`, `which` (their row positions in
-#'   `features_sf`) and `n_rows`. With `keep_unassigned = FALSE` they are not
-#'   in the result, and a warning of class `"spatialkit_unassigned"` gives
-#'   their number (`tryCatch(spatialkit_unassigned = )` catches it without
-#'   matching the message; the condition carries `n` and `total`). The usual
-#'   causes are a polygon layer that stops short of the data (a coastline
-#'   drawn at another scale, a tessellation of seeds built without a
-#'   `boundary` or `cover`; see [build_tessellation()]) and points outside
-#'   the study area. A feature with empty geometry, or with a coordinate
-#'   that is not finite or lies beyond 1e150, or in a geographic CRS a
-#'   vertex at a latitude beyond 90 degrees (read as given, before any
-#'   move into the polygons' CRS), has no location to assign: it matches no
-#'   polygon, and the warning says how many of them there are. With
-#'   `keep_unassigned = TRUE` they are kept with an
-#'   `NA` ID and no warning is raised, unless every feature is unassigned.
-#'   A polygon of `polygons_sf` with a coordinate that is not finite or lies
-#'   beyond 1e150 (read as given) has no location either: it takes no
-#'   feature, and the features inside the rest of its ring are unassigned.
-#'
-#'   The
-#'   attribute `"ties"` records how many features matched more than one
-#'   polygon (with `largest`, overlapped several by exactly the same area)
-#'   and had the `tie_break` rule decide for them (on cells built from the
-#'   centres a profile scored, the profile's rule then places the points
-#'   among them, as the last paragraph says): a list with `n`,
-#'   `which` (their row positions in `features_sf`), `rule`, `n_rows`
-#'   (the number of rows returned, which the record was made for) and, when
-#'   the rule gave some of them no polygon (see `tie_break`), `unresolved`,
-#'   the row positions of those among `which`. A large
-#'   `n` means the polygon layer overlaps, and per-cell counts built from the
-#'   result depend on the rule. The record describes the rows this call
-#'   returned and does not survive subsetting: `joined[i, ]`, like
-#'   `dplyr::filter()`, `slice()` or `arrange()` of it, is a plain layer
-#'   with no `"ties"` attribute, so nothing reports the parent's count
-#'   for a different set of rows. `sf::st_drop_geometry()` keeps the record,
-#'   since the rows are the same; see \code{\link{[.spatialkit_rows}} for
-#'   what binding such data frames does. The `"unassigned"` record is
-#'   stamped and removed the same way.
-#'
-#'   When `polygons_sf` carries `attr(, "count_rule")`, the record of how
-#'   its cell count was set (cells from [build_tessellation()] on seeds
-#'   placed from a [select_resolution()] result or from a profile built with
-#'   an `estimate`), the result carries the same record.
-#'   [summarize_by_cell()] reads it and checks that the rows and cells it is
-#'   given are the ones the count was scored on. It is a plain attribute: a
-#'   row subset keeps it and `dplyr::mutate()`, `dplyr::select()` and
-#'   `dplyr::arrange()` drop it, which is why the summary also looks for it
-#'   on its `cells_sf`. The profile scores a feature that is not a point at
-#'   one point of it (`coerce_to_points(, "auto")`), in the cell of the
-#'   nearest centre; this function gives a polygon feature to the cell it
-#'   overlaps most. A feature that straddles a cell boundary can therefore
-#'   be assigned to another cell than the one it was scored in, and the
-#'   summary does not compare the two for such a layer. To assign the
-#'   features as they were scored, assign their points:
-#'   `assign_features_to_polygons(coerce_to_points(features_sf, "auto"), polygons_sf)`.
-#'
-#'   When that record says the cells are the ones the profile scored
-#'   (`scored_cells` is `TRUE`: the cells [build_tessellation()] builds on a
-#'   selection's seeds, or on the seeds a seeding function returns for one)
-#'   and holds the centres it scored (`count_rule$scored$centres`), a point
-#'   on the edge between two or more of those cells is given the cell
-#'   [resolution_profile()] scored it in: that of its nearest centre,
-#'   measured in the CRS the record names, and of centres the same distance
-#'   away the lower-numbered one (a distance counts as the same as the least
-#'   when its square is no more than the square of the least distance
-#'   lengthened by a margin, plus one part in ten million of the least
-#'   squared distance; the margin is one part in 1e10 of the largest
-#'   coordinate of the centres, at most a millionth of the diagonal of their
-#'   bounding box and at least four times the spacing of doubles at that
-#'   coordinate). Such points occur on
-#'   gridded locations (raster cell centres, a regular sampling grid), where
-#'   a row can lie the same distance from two centres and the polygons hold
-#'   it in either cell or in both. The rows each cell holds are then the rows
-#'   its count was scored on, and [summarize_by_cell()]'s check of them reads
-#'   `"match"`. A point counts as on the edge when it lies within a margin of
-#'   both cells: one part in 1e10 of the largest coordinate of the cells,
-#'   0.44 mm at a UTM northing of 4,400 km, at most a millionth of the
-#'   diagonal of their bounding box and at least four times the spacing of
-#'   doubles at that coordinate. For a point that two centres tie
-#'   for while the cell holding it is that of the strictly nearer one, the
-#'   margin also takes in the point's distance from the boundary between the
-#'   two, measured in the CRS the record names: midway between centres far
-#'   apart the tie reaches about 1.25e-8 of their distance from the boundary,
-#'   which can exceed that margin.
-#'   [build_tessellation()] draws such cells in the CRS the record names,
-#'   around the centres as the record holds them, whatever CRS the seeds came
-#'   back in (unless its `crs` names another projected CRS), so their corners
-#'   carry only the rounding of that computation, far less than the margin.
-#'   Cells it returns in a
-#'   geographic `crs` are moved back into the record's CRS for the join (see
-#'   Details). In a UTM zone the round trip through degrees moves a corner by
-#'   about 2e-9 m; in the equal-area CRS the profile works in for a layer
-#'   wider than a zone it can move one by more than the margin (how far
-#'   depends on the PROJ build), so a point on such an edge can keep the
-#'   polygon that holds it, and the summary's check then reads `"differ"`. A
-#'   point farther from its nearest centre's cell keeps the polygon that
-#'   holds it, and so do features that are not points, points without a CRS
-#'   beside a record with one or with a CRS beside a record without one, and
-#'   a join in longitude and latitude (polygons
-#'   in degrees beside a record in degrees). A centre's cell
-#'   is the one cell that holds it and no other centre; a centre outside a
-#'   boundary that clipped its cell away from it has the cell, among those
-#'   that hold no centre, whose inside is nearest it. Cells built from other
-#'   seeds leave most centres without a cell, and their points to the
-#'   polygons. Polygons without the record, such as polygons
-#'   the caller brings, and cells whose record says `scored_cells` is
-#'   `FALSE` or `NA` (other cells built from the count, such as a lattice
-#'   sized by it) are placed by the polygons alone.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -328,7 +333,7 @@
 #' grid <- create_grid_polygons(bnd, target_cells = 9, type = "square")
 #' assigned <- assign_features_to_polygons(pts, grid)
 #' table(assigned$poly_id)
-#' @family aggregation
+#' @family assign and summarise
 #' @seealso [build_tessellation()] to build the polygon layer;
 #'   [summarize_by_cell()] for the aggregation step that consumes the result.
 #' @export
@@ -1692,10 +1697,8 @@ assign_features_to_polygons <- function(
 #' components \eqn{(c_i, a_i)} the semivariance is
 #' \eqn{\gamma(h) = c_0 + \sum_i c_i (1 - f_i(h))}, so the correlation is
 #' \eqn{1 - \gamma(h) / (c_0 + \sum_i c_i) = \sum_i c_i f_i(h) / (c_0 + \sum_i c_i)}:
-#' every structured component contributes, weighted by its partial sill.  The
-#' function used to read the single largest component only, which for a
-#' user-built \code{Nug + Exp + Sph} model gave 0.108 at \code{h = 200} where
-#' \code{gstat::variogramLine()} implies 0.197.
+#' every structured component contributes, weighted by its partial sill, as
+#' \code{gstat::variogramLine()} implies for a nested model.
 #'
 #' Only the exponential, spherical and Gaussian families are implemented.  A
 #' model carrying any other family (Matern, power, circular, ...) returns
@@ -1720,7 +1723,7 @@ assign_features_to_polygons <- function(
 #' perfectly correlated even when they coincide.  Self-correlation of 1 belongs
 #' on the diagonal of the correlation matrix and is imposed by the caller.
 #'
-#' @param vgm_model A fitted \code{gstat} variogram model (a data frame with
+#' @param vgm_model A fitted \pkg{gstat} variogram model (a data frame with
 #'   \code{model}, \code{psill} and \code{range} columns).
 #' @return A function of distance returning correlation, or \code{NULL} if the
 #'   model cannot be interpreted or uses a family this function does not
@@ -1823,10 +1826,9 @@ assign_features_to_polygons <- function(
 #' \deqn{E[s^2] = \sigma^2 (n - \mathrm{deff}) / (n - 1)}
 #' so \eqn{s^2} understates \eqn{\sigma^2} by very nearly the factor deff
 #' inflates the mean's variance by, and the two errors compound rather than
-#' cancel.  Measured 95% CI coverage of the uncorrected form at \eqn{n = 30}
-#' over 20,000 replicates: 0.921 at \eqn{\rho = 0.2}, 0.844 at \eqn{\rho = 0.5},
-#' 0.628 at \eqn{\rho = 0.8}.  With the \eqn{\sqrt{(n-1)/(n-\mathrm{deff})}}
-#' rescale below: 0.948, 0.950, 0.949.
+#' cancel.  The \eqn{\sqrt{(n-1)/(n-\mathrm{deff})}} rescale below removes
+#' the second bias, so an interval built on the result does not under-cover
+#' for the understated \eqn{s^2}.
 #'
 #' At \code{deff = 1} the factor is exactly 1, so the default path is
 #' bit-identical to \code{s/sqrt(n)}.
@@ -1939,10 +1941,9 @@ assign_features_to_polygons <- function(
 #' \eqn{\bar{r}}, not deff, that is returned, because the design effect a
 #' \emph{column} needs is the one for the observations that column actually
 #' has: a cell of 10 points with 2 non-missing responses has a response design
-#' effect of \eqn{1 + (2-1)\bar{r}}, not \eqn{1 + (10-1)\bar{r}}.  Measured:
-#' adding 8 NA-response rows to a 2-observation cell moved its response SE from
-#' 8.46 to 26.38 when the cell-level deff was applied to it; NA rows carry no
-#' information and must not move anything.
+#' effect of \eqn{1 + (2-1)\bar{r}}, not \eqn{1 + (10-1)\bar{r}}.  The
+#' cell-level deff would let rows with a missing response widen the response
+#' SE, though they carry no information about it.
 #'
 #' Subsampling estimates \eqn{\bar{r}} just as well as the full cell does
 #' (the subsample's pairwise-distance distribution is the cell's), which is
@@ -2027,8 +2028,7 @@ assign_features_to_polygons <- function(
 #' exchangeable correlation the ratio is exactly 1 (\eqn{AR} has \eqn{n-1}
 #' equal non-zero eigenvalues), which is why a t interval on the Kish path
 #' keeps \eqn{n - 1} df; under correlation that decays with distance it is
-#' below 1, and a t interval that ignores that under-covers (measured 0.918 at
-#' a range of 400 on a 1000-unit domain against 0.958 with this df).
+#' below 1, and a t interval that ignores that under-covers.
 #' \eqn{\mathrm{tr}(AR) = n - \mathrm{deff}}, so the same \eqn{R} gives the
 #' design effect and the df with no extra pass.
 #'
@@ -2113,40 +2113,52 @@ assign_features_to_polygons <- function(
 .icc_reason_constant <- "the column does not vary"
 
 
-#' Summarize features by polygon/cell ID
+#' Summarise assigned points by cell, with standard errors and pooled values
 #'
-#' Aggregates an sf point dataset into one row per cell. By default computes
-#' counts and means, but the aggregation function is configurable. It also
-#' returns a pooled value for each cell, its mean pulled toward the mean of
-#' the cells around it (`estimate = "pooled"`, the default; `estimate =
-#' "mean"` leaves it out), and can return a range for one further
-#' observation.
+#' Aggregates an sf point dataset into one row per cell. Each cell gets a
+#' count, the mean of each response and predictor column (or the functions in
+#' `agg_funs`), and that column's within-cell standard deviation and standard
+#' error. By default each numeric column also gets a pooled value, the cell's
+#' mean pulled toward the mean of the cells around it (`estimate = "pooled"`;
+#' `estimate = "mean"` leaves it out). On request the frame adds an interval
+#' for each mean (`conf_level`) and an interval for one further observation
+#' (`obs_level`).
 #'
-#' This is the third step of the package's pipeline, taking the labelled layer
-#' from [assign_features_to_polygons()] down to cell level. What distinguishes
-#' it from a plain `dplyr::group_by()` + `summarise()` is that it carries the
-#' *uncertainty* of each aggregate with it: alongside every mean it returns a
-#' within-cell standard deviation, a standard error and an observation count,
-#' and it can correct that standard error for within-cell spatial
-#' autocorrelation via `deff`. Reach for it whenever the cell-level values will
-#' be modelled or mapped, because a cell mean over 2 observations and one over
-#' 200 are not the same measurement and nothing downstream can tell them apart
-#' otherwise.
+#' This is the step after [assign_features_to_polygons()], which labels each
+#' observation with its cell. Beside every mean the frame keeps the count and
+#' the standard error, so a cell mean over 2 observations and one over 200 stay
+#' distinguishable in a map or a model, and `deff` can widen the standard error
+#' for correlation inside a cell.
 #'
-#' In addition to user-specified aggregation functions, this function always
-#' computes within-cell standard deviation (`..sd_<var>`) and standard error
-#' (`..se_<var>`) for every numeric response/predictor column, plus an `n`
-#' column (rows falling in the cell) and a `cell_weight` column.
-#' These columns let downstream models account for the fact that a cell with
-#' 2 observations carries more aggregation uncertainty than one with 200.
+#' # Output columns
 #'
-#' `cell_weight` is the *effective* sample size of the primary variable: the
+#' One row per cell, with these columns in this order:
+#'
+#' * the ID column (see `id_col`);
+#' * `n`, the rows that fall in the cell;
+#' * for each variable, the response's first and then each predictor's: one
+#'   column per `agg_funs` entry (`resp_<name>_<var>` for the response and
+#'   `pred_<name>_<var>` for a predictor, so `resp_mean_val` for the default
+#'   mean of a response `val`), the within-cell standard deviation
+#'   (`..sd_resp_<var>`, `..sd_pred_<var>`) and standard error
+#'   (`..se_resp_<var>`, `..se_pred_<var>`) of a numeric column, and with
+#'   `conf_level` its `..neff_*`, `..df_*`, `..ci_lo_*` and `..ci_hi_*` (see
+#'   "Confidence intervals");
+#' * `cell_weight`, always;
+#' * `deff_applied` and `deff_method` when a design effect was requested (any
+#'   `deff` other than 1);
+#' * with `estimate = "pooled"`, the pooled columns (see "Pooled values" and
+#'   "Value");
+#' * with `cells_sf`, the cells' geometry;
+#' * with `area = TRUE`, `cell_area` and `n_per_area`.
+#'
+#' `cell_weight` is the effective sample size of the primary variable: the
 #' response when one was supplied, otherwise the first predictor. It counts
 #' that variable's non-missing rows, not all rows (a cell of 10 rows with 3
 #' finite responses carries 3 observations' worth of information about the
-#' response, not 10), and it is divided by that cell's design effect when
-#' `deff` applied one. With `deff = 1` and no missing values it equals `n`.
-#' Pass it as the `weights` argument of a downstream regression.
+#' response), and it is divided by that cell's design effect when `deff`
+#' applied one. With `deff = 1` and no missing values it equals `n`. Pass it
+#' as the `weights` argument of a downstream regression.
 #'
 #' An infinite value (`Inf`, `-Inf`) in a response or predictor column is
 #' treated as missing, as `NA` and `NaN` are, in every statistic of that
@@ -2163,194 +2175,18 @@ assign_features_to_polygons <- function(
 #' `..sd_*` is the standard deviation of the cell's values in the units of
 #' the column, at any size. Where the raw squares overflow or lose their bits
 #' (a standard deviation that is not finite or is below 1e-150), it is taken
-#' on the values centred on their median and divided by powers of two,
-#' which keeps their spread. A cell whose
-#' standard deviation is beyond the largest double (about 1.8e308) has
-#' `..sd_*` of `Inf` and standard errors and interval of `NA`, with a warning
-#' of class `"spatialkit_sd_overflow"` (the condition carries `columns` and
-#' `cells`, the number of such cells of each column).
-#'
-#' # Spatial autocorrelation and standard-error bias
-#'
-#' By default (`deff = 1`), the `..se_*` columns are computed as
-#' `sd / sqrt(n)`, which treats the observations within each cell as
-#' independent. When data are spatially autocorrelated (the common case for the
-#' spatial workflows this package supports), within-cell observations are
-#' typically positively correlated: they share the cell's departure from the
-#' population mean, so as an estimate of the **population (grand) mean** a cell
-#' mean has an effective sample size smaller than `n`. For that estimand the
-#' naive SE is **anticonservative** (too small), and a downstream weighted
-#' regression that uses `cell_weight` or the `..se_*` columns for population-level
-#' inference will produce overconfident standard errors for cells with strong
-#' intra-cell correlation. For the cell's **own** mean the naive SE is the right
-#' one when the cell's points are spread through it, and the corrected SE is too
-#' wide; see "What the standard error estimates" before setting `deff`.
-#'
-#' Setting `deff = "kish"` applies an approximate correction using Kish's
-#' design effect. An intra-class correlation (ICC) is estimated for every
-#' summarised column on its own, the response and each predictor, via a
-#' one-way random-effects decomposition across all cells. Each column's ICC
-#' is used for that column's SE adjustment, and each cell's effective sample
-#' size is reduced to `n_i / (1 + (n_i - 1) * rho)`. This is a first-order
-#' correction that does not require a full spatial covariance model but does
-#' require enough cells and observations for a stable ICC estimate. A column
-#' whose ICC cannot be estimated at all gets `NA` standard errors (see
-#' `deff`).
-#'
-#' A design effect estimated from the data (`"kish"` or `"variogram"`) comes
-#' with a second, small-sample correction. The within-cell correlation that
-#' inflates the variance of the mean to `sigma^2 * deff / n` also biases the
-#' within-cell sample variance downward: under exchangeable correlation `rho`
-#' (Kish's own assumption), with `deff = 1 + (n - 1) * rho`,
-#' `E[s^2] = sigma^2 * (n - deff) / (n - 1)`, so `s^2` understates `sigma^2`
-#' by very nearly the factor by which `deff` inflates the mean's variance, and
-#' the two errors compound rather than cancel. The standard error is therefore
-#' `s * sqrt(deff / n) * sqrt((n - 1) / (n - deff))`, and `NA` where
-#' `deff >= n` (the cell then holds one observation's worth of information
-#' and `s` carries none about `sigma`). This is the package's own derivation,
-#' not taken from a reference. Measured 95% interval coverage at `n = 30`
-#' over 20,000 replicates: 0.921, 0.844 and 0.628 at `rho` = 0.2, 0.5 and 0.8
-#' with `s * sqrt(deff / n)` alone, against 0.948, 0.950 and 0.949 with the
-#' rescaling.
-#'
-#' You may also pass a fixed numeric design effect (e.g. `deff = 2`) to
-#' uniformly inflate standard errors: an externally supplied constant is
-#' applied as `sd * sqrt(deff / n)`, exactly `sqrt(deff)` times the naive SE in
-#' every cell. (The `E[s^2]` correction that the estimated design effects also
-#' apply is derived from within-cell correlation and would not be justified for
-#' a number the caller chose.)
-#'
-#' Even with the Kish correction, the adjusted SE is an approximation.
-#' For rigorous inference under spatial dependence, consider fitting an
-#' explicit spatial covariance model (e.g. via \code{\link{fit_bayesian_spatial_model}}).
-#'
-#' # What the standard error estimates
-#'
-#' What the `..se_*` columns estimate follows `deff`. At the default,
-#' `deff = 1`, `sd / sqrt(n)` is the standard error of **the cell's own
-#' mean**, the mean of the units the cell holds, and it is the right one when
-#' the cell's observations are spread through the cell. Under
-#' `deff = "kish"`, `"variogram"` or a number other than 1 the columns are the
-#' standard error of the cell mean **as an estimate of the population (grand)
-#' mean**: the unconditional quantity, in which the cell's own realised
-#' deviation is part of the error, widened for the correlation inside the
-#' cell. That is the right quantity when cells are treated as samples from a
-#' common population: measured 95% interval coverage of the grand mean is
-#' 0.95 with `deff = "kish"` (and 0.29 with the naive SE) on exchangeable
-#' within-cell correlation, and 0.93 with `deff = "variogram"` on a simulated
-#' Gaussian field.
-#'
-#' The corrected standard error is **not** that of the cell's own mean (the
-#' block average over that cell), which is what a cell-level map or a
-#' regression on cell values usually wants. For that quantity the naive
-#' `sd / sqrt(n)` is the
-#' better of the two on offer: measured coverage 0.95 under exchangeable
-#' within-cell correlation, against very nearly 1.00 for the
-#' design-effect-corrected SE, which is too wide by the factor
-#' `sqrt(deff / (1 - rho))` (4.6 at 20 points a cell and `rho = 0.5`). That 0.95
-#' is exact under the exchangeable model and holds under a spatial covariance
-#' model only when the cell's points are spread through the cell; with
-#' *clustered* sampling inside a cell it is anticonservative for the block
-#' average too (measured 0.58), and the right quantity there is a
-#' block-kriging variance, which this function does not compute. Use `deff`
-#' when the cell means feed a population-level inference; leave it at 1 when
-#' they are measurements of the cells themselves and the sampling within cells
-#' is reasonably uniform.
-#'
-#' # Design effects and variable types
-#'
-#' `deff = "kish"` estimates a separate ICC for each summarised column, the
-#' response and every predictor, and applies each to that column alone:
-#' listing or removing a predictor leaves every other column's standard error,
-#' effective n and interval as they were. (One ICC used to be pooled over all
-#' the predictors, which was right for a column only when they all shared it:
-#' beside a predictor with an ICC of 0.87, one with an ICC of 0 had its
-#' standard error multiplied by 3.1.) `deff = "variogram"` fits or
-#' accepts **one** correlation function and applies it to every numeric column,
-#' because a variogram is a property of the field being modelled rather than of
-#' a variable type; a predictor whose spatial structure differs markedly from
-#' the response's will have its SE corrected by the response's correlation.
-#' When that variogram finds no spatial structure (the pure nugget
-#' [estimate_sac_range()] returns with that verdict), every column gets a
-#' design effect of 1, the predictors included, and a warning of class
-#' `"spatialkit_deff_no_structure"` names the predictor columns: the verdict
-#' is about the variable the variogram was fitted to, not about them.
-#' `deff = "kish"` gives each predictor its own ICC.
-#' The internally estimated variogram is fitted to the **response itself**,
-#' never to OLS residuals, whatever `predictor_vars` holds: the `..se_resp_*`
-#' columns estimate the grand mean of the response, so the correlation to
-#' correct for is the response's own. (A residual variogram, whose correlation
-#' is that of the part the predictors do not explain, is weaker; using it here
-#' dropped grand-mean coverage from 0.93 to 0.51 the moment a predictor was
-#' listed.) Pass `sac` explicitly when you want a different variogram, such as
-#' a residual one from `estimate_sac_range(..., predictor_vars = )`. A `sac`
-#' whose `attr(sac, "detrended")` is `TRUE` is used as given, but when it
-#' corrects response columns a warning says that their standard errors are
-#' understated, as [kriging_adequacy()] warns about the same mismatch.
-#'
-#' # Confidence intervals
-#'
-#' With `conf_level` set, every numeric response and predictor column gains
-#' four more columns: `..neff_*`, that column's effective sample size in the
-#' cell (its non-missing count over its design effect, the per-column version
-#' of `cell_weight`); `..df_*`, the degrees of freedom the interval uses; and
-#' `..ci_lo_*` / `..ci_hi_*`, a t interval for a mean. Which mean follows
-#' `deff`, as for `..se_*`: at the default, `deff = 1`, **the cell's own
-#' mean**, when its observations are spread through the cell; under
-#' `deff = "kish"`, `"variogram"` or a number other than 1, the **cell mean as
-#' an estimate of the population (grand) mean**. Everything in "What the
-#' standard error estimates" applies to it, including that the corrected
-#' interval is not one for the cell's own block average. The interval is
-#' `mean +/- qt((1 + conf_level) / 2, df) * se`, centred on the plain mean of
-#' the column's non-missing values whatever `agg_funs` computes, and is `NA`
-#' wherever the standard error is (a single observation; complete redundancy
-#' under `deff`). `..neff_*` and `..df_*` are `NA` where the column has one
-#' non-missing value or none, like the standard error; `cell_weight` still
-#' counts such a cell (1, or `1 / deff` for a numeric `deff`), so the two
-#' differ there.
-#'
-#' At no setting is `..ci_*` a range for one observation: it is an interval
-#' for a mean, and it narrows as a cell's count grows where the spread of
-#' single observations does not. The interval for one further observation in
-#' a cell has its own argument and columns, `obs_level` with
-#' `estimate = "pooled"` and `..obs_lo_*` / `..obs_hi_*` (see "Intervals:
-#' which one answers which question"). In the simulation described there,
-#' `..ci_*` at `conf_level = 0.90` held 58.9 percent of the observations held
-#' out among the others, and the interval for one observation at
-#' `obs_level = 0.90` held 89.6 percent. Away from the observations no
-#' interval here is calibrated.
-#'
-#' The degrees of freedom are **not** `neff - 1`. The interval's spread comes
-#' from the within-cell sample variance, and under exchangeable correlation
-#' (`deff = "kish"`) that variance keeps its `n - 1` degrees of freedom
-#' whatever the design effect. The design effect inflates the mean's
-#' variance and biases `s^2`, both of which the standard error already
-#' corrects, and the resulting pivot is exactly t on `n - 1` df. Measured 95%
-#' coverage of the grand mean on the Kish path, 20 cells of 20 at an ICC of
-#' 0.2 / 0.6 / 0.9: 0.954 / 0.953 / 0.952 with `n - 1`, against
-#' 0.992 / 1.000 / 1.000 with `neff - 1`, which is not an interval so much as
-#' a refusal to say anything. The effective-sample-size degrees of freedom of
-#' Faes et al. (2009) belong to a mean estimated across many correlated units
-#' whose variance is estimated from the spread between them; they do not
-#' transfer to a single cell's mean with a variance estimated from inside it.
-#' `..df_*` is therefore `n - 1` at `deff = 1`, for a numeric `deff` and for
-#' `"kish"`. Under `deff = "variogram"` correlation decays with distance and
-#' the within-cell variance loses degrees of freedom to it; `..df_*` is then
-#' the Satterthwaite (1946) moment-matched df of `s^2` under the fitted
-#' correlation matrix, a fraction of `n - 1` that shrinks as the range grows.
-#' Measured on a Gaussian field with an exponential range of 150 and 400 on a
-#' 1000-unit domain, 16 cells of about 25 points: 0.960 and 0.958 with that
-#' df, against 0.931 and 0.918 with `n - 1`, and 0.34 and 0.19 for the naive
-#' `deff = 1` interval. The interval is only as good as the design effect
-#' under it: a mis-specified variogram, or an ICC estimated from too few
-#' cells, moves the coverage with it.
+#' on the values centred on their median and divided by powers of two, which
+#' keeps their spread. A cell whose standard deviation is beyond the largest
+#' double (about 1.8e308) has `..sd_*` of `Inf` and standard errors and
+#' interval of `NA`, with a warning of class `"spatialkit_sd_overflow"` (the
+#' condition carries `columns` and `cells`, the number of such cells of each
+#' column).
 #'
 #' # Pooled values
 #'
 #' With `estimate = "pooled"` every numeric column also gets a pooled value.
-#' That is the default; `estimate = "mean"` leaves the pooled columns out
-#' and returns the frame of earlier versions.
-#' A cell's value, plain or pooled, estimates the cell's *level*: the
+#' That is the default; `estimate = "mean"` leaves the pooled columns out.
+#' A cell's value, plain or pooled, estimates the cell's true mean: the
 #' expected value of one further observation located in the cell the way its
 #' observations were. It is not the average of a surface over the cell's
 #' area, which would give weight to ground that holds no observation.
@@ -2368,8 +2204,8 @@ assign_features_to_polygons <- function(
 #'   neighbours whether or not they touch, and a cell is never its own
 #'   neighbour;
 #' * `tau2 = max(0, (sum(n * (m - t)^2) - K * sigma2) / N)` is the mean
-#'   squared distance between a cell's level and its target, the target's own
-#'   error included;
+#'   squared distance between a cell's true mean and its target, the target's
+#'   own error included;
 #' * the own weight is `w = tau2 / (tau2 + sigma2 / n)`;
 #' * the pooled value is `w * m + (1 - w) * t`.
 #'
@@ -2381,19 +2217,18 @@ assign_features_to_polygons <- function(
 #' columns are the same under either `estimate`, and they are the ones to
 #' use, with `cell_weight`, in a regression on cell values: each column is
 #' pulled toward its neighbours by its own amount, so a regression of pooled
-#' responses on pooled predictors is not a regression of the levels.
+#' responses on pooled predictors is not a regression of the true means.
 #'
 #' The cells can be any polygons the rows were assigned to, the package's
 #' own or ones the caller brings, with IDs of any type: only each row's cell
 #' and location are read. Each column is pooled on its own rows, those with
 #' a value, a cell and a location, with its own centroids, neighbours,
-#' `sigma2` and `tau2`; a
-#' missing value in one column changes nothing in another. A cell with one
-#' such row gets a value. A cell with none gets `NA`, never a value made from
-#' its neighbours. The pooled columns do not read `agg_funs` or `deff`: the
-#' mean that is pooled is the arithmetic mean whatever `agg_funs` computes,
-#' and no design effect enters `sigma2`, `tau2`, the weights or the interval
-#' of `obs_level`.
+#' `sigma2` and `tau2`; a missing value in one column changes nothing in
+#' another. A cell with one such row gets a value. A cell with none gets
+#' `NA`, never a value made from its neighbours. The pooled columns do not
+#' read `agg_funs` or `deff`: the mean that is pooled is the arithmetic mean
+#' whatever `agg_funs` computes, and no design effect enters `sigma2`,
+#' `tau2`, the weights or the interval of `obs_level`.
 #'
 #' Three cases change what the numbers rest on, and each is a warning (see
 #' "Conditions"). With 2 to 9 cells the neighbours of a cell are all the
@@ -2436,25 +2271,6 @@ assign_features_to_polygons <- function(
 #' so can a lattice whose spacing is below about a ten-millionth of its
 #' coordinates.
 #'
-#' The figures on this page that describe pooled values and the two
-#' intervals come from one simulation, `dev/sim-pooled-values.R` in the
-#' package's repository, whose header holds its settings and seeds. It draws 200
-#' layers on a square of side 1,000. Each has 2,100 clustered locations
-#' (four fifths of them round 25 parent points with a standard deviation of
-#' 40, the rest uniform) and a response that is a field with covariance
-#' `exp(-d / 100)` plus noise of variance 0.3. The 300 locations nearest a
-#' random centre are held out as a block, 300 of the others are held out at
-#' random, and the 1,500 left are the layer: 333 cells at 4.5 observations a
-#' cell from [resolution_profile()] with `partition = "density"`,
-#' `select_resolution(criterion = "size")`, [get_voronoi_seeds()],
-#' [build_tessellation()] and [assign_features_to_polygons()], summarised
-#' with `estimate = "pooled"`. A held-out observation is given the value of
-#' its cell by [cell_values_at()]. At the observations held out at random
-#' the root mean squared error of the pooled value was 0.96 of the plain
-#' mean's: 0.84 in cells that hold one of the layer's observations, 0.95 in
-#' cells of 2 to 4, 0.98 in cells of 5 to 9 and 0.99 in cells of 10 or
-#' more. In the held-out block it was 0.95.
-#'
 #' `structured` in `attr(, "pooled")` says whether these cells predict a
 #' left-out observation better than one mean for all rows. It is `FALSE`
 #' when the leave-one-out error of one mean (`loo_one_cell`) is within 2
@@ -2462,44 +2278,20 @@ assign_features_to_polygons <- function(
 #' test of the cell means against one mean has `p >= 0.05`
 #' (`structure_p`). `FALSE` raises a warning of class
 #' `"spatialkit_no_structure"`, and the values are returned. On a response
-#' without spatial structure they still make a smooth map, because each is
-#' mostly the mean of its neighbours. With white noise as the response on
-#' the simulation's 200 layers the median own weight was 0.11, `tau2` was 0
-#' on 20 layers, the warning was raised on all 200, and a cell's pooled
-#' value had a correlation of 0.79 with the mean of the pooled values of its
-#' 8 nearest cells, where the plain means had one of -0.02.
+#' without spatial structure they still make a smooth map: the own weights
+#' are small, so each pooled value lies close to the mean of its neighbours
+#' ("How this was checked" gives the figures).
 #'
 #' The pooling model implies an error variance for a pooled value as an
-#' estimate of the cell's level, `(1 - w) * tau2`. It is not returned, and
-#' neither is an interval for the level, because no check has confirmed an
-#' interval built from it; `sigma2`, `tau2` and `..pooled_w_*` are in the
-#' result for a reader who wants to form it. In the simulation, with a
-#' cell's level taken as the mean of the noise-free field over further
-#' locations drawn in it like the data's, the squared error of the pooled
-#' value was 0.98 of `(1 - w) * tau2` among the observations and 6.9 times
-#' it in the held-out block: away from the observations it is too small.
+#' estimate of the cell's true mean, `(1 - w) * tau2`. It is not returned,
+#' and neither is an interval for the true mean, because no check has
+#' confirmed an interval built from it; `sigma2`, `tau2` and `..pooled_w_*`
+#' are in the result for a reader who wants to form it. Away from the
+#' observations that variance is too small ("How this was checked").
 #'
 #' Beside a sharp boundary the pooled value can be further from a cell's
-#' level than the plain mean, because its target takes in cells across the
-#' boundary. A second simulation measured this on fields whose level jumps
-#' at county boundaries: one level for each county, alone and with a smooth
-#' field added, on two layouts of real locations (892 and 2,634 points, each
-#' in a county), with noise of 5, 20 or 50 percent of an observation's
-#' variance, 200 layers of each, five random folds, and on each fold the
-#' cells the package's defaults build from the training observations. A
-#' held-out observation is a boundary row when every training observation
-#' of its cell lies in its own county and more than half of those of the
-#' cell's neighbours lie in other counties. Boundary rows were 21.75 to
-#' 28.04 percent of the held-out observations. Over them the root mean
-#' squared error of the pooled value against the noise-free field, as a
-#' geometric mean over the layers of its ratio to the plain mean's, was
-#' from 9.16 percent lower to 56.36 percent higher. On county levels alone
-#' it was 43.21 and 56.36 percent higher with 5 percent noise, 11.23 and
-#' 20.58 percent higher with 20 percent, and from 3.79 percent lower to 1.47
-#' percent higher with 50 percent; with the smooth field added it was from
-#' 9.16 percent lower to 1.59 percent higher. Over all held-out observations
-#' the pooled value's error was the lower of the two in every setting, by
-#' 1.75 to 18.73 percent.
+#' true mean than the plain mean, because its target takes in cells across
+#' the boundary.
 #'
 #' # Intervals: which one answers which question
 #'
@@ -2519,7 +2311,7 @@ assign_features_to_polygons <- function(
 #' `"variogram"` or a number other than 1 the cell mean as an estimate of
 #' the population mean (see "Confidence intervals", which also describes
 #' `..neff_*` and `..df_*`). No interval and no standard error is returned
-#' for a cell's level as the pooled value estimates it.
+#' for a cell's true mean as the pooled value estimates it.
 #' `attr(, "intervals")` says the same of the frame in hand, one row per
 #' family present.
 #'
@@ -2534,15 +2326,13 @@ assign_features_to_polygons <- function(
 #'
 #' * It is a statement about observations on average: of further
 #'   observations located like the data, about `obs_level` of them fall
-#'   inside the interval of their cell. It does not hold cell by cell (the
-#'   second simulation below gives the coverage in cells of one
-#'   observation).
+#'   inside the interval of their cell. It does not hold cell by cell.
 #' * The two offsets are the same in every cell. The interval's centre
 #'   varies over the map and its width does not. It does not narrow where a
 #'   cell holds more rows: the offsets are quantiles of the errors of
 #'   predicting single observations, and the spread of observations inside a
 #'   cell is in every one of them.
-#' * It is wide. One observation is uncertain.
+#' * It is wide, because one observation is uncertain.
 #' * Only the level 0.90 has been checked. Another level is computed the
 #'   same way.
 #' * Each residual is the error of predicting an observation from the other
@@ -2553,29 +2343,146 @@ assign_features_to_polygons <- function(
 #'   interval is too narrow for a cell with no observation, a gap in the
 #'   layer or ground beyond the layer's edge.
 #'
-#' In the simulation described under "Pooled values", the interval at
-#' `obs_level = 0.90` held 89.6 percent of the observations held out at
-#' random among the others (83.7 to 94.0 percent in single layers) and 75.1
-#' percent of those in the held-out block. `..ci_*` at `conf_level = 0.90`,
-#' read as a range for one observation, held 58.9 and 49.2 percent of them,
-#' over the held-out observations whose cell has that interval.
 #' [cell_values_at()] returns each location's distance from the nearest
 #' observation, and its help gives the coverage by that distance.
 #'
-#' The second simulation described under "Pooled values" read the
-#' interval at `obs_level = 0.90` on smooth fields of two ranges and on
-#' county levels with a smooth field, with 20 or 50 percent noise, on both
-#' layouts: twelve settings. Setting by setting it held 89.38 to 89.79
-#' percent of the held-out observations. Counted by the training
-#' observations in an observation's cell (1, 2 to 4, 5 to 9, 10 or more), it
-#' held at least 85.65 percent in every class but one: on county levels with
-#' a smooth field, on the layout of 892 points with 20 percent noise, it
-#' held 83.74 percent of the 4,878 observations whose cell held one training
-#' observation. On fields of that kind it is not a 90 percent interval in
-#' such cells: there it held 83.74 to 87.83 percent with 20 or 50 percent
-#' noise, and 82.64 and 82.94 percent with 5 percent.
-#'
 #' Away from the observations no interval here is calibrated.
+#'
+#' # Standard errors and design effects
+#'
+#' What the `..se_*` columns estimate follows `deff`. At the default,
+#' `deff = 1`, `sd / sqrt(n)` is the standard error of the cell's own mean,
+#' the mean of the units the cell holds, and it is the right one when the
+#' cell's observations are spread through the cell. Under `deff = "kish"`,
+#' `"variogram"` or a number other than 1 the columns are the standard error
+#' of the cell mean as an estimate of the population (grand) mean: the
+#' unconditional quantity, in which the cell's own realised deviation is part
+#' of the error, widened for the correlation inside the cell. That is the
+#' right quantity when cells are treated as samples from a common population.
+#'
+#' Spatially autocorrelated observations in one cell are positively
+#' correlated: they share the cell's departure from the population mean. As
+#' an estimate of the population mean, a cell mean then has an effective
+#' sample size smaller than `n`, and the naive standard error is too small. A
+#' downstream weighted regression that uses `cell_weight` or the `..se_*`
+#' columns for population-level inference then gives overconfident standard
+#' errors for cells with strong within-cell correlation.
+#'
+#' The corrected standard error is not that of the cell's own mean (the
+#' block average over that cell), which is what a cell-level map or a
+#' regression on cell values usually wants. For that quantity the naive
+#' `sd / sqrt(n)` is the better of the two on offer. Under exchangeable
+#' within-cell correlation it is exact, and the design-effect-corrected SE is
+#' too wide by the factor `sqrt(deff / (1 - rho))` (4.6 at 20 points a cell
+#' and `rho = 0.5`). Under a spatial covariance model it holds only when the
+#' cell's points are spread through the cell; with clustered sampling inside
+#' a cell it is too small for the block average too, and the right quantity
+#' there is the plain mean's error variance under a variogram, `plain_var` in
+#' [kriging_adequacy()]. Use `deff` when the cell means feed a
+#' population-level inference; leave it at 1 when they are measurements of
+#' the cells themselves and the sampling within cells is close to uniform.
+#'
+#' `deff = "kish"` applies Kish's design effect. An intra-class correlation
+#' (ICC) is estimated for every summarised column on its own, the response
+#' and each predictor, by a one-way random-effects decomposition across all
+#' cells, and each column's ICC is used for that column alone: listing or
+#' removing a predictor leaves every other column's standard error,
+#' effective n and interval as they were. Each cell's effective sample size
+#' is `n_i / (1 + (n_i - 1) * rho)`. This first-order correction needs no
+#' spatial covariance model, but it needs enough cells and observations for
+#' a stable ICC. A column whose ICC cannot be estimated at all gets `NA`
+#' standard errors (see `deff`).
+#'
+#' `deff = "variogram"` fits or accepts one correlation function and applies
+#' it to every numeric column, because a variogram is a property of the field
+#' being modelled rather than of a variable type; a predictor whose spatial
+#' structure differs from the response's has its SE corrected by the
+#' response's correlation. When that variogram finds no spatial structure
+#' (the pure nugget [estimate_sac_range()] returns with that verdict), every
+#' column gets a design effect of 1, the predictors included, and a warning
+#' of class `"spatialkit_deff_no_structure"` names the predictor columns: the
+#' verdict is about the variable the variogram was fitted to, not about
+#' them. The internally estimated variogram is fitted to the response
+#' itself, never to OLS residuals, whatever `predictor_vars` holds: the
+#' `..se_resp_*` columns estimate the grand mean of the response, so the
+#' correlation to correct for is the response's own. A residual variogram
+#' holds only the correlation of the part the predictors do not explain,
+#' which is weaker. Pass `sac` explicitly for a different variogram, such as
+#' a residual one from `estimate_sac_range(..., predictor_vars = )`. A `sac`
+#' whose `attr(sac, "detrended")` is `TRUE` is used as given, but when it
+#' corrects response columns a warning says that their standard errors are
+#' understated, as [kriging_adequacy()] warns about the same mismatch.
+#'
+#' A design effect estimated from the data (`"kish"` or `"variogram"`) comes
+#' with a second, small-sample correction. The within-cell correlation that
+#' inflates the variance of the mean to `sigma^2 * deff / n` also biases the
+#' within-cell sample variance downward: under exchangeable correlation `rho`
+#' (Kish's own assumption), with `deff = 1 + (n - 1) * rho`,
+#' `E[s^2] = sigma^2 * (n - deff) / (n - 1)`, so `s^2` understates `sigma^2`
+#' by very nearly the factor by which `deff` inflates the mean's variance,
+#' and the two errors compound. The standard error is therefore
+#' `s * sqrt(deff / n) * sqrt((n - 1) / (n - deff))`, and `NA` where
+#' `deff >= n` (the cell then holds one observation's worth of information
+#' and `s` carries none about `sigma`). This is the package's own derivation,
+#' not taken from a reference.
+#'
+#' A fixed numeric design effect (`deff = 2`, say) inflates the standard
+#' errors uniformly: it is applied as `sd * sqrt(deff / n)`, exactly
+#' `sqrt(deff)` times the naive SE in every cell. The `E[s^2]` correction of
+#' the estimated design effects is derived from within-cell correlation, and
+#' is not applied to a number the caller chose.
+#'
+#' Even with these corrections the adjusted SE is an approximation. For
+#' inference under spatial dependence, fit an explicit spatial covariance
+#' model, such as [fit_bayesian_spatial_model()].
+#'
+#' # Confidence intervals
+#'
+#' With `conf_level` set, every numeric response and predictor column gains
+#' four more columns: `..neff_*`, that column's effective sample size in the
+#' cell (its non-missing count over its design effect, the per-column version
+#' of `cell_weight`); `..df_*`, the degrees of freedom the interval uses; and
+#' `..ci_lo_*` / `..ci_hi_*`, a t interval for a mean. Which mean follows
+#' `deff`, as for `..se_*`: at the default, `deff = 1`, the cell's own mean,
+#' when its observations are spread through the cell; under `deff = "kish"`,
+#' `"variogram"` or a number other than 1, the cell mean as an estimate of
+#' the population (grand) mean. "Standard errors and design effects" applies
+#' to it, including that the corrected interval is not one for the cell's own
+#' block average. The interval is
+#' `mean +/- qt((1 + conf_level) / 2, df) * se`, centred on the plain mean of
+#' the column's non-missing values whatever `agg_funs` computes, and is `NA`
+#' wherever the standard error is (a single observation; complete redundancy
+#' under `deff`). `..neff_*` and `..df_*` are `NA` where the column has one
+#' non-missing value or none, like the standard error; `cell_weight` still
+#' counts such a cell (1, or `1 / deff` for a numeric `deff`), so the two
+#' differ there.
+#'
+#' At no setting is `..ci_*` a range for one observation: it is an interval
+#' for a mean, and it narrows as a cell's count grows where the spread of
+#' single observations does not. The interval for one further observation in
+#' a cell has its own argument and columns, `obs_level` with
+#' `estimate = "pooled"` and `..obs_lo_*` / `..obs_hi_*` (see "Intervals:
+#' which one answers which question"). Away from the observations no interval
+#' here is calibrated.
+#'
+#' The degrees of freedom are not `neff - 1`. The interval's spread comes
+#' from the within-cell sample variance, and under exchangeable correlation
+#' (`deff = "kish"`) that variance keeps its `n - 1` degrees of freedom
+#' whatever the design effect. The design effect inflates the mean's
+#' variance and biases `s^2`, both of which the standard error already
+#' corrects, and the resulting pivot is exactly t on `n - 1` df. The
+#' effective-sample-size
+#' degrees of freedom of Faes et al. (2009) belong to a mean estimated across
+#' many correlated units whose variance is estimated from the spread between
+#' them; they do not transfer to a single cell's mean with a variance
+#' estimated from inside it. `..df_*` is therefore `n - 1` at `deff = 1`, for
+#' a numeric `deff` and for `"kish"`. Under `deff = "variogram"` correlation
+#' decays with distance and the within-cell variance loses degrees of freedom
+#' to it; `..df_*` is then the Satterthwaite (1946) moment-matched df of
+#' `s^2` under the fitted correlation matrix, a fraction of `n - 1` that
+#' shrinks as the range grows. The interval is only as good as the design
+#' effect under it: a mis-specified variogram, or an ICC estimated from too
+#' few cells, moves the coverage with it.
 #'
 #' # Conditions
 #'
@@ -2597,11 +2504,11 @@ assign_features_to_polygons <- function(
 #'   close to their median, that the squares of many such values can
 #'   overflow or lose their precision; the message gives the bounds, and the
 #'   column rescaled by a power of ten is pooled) or `"work limit"`. The last
-#'   is the case of many cells without the 'FNN' package: the neighbour
+#'   is the case of many cells without the \pkg{FNN} package: the neighbour
 #'   search then compares every pair of cells and is not made above
 #'   `getOption("spatialkit.exact_pairs_max", 2e9)` pairs, which is about
 #'   44,700 cells (the condition also carries `work`, `limit`, and `cells`
-#'   by column). With 'FNN' there is no such limit, and the result is the
+#'   by column). With \pkg{FNN} there is no such limit, and the result is the
 #'   same.
 #' * `"spatialkit_pool_degenerate"`: the pooled values were computed and
 #'   carry no pooling. `reason` is `"one cell"` (the pooled value is the
@@ -2646,6 +2553,46 @@ assign_features_to_polygons <- function(
 #' interval is read from residuals, so a constant column raises
 #' `"spatialkit_pool_degenerate"` and no other.
 #'
+#' # How this was checked
+#'
+#' The figures on this page that describe pooled values and the two
+#' intervals come from one simulation,
+#' [`dev/sim-pooled-values.R`](https://github.com/elkronos/gis_modeling_toolkit/blob/main/dev/sim-pooled-values.R)
+#' in the package's GitHub repository, whose header holds its settings and
+#' seeds. It draws 200 layers on a square of side 1,000. Each has 2,100
+#' clustered locations (four fifths of them round 25 parent points with a
+#' standard deviation of 40, the rest uniform) and a response that is a field
+#' with covariance `exp(-d / 100)` plus noise of variance 0.3. The 300
+#' locations nearest a random centre are held out as a block, 300 of the
+#' others are held out at random, and the 1,500 left are the layer: 333 cells
+#' at 4.5 observations a cell from [resolution_profile()] with
+#' `partition = "density"`, `select_resolution(criterion = "size")`,
+#' [get_voronoi_seeds()], [build_tessellation()] and
+#' [assign_features_to_polygons()], summarised with `estimate = "pooled"`. A
+#' held-out observation is given the value of its cell by [cell_values_at()].
+#'
+#' At the observations held out at random the root mean squared error of the
+#' pooled value was 0.96 of the plain mean's: 0.84 in cells that hold one of
+#' the layer's observations, 0.95 in cells of 2 to 4, 0.98 in cells of 5 to 9
+#' and 0.99 in cells of 10 or more. In the held-out block it was 0.95.
+#'
+#' The interval at `obs_level = 0.90` held 89.6 percent of the observations
+#' held out at random among the others (83.7 to 94.0 percent in single layers)
+#' and 75.1 percent of those in the held-out block. `..ci_*` at
+#' `conf_level = 0.90`, read as a range for one observation, held 58.9 and
+#' 49.2 percent of them, over the held-out observations whose cell has that
+#' interval.
+#'
+#' With a cell's true mean taken as the mean of the noise-free field over
+#' further locations drawn in it like the data's, the squared error of the
+#' pooled value was 0.98 of `(1 - w) * tau2` among the observations and 6.9
+#' times it in the held-out block.
+#'
+#' With white noise as the response on the simulation's 200 layers the median
+#' own weight was 0.11, `tau2` was 0 on 20 layers, the warning of class
+#' `"spatialkit_no_structure"` was raised on all 200, and a cell's pooled
+#' value had a correlation of 0.79 with the mean of the pooled values of its 8
+#' nearest cells, where the plain means had one of -0.02.
 #' @param assigned_points_sf An sf object with a cell identifier column.
 #' @param response_var Optional response column name for per-cell
 #'   aggregation: a single character string. A name that is not a column, or
@@ -2653,7 +2600,11 @@ assign_features_to_polygons <- function(
 #' @param predictor_vars Optional predictor column names for per-cell
 #'   aggregation. Names that are not columns, and columns that are not
 #'   numeric, are skipped with a warning.
-#' @param id_col Preferred name of the polygon/cell ID column.
+#' @param id_col Name of the cell ID column. Default `"poly_id"`. When
+#'   `assigned_points_sf` has no column of that name, the first of
+#'   `"poly_id"`, `"polygon_id"` and `"cell_id"` it carries is used; the
+#'   message that names the column shows only with `quiet = FALSE`. The
+#'   column of `cells_sf` is found as `cells_sf` says.
 #' @param agg_funs Named list of aggregation functions. Default
 #'   \code{list(mean = \(x) mean(x, na.rm = TRUE))}. Additional common options:
 #'   \code{median}, \code{sum}, \code{sd}. A single function
@@ -2665,7 +2616,7 @@ assign_features_to_polygons <- function(
 #'   \code{agg1}; pass a named list to choose the name. Anything else falls
 #'   back to the default mean with a warning. The functions receive each
 #'   column with its infinite values already set to \code{NA} (see
-#'   "Details"), so they need \code{na.rm = TRUE} as they do for missing
+#'   "Output columns"), so they need \code{na.rm = TRUE} as they do for missing
 #'   values.
 #' @param cells_sf Optional polygon sf layer to join cell geometries onto
 #'   the output. When supplied, the return value is an sf object with
@@ -2679,7 +2630,7 @@ assign_features_to_polygons <- function(
 #'   since the join drops it with its points; a `cells_sf` with none of
 #'   those columns, or one that is not an sf object, gives a warning and a
 #'   plain data frame (an error with `area = TRUE`). When NULL (default), a
-#'   plain data.frame/tibble is returned (previous behaviour).
+#'   plain data.frame/tibble is returned.
 #' @param deff Design-effect adjustment for standard errors. One of:
 #'   \describe{
 #'     \item{`1` (default)}{No adjustment; the classic IID standard error
@@ -2694,7 +2645,7 @@ assign_features_to_polygons <- function(
 #'       lets correlation decay with distance, which matters increasingly as
 #'       cells get larger and Kish's single-`rho` assumption degrades. Supply
 #'       the fit via `sac`, or it is estimated when `response_var` is given and
-#'       'gstat' is available. The distances are taken in x and y: a layer
+#'       \pkg{gstat} is available. The distances are taken in x and y: a layer
 #'       whose features, or the points taken from them, do not all have the
 #'       same dimensions (some with a Z or M coordinate) is read without its
 #'       Z and M. Exponential, spherical and Gaussian models are
@@ -2733,11 +2684,8 @@ assign_features_to_polygons <- function(
 #'       for each predictor), then apply Kish's formula per
 #'       cell: `deff_i = 1 + (n_i - 1) * rho`. The ICC is the ANOVA
 #'       (method-of-moments) estimator with Donner's `n0` for unequal cell
-#'       sizes, not the REML estimate a mixed model returns: on a single
-#'       unbalanced draw the two can differ by 0.1--0.2 (one check with cell
-#'       sizes 3 to 77 and a true ICC of 0.5 gave 0.33 against REML's 0.51),
-#'       while balanced designs agree to about 0.01. Neither is wrong, so do
-#'       not read the difference as a defect. Each column's ICC is used
+#'       sizes, not the REML estimate a mixed model returns, so on cells of
+#'       unequal sizes the two estimates can differ. Each column's ICC is used
 #'       for that column's SEs and for no other: the response's ICC is never
 #'       applied to a predictor, nor one predictor's to another. It is the
 #'       response's ICC that sets `cell_weight` whenever a response was
@@ -2784,11 +2732,11 @@ assign_features_to_polygons <- function(
 #'   possible, `deff` falls back to `"kish"` with the fallback warning, which
 #'   names the rejection. The exception is a `sac` refused because no spatial
 #'   structure was found, whose model is a pure nugget: it is used, and gives
-#'   a design effect of 1. A `sac` with no `variogram_model` attribute -- a plain
-#'   number or a `units` object, say -- is a range without a correlation
+#'   a design effect of 1. A `sac` with no `variogram_model` attribute, such
+#'   as a plain number or a `units` object, is a range without a correlation
 #'   function, and is set aside the same way. A `sac` fitted to residuals
 #'   (`attr(sac, "detrended")` `TRUE`) is used as given, with a warning when
-#'   it corrects response columns (see "Design effects and variable types").
+#'   it corrects response columns (see "Standard errors and design effects").
 #' @param deff_max_n Cells with more than this many points are subsampled
 #'   before forming the `n x n` correlation matrix used by
 #'   `deff = "variogram"`. Default 500. It must be a single number of at
@@ -2799,14 +2747,13 @@ assign_features_to_polygons <- function(
 #'   where it was.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
-#'   (see \code{\link{spatialkit_quiet}} for that). Default \code{TRUE},
-#'   unlike the tessellation functions, whose default is \code{FALSE}.
+#'   (see \code{\link{spatialkit_quiet}} for that). Default \code{TRUE}.
 #' @param area Logical, default `FALSE`.  With `TRUE`, and `cells_sf`
 #'   supplied, the result gains `cell_area` (each cell's planar area in the
 #'   squared units of `cells_sf`'s CRS) and `n_per_area` (the count of rows
 #'   in the cell over that area, a point density; a rate of anything else
 #'   is that thing's `agg_funs` sum over `cell_area`).  The request is
-#'   **refused** with an error, not answered with a number, when the cells'
+#'   refused with an error, not answered with a number, when the cells'
 #'   CRS distorts areas across them by more than 1 percent, measured as the
 #'   spread of planar-to-geodesic area ratios over the cells (over 200 of
 #'   them when there are more, taken at even spacing along the cells sorted
@@ -2844,7 +2791,7 @@ assign_features_to_polygons <- function(
 #'   s2 refuses (`rows` on the condition) and says to transform the cells to
 #'   a projected CRS, such as the one they were built in or the equal-area
 #'   one `ensure_projected(purpose = "area")` picks.  With s2 switched off,
-#'   sf needs the lwgeom package for that area and the request is refused
+#'   \pkg{sf} needs \pkg{lwgeom} for that area and the request is refused
 #'   without it.  The measured spread is attached as `attr(, "area_error")`.
 #'   Cells that mix XY and XYZ (or XYM) geometries are measured, and their
 #'   spread taken, without Z and M, since sf reads a layer in the dimension
@@ -2858,16 +2805,16 @@ assign_features_to_polygons <- function(
 #'   `..neff_*`, `..df_*`, `..ci_lo_*` and `..ci_hi_*` (see "Confidence
 #'   intervals"). Default `NULL`: no such columns.
 #' @param estimate Which value of a cell the frame reports: `"pooled"`
-#'   (default) or `"mean"`. With `"mean"` the frame is the one described
-#'   above, the frame of earlier versions, whose default this was. With
-#'   `"pooled"` every numeric response and predictor column also
+#'   (default) or `"mean"`. With `"mean"` the frame holds the plain columns
+#'   only. With `"pooled"` every numeric response and predictor column also
 #'   gets a pooled value, `w * m + (1 - w) * t`: the cell's own mean `m` and a
 #'   target `t`, the mean of the rows of the 8 cells whose observations'
 #'   centroids are nearest (all the other cells when there are fewer than 10;
 #'   the polygons are not read). The own weight is
 #'   `w = tau2 / (tau2 + sigma2 / n)`, where `n` is the cell's count,
 #'   `sigma2` the spread of the observations about their cell's mean and
-#'   `tau2` the mean squared distance between a cell's level and its target.
+#'   `tau2` the mean squared distance between a cell's true mean and its
+#'   target.
 #'   Each column is pooled on its own rows: those with a value, a cell and a
 #'   location. `agg_funs`, `deff`, `sac` and `conf_level` do not enter the
 #'   pooled columns, and every other column is computed as with `"mean"`.
@@ -2883,8 +2830,8 @@ assign_features_to_polygons <- function(
 #'   in. The distances are taken in x and y: a layer whose features, or the
 #'   points taken from them, do not all have the same dimensions (some with a
 #'   Z or M coordinate) is read without its Z and M. So is a layer whose
-#'   geometries carry M (XYM or XYZM), which GEOS does not read. The value is matched as [match.arg()] matches a choice, so an
-#'   abbreviation (`"m"`) is accepted and `NULL` is the default. See "Pooled
+#'   geometries carry M (XYM or XYZM), which GEOS does not read. An
+#'   abbreviation such as `"m"` is accepted. See "Pooled
 #'   values" for what the pooled value estimates and what its numbers rest
 #'   on, "Value" for the columns and the attributes, and "Conditions" for
 #'   the warnings.
@@ -2901,12 +2848,13 @@ assign_features_to_polygons <- function(
 #'   `NULL`: no such interval.
 #' @return A tibble/data.frame (or sf if cells_sf given) with per-cell
 #'   summaries: the ID column, `n` (rows in the cell), one column per
-#'   `agg_funs` entry per variable, `..sd_*` / `..se_*` for every numeric
-#'   response and predictor, `..neff_*` / `..df_*` / `..ci_lo_*` /
+#'   `agg_funs` entry per variable (`resp_<name>_<var>` for the response and
+#'   `pred_<name>_<var>` for each predictor), `..sd_*` / `..se_*` for every
+#'   numeric response and predictor, `..neff_*` / `..df_*` / `..ci_lo_*` /
 #'   `..ci_hi_*` for the same columns when `conf_level` is given,
-#'   `cell_weight`, `deff_applied` and `deff_method` when a design effect
-#'   was requested (any `deff` other than 1), and `cell_area` / `n_per_area`
-#'   when `area = TRUE`. An input column also called `n` is not allowed to
+#'   `cell_weight` (always), `deff_applied` and `deff_method` when a design
+#'   effect was requested (any `deff` other than 1), and `cell_area` /
+#'   `n_per_area` when `area = TRUE` ("Output columns" gives the order). An input column also called `n` is not allowed to
 #'   shadow the count.
 #'
 #'   `deff_applied` is `TRUE` on every row when a design-effect correction
@@ -3043,7 +2991,7 @@ assign_features_to_polygons <- function(
 #'   (`scored_cells` is `FALSE` or `NA`), the profile scored no estimate, the
 #'   input has no coordinates, the features are not points (see
 #'   [assign_features_to_polygons()]), or the fit was stopped by the limit on
-#'   an exact search without the 'FNN' package. Cells and rows without a
+#'   an exact search without the \pkg{FNN} package. Cells and rows without a
 #'   record, such as polygons the caller brings, are not checked and raise
 #'   neither warning.
 #'
@@ -3090,7 +3038,7 @@ assign_features_to_polygons <- function(
 #'
 #'   The comparison uses the fit of the pooled columns when that is a fit of
 #'   the estimate the profile scored, and fits the response once more
-#'   otherwise. Without the 'FNN' package that fit compares every pair of
+#'   otherwise. Without the \pkg{FNN} package that fit compares every pair of
 #'   cell centroids (pooled values) or, for each row alone in its cell,
 #'   every other location (plain means), and above
 #'   `options(spatialkit.exact_pairs_max = )` pairs it is not made
@@ -3119,10 +3067,10 @@ assign_features_to_polygons <- function(
 #' # Nine cells are too few for pooled values (each would be pulled toward
 #' # all the other cells), so these summaries report plain means alone:
 #' # estimate = "mean".
-#' # IID standard errors (default) vs Kish design-effect adjustment.  The
-#' # correction is large here, and meant to be: about 22 points per cell that
-#' # all share the cell's part of the trend carry far fewer than 22
-#' # independent pieces of information about the cell mean.
+#' # IID standard errors (default) against the Kish design effect.  The Kish
+#' # correction is large here: about 22 points per cell that share the cell's
+#' # part of the trend carry far fewer than 22 independent pieces of
+#' # information about the cell mean.
 #' naive <- summarize_by_cell(assigned, response_var = "val", estimate = "mean")
 #' kish  <- summarize_by_cell(assigned, response_var = "val", deff = "kish",
 #'                            estimate = "mean")
@@ -3172,7 +3120,7 @@ assign_features_to_polygons <- function(
 #' Satterthwaite, F. E. (1946). An approximate distribution of estimates of
 #' variance components. \emph{Biometrics Bulletin}, 2(6), 110--114.
 #' \doi{10.2307/3002019}
-#' @family aggregation
+#' @family assign and summarise
 #' @seealso [assign_features_to_polygons()], which produces the input layer;
 #'   [build_tessellation()] for the cells themselves.
 #' @export
@@ -4368,7 +4316,7 @@ summarize_by_cell <- function(assigned_points_sf,
       if (length(icc_reason)) list(reason = icc_reason))
   # The same fact per row.  The attribute does not survive rbind(),
   # dplyr::bind_rows() or most dplyr verbs, so results combined across calls
-  # (a simulation, a benchmark over many layers) could not tell a row whose
+  # (a simulation, a run over many layers) could not tell a row whose
   # design effect fell back to 1 from one that was corrected, and a fallback
   # fires when the variogram is rejected -- often when correlation is
   # strongest.  Only when a design effect was requested, so the default

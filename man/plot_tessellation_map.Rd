@@ -54,33 +54,38 @@ in the legend title); anything else a discrete one.
 columns, while \code{outline_col}, \code{features_col},
 \code{seeds_col} and \code{boundary_col} are colours.}
 
-\item{palette}{Viridis palette name. Default "viridis".}
+\item{palette}{Viridis palette, passed as \code{option} to
+\code{ggplot2::scale_fill_viridis_c()} or \code{ggplot2::scale_fill_viridis_d()}:
+\code{"viridis"} (default), \code{"magma"}, \code{"inferno"}, \code{"plasma"}, \code{"cividis"},
+\code{"rocket"}, \code{"mako"} or \code{"turbo"}.}
 
 \item{na_fill}{Fill for NA values. Default "grey90".}
 
 \item{tile_alpha}{Alpha for filled polygons. Default 0.9.}
 
-\item{outline_col, outline_size}{Colour and line width of the tessellation
-outline.}
+\item{outline_col, outline_size}{Colour and line width of the cell
+outlines. Defaults \code{"white"} and 0.2.}
 
 \item{features_col, features_size}{Colour and point size of the feature
-overlay.}
+overlay. Defaults \code{"#333333"} and 0.5.}
 
-\item{seeds_col, seeds_size}{Colour and point size of the seed overlay.}
+\item{seeds_col, seeds_size}{Colour and point size of the seed overlay.
+Defaults \code{"#1f77b4"} and 1.5.}
 
 \item{boundary_col, boundary_size}{Colour and line width of the boundary
-outline.}
+outline. Defaults \code{"#111111"} and 0.6.}
 
 \item{labels}{Logical; draw per-cell labels. Default FALSE.  A cell is
 labelled when its label is not NA and it has a location; when no cell
 has both, the labels are skipped with a log line.}
 
 \item{label_col}{Name of the COLUMN holding the label text.  Default
-\code{NULL}: the first of \code{"grid_id"}, \code{"cell_id"},
-\code{"poly_id"}, \code{"polygon_id"} and \code{"id"} the layer has, so
-the cells of \code{\link{build_tessellation}()} (\code{cell_id}) and the
-output of \code{\link{summarize_by_cell}()} (\code{poly_id}) are
-labelled without naming one.  A \code{units} or \code{difftime} column
+\code{NULL}: the first of \code{"poly_id"}, \code{"polygon_id"},
+\code{"id"}, \code{"cell_id"} and \code{"grid_id"} the layer has, the
+order in which \code{\link{assign_features_to_polygons}()} reads a
+polygon layer's IDs, so the cells of \code{\link{build_tessellation}()}
+and the output of \code{\link{summarize_by_cell}()} are labelled
+without naming one, by the ID the summary is keyed on.  A \code{units} or \code{difftime} column
 is drawn formatted, with its unit.}
 
 \item{label_size}{Label text size. Default 2.7.}
@@ -89,10 +94,8 @@ is drawn formatted, with its unit.}
 
 \item{legend_title}{Optional legend title.}
 
-\item{theme}{A ggplot2 theme, or NULL (the default) to use
-\code{ggplot2::theme_void()}.  The default is resolved inside the function
-rather than in the formals, so that a Suggests package is never evaluated
-before the \code{requireNamespace()} check has run.}
+\item{theme}{A ggplot2 theme. Default \code{NULL}, which uses
+\code{ggplot2::theme_void()}.}
 
 \item{target_crs}{Optional CRS for plotting. When \code{NULL} (the default) the
 tessellation's own CRS is used, or (if the tessellation has none) a
@@ -118,8 +121,9 @@ Default TRUE.}
 A ggplot2 object.
 }
 \description{
-Builds a layered ggplot2 map of polygon tessellations and optional
-overlays for a study boundary, seed points, and additional features.
+Builds a layered ggplot2 map of the cells, with optional overlays of a
+study boundary, seed points and other features. Requires the \pkg{ggplot2}
+package.
 }
 \details{
 Every layer is drawn in x and y: a layer whose geometries mix XY with XYZ
@@ -148,16 +152,18 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   # shaded by the cell mean rather than by an arbitrary ID.  Each cell
   # holds one point, so there is nothing to pool: estimate = "mean".
   tess  <- build_tessellation(pts, method = "voronoi", quiet = TRUE)
-  cells <- summarize_by_cell(assign_features_to_polygons(pts, tess$cells),
-                             response_var = "z", cells_sf = tess$cells,
-                             estimate = "mean")
+  asg   <- assign_features_to_polygons(pts, tess$cells,
+                                       polygon_id_col = "cell_id")
+  cells <- summarize_by_cell(asg, response_var = "z", id_col = "cell_id",
+                             cells_sf = tess$cells, estimate = "mean")
   plot_tessellation_map(cells, features_sf = pts, fill_col = "resp_mean_z",
                         legend_title = "mean z")
 }
 }
 \seealso{
-Other tessellation:
+Other cell building:
 \code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=clip_target_for]{clip_target_for()}},
 \code{\link[=create_grid_polygons]{create_grid_polygons()}},
 \code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
 \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
@@ -166,4 +172,4 @@ Other tessellation:
 \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}},
 \code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
 }
-\concept{tessellation}
+\concept{cell building}

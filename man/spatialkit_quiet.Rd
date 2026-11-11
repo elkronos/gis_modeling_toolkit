@@ -47,8 +47,6 @@ spatialkit_quiet(FALSE)        # or back to the WARN+ default
 }
 \seealso{
 Other package options and caches:
-\code{\link[=clear_fitted_cache]{clear_fitted_cache()}},
-\code{\link[=clear_grid_cache]{clear_grid_cache()}},
-\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}}
+\code{\link[=clear_fitted_cache]{clear_fitted_cache()}}
 }
 \concept{package options and caches}

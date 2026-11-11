@@ -611,7 +611,8 @@ test_that("kriging_adequacy()'s print says why a pure nugget still has a gain", 
   df <- sf::st_drop_geometry(ka)
   expect_true(all(df$kr_n_used == 50L))
   expect_equal(df$kr_gain, 1 - df$n / df$kr_n_used, tolerance = 1e-3)
-  line <- grep("^  kr_gain", .tm_print(ka), value = TRUE)
+  line <- grep("^  kr_gain", withr::with_options(list(width = 10000), .tm_print(ka)),
+               value = TRUE)
   expect_length(line, 1L)
   expect_match(line, paste0("; under a pure nugget the variogram gives every place one mean, so ",
                             "this is the gain of averaging the kr_n_used locations a cell is ",
@@ -620,7 +621,7 @@ test_that("kriging_adequacy()'s print says why a pure nugget still has a gain", 
   # A variogram with structure gets no such clause.
   kz <- .tm_quiet(kriging_adequacy(asg, "z", units, id_col = "GEOID"))
   expect_false(all(attr(kz, "variogram")$model == "Nug"))
-  out <- .tm_print(kz)
+  out <- withr::with_options(list(width = 10000), .tm_print(kz))
   expect_length(grep("^  kr_gain", out), 1L)
   expect_false(any(grepl("pure nugget", out, fixed = TRUE)))
 })
@@ -648,12 +649,30 @@ test_that("under a pure nugget the kriging print says that a cell of more than n
   expect_equal(df$kr_n_used[1L], 210)
   expect_true(all(df$kr_n_used[-1L] == 30L))
   expect_equal(df$kr_gain, 1 - df$n / df$kr_n_used, tolerance = 1e-3)
-  line <- grep("^  kr_gain", .tm_print(ka), value = TRUE)
+  line <- grep("^  kr_gain", withr::with_options(list(width = 10000), .tm_print(ka)),
+               value = TRUE)
   expect_length(line, 1L)
   expect_match(line, paste0("over averaging its own alone \\(the nmax = 30 nearest its centre, ",
                             "or, for 1 cell\\(s\\) with own locations beyond those, all of its ",
                             "own plus the 30 nearest outside it\\)$"))
   expect_false(grepl("in place of", line, fixed = TRUE))
+})
+
+test_that("kriging_adequacy()'s print wraps each line to the console width", {
+  skip_if_not_installed("gstat")
+  units <- .tm_layers()$units
+  asg <- .tm_quiet(assign_features_to_polygons(.tm_pts(), units, polygon_id_col = "GEOID"))
+  kz <- .tm_quiet(kriging_adequacy(asg, "z", units, id_col = "GEOID"))
+  for (w in c(60L, 80L)) {
+    out <- withr::with_options(list(width = w), .tm_print(kz))
+    expect_true(all(nchar(out) <= w), info = w)
+    # A continuation line is indented two spaces more than the line it continues.
+    expect_true(any(grepl("^    [^ ]", out)), info = w)
+    # Joined up, the lines are the report printed without a limit.
+    wide <- withr::with_options(list(width = 10000), .tm_print(kz))
+    expect_identical(gsub("\n {4}", " ", paste(out, collapse = "\n")),
+                     paste(wide, collapse = "\n"), info = w)
+  }
 })
 
 test_that("the numbers of one printed line share one notation", {

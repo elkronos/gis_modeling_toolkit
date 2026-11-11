@@ -2,7 +2,7 @@
 % Please edit documentation in R/tessellation.R
 \name{create_voronoi_polygons}
 \alias{create_voronoi_polygons}
-\title{Create Voronoi polygons from points with CRS handling and optional clipping}
+\title{Build Voronoi cells around points}
 \usage{
 create_voronoi_polygons(
   points_sf,
@@ -33,21 +33,10 @@ do not look like lon/lat cannot take a geographic boundary's CRS, and are
 refused with an error. A CRS-less boundary given with lon/lat points (or
 with CRS-less points taken as lon/lat) is read as lon/lat when its
 coordinates fit the lon/lat envelope, and refused with an error
-otherwise. A boundary that mixes XY and XYZ (or XYM) geometries is read
-without Z and M, since sf reads a layer in the dimension of its first
-geometry. So is one whose
-geometries carry M (XYM or XYZM), which GEOS refuses.
-A row that is empty, or has a coordinate that is not finite or lies
-beyond 1e150 (read as given, and again after any move into another
-CRS), covers no ground and is left out; a boundary with no such row
-left is refused with an error that says so. A boundary in a geographic
-CRS with a vertex at a latitude beyond 90 degrees, which is no place on
-the Earth, is refused with an error of class
-\code{"spatialkit_cells_degenerate"} that names its rows and says to check
-its CRS.
-A row the repair of \code{boundary} leaves without a polygon (a ring with no
-height: every vertex on one line, or in degrees on one parallel) is
-left out as well, and a boundary with no polygon left is refused.}
+otherwise.
+Rows without a location, rows the repair leaves without a polygon,
+vertices at a latitude beyond 90 and mixed dimensions are handled as
+"Boundaries" in \link{spatialkit-geometry} says.}
 
 \item{expand}{Numeric; absolute distance, in the working CRS's units, by
 which the boundary (or the hull derived from the points) is grown before
@@ -56,7 +45,7 @@ grown boundary, so they reach \code{expand} beyond the study area, and a point
 up to \code{expand} outside it gets a cell and an \code{index} value. The grown
 boundary is the one returned as \code{boundary}.}
 
-\item{clip}{Logical; intersect cells with boundary.}
+\item{clip}{Logical; clip the cells to the boundary. Default \code{TRUE}.}
 
 \item{keep_duplicates}{Logical. With \code{FALSE} (the default), points
 are merged before the diagram is built when they round to one point in
@@ -79,18 +68,12 @@ there at two corners that differ only by rounding, which the transform
 to degrees can put at one point, and sf's spherical engine (s2) refuses
 such a cell. \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} joins the cells of the
 centres a profile scored in the CRS they were built in, while they
-carry the record that says so (\code{scored_cells = TRUE}). \code{sf::st_area()},
-\code{sf::st_union()}, and a join of rows in degrees to other cells (cells
-without the record, such as those of a count given as a number or those
-a verb that drops attributes has stripped of it, and cells whose record
-says \code{scored_cells = FALSE}, such as those of centres refitted to every
-point) go to s2 and stop on such a cell: transform the cells to a
-projected CRS first. \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} then stops with an
-error of class \code{"spatialkit_cells_degenerate"} that names the cells s2
-refuses, the cause and that transform; its largest-overlap join of
-polygon features repairs such cells instead, with a warning.
-\code{\link[=summarize_by_cell]{summarize_by_cell()}} with \code{area = TRUE}, which takes the areas of such
-cells, stops with the same error before any summary.}
+carry the record that says so (\code{scored_cells = TRUE}).
+\code{sf::st_area()} and \code{sf::st_union()} stop on such a cell in degrees
+with s2's error. The package's other joins and measures of it stop with
+an error of class \code{"spatialkit_cells_degenerate"} ("Polygons in
+degrees" in \link{spatialkit-geometry} gives the exceptions). Transform the
+cells to a projected CRS first.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
@@ -164,21 +147,19 @@ assigns, and \code{\link{summarize_by_cell}()} checks its result
 against it.
 }
 \description{
-Assigns every location in the study area to its nearest input point, giving
-one cell per point. This is the tessellation to reach for when the
-observations themselves define the regions of interest (sampling sites,
-monitoring stations, service points), because cell size then adapts to
-sampling density instead of being imposed by a fixed grid: dense areas get
-small cells and sparse areas large ones. Prefer \code{\link[=create_grid_polygons]{create_grid_polygons()}}
-instead when you need equal-area cells or a resolution independent of where
-the data happen to be.
+Gives every location in the study area to its nearest input point, so
+each point gets one cell. Use it when the observations themselves define
+the cells (sampling sites, monitoring stations, service points): cell size
+then follows sampling density, with small cells where the points are dense
+and large ones where they are sparse. Use \code{\link[=create_grid_polygons]{create_grid_polygons()}} instead
+for equal-area cells, or for a resolution that does not depend on where
+the data are.
 }
 \details{
-The heavy lifting is \code{\link[sf:st_voronoi]{sf::st_voronoi()}}.  What this adds is the surrounding
-bookkeeping: projecting lon/lat input, building and buffering an envelope
-so edge cells are bounded, clipping to \code{boundary}, restoring the
-point-to-cell correspondence that \code{st_voronoi()} scrambles, and stamping
-stable \code{cell_id} values.
+\code{\link[sf:st_voronoi]{sf::st_voronoi()}} builds the diagram. This function projects lon/lat
+input, builds and buffers an envelope so edge cells are bounded, clips to
+\code{boundary}, restores the point-to-cell correspondence that \code{st_voronoi()}
+scrambles, and numbers the cells with stable \code{cell_id} values.
 
 The generators are the points' vertices, not the features. A MULTIPOINT
 feature with several vertices therefore gets one cell per vertex, and its
@@ -193,9 +174,8 @@ data. For observations that is their own convex hull grown by 2 percent of
 its diagonal, so every observation has a cell. Seeds are different: k-means
 centres, random points in a study area and the centres a resolution
 profile scored all lie inside the ground they stand for, and cells clipped
-to the hull of the seeds leave the edge of that ground uncovered (on 3,000
-uniform points, 72 percent of them at 4 seeds, 25 percent at 25 and 4
-percent at 100). The boundary is therefore derived from the \code{cover} when
+to the hull of the seeds leave the edge of that ground uncovered. The
+boundary is therefore derived from the \code{cover} when
 there is one: the argument, or the cover the seeding functions attach to
 their result. A layer that looks like seeds and has neither a boundary nor
 a cover (seeds bound with \code{rbind()}, which drops the attribute, or built
@@ -264,8 +244,9 @@ res$cells   # one polygon per unique point, with stable cell_id
 res$index   # cell_id assignment for each input point
 }
 \seealso{
-Other tessellation:
+Other cell building:
 \code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=clip_target_for]{clip_target_for()}},
 \code{\link[=create_grid_polygons]{create_grid_polygons()}},
 \code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
 \code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}},
@@ -274,4 +255,4 @@ Other tessellation:
 \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}},
 \code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
 }
-\concept{tessellation}
+\concept{cell building}

@@ -17,25 +17,20 @@ create_grid_polygons(
 )
 }
 \arguments{
-\item{boundary}{Polygonal sf or sfc object. One that mixes XY and XYZ (or
-XYM) geometries is read without Z and M, since sf reads a layer in the
-dimension of its first geometry. So is one whose
-geometries carry M (XYM or XYZM), which GEOS refuses.
-A row that is empty, or has a coordinate that is not finite or lies
-beyond 1e150 (read as given, and again after any move into another
-CRS), covers no ground and is left out; a boundary with no such row
-left is refused with an error that says so. A boundary in a geographic
-CRS with a vertex at a latitude beyond 90 degrees, which is no place on
-the Earth, is refused with an error of class
-\code{"spatialkit_cells_degenerate"} that names its rows and says to check
-its CRS.
-A row the repair of \code{boundary} leaves without a polygon (a ring with no
-height: every vertex on one line, or in degrees on one parallel) is
-left out as well, and a boundary with no polygon left is refused.
+\item{boundary}{Polygonal sf or sfc object, the study area the grid is
+laid over and clipped to.
+Rows without a location, rows the repair leaves without a polygon,
+vertices at a latitude beyond 90 and mixed dimensions are handled as
+"Boundaries" in \link{spatialkit-geometry} says.
 A boundary without a CRS that \code{crs} stamps with a geographic CRS is
 tested for its latitude in the same way.}
 
-\item{target_cells}{Optional approximate desired number of cells.  The cell
+\item{target_cells}{Optional approximate desired number of cells. Besides
+a number it accepts what \code{approx_n_cells} of \code{\link[=build_tessellation]{build_tessellation()}}
+accepts and reads it the same way: the ranked levels of
+\code{\link[=determine_optimal_levels]{determine_optimal_levels()}} (the first is used), a
+\code{\link[=select_resolution]{select_resolution()}} result (its \verb{$best}) or a \code{\link[=resolution_profile]{resolution_profile()}},
+with the warnings and errors described there. The cell
 \emph{size} is derived from it as \code{sqrt(area / target_cells)}, where
 \code{area} is that of the boundary's bounding box, so square grids get
 square cells; for hex grids the count is adjusted for hexagonal packing
@@ -44,18 +39,19 @@ spans the longer side of the box.  The size does not depend on which way
 the boundary lies; the count can, because hexagon rows are 0.87
 \code{cellsize} apart while columns are \code{cellsize} apart (about 10
 percent on a moderately elongated box, up to 1.7 times on a strip
-narrower than one hexagon).  The word "approximate" is load bearing: a
-grid of square cells over an elongated bounding box needs more of them
-than a grid of rectangles would (a 1000 x 1 strip at
-\code{target_cells = 9} yields cells of side 10.5 and about 95 of them),
-and clipping to an irregular boundary moves the count again.  Pass
-\code{cellsize} when the count matters more than the shape.}
+narrower than one hexagon).  The count is approximate: square cells
+over an elongated bounding box need more cells than rectangles would (a
+1000 x 1 strip at \code{target_cells = 9} gives cells of side 10.5 and
+about 95 of them), and clipping to an irregular boundary moves the
+count again.  Pass \code{cellsize} when the count matters more than the
+shape.}
 
 \item{type}{Grid type: \code{"square"} (the default) or \code{"hex"}.}
 
 \item{cellsize}{Optional numeric cell size (length 1 or 2), in the units of
-the working CRS. Takes precedence over \code{n}: if both are supplied,
-\code{cellsize} is used, \code{n} is ignored and a warning is logged. Supply exactly
+the working CRS. Takes precedence over \code{n} and \code{target_cells}: if
+either is also supplied, \code{cellsize} is used, the other is ignored and a
+warning is logged. Supply exactly
 one of \code{target_cells}, \code{cellsize} and \code{n}.  For \code{type = "hex"} a hexagon
 is defined by a single edge-to-edge distance, so only \code{cellsize[1]} is
 used and a differing \code{cellsize[2]} is ignored with a logged warning.
@@ -80,13 +76,15 @@ cells, although it does change the grid, because the \code{cellsize} derived
 from it is what the hexagons are built with. Ignored (with a logged
 warning) when \code{cellsize} is also supplied. Passing both would otherwise
 truncate the grid to \code{n[1]} x \code{n[2]} cells anchored at the bounding-box
-corner, covering only part of the boundary.}
+corner, covering only part of the boundary. Wins over \code{target_cells},
+which is then ignored with a logged warning.}
 
-\item{clip}{Logical; clip grid to boundary. In a projected or CRS-less
+\item{clip}{Logical; clip the grid to the boundary. Default \code{TRUE}. In a
+projected or CRS-less
 grid, a cell that meets the boundary only within a margin of the cell's
 edge (the margin \code{cellsize} gives: one part in 1e10 of the largest
 coordinate of the boundary, within its bounds; a
-cell whose edge lies on the boundary's edge but for rounding) is
+cell whose edge lies on the boundary's edge up to rounding) is
 dropped, rather than kept as a sliver. The call stops when the clip
 leaves no cell, as it does when the lattice has none: in degrees with
 s2 on, a boundary edge that spans more than 180 degrees of longitude is
@@ -132,23 +130,29 @@ this refuses it with a message before memory is exhausted. Set to
 \code{Inf} to disable.}
 }
 \value{
-An sf polygon layer with poly_id column.
+An sf polygon layer with one column, \code{poly_id}, numbering the
+cells in the order \code{\link[sf:st_make_grid]{sf::st_make_grid()}} lays them (row by row from the
+bottom left). The numbering differs from that of
+\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}} and \code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}}, which
+sort cells by position; pass the result to \code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}} for
+IDs that do not depend on how the grid was built. Use one builder
+throughout an analysis, since a summary keyed on the IDs of one drawn on
+the cells of the other puts the values on the wrong cells.
 }
 \description{
 Lays a regular grid of equal-area cells over \code{boundary} and clips it to that
-boundary. Reach for this rather than \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} when cell
-size should be a decision you make, instead of one dictated by where the
-observations happen to be. That is the case when you need per-cell rates
-comparable across the map, or a resolution that stays fixed as the sample
-grows. Hexagons (\code{type = "hex"}) avoid the axis-aligned artefacts of squares
-and give every cell the same distance to all six neighbours, which matters
-for anything that reads neighbourhoods.
+boundary. Use it rather than \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} when you set the
+cell size yourself instead of letting the observations set it: per-cell
+rates comparable across the map, or a resolution that stays fixed as the
+sample grows. Hexagons (\code{type = "hex"}) avoid the axis-aligned artefacts of
+squares and put all six neighbours of a cell at the same distance.
 }
 \details{
-Size the grid with exactly one of \code{target_cells} (roughly how many cells you
-want, the package derives the rest), \code{cellsize} (a fixed edge length in CRS
-units) or \code{n} (a fixed number of columns and rows). See \verb{@param cellsize}
-for what happens when more than one is given.
+Size the grid with exactly one of \code{target_cells} (roughly how many cells
+you want; the package derives the rest), \code{cellsize} (a fixed edge length
+in CRS units) or \code{n} (a fixed number of columns and rows). When more than
+one is given, \code{cellsize} wins over the other two and \code{n} wins over
+\code{target_cells}; each argument ignored is named in a logged warning.
 }
 \examples{
 library(sf)
@@ -158,14 +162,15 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 grid_sq  <- create_grid_polygons(bnd, target_cells = 100, type = "square")
 grid_hex <- create_grid_polygons(bnd, target_cells = 100, type = "hex")
 nrow(grid_sq)
-# Hex counts run above target because clipping keeps every hexagon that
-# merely overhangs the boundary; the inflation is proportionally larger
-# at small target_cells.
+# The hex count runs above the target: clipping keeps every hexagon that
+# overhangs the boundary, and that adds more, in proportion, at a small
+# target_cells.
 nrow(grid_hex)
 }
 \seealso{
-Other tessellation:
+Other cell building:
 \code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=clip_target_for]{clip_target_for()}},
 \code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
 \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
 \code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}},
@@ -174,4 +179,4 @@ Other tessellation:
 \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}},
 \code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
 }
-\concept{tessellation}
+\concept{cell building}

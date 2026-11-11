@@ -2,7 +2,7 @@
 % Please edit documentation in R/tessellation.R
 \name{clip_target_for}
 \alias{clip_target_for}
-\title{Build a polygonal clip target from points and/or a boundary}
+\title{Build the area to tessellate within, from points or a boundary}
 \usage{
 clip_target_for(points_sf, boundary = NULL, expand = 0, quiet = FALSE)
 }
@@ -30,28 +30,17 @@ warning. With points in a projected CRS it is read as \code{\link[=harmonize_crs
 does: coordinates that look like lon/lat are taken as EPSG:4326 and
 reprojected, anything else is stamped with the points' CRS. With lon/lat
 points it is read as lon/lat when its coordinates fit the lon/lat
-envelope, and refused with an error otherwise. A boundary that mixes XY
-and XYZ (or XYM) geometries is read without Z and M, since sf reads a
-layer in the dimension of its first geometry. So is one whose
-geometries carry M (XYM or XYZM), which GEOS refuses.
-A row that is empty, or has a coordinate that is not finite or lies
-beyond 1e150 (read as given, and again after any move into another
-CRS), covers no ground and is left out; a boundary with no such row
-left is refused with an error that says so. A boundary in a geographic
-CRS with a vertex at a latitude beyond 90 degrees, which is no place on
-the Earth, is refused with an error of class
-\code{"spatialkit_cells_degenerate"} that names its rows and says to check
-its CRS.
-A row the repair of \code{boundary} leaves without a polygon (a ring with no
-height: every vertex on one line, or in degrees on one parallel) is
-left out as well, and a boundary with no polygon left is refused.}
+envelope, and refused with an error otherwise.
+Rows without a location, rows the repair leaves without a polygon,
+vertices at a latitude beyond 90 and mixed dimensions are handled as
+"Boundaries" in \link{spatialkit-geometry} says.}
 
-\item{expand}{Numeric expansion distance or fraction (0–1 = fraction of
-extent). Absolute values are expressed in the units of the CRS the clip
-target is built in. Because \code{\link[sf:st_buffer]{sf::st_buffer()}} interprets \code{dist} as
-\strong{metres} for lon/lat data while the fraction-of-extent form is derived
-from a bounding box measured in \strong{degrees}, lon/lat input is projected to
-a local projected CRS first (see \verb{@return}), so both forms agree.}
+\item{expand}{A single non-negative number. Below 1 it is a fraction of
+the longer side of the bounding box (of \code{boundary} when one is given,
+otherwise of \code{points_sf}); 1 or more is a distance in the units of the
+CRS the target is built in. Default 0 (no buffer). Lon/lat input is
+first projected to a local projected CRS (see Value), so both forms are
+in that CRS's units.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
@@ -63,32 +52,31 @@ the layer is returned in the automatically selected local projected CRS,
 not the input CRS; a message reports this unless \code{quiet = TRUE}.
 }
 \description{
-Resolves a single polygon to tessellate within. With a \code{boundary} it is
-that boundary (optionally buffered by \code{expand}); without one it is the
-axis-aligned bounding box of \code{points_sf} (the rectangle in the working
-CRS), again optionally buffered, or a small buffer around the points when
-they all share one x or one y, or nearly so (the short side of their
-bounding box below a millionth of the long side, or below about 1.5e-154,
-a length whose square doubles cannot hold). When every point sits at one
-location, or the share of their spread the buffer would take (5 percent,
-or a fractional \code{expand}) is below that length, the box has no extent to
-take a share of, and the target is a disk of radius 1 unit of the CRS
-around it (1 m in a metre CRS, 1 km in a
-kilometre CRS), unless \code{expand} is 1 or more, which is then the radius;
-the message says so. Pass \code{boundary} for a target of real size.
-Reach for this function to build the \code{boundary} that
-\code{method = "hex"} and \code{"square"} require, to check that a study-area
-polygon actually contains the observations before tessellating, or to
-pass the same envelope to \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} and
-\code{\link[=create_grid_polygons]{create_grid_polygons()}} so that two tessellations of one dataset cover
-identical ground.
+Builds the polygon layer to tessellate within. With a \code{boundary} it is
+that boundary, row for row (optionally buffered by \code{expand}). Without one
+it is the axis-aligned bounding box of \code{points_sf} in the working CRS,
+again optionally buffered. Points that all share one x or one y, or
+nearly so (the short side of their bounding box below a millionth of the
+long side, or below about 1.5e-154, a length whose square doubles cannot
+hold), get a small buffer around them instead. When every point sits at
+one location, or the share of their spread the buffer would take (5
+percent, or a fractional \code{expand}) is below that length, the box has no
+extent to take a share of, and the target is a disk of radius 1 unit of
+the CRS around it (1 m in a metre CRS, 1 km in a kilometre CRS), unless
+\code{expand} is 1 or more, which is then the radius; the message says so.
+Pass \code{boundary} for a target of real size.
 }
 \details{
+Use it to build the \code{boundary} that \code{method = "hex"} and \code{"square"}
+require, to check that a study-area polygon contains the observations
+before tessellating, or to pass the same envelope to
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} and \code{\link[=create_grid_polygons]{create_grid_polygons()}} so that two
+tessellations of one dataset cover the same ground.
+
 It is not the target \code{\link[=build_tessellation]{build_tessellation()}} derives on its own:
 \code{method = "voronoi"} without a boundary clips to the convex hull of the
 points (or of their \code{cover}, for seeds) buffered by 2 percent of its
-diagonal, and there \code{expand} is always
-a distance. A bounding box over a non-rectangular point cloud includes
+diagonal, and there \code{expand} is always a distance. A bounding box over a non-rectangular point cloud includes
 corners with no data, so a hex or square grid laid over it has cells that
 hold no points; pass the study-area polygon when there is one.
 }
@@ -103,4 +91,16 @@ pts <- st_as_sf(
 box <- clip_target_for(pts, expand = 0.1, quiet = TRUE)
 st_area(box)
 }
-\concept{spatial data preparation}
+\seealso{
+Other cell building:
+\code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=create_grid_polygons]{create_grid_polygons()}},
+\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}},
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=plot_tessellation_map]{plot_tessellation_map()}},
+\code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}},
+\code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
+}
+\concept{cell building}

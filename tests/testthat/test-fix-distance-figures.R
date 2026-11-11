@@ -221,7 +221,9 @@ test_that("kriging_adequacy()'s print quotes an identified range in any unit", {
     cells <- sf::st_sf(poly_id = 1:36, geometry = sf::st_make_grid(L, n = c(6, 6)))
     a <- suppressWarnings(suppressMessages(assign_features_to_polygons(L, cells)))
     ka <- suppressWarnings(suppressMessages(kriging_adequacy(a, "z", cells, sac = r)))
-    pr <- grep("^  variogram: ", utils::capture.output(print(ka)), value = TRUE)
+    pr <- grep("^  variogram: ", withr::with_options(list(width = 10000),
+                                                     utils::capture.output(print(ka))),
+               value = TRUE)
     expect_length(pr, 1L)
     f <- .df_figures(pr, c(range = "%\\), range "))
     expect_true(isTRUE(attr(ka, "range_identified")), info = unit)
