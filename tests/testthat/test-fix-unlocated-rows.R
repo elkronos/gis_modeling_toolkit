@@ -686,13 +686,21 @@ test_that("resolution_profile() reads the bound before and after the move into t
   }
   # A row with a location in EPSG:5070 that has none in EPSG:32617 (the move
   # gives NaN): dropped after the move, with the drop warning, where it
-  # stopped the call.
+  # stopped the call.  The move says first that it cannot place the row
+  # (BUG-203, class spatialkit_rows_unplaced, in the words of
+  # resolution_profile() and naming EPSG:5070).
   ctl <- .ful_run(resolution_profile(.ful_put(L, 5070, NULL), "z", sac = sac, n_levels = 3))
   r <- .ful_run(resolution_profile(.ful_put(L, 5070, c(3e7, 3e7)), "z", sac = sac,
                                    n_levels = 3))
   expect_identical(r$value, ctl$value)
-  expect_identical(r$msgs[-1L], ctl$msgs[-1L])
-  expect_identical(r$msgs[1L], paste0("resolution_profile(): dropping 1 point(s) without a ",
+  expect_identical(r$msgs[-(1:2)], ctl$msgs[-1L])
+  expect_identical(r$classes[1L], "spatialkit_rows_unplaced")
+  expect_identical(r$msgs[1L], paste0("resolution_profile(): the move of `data_sf` to ",
+                                      "EPSG:32617 cannot place every vertex of row 1 of its ",
+                                      "150, which has a location in EPSG:5070; it comes back ",
+                                      "empty or without the vertices it cannot place. ",
+                                      "Correct or drop those rows."))
+  expect_identical(r$msgs[2L], paste0("resolution_profile(): dropping 1 point(s) without a ",
                                       "location in the CRS of `sac` (an empty point, or a ",
                                       "coordinate that is not finite or lies beyond 1e150)."))
   # With the split, a row the move leaves without a location is in neither

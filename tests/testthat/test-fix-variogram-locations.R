@@ -300,8 +300,12 @@ test_that("the help and NEWS say what the floor counts, and when", {
                   "decide whether 30 distinct locations remain, and so whether a range is ",
                   "estimated at all"))
   # No warning of a raw-response fit that is not made.
-  says(rd, paste0("On fewer than 30 distinct locations nothing is fitted then either: the ",
-                  "result is the NA, and there is no such warning."))
+  # The constant response and the points with no extent are named with the
+  # floor on locations since the warning follows those refusals too
+  # (BUG-41).
+  says(rd, paste0("Where nothing is fitted then either (fewer than 30 distinct locations, ",
+                  "a constant response, or points with no extent), the result is the NA ",
+                  "with its reason, and there is no such warning."))
 
   news_file <- file.path(root, "NEWS.md")
   if (!file.exists(news_file)) news_file <- system.file("NEWS.md", package = "spatialkit")

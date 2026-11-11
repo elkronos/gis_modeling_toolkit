@@ -361,9 +361,20 @@ assign_features_to_polygons <- function(
   # EPSG:32616 came back finite in EPSG:32617 and was joined there.
   unlocated_f <- .unlocated_features(sf::st_geometry(features_xy))
   polygons_xy <- .xy_if_mixed_or_m(polygons_sf)
-  hh <- harmonize_crs(features_xy, polygons_xy,
-                      prefer = if (join_in_p) "b" else "a")
+  # A row with a location that the move cannot place in full comes back
+  # empty, or without the vertices it cannot place, and is said in this
+  # function's words, naming `features_sf` or `polygons_sf`, in place of
+  # harmonize_crs()'s, which names `a` or `b`.
+  done <- .answer_for_classed("spatialkit_rows_unplaced")
+  hh <- tryCatch(harmonize_crs(features_xy, polygons_xy,
+                               prefer = if (join_in_p) "b" else "a"),
+                 finally = done())
   f <- hh$a; p <- hh$b
+  # A layer without a CRS that harmonize_crs() read as lon/lat and moved is
+  # compared as EPSG:4326, so the warning names longitude and latitude.
+  .warn_rows_unplaced(.as_harmonize_read(features_xy, f), f,
+                      caller = "assign_features_to_polygons",
+                      arg = "features_sf", remedy = .UNPLACED_REMEDY)
   # `f` is only the join's copy.  The rows returned keep the geometry the
   # features arrived with, Z and M included; a CRS-less layer is resolved
   # into the polygons' CRS and returned there, as before.  A CRS-less layer
@@ -405,10 +416,24 @@ assign_features_to_polygons <- function(
   # is not finite or lies beyond 1e150, read as given, comes back empty
   # (.transform_keep_unlocated()), as harmonize_crs() returns it: moved as
   # it was, it came back as a smaller shape that took points.
+  # The features are moved with .transform_keep_unlocated() as well, and a
+  # row either move cannot place in full is said, as above.  The polygons
+  # are said for the move whose copy is joined.
   crs_s <- if (!join_in_p && !is.na(crs_p)) .scored_crs(count_rule) else NULL
-  if (!is.null(crs_s)) {
-    if (!isTRUE(sf::st_crs(f) == crs_s)) f <- sf::st_transform(f, crs_s)
+  if (is.null(crs_s)) {
+    .warn_rows_unplaced(.as_harmonize_read(polygons_xy, p), p,
+                        caller = "assign_features_to_polygons",
+                        arg = "polygons_sf", remedy = .UNPLACED_REMEDY)
+  } else {
+    if (!isTRUE(sf::st_crs(f) == crs_s)) {
+      f0 <- f
+      f  <- .transform_keep_unlocated(f0, crs_s)
+      .warn_rows_unplaced(f0, f, caller = "assign_features_to_polygons",
+                          arg = "features_sf", remedy = .UNPLACED_REMEDY)
+    }
     p <- .transform_keep_unlocated(polygons_xy, crs_s)
+    .warn_rows_unplaced(polygons_xy, p, caller = "assign_features_to_polygons",
+                        arg = "polygons_sf", remedy = .UNPLACED_REMEDY)
   }
 
   id_candidates <- unique(c(polygon_id_col, "poly_id", "polygon_id", "id", "cell_id", "grid_id"))

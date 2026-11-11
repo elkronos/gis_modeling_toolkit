@@ -1469,7 +1469,9 @@
 #'   the ladder; values below 2, above the number of distinct locations, or
 #'   at or above the number of points, are dropped (k-means cannot place more
 #'   centres than there are distinct points, and \code{stats::kmeans()}
-#'   refuses as many centres as points).
+#'   refuses as many centres as points).  When none is left the call stops
+#'   with an error, before the variogram is estimated or read, so it raises
+#'   no warning about the variogram.
 #' @param n_levels Number of levels on the ladder.  Default 20.  The ladder
 #'   has fewer when rounding puts two of them on one count, and one more
 #'   when the range floor is added as a level (see "The ladder and its
@@ -2461,6 +2463,55 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     centre_guard(finest)
   }
 
+  # The rows of the subsample the response criteria read (under select_on =
+  # "split", those of the selection half): what a fitted cell is scored on.
+  n_scored <- if (has_resp) sum(is.finite(y)) else NA_integer_
+  # On every other ladder the finest level is known before the variogram
+  # too: the largest of the caller's `levels` the locations allow, or else
+  # the ceiling, and neither reads the variogram.  So `levels` is checked,
+  # and the estimate's search of each scored row's nearest centre bounded,
+  # before the variogram is estimated and read.  They came after it, and a
+  # call they stopped had warned what `cp` and `reliability` would take from
+  # a variogram that no column ever read.
+  if (!size_ladder) {
+    by_support <- floor(n_support / min_cell_n)
+    # The ceiling is the smallest of what the layer's point count supports,
+    # what its distinct locations allow and, when the fits run on a subsample,
+    # what the subsample can fit: two of its points per cell.  k-means can put
+    # a centre on every distinct location but no more, and stats::kmeans()
+    # refuses as many centres as points, so that bound is the distinct
+    # locations when some repeat and one short of the points when none do.  It
+    # used to be one short of the distinct locations in every case, which
+    # dropped k = 5 on five stations visited thirty times each.  Which bound
+    # holds is recorded (below), because the print and the "bound is
+    # choosing" notes name it.
+    k_cap_fit    <- min(n_uniq, n - 1L)
+    data_ceiling <- min(by_support, k_cap_all)
+    # Two scored subsample rows per cell, not two subsample points: with 20,000
+    # points, a response on 5,000 and sample_n = 1500, half the subsample left
+    # about 0.5 scored rows per cell at a ceiling of 750.
+    fit_rows     <- if (has_resp && n_resp > 0L) n_scored else n
+    fit_cap      <- if (n < n_all) min(floor(fit_rows / 2), k_cap_fit) else Inf
+    # A ladder the caller set is scored as given.  Settled here, before the
+    # messages below, because they name it: with `levels = 2:4` on ten points
+    # the warning said "the profile scores 2 cells" over a table of three
+    # levels.
+    if (levels_given) {
+      levels <- sort(unique(as.integer(levels)))
+      levels <- levels[!is.na(levels) & levels >= 2L & levels <= k_cap_fit]
+      if (!length(levels))
+        stop("resolution_profile(): no usable value in `levels`.", call. = FALSE)
+    }
+    # Fewer than two cells that meet min_cell_n, or one distinct location, is
+    # no ladder at all.  The ceiling used to be raised to 2 without a word:
+    # ten points at min_cell_n = 9 came back as "ceiling 2 from min_cell_n",
+    # supported.
+    too_few <- data_ceiling < 2
+    ceiling_L    <- max(2L, as.integer(min(data_ceiling, fit_cap)))
+    # The ladder built below ends at the ceiling.
+    centre_guard(if (levels_given) max(levels) else ceiling_L)
+  }
+
   # Variogram: supplied, or estimated on the subsample (its selection half
   # under select_on = "split": the range reads the response).
   vg <- NULL
@@ -2683,10 +2734,8 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   }
 
   # Bounds.  `area`, `n_uniq_all`, `n_all` and `k_cap_all` are the layer's
-  # and `n_uniq` the subsample's (see above).
-  # The rows of the subsample the response criteria read (under select_on =
-  # "split", those of the selection half): what a fitted cell is scored on.
-  n_scored <- if (has_resp) sum(is.finite(y)) else NA_integer_
+  # and `n_uniq` the subsample's (see above); `n_scored` is the subsample's
+  # scored rows (above).
   # What a row has to carry to be scored, in the words of the messages: with
   # predictors a row with a response and no predictor is left out as well,
   # and "450 of the 900 points carry a response" was said of a layer on
@@ -2710,40 +2759,8 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     ceiling_L    <- sl$ceiling
     ceiling_from <- sl$ceiling_from
   } else {
-    by_support <- floor(n_support / min_cell_n)
-    # The ceiling is the smallest of what the layer's point count supports,
-    # what its distinct locations allow and, when the fits run on a subsample,
-    # what the subsample can fit: two of its points per cell.  k-means can put
-    # a centre on every distinct location but no more, and stats::kmeans()
-    # refuses as many centres as points, so that bound is the distinct
-    # locations when some repeat and one short of the points when none do.  It
-    # used to be one short of the distinct locations in every case, which
-    # dropped k = 5 on five stations visited thirty times each.  Which bound
-    # holds is recorded, because the print and the "bound is choosing" notes
-    # name it.
-    k_cap_fit    <- min(n_uniq, n - 1L)
-    data_ceiling <- min(by_support, k_cap_all)
-    # Two scored subsample rows per cell, not two subsample points: with 20,000
-    # points, a response on 5,000 and sample_n = 1500, half the subsample left
-    # about 0.5 scored rows per cell at a ceiling of 750.
-    fit_rows     <- if (has_resp && n_resp > 0L) n_scored else n
-    fit_cap      <- if (n < n_all) min(floor(fit_rows / 2), k_cap_fit) else Inf
-    # A ladder the caller set is scored as given.  Settled here, before the
-    # messages below, because they name it: with `levels = 2:4` on ten points
-    # the warning said "the profile scores 2 cells" over a table of three
-    # levels.
-    if (levels_given) {
-      levels <- sort(unique(as.integer(levels)))
-      levels <- levels[!is.na(levels) & levels >= 2L & levels <= k_cap_fit]
-      if (!length(levels))
-        stop("resolution_profile(): no usable value in `levels`.", call. = FALSE)
-    }
-    # Fewer than two cells that meet min_cell_n, or one distinct location, is
-    # no ladder at all.  The ceiling used to be raised to 2 without a word:
-    # ten points at min_cell_n = 9 came back as "ceiling 2 from min_cell_n",
-    # supported.
-    too_few <- data_ceiling < 2
-    ceiling_L    <- max(2L, as.integer(min(data_ceiling, fit_cap)))
+    # The ceiling, its parts and the caller's `levels` were settled before
+    # the variogram (above); which bound sets the ceiling is recorded here.
     ceiling_from <- if (k_cap_all < 2L) "fewer than two distinct locations"
                     else if (by_support < 2) "fewer than two supported cells"
                     else if (fit_cap < data_ceiling) "sample_n"
@@ -2903,11 +2920,6 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     bounds$obs_per_cell <- ladder_sizes
     bounds$size_levels  <- sl$size_levels
   }
-
-  # A ladder of sizes passed its guards before the variogram (above).  On
-  # every other ladder the levels are known only now, and the one search to
-  # bound is the estimate's, of each scored row's nearest centre.
-  if (!size_ladder) centre_guard(max(levels))
 
   # Over the hull the area is measured on, not its bounding box (see
   # .rbar_domain()); reliability needs an identified range.

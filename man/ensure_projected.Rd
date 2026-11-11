@@ -152,10 +152,11 @@ row has a location gets Web Mercator (Equal Earth for
 empty, in their own geometry type;
 \code{\link[sf:st_transform]{sf::st_transform()}} would drop the vertex it cannot move, or put a
 coordinate beyond 1e150 at a finite place, and return the rest of the
-feature. A row that has a location and that the move out of lon/lat
+feature. A row that has a location and that a move to another CRS
 cannot place in full comes back empty, or without the vertices the
 CRS cannot place, and a warning of class \code{spatialkit_rows_unplaced}
-names such rows (\code{rows} on the condition). With the projection chosen
+names such rows (\code{rows} on the condition), from lon/lat or from a
+projected CRS. With the projection chosen
 here that happens only at a coordinate no CRS places, such as a
 latitude beyond 90; with a \code{target_crs}, wherever that CRS cannot
 place the layer. The choice of a projection does not read a row with

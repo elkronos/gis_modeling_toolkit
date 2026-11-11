@@ -88,6 +88,12 @@
 #' @keywords internal
 #' @noRd
 .values_at_place <- function(pts, arg, what, crs, points_crs, as_lonlat) {
+  # The rows a move leaves without a location are read again after it and
+  # reported or refused in cell_values_at()'s words (.values_at_xy()), so
+  # the movers' warning about them is not given as well: the move of seeds
+  # without a CRS below (.transform_or_stamp()) and ensure_projected().
+  done <- .answer_for_classed("spatialkit_rows_unplaced")
+  on.exit(done(), add = TRUE)
   if (is.na(sf::st_crs(pts)) && !is.na(points_crs)) {
     if (!identical(arg, "seeds"))
       stop(sprintf(paste0("cell_values_at(): `%s` has no CRS and `points` has one; set it ",
@@ -104,11 +110,6 @@
     stop(sprintf(paste0("cell_values_at(): `%s` has a CRS and `points` has none; set the ",
                         "CRS of `points` with sf::st_set_crs() so the %s can be placed."),
                  arg, what), call. = FALSE)
-  # The rows the move leaves without a location are read again after it and
-  # reported or refused here in cell_values_at()'s words (.values_at_xy()),
-  # so ensure_projected()'s warning about them is not given as well.
-  done <- .answer_for_classed("spatialkit_rows_unplaced")
-  on.exit(done(), add = TRUE)
   ensure_projected(pts, target_crs = crs)
 }
 
@@ -340,8 +341,14 @@
   } else if (!isTRUE(sf::st_crs(g) == crs)) {
     # A polygon with a vertex that is not finite or lies beyond 1e150, read
     # as given, comes back empty and gives no free cell: moved as it was, it
-    # came back as a smaller shape.
-    g <- .transform_keep_unlocated(g, crs)
+    # came back as a smaller shape.  One with a location that the working
+    # CRS cannot place in full comes back empty, or without the vertices it
+    # cannot place, and a warning names its row of `values`.
+    g0 <- g
+    g  <- .transform_keep_unlocated(g0, crs)
+    .warn_rows_unplaced(g0, g, caller = "cell_values_at", arg = "values",
+                        remedy = .UNPLACED_REMEDY, at = which(keep),
+                        n = length(keep))
   }
   at <- sf::st_as_sf(data.frame(x = seed_xy[lost, 1L], y = seed_xy[lost, 2L]),
                      coords = c("x", "y"), crs = sf::st_crs(g))
@@ -1193,6 +1200,11 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
     # `values` and asked for no assignment; it is raised again in this
     # function's words, with the rows of `values`.
     answered <- .answer_for_classed("spatialkit_unassigned")
+    # A row that function's move cannot place in full is named as a row of
+    # `newdata` or of `values`, in this function's words.
+    in_words <- .unplaced_in_words_of("cell_values_at", list(
+      features_sf = list(arg = "newdata", at = live, n = nrow(newdata)),
+      polygons_sf = list(arg = "values", at = which(has_id), n = nrow(values))))
     held <- tryCatch(
       assign_features_to_polygons(feat, cells_at, polygon_id_col = id_col,
                                   keep_unassigned = TRUE, quiet = TRUE),
@@ -1205,7 +1217,7 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
           of = if (all(has_id)) NULL
                else sprintf("the %d polygons of `values` that carry an ID", e$n),
           s2_forced = isTRUE(e$s2_forced)),
-      finally = answered())
+      finally = { answered(); in_words() })
     if (nrow(held) != length(live))
       stop("cell_values_at(): the assignment returned ", nrow(held), " rows for ",
            length(live), " locations.", call. = FALSE)

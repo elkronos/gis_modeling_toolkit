@@ -77,7 +77,10 @@
                "CRS explicitly with sf::st_crs() to suppress this."),
         caller, what, ll$bb[["xmin"]], ll$bb[["xmax"]],
         ll$bb[["ymin"]], ll$bb[["ymax"]])
-      return(.transform_keep_unlocated(sf::st_set_crs(x, 4326), crs))
+      x0 <- sf::st_set_crs(x, 4326)
+      out <- .transform_keep_unlocated(x0, crs)
+      .warn_rows_unplaced(x0, out, caller = caller, arg = what, remedy = .UNPLACED_REMEDY)
+      return(out)
     }
     # Named by its label: most callers have no `crs` argument, so "the
     # supplied `crs`" sent the reader looking for one they had not passed.
@@ -94,7 +97,13 @@
   # A row of a projected `x` with a coordinate beyond .LONLAT_MOVE_MAX comes
   # out empty when `crs` is in degrees (.lonlat_of_placed(), which it moves
   # with): moved from Web Mercator at x = 1e20 it never came back from PROJ.
-  .transform_keep_unlocated(x, crs)
+  # A row with a location that `crs` cannot place in full comes back empty,
+  # or without the vertices it cannot place, and a warning of class
+  # "spatialkit_rows_unplaced" names it in the caller's words: a ring with
+  # a vertex at latitude 95 lost that vertex in silence.
+  out <- .transform_keep_unlocated(x, crs)
+  .warn_rows_unplaced(x, out, caller = caller, arg = what, remedy = .UNPLACED_REMEDY)
+  out
 }
 
 #' Check whether an sf/sfc object has a geographic (lon/lat) CRS
@@ -315,18 +324,31 @@
 #' beyond `.LONLAT_MOVE_MAX` when `b` is in degrees
 #' (`.transform_keep_unlocated()`, `.lonlat_of_placed()`).
 #'
+#' A row of `a` with a location that the CRS of `b` cannot place in full
+#' comes back empty, or without the vertices it cannot place, and a warning
+#' of class `spatialkit_rows_unplaced` names it in the words of `caller` and
+#' `arg` (`.warn_rows_unplaced()`).
+#'
 #' @param a sf or sfc object to re-project.
 #' @param b sf or sfc reference whose CRS takes precedence.
+#' @param caller,arg The function the user called and the argument `a` came
+#'   from, for the warning.
+#' @param label `a` as the warning names it; the argument in backticks by
+#'   default.
 #' @return `a`, possibly transformed.
 #' @keywords internal
 #' @noRd
-.align_crs <- function(a, b) {
+.align_crs <- function(a, b, caller = "spatialkit", arg = "input",
+                       label = sprintf("`%s`", arg)) {
   if (is.null(a) || is.null(b)) return(a)
   if (is.na(sf::st_crs(a)) || is.na(sf::st_crs(b))) return(a)
   if (sf::st_crs(a) == sf::st_crs(b)) return(a)
   # A row with a coordinate that is not finite or lies beyond 1e150 comes
   # back empty (.transform_keep_unlocated()), not as the rest of the feature.
-  .transform_keep_unlocated(a, sf::st_crs(b))
+  out <- .transform_keep_unlocated(a, sf::st_crs(b))
+  .warn_rows_unplaced(a, out, caller = caller, arg = arg, label = label,
+                      remedy = .UNPLACED_REMEDY)
+  out
 }
 
 

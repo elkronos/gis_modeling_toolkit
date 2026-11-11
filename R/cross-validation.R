@@ -2035,7 +2035,11 @@
 #'   bound starting ranges; it is divided by the diagonal and rounded to
 #'   \code{.KMEANS_STEP}, as the coordinates are.  One that is not finite
 #'   or not positive is read as the diagonal.
-#' @return \code{NULL} when no fit converged, else a list with \code{beta}
+#' @return \code{NULL} when no fit converged; a list with one element,
+#'   \code{unfitted} (the error of \code{model.matrix()}), when no start
+#'   gave a fit and the trend's design cannot be built on the rows of the
+#'   fit (a factor with one level there, say); else a list with
+#'   \code{beta}
 #'   (named trend coefficients), \code{range} (the exponential range
 #'   parameter, in the caller's unit), \code{nugget_prop}, \code{sigma2},
 #'   \code{n_used}, \code{subsampled}, \code{n_colocated} (the rows left out
@@ -2211,7 +2215,15 @@
     if (n_fits == 1L && is.finite(grid_best) && !is.null(best) &&
         isTRUE(best$score >= grid_best - 0.01)) break
   }
-  if (is.null(best)) return(NULL)
+  if (is.null(best)) {
+    # No start gave a fit.  When the trend's design cannot be built on these
+    # rows (contrasts on a factor with one level, say), gls() failed on it
+    # before the correlation parameters came into it: no iteration ran, so
+    # the fit "did not converge" is not why, and the design's error is.
+    if (inherits(X, "try-error"))
+      return(list(unfitted = .try_error_message(X)))
+    return(NULL)
+  }
 
   ll_null <- tryCatch(
     suppressWarnings(as.numeric(stats::logLik(nlme::gls(fml, data = d, method = "REML")))),
@@ -3296,8 +3308,10 @@ sac_nugget <- function(x) {
 #'   case differs, as it always has: when no row at all has every predictor
 #'   (one is missing on every row) no trend can be fitted, and the variogram
 #'   is of the raw response, with an R warning and \code{detrended} set to
-#'   \code{FALSE}.  On fewer than 30 distinct locations nothing is fitted
-#'   then either: the result is the \code{NA}, and there is no such warning.
+#'   \code{FALSE}.  Where nothing is fitted then either (fewer than 30
+#'   distinct locations, a constant response, or points with no extent),
+#'   the result is the \code{NA} with its reason, and there is no such
+#'   warning.
 #' @param n_max Maximum number of points the variogram is computed on, at
 #'   least 30; \code{Inf} for no limit.  Variogram estimation is O(n²) so
 #'   this keeps runtime bounded.  A layer with more rows that carry a value
@@ -3361,9 +3375,11 @@ sac_nugget <- function(x) {
 #'   costs \eqn{O(n^3)}, and so runs on at most \code{reml_max_n} points;
 #'   it takes one row a location and needs 30 locations, which every layer
 #'   needs anyway (a layer with fewer gets the unclassed \code{NA}, see
-#'   Value, and no fit is tried).  When it is not fitted (no \pkg{nlme}) or
-#'   does not converge, the \code{"ols"} path runs instead with an R
-#'   warning that says which.  The start of the fit is chosen from the profile
+#'   Value, and no fit is tried).  When it is not fitted (no \pkg{nlme}),
+#'   cannot be fitted (the design of the trend cannot be built, as on a
+#'   factor with one level) or does not converge,
+#'   the \code{"ols"} path runs instead with an R warning that says which.
+#'   The start of the fit is chosen from the profile
 #'   REML likelihood on a grid of ranges and nugget proportions, and when
 #'   more than one start is fitted the fit with the largest log-likelihood
 #'   is kept.
@@ -3820,9 +3836,10 @@ estimate_sac_range <- function(points_sf, response_var,
       # estimand, so it is an R warning, not a log line.  When some rows are
       # complete but fewer than 30, there is a trend to fit and too little
       # to fit a variogram to: that is the NA below, with their count.  The
-      # warning is raised once the floor on locations has passed: below 30
-      # locations nothing is fitted, the raw response included, and the NA's
-      # reason is the whole answer.
+      # warning is raised once the refusals that fit nothing have passed (the
+      # floor on locations, a constant response, no extent): there nothing
+      # is fitted, the raw response included, and the NA's reason is the
+      # whole answer.
       raw_fallback <- sprintf(paste0("estimate_sac_range(): the %s detrending on %s ",
                                      "failed (none of the %d row(s) with a response has ",
                                      "every predictor present and finite); the ",
@@ -3950,8 +3967,6 @@ estimate_sac_range <- function(points_sf, response_var,
     return(refuse_few_locations(n_loc_used, n, TRUE))
   }
   xy_layer <- NULL
-  # The raw response is modelled from here on, so the fallback is said now.
-  if (!is.null(raw_fallback)) .warn_and_log("%s", raw_fallback)
 
   pts_df <- sf::st_drop_geometry(pts)
   y_raw  <- as.numeric(pts_df[[response_var]])
@@ -4038,6 +4053,8 @@ estimate_sac_range <- function(points_sf, response_var,
       extent <- max(diff(range(xy[, 1L])), diff(range(xy[, 2L])))
       reml_fit <- .reml_trend(mf, fml, extent = extent, max_n = reml_max_n,
                               seed = seed)
+      reml_unfitted <- if (is.list(reml_fit)) reml_fit[["unfitted"]] else NULL
+      if (!is.null(reml_unfitted)) reml_fit <- NULL
       if (is.null(reml_fit)) {
         # Why there is no fit.  .reml_trend() fits one row a location and
         # needs 30 of them (`reml_max_n` is at least 30, so its subsample
@@ -4046,10 +4063,15 @@ estimate_sac_range <- function(points_sf, response_var,
         # floor on locations above returns first for fewer than 30 locations
         # among these same rows, counted the same way (coordinates equal to
         # the last bit), so the second case is not reached from here; it
-        # stays as a guard on .reml_trend()'s own floor.
+        # stays as a guard on .reml_trend()'s own floor.  Where the trend's
+        # design cannot be built (a factor with one level, say), gls() failed
+        # before any iteration, and the design's error is the reason: that
+        # case said "did not converge" as well.
         n_loc <- sum(!duplicated(mf[, c(".sac_x", ".sac_y"), drop = FALSE]))
         why <- if (!.has_backend("nlme"))
           "was not fitted (package 'nlme' is not installed)"
+        else if (!is.null(reml_unfitted))
+          sprintf("could not be fitted (%s)", reml_unfitted)
         else if (n_loc < 30L)
           sprintf(paste0("was not fitted: the %d row%s lie at %d location%s, fewer than ",
                          "the 30 it needs"),
@@ -4093,17 +4115,20 @@ estimate_sac_range <- function(points_sf, response_var,
       # REML handled the trend above; nothing to do here.
     } else if (inherits(lm_fit, "try-error")) {
       # Falling through to the raw response is a different estimand, so it
-      # is an R warning, not a log line.
-      .warn_and_log(paste0("estimate_sac_range(): the OLS detrending on %s ",
-                           "failed (%s); the variogram is fitted to the RAW ",
-                           "response instead, which includes the trend."),
-                    paste(predictor_vars, collapse = " + "),
-                    .try_error_message(lm_fit))
+      # is an R warning, not a log line, raised with the one above once the
+      # refusals that fit nothing have passed (below).
+      raw_fallback <- sprintf(paste0("estimate_sac_range(): the OLS detrending on %s ",
+                                     "failed (%s); the variogram is fitted to the RAW ",
+                                     "response instead, which includes the trend."),
+                              paste(predictor_vars, collapse = " + "),
+                              .try_error_message(lm_fit))
     } else {
       resid <- stats::residuals(lm_fit)
       if (length(resid) != n) {
-        .warn_and_log("estimate_sac_range(): OLS residual length (%d) does not match data rows (%d); the variogram is fitted to the RAW response instead.",
-                      length(resid), n)
+        raw_fallback <- sprintf(paste0("estimate_sac_range(): OLS residual length (%d) ",
+                                       "does not match data rows (%d); the variogram is ",
+                                       "fitted to the RAW response instead."),
+                                length(resid), n)
       } else {
         y <- as.numeric(resid)
         Xl <- try(stats::model.matrix(lm_fit), silent = TRUE)
@@ -4215,6 +4240,14 @@ estimate_sac_range <- function(points_sf, response_var,
       "the points have no extent (the largest distance between them is zero ",
       "or could not be computed)")))
   }
+
+  # The raw response is modelled from here on, so the fallback is said now:
+  # after the refusals that fit nothing at all (fewer than 30 locations, a
+  # constant response, no extent), whose NA and reason are the whole answer.
+  # Raised before them, the warning that the variogram is fitted to the raw
+  # response came with an NA for "the response is constant" and no
+  # variogram.
+  if (!is.null(raw_fallback)) .warn_and_log("%s", raw_fallback)
 
   cutoff_dist <- as.numeric(cutoff * max_dist)
 

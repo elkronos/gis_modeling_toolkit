@@ -440,7 +440,8 @@ get_voronoi_seeds <- function(boundary = NULL,
     rec <- attr(out, "partition", exact = TRUE)
     refit <- attr(out, "refit", exact = TRUE)
     rule <- .count_rule_get(out)
-    out <- .align_crs(out, boundary)
+    out <- .align_crs(out, boundary, caller = "get_voronoi_seeds", arg = "n",
+                      label = "the seeds of `n`")
     # Kept across the CRS alignment whatever sf does with custom attributes.
     attr(out, "cover") <- cov
     if (!is.null(rec)) attr(out, "partition") <- rec
@@ -540,7 +541,10 @@ get_voronoi_seeds <- function(boundary = NULL,
 
     "kmeans" = {
       if (!is.null(sample_points)) {
-        cloud <- if (!is.null(boundary)) .align_crs(sample_points, boundary) else sample_points
+        cloud <- if (!is.null(boundary))
+          .align_crs(sample_points, boundary, caller = "get_voronoi_seeds",
+                     arg = "sample_points")
+        else sample_points
       } else {
         if (is.null(boundary))
           stop("get_voronoi_seeds(): k-means seeds require 'boundary' (or provide 'sample_points').",
@@ -670,7 +674,9 @@ get_voronoi_seeds <- function(boundary = NULL,
   # Single alignment point for every branch: the seeds are returned in the
   # boundary's CRS whenever one is available.  (The branches above no longer
   # align individually, which made this block unreachable.)
-  out <- .align_crs(out, boundary)
+  # Only provided seeds can be moved here: the other branches build them in
+  # the boundary's CRS.
+  out <- .align_crs(out, boundary, caller = "get_voronoi_seeds", arg = "seeds")
   # Where `n` came from, when it was a level-selection result rather than a
   # number; the count itself is nrow(out) (or fewer, see `n`).
   if (!is.null(n_from)) attr(out, "n_from") <- n_from

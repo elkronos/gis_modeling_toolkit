@@ -288,7 +288,9 @@ test_that("the area distortion is not measured on a multipolygon with one part b
                                                   sf::st_linestring(rbind(c(-8.7e6, 5e6), c(1e20, 5e6))))),
                    sf::st_geometrycollection(list(sf::st_point(c(-8.7e6, 5e6)))), crs = 3857)
   expect_identical(.beyond_lonlat_move(gc), c(TRUE, FALSE))
-  ll <- .align_crs(g, sf::st_sfc(sf::st_point(c(-80, 40)), crs = 4326))
+  # The move says that it cannot place row 3 (BUG-203).
+  expect_warning(ll <- .align_crs(g, sf::st_sfc(sf::st_point(c(-80, 40)), crs = 4326)),
+                 class = "spatialkit_rows_unplaced", regexp = "row 3 of its 3")
   expect_identical(sf::st_is_empty(ll), c(FALSE, FALSE, TRUE))
   expect_identical(ll[1:2], sf::st_transform(g[1:2], 4326))
   expect_null(seen$refused)
@@ -334,14 +336,19 @@ test_that("a projected layer moved into a CRS in degrees leaves a row beyond 1e1
   local_mocked_bindings(st_transform = .fpf_guard(seen), .package = "sf")
   ll  <- sf::st_transform(.fpf_layer(-8.7e6), 4326)
   ref <- sf::st_transform(.fpf_layer(NULL), 4326)
+  # Each move says that it cannot place row 1 (BUG-203).
   for (x in c(1e20, 1e12)) {
-    a <- .align_crs(.fpf_layer(x), ll)
+    expect_warning(a <- .align_crs(.fpf_layer(x), ll),
+                   class = "spatialkit_rows_unplaced", regexp = "row 1 of its")
     expect_identical(a, ref, label = format(x))
-    expect_identical(suppressWarnings(.transform_or_stamp(.fpf_layer(x), sf::st_crs(4326))),
-                     ref, label = format(x))
-    h <- harmonize_crs(.fpf_layer(x), ll, prefer = "b")
+    expect_warning(t <- .transform_or_stamp(.fpf_layer(x), sf::st_crs(4326)),
+                   class = "spatialkit_rows_unplaced", regexp = "row 1 of its")
+    expect_identical(t, ref, label = format(x))
+    expect_warning(h <- harmonize_crs(.fpf_layer(x), ll, prefer = "b"),
+                   class = "spatialkit_rows_unplaced", regexp = "row 1 of its")
     expect_identical(h$a, ref, label = format(x))
-    h <- harmonize_crs(.fpf_layer(x), ll, target_crs = 4326)
+    expect_warning(h <- harmonize_crs(.fpf_layer(x), ll, target_crs = 4326),
+                   class = "spatialkit_rows_unplaced", regexp = "row 1 of its")
     expect_identical(h$a, ref, label = format(x))
   }
   # Into a projected CRS the row is moved as before.
@@ -363,9 +370,13 @@ test_that("get_voronoi_seeds(method = \"kmeans\") drops a sample point beyond 1e
   g <- sf::st_geometry(sp)
   g[1] <- sf::st_sfc(sf::st_point(c(1e20, 5e6)), crs = 3857)
   sp <- sf::st_set_geometry(sp, g)
-  expect_warning(s <- get_voronoi_seeds(n = 5, method = "kmeans", boundary = b,
-                                        sample_points = sp, set_seed = 1),
-                 "dropping 1 point")
+  # The move says that it cannot place the point (BUG-203), and the k-means
+  # cloud drops it.
+  expect_warning(
+    expect_warning(s <- get_voronoi_seeds(n = 5, method = "kmeans", boundary = b,
+                                          sample_points = sp, set_seed = 1),
+                   "dropping 1 point"),
+    class = "spatialkit_rows_unplaced", regexp = "the move of `sample_points`")
   expect_identical(nrow(s), 5L)
   expect_identical(sf::st_crs(s), sf::st_crs(4326))
   expect_identical(attr(s, "kmeans")$rows, 2:60)
@@ -385,7 +396,10 @@ test_that("the move that empties rows beyond 1e150 also empties a projected row 
   out <- .transform_keep_unlocated(d, 4326)
   expect_true(all(sf::st_is_empty(out)[1:2]))
   expect_identical(out[-(1:2), ], sf::st_transform(d[-(1:2), ], 4326))
-  expect_identical(.align_crs(d, sf::st_sfc(sf::st_point(c(-81, 41)), crs = 4326)), out)
+  # The move of row 1 is said (BUG-203); row 2 has no location as given.
+  expect_warning(a <- .align_crs(d, sf::st_sfc(sf::st_point(c(-81, 41)), crs = 4326)),
+                 class = "spatialkit_rows_unplaced", regexp = "row 1 of its")
+  expect_identical(a, out)
   # A polygon cover with one vertex at x = 1e20 in EPSG:3857, moved into
   # the generators' EPSG:4326, comes back with that row empty, in its type.
   sq <- function(x0) sf::st_polygon(list(rbind(c(x0, 5e6), c(x0 + 5e4, 5e6),
@@ -393,7 +407,8 @@ test_that("the move that empties rows beyond 1e150 also empties a projected row 
   far <- sq(-9e6); far[[1]][3, 1] <- 1e20
   cov <- sf::st_sfc(sq(-9.1e6), far, crs = 3857)
   pts <- sf::st_sfc(sf::st_point(c(-81, 41)), sf::st_point(c(-80, 41.2)), crs = 4326)
-  cf <- .cover_follow(cov, pts, pts)
+  expect_warning(cf <- .cover_follow(cov, pts, pts),
+                 class = "spatialkit_rows_unplaced", regexp = "row 2 of its 2")
   expect_identical(sf::st_is_empty(cf), c(FALSE, TRUE))
   expect_s3_class(cf[[2L]], "POLYGON")
   expect_null(seen$refused)

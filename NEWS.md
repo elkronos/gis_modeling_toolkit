@@ -2126,6 +2126,39 @@ old behaviour where there is a way.
   on `LINESTRING (0 0, 180 0)` with `purpose = "area"`, the Lambert
   azimuthal CRS, which is still used.
 
+* **`harmonize_crs()` and the functions that move a layer into the CRS
+  they work in returned a row the target CRS cannot place in full, emptied
+  or short of a vertex, without a word.**  GDAL returns a point it cannot
+  move as an empty point and drops such a vertex from a line or a ring.
+  `harmonize_crs(a, b, prefer = "b")` with `b` in UTM zone 46 returned the
+  point (10, 0.1) of `a` empty and `LINESTRING (10 0, 90 0, 170 0)`
+  without its vertex at longitude 10, and a ring with a vertex at latitude
+  95 lost that vertex, through `harmonize_crs()` and through the
+  `boundary` of `predict_surface()`; `ensure_projected(target_crs =)` did
+  the same in silence from a projected layer, such as one in EPSG:3857.
+  Every such move now warns with class `spatialkit_rows_unplaced`, naming
+  the rows, the function called and the argument: `harmonize_crs()` (`a`
+  or `b`, not after the `on_transform_error = "set_crs"` stamp),
+  `ensure_projected(target_crs =)` from any CRS, the seeders and the
+  tessellation builders (`boundary`, `seeds`, `sample_points`, `cover`),
+  `assign_features_to_polygons()` (`features_sf`, `polygons_sf`),
+  `kriging_adequacy()`, `cell_values_at()` (`values`, and `newdata` where
+  it is placed in the polygons of `values`), and the functions that move a
+  layer they are given into the CRS of their data: `make_folds()`,
+  `cv_spatial()`, `cv_gwr()`, `cv_bayes()`, `area_of_applicability()`,
+  `predict_surface()`, `fold_separation()`, `resolution_profile()`,
+  `summarize_by_cell()`, `create_grid_polygons()`, `plot_folds()`, the
+  `predict()` methods of the GWR, random forest and Bayesian fits, and
+  `plot_tessellation_map()` for a layer without a CRS.  So does a row of
+  a projected layer with a coordinate beyond 1e10 that a move to a CRS in
+  degrees empties.  The warning names the CRS the layer was in ("a
+  location in EPSG:3857"), and longitude and latitude for a lon/lat layer
+  or for one without a CRS that is read as lon/lat.
+  `cell_values_at()` and the pooled readers of `summarize_by_cell()` still
+  report the locations and seeds they place in their own words.  The rows
+  come back as they did; layers the target CRS places in full raise no new
+  warning and give the same results.
+
 * **A row of a lon/lat layer with a vertex at a latitude beyond 90 shaped
   the projection `ensure_projected()` chose for the other rows.**  No CRS
   places such a row, but the choice read it in the extent, the longitudes
@@ -7575,6 +7608,35 @@ old behaviour where there is a way.
   the local collinearity survey of `fit_gwr_model()`,
   `gwr_model_selection()`, `cv_gwr()` and `predict()`. The other kernels
   are unchanged.
+
+* **`resolution_profile()` warned what `cp` and `reliability` take from the
+  variogram, then stopped with "no usable value in `levels`".**  A
+  `levels` with no value the layer can hold (`levels = 500` on 120
+  points), with a `sac` that draws a warning or with the variogram
+  estimated, raised that warning about columns the call never returned.
+  `levels` is now checked before the variogram is estimated or read, and
+  the work limit on the search of each scored row's nearest centre (a
+  ladder of counts with an `estimate` and without FNN) is applied there
+  too: a call either stops with its error alone, or returns the profile
+  the warnings describe. A call that returns a profile is unchanged.
+
+* **`estimate_sac_range()` warned that "the variogram is fitted to the RAW
+  response instead" on calls that fitted none.**  Where the detrending
+  could not run (a predictor missing on every row, or an `lm()` that
+  fails, as on a factor with one level) and the response was then
+  constant or the points had no extent, the result was the `NA` for that
+  reason together with the warning of a raw-response fit. The warning now
+  comes after those refusals, on the calls that go on to the raw
+  response.
+
+* **`estimate_sac_range(detrend = "reml")` said the REML fit "did not
+  converge" where `nlme::gls()` could not fit the trend at all.**  On a
+  factor predictor with one level `gls()` fails on its contrasts before
+  any iteration, and the warning of the fallback to OLS gave
+  non-convergence as the reason. Where no start gives a fit and the
+  design of the trend cannot be built on the rows of the fit, the warning
+  now says the REML detrending "could not be fitted" and gives the
+  design's error.
 
 ## Documentation
 

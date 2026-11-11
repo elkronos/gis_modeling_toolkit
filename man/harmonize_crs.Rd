@@ -41,8 +41,13 @@ location to move, and \code{\link[sf:st_transform]{sf::st_transform()}} would dr
 return the rest of the feature, or put the coordinate at a finite
 place.  So does a row of a projected layer moved to a CRS in degrees
 with a coordinate beyond 1e10 in its CRS's own unit, further out than
-any projected CRS places a point of the Earth.  A layer that is not
-transformed is returned as it came.
+any projected CRS places a point of the Earth.  A row that has a
+location and that the target CRS cannot place in full, such as a point
+far outside a UTM zone or a ring with a vertex at a latitude beyond 90,
+comes back empty, or without the vertices the CRS cannot place, and a
+warning of class \code{"spatialkit_rows_unplaced"} names such rows of
+\code{a} or \code{b} (\code{rows} on the condition).  A layer that is
+not transformed is returned as it came.
 }
 \description{
 Aligns two sf objects to a common CRS.

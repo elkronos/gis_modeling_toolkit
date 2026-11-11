@@ -509,7 +509,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   cells <- if (is.na(sf::st_crs(cells_in)) && !is.na(sf::st_crs(pts)))
     .transform_or_stamp(cells_in, sf::st_crs(pts), what = "cells_sf",
                         caller = "kriging_adequacy")
-  else .align_crs(cells_in, pts)
+  else .align_crs(cells_in, pts, caller = "kriging_adequacy", arg = "cells_sf")
   cells <- .safe_make_valid(cells)
   # Numeric or logical by the check above, so nothing is coerced to NA here.
   z <- as.numeric(sf::st_drop_geometry(pts)[[response_var]])

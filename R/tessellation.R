@@ -425,13 +425,21 @@
 #'     are added, so the edges along 180 get them as well.
 #' }
 #'
+#' A row of the cover with a location that the working CRS cannot place in
+#' full comes back empty, or without the vertices it cannot place, and a
+#' warning of class \code{"spatialkit_rows_unplaced"} names it in the words
+#' of \code{caller} (\code{.warn_rows_unplaced()}).
+#'
 #' @param cover sfc geometry of the cover.
 #' @param pts_in The generators as the calling function received them.
 #' @param pts_now The generators in the working CRS.
+#' @param caller The function the user called, for the warning.
+#' @param label The cover as the warning names it.
 #' @return The cover as an sfc in the CRS of \code{pts_now}.
 #' @keywords internal
 #' @noRd
-.cover_follow <- function(cover, pts_in, pts_now) {
+.cover_follow <- function(cover, pts_in, pts_now, caller = "spatialkit",
+                          label = "`cover`") {
   g <- sf::st_geometry(cover)
   crs_in <- sf::st_crs(pts_in); crs_now <- sf::st_crs(pts_now)
   if (is.na(sf::st_crs(g))) {
@@ -464,7 +472,10 @@
                                             dfMaxLength = ext / 200), crs_g)
     }
   }
-  .transform_keep_unlocated(g, crs_now)
+  out <- .transform_keep_unlocated(g, crs_now)
+  .warn_rows_unplaced(g, out, caller = caller, arg = "cover", label = label,
+                      remedy = .UNPLACED_REMEDY)
+  out
 }
 
 
@@ -684,7 +695,8 @@
   g <- sf::st_geometry(cover)
   types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
   if (!length(g) || !all(types %in% c("POINT", "MULTIPOINT"))) return(NULL)
-  g <- tryCatch(.cover_follow(g, pts_in, pts_now), error = function(e) NULL)
+  g <- tryCatch(.cover_follow(g, pts_in, pts_now, caller = caller),
+                error = function(e) NULL)
   if (is.null(g)) return(NULL)
   cells_cmp <- cells
   if (is.na(sf::st_crs(g)) != is.na(sf::st_crs(cells_cmp)))
@@ -938,7 +950,7 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
     # points' (projected) CRS instead, as build_tessellation() does.
     if (is.na(sf::st_crs(boundary)) && !is.na(crs_pts))
       boundary <- .transform_or_stamp(boundary, crs_pts, "boundary", "clip_target_for")
-    boundary <- .align_crs(boundary, points_sf)
+    boundary <- .align_crs(boundary, points_sf, caller = "clip_target_for", arg = "boundary")
     # The move empties a row it cannot place.  No move here empties a row
     # with a location yet (a move into a projected CRS keeps a row at 1e20
     # as another shape); the test guards a move that empties it.
@@ -1563,7 +1575,9 @@ create_voronoi_polygons <- function(
     if (.is_geographic_crs(crs)) {
       crs_out <- sf::st_crs(pts)
       pts <- if (is.null(scored_crs)) ensure_projected(pts) else sf::st_transform(pts, scored_crs)
-      if (!is.null(boundary)) boundary <- .align_crs(boundary, pts)
+      if (!is.null(boundary))
+        boundary <- .align_crs(boundary, pts, caller = "create_voronoi_polygons",
+                               arg = "boundary")
     }
   } else {
     # A CRS-less boundary with lon/lat points is read in the points' own CRS
@@ -1595,7 +1609,8 @@ create_voronoi_polygons <- function(
       pts <- pair$points; boundary <- pair$boundary
       # CRS-less lon/lat points that just took a geographic boundary's CRS.
       if (.is_longlat(pts)) pts <- ensure_projected(pts)
-      boundary <- .align_crs(boundary, pts)
+      boundary <- .align_crs(boundary, pts, caller = "create_voronoi_polygons",
+                             arg = "boundary")
     }
   }
   # In the record's CRS, seeds that are its centres stand where the record
@@ -1613,7 +1628,9 @@ create_voronoi_polygons <- function(
     # From the cover: its hull or polygons, in the working CRS, grown by 2% of
     # the diagonal (see .cover_boundary()).
     from_cover <- .cover_boundary(
-      tryCatch(.cover_follow(cover_geom, pts_in, pts),
+      tryCatch(.cover_follow(cover_geom, pts_in, pts, caller = "create_voronoi_polygons",
+                             label = if (identical(cover_from, "cover")) "`cover`"
+                                     else "the cover the seeds carry"),
                error = function(e) sf::st_sfc(crs = sf::st_crs(pts))),
       pts)
     if (inherits(from_cover, "sf")) {
@@ -2959,7 +2976,9 @@ build_tessellation <- function(
       points_sf   <- if (is.null(scored_crs)) ensure_projected(points_sf)
                      else sf::st_transform(points_sf, scored_crs)
       lonlat_work <- TRUE
-      if (!is.null(boundary)) boundary <- .align_crs(boundary, points_sf)
+      if (!is.null(boundary))
+        boundary <- .align_crs(boundary, points_sf, caller = "build_tessellation",
+                               arg = "boundary")
     }
   } else {
     # ONE decision for points and boundary together.  A CRS-less layer goes
@@ -2995,7 +3014,8 @@ build_tessellation <- function(
       projected_msg <- TRUE
       if (!is.null(boundary)) {
         boundary <- .resolve_crsless_pair(seeds_in, boundary, "build_tessellation")$boundary
-        boundary <- .align_crs(boundary, points_sf)
+        boundary <- .align_crs(boundary, points_sf, caller = "build_tessellation",
+                               arg = "boundary")
       }
     } else if (!is.null(boundary)) {
       # Only a POSITIVE assumption is a CRS.  ensure_projected() records
@@ -3016,7 +3036,8 @@ build_tessellation <- function(
       pair <- .resolve_crsless_pair(points_sf, boundary, "build_tessellation")
       points_sf <- pair$points; boundary <- pair$boundary
       if (lonlat_work) boundary_ll <- boundary
-      boundary <- .align_crs(boundary, points_sf)
+      boundary <- .align_crs(boundary, points_sf, caller = "build_tessellation",
+                             arg = "boundary")
     }
   }
   finish <- function(res) {
@@ -3077,7 +3098,10 @@ build_tessellation <- function(
     # CRS, degrees and all.  A point `cover` goes as points, so its hull is
     # taken in the working CRS and holds them exactly.
     cover_now <- if (is.null(cover_geom)) NULL else
-      tryCatch(.cover_follow(cover_geom, points_in, points_sf),
+      tryCatch(.cover_follow(cover_geom, points_in, points_sf,
+                             caller = "build_tessellation",
+                             label = if (!is.null(cover)) "`cover`"
+                                     else "the cover the seeds carry"),
                error = function(e) NULL)
     if (!is.null(cover_geom) && is.null(cover_now) && is.null(boundary))
       .warn_classed("spatialkit_no_cover", paste0(

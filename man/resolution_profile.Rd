@@ -60,7 +60,9 @@ on the predictors, the variogram is estimated from those residuals, and
 the ladder; values below 2, above the number of distinct locations, or
 at or above the number of points, are dropped (k-means cannot place more
 centres than there are distinct points, and \code{stats::kmeans()}
-refuses as many centres as points).}
+refuses as many centres as points).  When none is left the call stops
+with an error, before the variogram is estimated or read, so it raises
+no warning about the variogram.}
 
 \item{n_levels}{Number of levels on the ladder.  Default 20.  The ladder
 has fewer when rounding puts two of them on one count, and one more

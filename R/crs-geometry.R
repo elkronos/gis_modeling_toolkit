@@ -1117,7 +1117,7 @@
 #' Compares a layer before a move between CRSs with the layer after it.  A
 #' row that had a location (not empty, and no coordinate that is not finite
 #' or lies beyond \code{.POOL_XY_MAX}; \code{.unlocated_features()}) and
-#' comes back empty, with fewer coordinates, or with a coordinate that is no
+#' comes back empty, with fewer vertices, or with an x or y that is no
 #' longer finite was not placed by the move: \code{sf::st_transform()}
 #' returns a point it cannot move as an empty point and drops such a vertex
 #' from a line or a ring.
@@ -1138,35 +1138,161 @@
   # always; row by row otherwise.
   if (!any(gone) && !lost(unlist(unclass(gb)[had]), unlist(unclass(ga)[had])))
     return(integer(0))
+  # Row by row, the vertices and their x and y are compared: a layer that
+  # mixes XY and XYZ is moved in the dimension of its first geometry, and
+  # an XYZ point among XY points comes back placed, without its Z.  They
+  # are read off the geometry list, which reads a collection as well
+  # (sf::st_coordinates() does not).
+  xy <- function(s) {
+    if (is.matrix(s)) return(s[, 1:2, drop = FALSE])
+    if (is.list(s)) {
+      parts <- lapply(s, xy)
+      return(if (length(parts)) do.call(rbind, parts) else matrix(numeric(0), 0L, 2L))
+    }
+    if (length(s) >= 2L) matrix(s[1:2], 1L) else matrix(numeric(0), 0L, 2L)
+  }
+  lost_xy <- function(b, a) {
+    cb <- xy(b); ca <- xy(a)
+    nrow(cb) != nrow(ca) || any(is.finite(cb) & !is.finite(ca))
+  }
   rows <- which(had)
-  rows[gone[rows] | vapply(rows, function(i)
-    lost(unlist(unclass(gb[[i]])), unlist(unclass(ga[[i]]))), logical(1))]
+  rows[gone[rows] | vapply(rows, function(i) lost_xy(gb[[i]], ga[[i]]), logical(1))]
 }
 
 
-#' Warn that a move out of longitude and latitude left rows unplaced
+#' Warn that a move to another CRS left rows unplaced
 #'
-#' @param before,after As for \code{.rows_unplaced()}.
+#' Every move of a caller's layer through \code{.transform_keep_unlocated()}
+#' calls this with the layer before and after the move:
+#' \code{ensure_projected()}, \code{harmonize_crs()},
+#' \code{.transform_or_stamp()}, \code{.align_crs()}, \code{.cover_follow()},
+#' the moves of \code{assign_features_to_polygons()} and the free cells of
+#' \code{cell_values_at()}.  The warning names the function the caller
+#' called, the argument it passed and the CRS the layer was in.
+#'
+#' @param before,after As for \code{.rows_unplaced()}.  \code{before} carries
+#'   the CRS the layer was moved from.
 #' @param caller,arg The function and the argument the warning names.
+#' @param label The layer as the message names it; the argument in
+#'   backticks by default.
+#' @param remedy The sentence that ends the message: what the caller can
+#'   change.
+#' @param at,n When \code{before} holds some of the rows of the caller's
+#'   layer: their positions in it, and how many rows it has.
 #' @return \code{NULL}, invisibly.  The warning, of class
 #'   \code{"spatialkit_rows_unplaced"}, carries \code{rows} and \code{n}.
+#'   Inside a span opened by \code{.unplaced_in_words_of()} for \code{arg},
+#'   it names the function and the argument of that span, and its rows.
 #' @keywords internal
 #' @noRd
-.warn_rows_unplaced <- function(before, after, caller = "ensure_projected", arg = "x") {
+.warn_rows_unplaced <- function(before, after, caller = "ensure_projected", arg = "x",
+                                label = sprintf("`%s`", arg),
+                                remedy = "Pass a target_crs that holds every location of the layer.",
+                                at = NULL, n = NULL) {
   rows <- .rows_unplaced(before, after)
   if (!length(rows)) return(invisible(NULL))
-  n <- length(sf::st_geometry(before))
+  if (!is.null(at)) rows <- at[rows]
+  n <- n %||% length(sf::st_geometry(before))
+  outer <- .unplaced_words$span
+  if (!is.null(outer) && !is.null(outer$args[[arg]])) {
+    a <- outer$args[[arg]]
+    caller <- outer$caller; label <- sprintf("`%s`", a$arg); remedy <- .UNPLACED_REMEDY
+    if (!is.null(a$at)) rows <- a$at[rows]
+    n <- a$n %||% n
+  }
   .warn_classed("spatialkit_rows_unplaced",
-                paste0("%s(): the move of `%s` to %s cannot place every vertex of %s ",
-                       "of its %d, which %s a location in longitude and latitude; ",
-                       "%s back empty or without the vertices it cannot place. ",
-                       "Pass a target_crs that holds every location of the layer."),
-                caller, arg, .fold_crs_label(after), .rows_text(rows), n,
+                paste0("%s(): the move of %s to %s cannot place every vertex of %s ",
+                       "of its %d, which %s a location in %s; ",
+                       "%s back empty or without the vertices it cannot place. %s"),
+                caller, label, .fold_crs_label(after), .rows_text(rows), n,
                 if (length(rows) == 1L) "has" else "have",
+                .crs_of_location(before),
                 if (length(rows) == 1L) "it comes" else "they come",
+                remedy,
                 data = list(rows = rows, n = n))
   invisible(NULL)
 }
+
+
+#' The CRS a layer's locations are in, as a message names it
+#'
+#' @param x An sf or sfc object.
+#' @return "longitude and latitude" for a geographic CRS; otherwise its EPSG
+#'   code ("EPSG:3857"), else its name, else "its CRS"; "its coordinates"
+#'   for a layer without a CRS.
+#' @keywords internal
+#' @noRd
+.crs_of_location <- function(x) {
+  cr <- sf::st_crs(x)
+  if (is.na(cr)) return("its coordinates")
+  if (isTRUE(sf::st_is_longlat(cr))) return("longitude and latitude")
+  epsg <- cr$epsg
+  if (length(epsg) == 1L && !is.na(epsg)) return(paste0("EPSG:", epsg))
+  nm <- tryCatch(cr$Name, error = function(e) NULL)
+  if (is.character(nm) && length(nm) == 1L && !is.na(nm) && nzchar(nm) &&
+      !identical(nm, "unknown")) return(nm)
+  "its CRS"
+}
+
+
+# A function that hands its layers to another exported function, which
+# moves them, opens a span here so that the warning names the function the
+# user called and the argument the layer came from, and its rows:
+# cell_values_at() gives assign_features_to_polygons() the rows of
+# `newdata` that have a location and the polygons of `values` that carry an
+# ID.
+.unplaced_words <- new.env(parent = emptyenv())
+
+#' A layer without a CRS as harmonize_crs() read it before a move
+#'
+#' harmonize_crs() takes a layer without a CRS whose coordinates look like
+#' longitude and latitude for EPSG:4326 and moves it; one that does not look
+#' so is only given the other layer's CRS, and nothing is moved.  A caller
+#' that compares the layer it passed with the one returned
+#' (\code{.warn_rows_unplaced()}) compares the first as EPSG:4326, so the
+#' warning names longitude and latitude, as harmonize_crs()'s does.
+#'
+#' @param before The layer passed to harmonize_crs().
+#' @param after The layer it returned.
+#' @return \code{before}, given EPSG:4326 when it has no CRS, \code{after}
+#'   has one, and its coordinates look like longitude and latitude.
+#' @keywords internal
+#' @noRd
+.as_harmonize_read <- function(before, after) {
+  if (is.na(sf::st_crs(before)) && !is.na(sf::st_crs(after)) &&
+      isTRUE(.looks_like_lonlat(before)$lonlat))
+    sf::st_set_crs(before, 4326)
+  else before
+}
+
+
+#' Open a span in which the movers' warning speaks for the calling function
+#'
+#' @param caller The function the user called.
+#' @param args Named list, one entry per argument of the inner function to
+#'   translate: \code{arg}, the caller's argument; \code{at}, the rows of it
+#'   the inner layer holds, in order (\code{NULL} for all); \code{n}, its
+#'   number of rows.
+#' @return A function that closes the span.
+#' @keywords internal
+#' @noRd
+.unplaced_in_words_of <- function(caller, args) {
+  outer <- .unplaced_words$span
+  .unplaced_words$span <- list(caller = caller, args = args)
+  function() {
+    .unplaced_words$span <- outer
+    invisible(NULL)
+  }
+}
+
+
+#' The sentence a mover's warning ends with where the caller names no CRS
+#'
+#' The layer goes to a CRS the call takes from its other inputs, so only
+#' the rows can change.
+#' @keywords internal
+#' @noRd
+.UNPLACED_REMEDY <- "Correct or drop those rows."
 
 
 #' Rows named in a message
@@ -1964,7 +2090,10 @@
 #' \code{.transform_or_stamp()}, \code{.align_crs()}, \code{.cover_follow()}
 #' (the builders' `cover`), the move of the polygons into a scored record's
 #' CRS in \code{assign_features_to_polygons()}, and
-#' \code{.values_at_free_cells()}.  The move itself is
+#' \code{.values_at_free_cells()}.  Each of them compares the rows before
+#' and after the move and warns, in the words of the function the user
+#' called, about a row with a location that the move left empty or without
+#' some of its vertices (\code{.warn_rows_unplaced()}).  The move itself is
 #' \code{.lonlat_of_placed()}: a row of a projected layer with a coordinate
 #' beyond \code{.LONLAT_MOVE_MAX} is emptied before a move to a CRS in
 #' degrees, which from Web Mercator at x = 1e20 never came back from PROJ.
@@ -2064,10 +2193,11 @@
 #'     empty, in their own geometry type;
 #'     [sf::st_transform()] would drop the vertex it cannot move, or put a
 #'     coordinate beyond 1e150 at a finite place, and return the rest of the
-#'     feature. A row that has a location and that the move out of lon/lat
+#'     feature. A row that has a location and that a move to another CRS
 #'     cannot place in full comes back empty, or without the vertices the
 #'     CRS cannot place, and a warning of class `spatialkit_rows_unplaced`
-#'     names such rows (`rows` on the condition). With the projection chosen
+#'     names such rows (`rows` on the condition), from lon/lat or from a
+#'     projected CRS. With the projection chosen
 #'     here that happens only at a coordinate no CRS places, such as a
 #'     latitude beyond 90; with a `target_crs`, wherever that CRS cannot
 #'     place the layer. The choice of a projection does not read a row with
@@ -2221,9 +2351,10 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
     if (!identical(xcrs, tcrs)) {
       x0 <- .xy_if_mixed_warn(x, "ensure_projected", "x")
       x  <- .transform_keep_unlocated(x0, tcrs)
-      # A move out of lon/lat that leaves a located row empty, or without
-      # some of its vertices, is said.
-      if (isTRUE(sf::st_is_longlat(xcrs))) .warn_rows_unplaced(x0, x)
+      # A move that leaves a located row empty, or without some of its
+      # vertices, is said, from lon/lat or from a projected CRS: from
+      # EPSG:3857 to UTM zone 46 a line lost its vertex at longitude 10.
+      .warn_rows_unplaced(x0, x)
     }
     return(x)
   }
@@ -2368,8 +2499,13 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
 #'   return the rest of the feature, or put the coordinate at a finite
 #'   place.  So does a row of a projected layer moved to a CRS in degrees
 #'   with a coordinate beyond 1e10 in its CRS's own unit, further out than
-#'   any projected CRS places a point of the Earth.  A layer that is not
-#'   transformed is returned as it came.
+#'   any projected CRS places a point of the Earth.  A row that has a
+#'   location and that the target CRS cannot place in full, such as a point
+#'   far outside a UTM zone or a ring with a vertex at a latitude beyond 90,
+#'   comes back empty, or without the vertices the CRS cannot place, and a
+#'   warning of class \code{"spatialkit_rows_unplaced"} names such rows of
+#'   \code{a} or \code{b} (\code{rows} on the condition).  A layer that is
+#'   not transformed is returned as it came.
 #' @family spatial data preparation
 #' @examples
 #' library(sf)
@@ -2409,9 +2545,15 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
     # empty when the target is in degrees (.lonlat_of_placed(), which that
     # helper moves with): moved from Web Mercator at x = 1e20 it never came
     # back from PROJ.
-    tryCatch(
+    # A row with a location that `to` cannot place in full comes back empty,
+    # or without the vertices it cannot place, and a warning of class
+    # "spatialkit_rows_unplaced" names it; not after the set_crs stamp,
+    # which moves nothing.
+    moved <- TRUE
+    out <- tryCatch(
       .transform_keep_unlocated(x, to),
       error = function(e) {
+        moved <<- FALSE
         if (identical(on_transform_error, "set_crs")) {
           .warn_and_log(
             "harmonize_crs(): st_transform() failed (%s); falling back to st_set_crs(). WARNING: coordinates are NOT reprojected -- downstream distances, joins, and areas may be wrong. Set on_transform_error='stop' (the default) to surface this error instead.",
@@ -2426,6 +2568,11 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
         }
       }
     )
+    if (moved)
+      .warn_rows_unplaced(x, out, caller = "harmonize_crs", arg = which_obj,
+                          remedy = paste0("Pass a target_crs that holds every location ",
+                                          "of both layers."))
+    out
   }
 
   # st_set_crs() only stamps a label: the coordinates are NOT moved.  Stamping

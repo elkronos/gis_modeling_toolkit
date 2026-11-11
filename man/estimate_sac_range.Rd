@@ -51,8 +51,10 @@ how many were left (see Value).  One
 case differs, as it always has: when no row at all has every predictor
 (one is missing on every row) no trend can be fitted, and the variogram
 is of the raw response, with an R warning and \code{detrended} set to
-\code{FALSE}.  On fewer than 30 distinct locations nothing is fitted
-then either: the result is the \code{NA}, and there is no such warning.}
+\code{FALSE}.  Where nothing is fitted then either (fewer than 30
+distinct locations, a constant response, or points with no extent),
+the result is the \code{NA} with its reason, and there is no such
+warning.}
 
 \item{n_max}{Maximum number of points the variogram is computed on, at
 least 30; \code{Inf} for no limit.  Variogram estimation is O(n²) so
@@ -121,9 +123,11 @@ variogram of the REML residuals for inspection.  It needs \pkg{nlme},
 costs \eqn{O(n^3)}, and so runs on at most \code{reml_max_n} points;
 it takes one row a location and needs 30 locations, which every layer
 needs anyway (a layer with fewer gets the unclassed \code{NA}, see
-Value, and no fit is tried).  When it is not fitted (no \pkg{nlme}) or
-does not converge, the \code{"ols"} path runs instead with an R
-warning that says which.  The start of the fit is chosen from the profile
+Value, and no fit is tried).  When it is not fitted (no \pkg{nlme}),
+cannot be fitted (the design of the trend cannot be built, as on a
+factor with one level) or does not converge,
+the \code{"ols"} path runs instead with an R warning that says which.
+The start of the fit is chosen from the profile
 REML likelihood on a grid of ranges and nugget proportions, and when
 more than one start is fitted the fit with the largest log-likelihood
 is kept.}
