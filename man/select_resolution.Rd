@@ -2,7 +2,7 @@
 % Please edit documentation in R/resolution-profile.R
 \name{select_resolution}
 \alias{select_resolution}
-\title{Read a level, and the region over which it is not distinguishable, off a profile}
+\title{Choose a cell count from a resolution profile}
 \usage{
 select_resolution(
   profile,
@@ -23,9 +23,7 @@ the profile's estimate, minimised), \code{"size"} (the count
 \code{obs_per_cell} gives), \code{"auto"} (\code{"size"} for a profile
 of pooled values, \code{"loo"} for one of plain means, \code{"cp"} for
 a profile without an estimate) or, with \code{diagnostic = TRUE},
-\code{"moran_z"} (\eqn{|z|} minimised).  Default \code{"auto"}.
-\code{"cp"} was the default of earlier versions; name it to read
-\eqn{C_p} on a profile that has it.}
+\code{"moran_z"} (\eqn{|z|} minimised).  Default \code{"auto"}.}
 
 \item{tol}{Width of the flat region.  For \code{cp}, \code{reliability}
 and \code{loo} it is relative to the optimum's value (\code{0.02} keeps
@@ -37,9 +35,8 @@ the ladder.  Under \code{"size"} there is no flat region, and
 
 \item{range_floor}{For \code{criterion = "reliability"} only.
 \code{TRUE} (default) reads the criterion at the levels at or above
-the range floor in \code{attr(profile, "bounds")}, which is where
-\code{resolution_profile()} started the ladder by default up to version
-2.0.0.  It applies when the layer supports the floor, some scored level
+the range floor in \code{attr(profile, "bounds")}.  It applies when the
+layer supports the floor, some scored level
 reaches it, and the profile built its own ladder (a ladder set with
 \code{levels} is read as given).  \code{FALSE} reads every level.}
 
@@ -56,63 +53,133 @@ built at exactly one (\code{\link{resolution_profile}(obs_per_cell =
 \code{"size"} it is an error.}
 }
 \value{
-A list of class \code{resolution_selection} with \code{best} (the
-level), \code{flat} (the levels in the flat region, ascending; a set,
-which can skip a rung), \code{criterion}, \code{value} (the optimum),
-\code{at_ceiling} and \code{at_floor} (logical: the optimum is the last
-or first of the levels this criterion was read at, which for
+A list of class \code{resolution_selection} with these elements:
+\describe{
+\item{\code{best}}{The level.}
+\item{\code{flat}}{The levels in the flat region, ascending: a set,
+which can skip a rung.}
+\item{\code{criterion}}{The criterion applied, never \code{"auto"}.}
+\item{\code{value}}{The optimum.}
+\item{\code{at_ceiling}, \code{at_floor}}{Whether the optimum is the
+last or first of the levels this criterion was read at, which for
 \code{moran_z} starts above nine cells and for \code{reliability} at
-the range floor; both \code{NA} under \code{"size"}, which searches for
-no optimum), \code{edge} (which bound that
-is, in words: the support ceiling, the subsample's ceiling, the range
-floor, the ladder's own end, the finest or the coarsest size offered
-on a ladder \code{obs_per_cell} set, the only level scored,
-or the first or last level the criterion is computable at; \code{NA} for
-an interior optimum and under \code{"size"}), \code{n_levels},
-\code{values} (the criterion
-at every level, \code{NA} where it could not be computed),
-\code{structured} (for \code{cp}: \code{FALSE} when \code{cp} at one
-cell is not above the optimum by more than \code{tol} (below it
-included), when the cell means at the
-optimum differ from one mean by no more than chance allows, or when
-the variogram found no spatial structure; \code{TRUE} when the optimum
-beats one cell on both counts; see "What each criterion returns".
-For \code{loo} and \code{size} on a profile built with
-\code{estimate}: \code{FALSE} when the leave-one-out error of one mean
-for all scored rows is within \code{tol} of the error at \code{best},
-or below it, or when the cell means at \code{best} differ from one
-mean by no more than chance allows; \code{TRUE} when the cells beat
-one mean on both counts.
-\code{TRUE} for an \code{elbow}; \code{NA} for \code{reliability}
-and \code{moran_z}, and for a profile that carries no one-cell value),
-\code{one_cell} (\code{cp} at one cell under \code{cp}; the
-leave-one-out error of one mean for all scored rows under \code{loo}
-and \code{size}; \code{NA} otherwise),
-\code{structure_p} (the p-value of the F test of the cells at
+the range floor; both \code{NA} under \code{"size"}, which searches
+for no optimum.}
+\item{\code{edge}}{Which bound that is, in words: the support ceiling,
+the subsample's ceiling, the range floor, the ladder's own end, the
+finest or the coarsest size offered on a ladder \code{obs_per_cell}
+set, the only level scored, or the first or last level the
+criterion is computable at; \code{NA} for an interior optimum and
+under \code{"size"}.}
+\item{\code{n_levels}}{The levels on the profile.}
+\item{\code{values}}{The criterion at every level, \code{NA} where it
+could not be computed.}
+\item{\code{structured}}{For \code{cp}: \code{FALSE} when \code{cp} at
+one cell is not above the optimum by more than \code{tol} (below it
+included), when the cell means at the optimum differ from one mean
+by no more than chance allows, or when the variogram found no
+spatial structure; \code{TRUE} when the optimum beats one cell on
+both counts (see "What each criterion returns").  For \code{loo}
+and \code{size} on a profile built with \code{estimate}:
+\code{FALSE} when the leave-one-out error of one mean for all scored
+rows is within \code{tol} of the error at \code{best}, or below it,
+or when the cell means at \code{best} differ from one mean by no
+more than chance allows; \code{TRUE} when the cells beat one mean on
+both counts.  \code{TRUE} for an \code{elbow}; \code{NA} for
+\code{reliability} and \code{moran_z}, and for a profile that
+carries no one-cell value.}
+\item{\code{one_cell}}{\code{cp} at one cell under \code{cp}; the
+leave-one-out error of one mean for all scored rows under
+\code{loo} and \code{size}; \code{NA} otherwise.}
+\item{\code{structure_p}}{The p-value of the F test of the cells at
 \code{best} against one mean, multiplied by the number of levels
-searched and capped at 1; a size searches one level; \code{NA} where
-\code{structured} is not read off \code{cp} or the leave-one-out
-error),
-\code{range_floor} (the floor \code{reliability} was held to, or
-\code{NA}), \code{note} (what the flags mean, in words: a character
-vector, one note an element; \code{NULL} when there is nothing to
-say.  The notes written under \code{"loo"} and \code{"size"}, and for
-a profile built with \code{estimate} or with one size, carry names:
+searched and capped at 1 (a size searches one level); \code{NA}
+where \code{structured} is not read off \code{cp} or the
+leave-one-out error.}
+\item{\code{range_floor}}{The floor \code{reliability} was held to, or
+\code{NA}.}
+\item{\code{note}}{What the flags mean, in words: a character vector,
+one note an element; \code{NULL} when there is nothing to say.  The
+notes written under \code{"loo"} and \code{"size"}, and for a
+profile built with \code{estimate} or with one size, carry names:
 \code{size} (the size that set the count), \code{held} (a size the
-profile held to the most cells k-means can place), \code{structure}
-(why the count is not identified), \code{finest} (the lowest error of
-pooled values is at the finest level scored), \code{estimate}
-(\code{cp} scores plain means, on a profile of pooled values) and
-\code{ladder} (the ladder is one size).  A note of \code{cp} or
-\code{moran_z} about the criterion itself has no name.  The warning
-of class \code{spatialkit_no_structure} that the functions taking the
-selection as a count raise carries every note but those named
-\code{size}, \code{held}, \code{finest}, \code{estimate} and
-\code{ladder}) and
-\code{seeds} (an sf POINT layer, with \code{seed_id}, of the centres of
-the partition the profile scored at \code{best}, in the CRS it was
-computed in; \code{NULL} for a profile that does not carry them).  Their
-Voronoi cells are the cells that were scored;
+profile held to the most cells k-means can place),
+\code{structure} (why the count is not identified), \code{finest}
+(the lowest error of pooled values is at the finest level scored),
+\code{estimate} (\code{cp} scores plain means, on a profile of
+pooled values) and \code{ladder} (the ladder is one size).  A note
+of \code{cp} or \code{moran_z} about the criterion itself has no
+name.  The warning of class \code{spatialkit_no_structure} that the
+functions taking the selection as a count raise carries every note
+but those named \code{size}, \code{held}, \code{finest},
+\code{estimate} and \code{ladder}.}
+\item{\code{seeds}}{An sf POINT layer, with \code{seed_id}, of the
+centres of the partition the profile scored at \code{best}, in the
+CRS it was computed in; \code{NULL} for a profile that does not
+carry them.  See "Seeds" below.}
+\item{\code{partition}}{For a profile built with \code{partition =
+      "density"} or \code{init = "random"}: \code{kind}, \code{init},
+\code{density_power} and \code{density_k}.  The seeds carry it as
+\code{attr(, "partition")}; the cells are those the profile built,
+whatever kind built them.  It stays the last element.}
+}
+For \code{"loo"} and \code{"size"}, and for any criterion on a profile
+built with \code{estimate}, the list has these elements after
+\code{seeds}:
+\describe{
+\item{\code{estimate}}{The profile's, \code{"mean"} or
+\code{"pooled"}; \code{NA} for a profile without one.}
+\item{\code{obs_per_cell}}{Rows per cell at \code{best}: the rows a
+size divides over \code{best}; \code{NA} for an object that keeps
+no row count.}
+\item{\code{obs_per_cell_asked}}{The size asked for; \code{NA} unless
+the criterion is \code{"size"}.}
+\item{\code{scored_per_cell}}{The profile's column at \code{best}: the
+rows the leave-one-out error read over the cells that hold one.  It
+is not \code{obs_per_cell}: it leaves out rows the error did not
+read and cells that hold none of them, as under
+\code{select_on = "split"}.}
+\item{\code{loo}, \code{loo_one_cell}}{The leave-one-out error at
+\code{best} and that of one mean for all scored rows.}
+\item{\code{share_alone}, \code{own_weight}}{The profile's columns at
+\code{best}.}
+\item{\code{count_rule}}{A list of class \code{spatialkit_count_rule}
+that records how the count was set: \code{rule} (the criterion
+applied), \code{estimate} (the estimate the rule was computed for:
+the profile's for \code{"size"} and \code{"loo"}, \code{"mean"} for
+\code{"cp"}, \code{NA} otherwise), \code{cells},
+\code{obs_per_cell}, \code{obs_per_cell_asked}, \code{response},
+\code{n} (the rows the size divides), \code{n_points}, \code{n_fit}
+(the rows the centres were fitted to; fewer than \code{n_points}
+for a subsample), \code{seed}, \code{features}, \code{scored} (what
+the profile scored at \code{best} for its estimate:
+\code{estimate}, \code{n}, \code{cells}, \code{loo}, \code{loo_se},
+\code{loo_one_cell}, \code{share_alone}, \code{own_weight},
+\code{structured}, \code{rows} and \code{centres}, the matrix of the
+centres the rows were scored in, in \code{crs} and in the profile's
+order; \code{NULL} without an estimate), \code{partition},
+\code{crs} and \code{scored_cells} (\code{NA}: the record stands for
+a count).}
+}
+A \code{"cp"} selection off a profile without an estimate has
+\code{count_rule} as well, after \code{seeds}, and nothing else of
+this list: its \code{estimate} is \code{"mean"}, since \eqn{C_p} scores
+plain means, and \code{scored} is \code{NULL}.  Under \code{"loo"} and
+\code{"size"} \code{one_cell} holds the leave-one-out error of one mean
+and \code{range_floor} is \code{NA}.
+
+\code{seeds} carries the same record as \code{attr(, "count_rule")}
+with \code{scored_cells = TRUE}, since they are the centres that were
+scored, or \code{FALSE} when they were refitted to every point, since
+they are then other cells built from the count.  The record travels on
+with the seeds, the cells and the assigned layer to
+\code{\link{summarize_by_cell}()}, which warns when it reports another
+cell value than the count was chosen for (class
+\code{spatialkit_estimate_mismatch}) and when the cells or rows it is
+given are not the ones the count was scored on
+(\code{spatialkit_cells_differ}).
+
+Seeds: the Voronoi cells of the seeds are the cells that were scored;
 \code{\link{get_voronoi_seeds}(method = "kmeans", n = <this>)} and
 \code{\link{voronoi_seeds_kmeans}(k = <this>)} return them.  On a
 profile without an estimate whose centres were fitted to a subsample
@@ -122,94 +189,35 @@ iteration (Hartigan and Wong's for \code{"kmeans"}, Lloyd's on every
 point's density weights for \code{"density"}) run from the centres
 scored, with the profile's iteration limit and no random draw.  Where
 Hartigan and Wong's algorithm refuses the centres, Lloyd's iteration
-with every weight one runs in its place, and a log line says so.  They
-carry \code{attr(, "refit")}: \code{rows} (the points),
+with every weight one runs in its place, and a log line says so.  Such
+seeds carry \code{attr(, "refit")}: \code{rows} (the points),
 \code{subsample} (the points the profile fitted to), \code{kind},
-\code{iter}, \code{iter_max}, \code{converged}, \code{wss_scored}
-(the within-cell sum of squares of every point in the cells of the
-centres scored, each cell about its own mean) and \code{wss} (the same
-of the refitted cells).  Their cells are then not the cells scored, and
-the count is still the one the subsample gave; the centres scored are
+\code{iter}, \code{iter_max}, \code{converged}, \code{wss_scored} (the
+within-cell sum of squares of every point in the cells of the centres
+scored, each cell about its own mean) and \code{wss} (the same of the
+refitted cells).  Their cells are then not the cells scored, and the
+count is still the one the subsample gave; the centres scored are
 \code{attr(profile, "centres")[[as.character(best)]]}.  The refit reads
-every point's coordinates from \code{attr(profile, "refit_rows")}, which
-every such profile this version builds carries; on one built before it
-the centres scored are the seeds, and a log line says so.  The refit is
-not run either, and the centres scored are the seeds, when it would
-pass the work limits of a profile's own fits (see "Conditions" in
-\code{\link{resolution_profile}}); a log line says so.  A profile with
-an estimate scores it on every row of the layer in the cells of the
-centres fitted to the subsample, so its seeds are those centres, whose
-cells are the cells scored.  \code{summary()} and \code{plot()} of a
-profile read no seeds and refit nothing.  For a
-profile built with \code{partition = "density"} or \code{init =
-  "random"} the list also has \code{partition} (\code{kind},
-\code{init}, \code{density_power}, \code{density_k}), and the seeds
-carry it as \code{attr(, "partition")}; the regions are those the
-profile built, whatever kind built them.
-
-For \code{"loo"} and \code{"size"}, and for any criterion on a profile
-built with \code{estimate}, the list has these elements after
-\code{seeds} (\code{partition}, when there is one, stays last):
-\code{estimate} (the profile's, \code{"mean"} or \code{"pooled"};
-\code{NA} for a profile without one);
-\code{obs_per_cell} (rows per cell at \code{best}: the rows a size
-divides over \code{best}; \code{NA} for an object that keeps no row
-count);
-\code{obs_per_cell_asked} (the size asked for; \code{NA} unless the
-criterion is \code{"size"});
-\code{scored_per_cell} (the profile's column at \code{best}: the rows
-the leave-one-out error read over the cells that hold one.  It is not
-\code{obs_per_cell}: it leaves out rows the error did not read and
-cells that hold none of them, as under \code{select_on = "split"});
-\code{loo} and \code{loo_one_cell} (the leave-one-out error at
-\code{best} and that of one mean for all scored rows);
-\code{share_alone} and \code{own_weight} (the profile's columns at
-\code{best}); and \code{count_rule}, a list of class
-\code{spatialkit_count_rule} that records how the count was set:
-\code{rule} (the criterion applied), \code{estimate} (the estimate the
-rule was computed for: the profile's for \code{"size"} and
-\code{"loo"}, \code{"mean"} for \code{"cp"}, \code{NA} otherwise),
-\code{cells}, \code{obs_per_cell}, \code{obs_per_cell_asked},
-\code{response}, \code{n} (the rows the size divides), \code{n_points},
-\code{n_fit} (the rows the centres were fitted to; fewer than
-\code{n_points} for a subsample), \code{seed}, \code{features},
-\code{scored} (what the profile scored at \code{best} for its
-estimate: \code{estimate}, \code{n}, \code{cells}, \code{loo},
-\code{loo_se}, \code{loo_one_cell}, \code{share_alone},
-\code{own_weight}, \code{structured}, \code{rows} and \code{centres},
-the matrix of the centres the rows were scored in, in \code{crs} and
-in the profile's order; \code{NULL} without an estimate),
-\code{partition}, \code{crs} and
-\code{scored_cells} (\code{NA}: the record stands for a count).
-\code{seeds} carries the same record as \code{attr(, "count_rule")}
-with \code{scored_cells = TRUE}, since they are the centres that were
-scored, or \code{FALSE} when they were refitted to every point, since
-they are then other cells built from the count.  A \code{"cp"}
-selection off a profile without an estimate has \code{count_rule} as
-well, after \code{seeds}, and nothing else of this list: its
-\code{estimate} is \code{"mean"}, since \eqn{C_p} scores plain means,
-and \code{scored} is \code{NULL}.  The record travels on with the seeds, the cells and the
-assigned layer to \code{\link{summarize_by_cell}()}, which warns when
-it reports another cell value than the count was chosen for (class
-\code{spatialkit_estimate_mismatch}) and when the cells or rows it is
-given are not the ones the count was scored on
-(\code{spatialkit_cells_differ}).  Under \code{"loo"} and \code{"size"} \code{one_cell} holds
-the leave-one-out error of one mean and \code{range_floor} is
-\code{NA}.  \code{criterion} is the criterion applied, never
-\code{"auto"}.
+every point's coordinates from \code{attr(profile, "refit_rows")}; on a
+profile without that attribute the centres scored are the seeds, and a
+log line says so.  The refit is not run either, and the centres scored
+are the seeds, when it would pass the work limits of a profile's own
+fits (see "Conditions" in \code{\link{resolution_profile}}); a log line
+says so.  A profile with an estimate scores it on every row of the
+layer in the cells of the centres fitted to the subsample, so its seeds
+are those centres, whose cells are the cells scored.  \code{summary()}
+and \code{plot()} of a profile read no seeds and refit nothing.
 }
 \description{
 Picks the level a criterion prefers, together with the \emph{flat region}:
 every level whose criterion value is within \code{tol} of the optimum.
+Report the flat region with the count, since every level in it scores
+within \code{tol} of the optimum.
 On the default profile, one size scored for pooled values, the default
 criterion is that size: it returns the count the size gives, with no
 optimum and no flat region (see "A profile built with an estimate"); what
-follows is about the criteria read on a ladder of counts.  On
-the criteria this package computes the flat region is routinely wide: the
-reliability curve is flat to within 2 percent over a factor of 3--6 in the
-number of cells, and \eqn{C_p} on a smooth field descends to the support
-ceiling.  The region is the answer, and the argmin only a point in it.
-When the optimum sits at an end of the levels the criterion was scored at,
+follows is about the criteria read on a ladder of counts.  When the
+optimum sits at an end of the levels the criterion was scored at,
 the result says so and names the bound, because a bound is then doing the
 choosing rather than the criterion (see
 \code{\link{resolution_profile}} for what each criterion measures and
@@ -243,34 +251,18 @@ the whole layer predicts as well as any level scored, so the
 response shows no spatial structure the cells can use and the count
 is not identified.  \code{structured} is also \code{FALSE} when the
 profile's variogram was refused for showing no spatial structure.
-\code{best} is still the argmin.
-\strong{Measured on white noise} (uniform points, the automatic
-ladder of \code{obs_per_cell = NULL}), \code{structured} was
-\code{TRUE} on 3 of 200 layers of 60 points, 7 of 200 of 120, 5 of
-150 of 300 and none of 80 of 600 or of
-40 of 1,500 with the noise variance taken from the finest level; and
-with the package's own variogram, whose nugget was 0 on 27 of the
-180 layers, on none of 120 layers of 120 points and 3 of 60 of 300.
-The first comparison alone gave 27, 20, 8, 0 and 0, and then 38 and
-11.  The F distribution is exact for a Gaussian response, and the
-test held its level on others: with no structure in a lognormal
-response, a 0/1 response with mean 0.1 and a \eqn{t_3} response,
-\code{structured} was \code{TRUE} on 2 to 10 of 200 layers at each
-of 60, 120 and 300 points.  A \code{FALSE} on a small layer is weak
-evidence that there is
-no structure: on exponential fields (range parameter 100 on a
-1000-unit extent, nugget 0.3 on a unit sill) \code{structured} was
-\code{TRUE} on 12 of 40 layers of 60 points, 36 of 40 of 120 and 40
-of 40 of 300.}
-\item{\code{reliability}}{The coarsest count the range allows.  The
-reliability curve peaks below the range floor, so it is read at the
-levels at or above the floor the profile reports (when the layer
-supports the floor and the profile built its own ladder).  The floor
-is a level of every such ladder, so the result is the floor, with
-\code{edge} naming it (on a profile whose k-means failed at that
+\code{best} is still the argmin.  The F distribution is exact for a
+Gaussian response.  The test has little power on a small layer, so a
+\code{FALSE} there is weak evidence that there is no structure.}
+\item{\code{reliability}}{The level of highest reliability at or above
+the range floor the profile reports (when the layer supports the floor
+and the profile built its own ladder).  The reliability curve often
+peaks below the floor, and the floor is a level of every such ladder,
+so the result is often the floor, the coarsest count the range
+allows, with \code{edge} naming it (on a profile whose k-means failed at that
 level, the first level above it).  \code{range_floor = FALSE} reads
-every level and returns the curve's own maximum, which is usually a
-count below the floor.}
+every level and returns the curve's own maximum, which can be a count
+below the floor.}
 \item{\code{elbow}}{The number of clusters of the points, when they
 cluster; an error otherwise, because the column is \code{NA} at every
 level unless the WSS curve bends.}
@@ -296,10 +288,8 @@ Under this criterion the count depends on the values of the response.
 When the profile's estimate is the pooled value and the lowest error
 is at the finest level scored, a note says that the end of the ladder
 chose the count.  For pooled values the error tends to keep falling to
-the finest level: in the simulation described under "Observations per
-cell" in \code{\link{resolution_profile}}, the lowest error of the
-pooled value was at the finest of seven sizes on 176 of 200 layers,
-and that of the plain mean on none.  On a ladder \code{obs_per_cell}
+the finest level (see "How this was checked" in
+\code{\link{resolution_profile}}).  On a ladder \code{obs_per_cell}
 set, an optimum at
 an end has the \code{edge} \code{"the finest size offered
     (obs_per_cell)"} or \code{"the coarsest size offered
@@ -358,9 +348,9 @@ count.  A profile of pooled values built with a ladder argument
 (\code{n_levels} and the others) is read by the size as well: the
 default returns the level nearest the count the size gives, on the
 automatic ladder its top level, with \code{spatialkit_size_not_reached}.
-The default was \code{"cp"} in earlier versions, whatever the profile;
-\code{criterion = "cp"} reads it as before on a profile that has it.  \code{cp} is computed on such a profile as on any other and
-scores plain means; when the profile's estimate is the pooled value the
+\code{criterion = "cp"} reads \eqn{C_p} on a profile that has it.
+\code{cp} is computed on such a profile as on any other and scores plain
+means; when the profile's estimate is the pooled value the
 result's note says so.
 
 \code{"cp"} and \code{"reliability"} cannot be read off a profile whose
@@ -368,17 +358,15 @@ ladder \code{obs_per_cell} set under \code{sac = "auto"}.  Such a profile
 fits no variogram, both columns are \code{NA} at every level, and the
 call is an error that names the ways to get them: build the profile with
 \code{sac = NULL}, with a \code{sac} of your own, or with
-\code{obs_per_cell = NULL}.  The default profile is such a profile.  For
-the count \code{"cp"} gave in earlier versions, build the profile with
-\code{estimate = NULL, obs_per_cell = NULL}, and with \code{partition =
-"kmeans"} for the same regions.  On a ladder of one size that has a
+\code{obs_per_cell = NULL}.  The default profile is such a profile.  On a
+ladder of one size that has a
 variogram either criterion returns the one level, with \code{edge}
 \code{"the only level scored"}.
 
 For a ladder of one size, \code{summary()} of the profile lists each
 criterion that is finite at the level and says that the size set the
 count, and \code{plot()} draws each as one point, with no selected level
-and no band.  When none is finite, as on a constant response, where
+and no flat region.  When none is finite, as on a constant response, where
 \code{loo} is \code{NA} too, or when no row of the selection half has a
 response (\code{select_on = "split"}), \code{summary()} stops with an
 error that says so.  In that last case \code{"cp"} and \code{"moran_z"},
@@ -388,44 +376,43 @@ which gives the size ladder's reason, as above.
 }
 
 \examples{
-if (requireNamespace("gstat", quietly = TRUE)) {
-  library(sf)
-  # An exponential field with range parameter 200 (true effective range
-  # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill.
-  set.seed(4)
-  n <- 400
-  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-  D  <- as.matrix(dist(xy))
-  xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) \%*\% rnorm(n))
-  pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-  prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
+\dontshow{if (requireNamespace("gstat", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+# An exponential field with range parameter 200 (true effective range
+# 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill.
+set.seed(4)
+n <- 400
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+D  <- as.matrix(dist(xy))
+xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) \%*\% rnorm(n))
+pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 
-  sel <- select_resolution(prof, criterion = "cp")
-  print(sel)               # the level, and the flat region around it
-  print(sel$flat)          # every level within `tol` of the optimum
-  print(sel$edge)          # the bound the optimum sits on; NA when interior
-  print(sel$structured)    # FALSE when one cell for the layer does as well
+# The default profile is one size scored for pooled values, and the
+# default criterion, "auto", reads it by that size.
+select_resolution(resolution_profile(pts, response_var = "z"))
 
-  # Reliability prefers coarse cells: it is read at or above the floor the
-  # autocorrelation range sets, and the result says in words that the
-  # floor is choosing.
-  rel <- select_resolution(prof, criterion = "reliability")
-  print(rel)
-  print(c(at_floor = rel$at_floor, edge = rel$edge))
+# A ladder of counts for plain means, read by Mallows' Cp.
+prof <- resolution_profile(pts, response_var = "z", n_levels = 12,
+                           estimate = NULL)
+sel <- select_resolution(prof, criterion = "cp")
+sel               # the level, and the flat region around it
+sel$flat          # every level within `tol` of the optimum
+sel$edge          # the bound the optimum sits on; NA when interior
+sel$structured    # FALSE when one cell for the layer does as well
 
-  # The default profile is one size scored for pooled values, and the
-  # default criterion, "auto", reads it by that size.
-  select_resolution(resolution_profile(pts, response_var = "z"))
-}
+# Reliability prefers coarse cells: it is read at or above the floor the
+# autocorrelation range sets, and the result says in words when the
+# floor is choosing.
+rel <- select_resolution(prof, criterion = "reliability")
+rel
+rel$at_floor
+rel$edge
+\dontshow{\}) # examplesIf}
 }
 \seealso{
-Other aggregation:
-\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
-\code{\link[=cell_values_at]{cell_values_at()}},
+Other resolution:
 \code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
-\code{\link[=kriging_adequacy]{kriging_adequacy()}},
 \code{\link[=resolution_profile]{resolution_profile()}},
-\code{\link[=summarize_by_cell]{summarize_by_cell()}},
 \code{\link[=summary.resolution_profile]{summary.resolution_profile()}}
 }
-\concept{aggregation}
+\concept{resolution}

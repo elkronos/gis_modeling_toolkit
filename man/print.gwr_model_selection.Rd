@@ -36,7 +36,6 @@ edition. Springer.
 Other print methods:
 \code{\link[=print.aoa]{print.aoa()}},
 \code{\link[=print.morans_i]{print.morans_i()}},
-\code{\link[=print.resolution_profile]{print.resolution_profile()}},
 \code{\link[=print.sac_range]{print.sac_range()}}
 }
 \concept{print methods}

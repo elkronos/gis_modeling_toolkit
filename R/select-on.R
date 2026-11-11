@@ -11,11 +11,11 @@
 #' half.  Blocking reduces the dependence between the halves; it does not
 #' remove it.  The halves share a border, and under spatial autocorrelation
 #' the points on either side of it are still correlated: on the tests'
-#' \code{so_field(300)} (fitted range 253), 85\% of the estimation points lie
-#' within the range of a selection point (93\% within the true range of 300;
+#' \code{so_field(300)} (fitted range 253), 85 percent of the estimation points lie
+#' within the range of a selection point (93 percent within the true range of 300;
 #' the median distance to the nearest one is 141, against 36 for a random
 #' half).  No buffer is cut between
-#' the halves.  A buffer as wide as the range would discard about 85\% of
+#' the halves.  A buffer as wide as the range would discard about 85 percent of
 #' that estimation half, and a narrower one would be an arbitrary fraction of
 #' a range the split does not estimate; the finite-sample exposure that
 #' remains is the price of splitting a contiguous layer in two.  Fold 1 is

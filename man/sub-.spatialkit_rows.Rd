@@ -52,12 +52,21 @@ dat <- st_as_sf(
              resp = c(1, 2, NA, 4, 5), pred = c(1, 2, 3, 4, Inf)),
   coords = c("x", "y"), crs = 32632
 )
-clean <- prep_model_data(dat, "resp", "pred")   # warns: 2 of 5 rows dropped
+# prep_model_data() warns that it dropped 2 of the 5 rows.
+clean <- suppressWarnings(prep_model_data(dat, "resp", "pred"))
 attr(clean, "dropped")$n          # 2
-attr(clean[1:2, ], "dropped")     # NULL -- the record does not follow
+attr(clean[1:2, ], "dropped")     # NULL: the record does not follow
 }
 \seealso{
 \code{\link{prep_model_data}()} and
 \code{\link{assign_features_to_polygons}()}, the two functions that
 attach the records this method removes.
+
+Other data preparation:
+\code{\link[=coerce_to_points]{coerce_to_points()}},
+\code{\link[=ensure_projected]{ensure_projected()}},
+\code{\link[=harmonize_crs]{harmonize_crs()}},
+\code{\link[=prep_model_data]{prep_model_data()}},
+\code{\link{spatialkit-geometry}}
 }
+\concept{data preparation}

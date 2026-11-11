@@ -2216,15 +2216,17 @@
   .empty_unlocated(.lonlat_of_placed(x, crs), rows)
 }
 
-#' Ensure an object has a projected CRS (with sensible defaults)
+#' Project an sf object to a CRS suited to its extent
 #'
-#' Coerces spatial objects to a projected coordinate reference system suitable
-#' for distance/area calculations.
+#' Returns a spatial object in a projected CRS, so that distances and areas
+#' computed on it are close to true.  Without `target_crs`, an object that
+#' already has a projected CRS is returned as it is, and lon/lat input is
+#' moved to a CRS chosen from its extent; with `target_crs`, the object is
+#' moved to that CRS.
 #'
 #' @details
-#' An object that already has a projected CRS is returned untouched. Only
-#' geographic (lon/lat) input is transformed, and the CRS chosen depends on the
-#' extent of the data. It is **not** always UTM:
+#' Without `target_crs`, only geographic (lon/lat) input is transformed, and
+#' the CRS chosen depends on the extent of the data:
 #'
 #' \describe{
 #'   \item{Local extents}{The UTM zone containing the data's centre
@@ -2235,156 +2237,141 @@
 #'     zone edge get the same zone in every session.}
 #'   \item{Wide extents}{Once the data reach well beyond the roughly 3 degrees
 #'     a UTM zone is designed for, a single zone can distort distances by
-#'     several percent, and that error propagates straight into variogram
-#'     ranges, block sizes, GWR bandwidths and GP length-scales. Which
-#'     projection is actually best is then **measured, not assumed**: the zone,
+#'     several percent, and that error propagates into variogram ranges,
+#'     block sizes, GWR bandwidths and GP length-scales. The projection used
+#'     is then the one with the smallest measured distortion among the zone,
 #'     a Lambert azimuthal equal-area centred on the data and (where its
-#'     standard parallels do not degenerate or pass a pole) an Albers conic are
-#'     each scored by projecting representative points of the data (a non-POINT layer is
-#'     reduced to one point per feature, plus the vertices of its outline when
-#'     fewer than 40 distinct points remain, so a single study-area polygon is
-#'     scored too, however many rows repeat it; copies of one location count
-#'     once, and rows without a finite location are left out) and comparing
-#'     planar with geodesic distances over the pairs at least 1 mm apart, and
-#'     the one that distorts least is used. A candidate must place every
-#'     location of the layer to be used: one under which a vertex of the
-#'     layer has no coordinates (a UTM zone about 90 degrees or more from its
-#'     central meridian) gets `distance_error` `NA` and is not chosen, and
-#'     the log line names it. A vertex at a latitude beyond 90, which no CRS
-#'     places, takes no part in this test. When no candidate places every
-#'     vertex, Web Mercator (Equal Earth for `purpose = "area"`) is used.
-#'     The choice, both error figures and this argument are **logged** (see the
-#'     logging note under [spatialkit_quiet()]); they are not R warnings, so
+#'     standard parallels do not degenerate or pass a pole) an Albers conic.
+#'     Each is scored by projecting representative points of the data and
+#'     comparing planar with geodesic distances over the pairs at least 1 mm
+#'     apart. A non-POINT layer is reduced to one point per feature, plus the
+#'     vertices of its outline when fewer than 40 distinct points remain, so
+#'     a single study-area polygon is scored too, however many rows repeat
+#'     it; copies of one location count once, and rows without a finite
+#'     location are left out. A candidate must place every location of the
+#'     layer to be used: one under which a vertex of the layer has no
+#'     coordinates (a UTM zone about 90 degrees or more from its central
+#'     meridian) gets `distance_error` `NA` and is not chosen, and the log
+#'     line names it. A vertex at a latitude beyond 90, which no CRS places,
+#'     takes no part in this test. When no candidate places every vertex,
+#'     Web Mercator (Equal Earth for `purpose = "area"`) is used. The choice,
+#'     its distance error and the zone's, and this argument are logged (see
+#'     [spatialkit_quiet()]); they are not R warnings, so
 #'     `tryCatch(warning = )` does not see them.}
-#'   \item{Antimeridian}{Data straddling ±180° have a bounding box wider than a
-#'     hemisphere. The wrap is detected from the coordinates (one very large
-#'     gap in the sorted longitudes) and an equal-area projection centred on
-#'     the true extent is used.}
+#'   \item{Antimeridian}{Data straddling longitude 180 have a bounding box
+#'     wider than a hemisphere. The wrap is detected from the coordinates (one
+#'     very large gap in the sorted longitudes) and an equal-area projection
+#'     centred on the true extent is used.}
 #'   \item{Around a pole}{Data spanning more than 180 degrees of longitude
 #'     with no such gap surround a pole. When every point also lies on one
 #'     side of the equator (Antarctic stations, a pan-Arctic network), a
 #'     Lambert azimuthal equal-area centred on that pole is used, provided it
 #'     measures a smaller distance error than the global fallback. Web
-#'     Mercator splits such a layer at +/-180 degrees and stretches it
-#'     towards the pole: a ring of Antarctic stations measured a worst-case
-#'     distance error near 20,000 percent in it, against about 2 percent in
-#'     the polar projection. Only the coverage left over, spanning both
+#'     Mercator splits such a layer at longitude 180 and stretches it
+#'     towards the pole. Only the coverage left over, spanning both
 #'     hemispheres or a low-latitude belt the polar projection fits worse,
 #'     falls back to EPSG:3857 (Equal Earth for `purpose = "area"`).}
-#'   \item{Missing CRS}{With no `target_crs`, a bounding box that looks like
-#'     lon/lat means EPSG:4326 is assumed (a real warning) and the rules above
-#'     then apply; coordinates the heuristic declines are left exactly as they
-#'     are. The box is the one of the coordinates that have a location (see
-#'     the next item). With `target_crs` supplied there is no source CRS to reproject
-#'     from, so the same heuristic decides between two outcomes: lon/lat-looking
-#'     coordinates are read as EPSG:4326 and reprojected to the target (a real
-#'     warning), and anything else has the target **stamped on without
-#'     reprojection**. That is a relabel, logged only, so verify the
-#'     coordinates really are in that CRS. Set the CRS explicitly to suppress
-#'     either. A `target_crs` in longitude and latitude is not stamped on
-#'     coordinates that cannot be in it: an x outside -180 to 360 or a y
-#'     beyond 90 north or south, in the box of the coordinates that have a
-#'     location, stops the call with an error that gives the box.}
-#'   \item{Rows without a location}{A coordinate that is not finite or lies
-#'     beyond 1e150 has no location, and nor does a row whose geometry is
-#'     empty. The lon/lat test of a layer without a CRS reads the
-#'     coordinates that have a location, vertex by vertex: a polygon with one
-#'     such vertex is read on its other vertices. The choice of a projection
-#'     reads the rows that have a location: a row with one such coordinate
-#'     takes no part in it, as an empty row would, and a layer in which no
-#'     row has a location gets Web Mercator (Equal Earth for
-#'     `purpose = "area"`). Moved to another CRS, these rows come back
-#'     empty, in their own geometry type;
-#'     [sf::st_transform()] would drop the vertex it cannot move, or put a
-#'     coordinate beyond 1e150 at a finite place, and return the rest of the
-#'     feature. A row that has a location and that a move to another CRS
-#'     cannot place in full comes back empty, or without the vertices the
-#'     CRS cannot place, and a warning of class `spatialkit_rows_unplaced`
-#'     names such rows (`rows` on the condition), from lon/lat or from a
-#'     projected CRS. With the projection chosen
-#'     here that happens only at a coordinate no CRS places, such as a
-#'     latitude beyond 90; with a `target_crs`, wherever that CRS cannot
-#'     place the layer. The choice of a projection does not read a row with
-#'     a vertex at a latitude beyond 90 either: it is made on the other
-#'     rows, and a layer each row of which is empty, has no location or has
-#'     such a vertex gets Web Mercator (Equal Earth for `purpose = "area"`).
-#'     The functions that read a lon/lat data layer row by row
-#'     ([coerce_to_points()], [prep_model_data()] and the fits, the k-means
-#'     seeders' points, the features of [assign_features_to_polygons()], the
-#'     pooled readers of [summarize_by_cell()] and [cell_values_at()], and
-#'     [ensure_stable_poly_id()]) read a row with a vertex at a latitude
-#'     beyond 90 as a row without a location, before anything else reads
-#'     it, and say so in the words they use for such a row.}
+#'   \item{Missing CRS}{A layer without a CRS is read by the lon/lat test of
+#'     [spatialkit-geometry] ("Layers without a CRS"). With no `target_crs`,
+#'     coordinates the test takes for degrees are read as EPSG:4326, with a
+#'     warning, and the rules above then apply; coordinates it declines are
+#'     left as they are. With `target_crs`, coordinates the test takes for
+#'     degrees are read as EPSG:4326 and reprojected to the target, with a
+#'     warning, and any others have the target stamped on without
+#'     reprojection. A stamp is a relabel, logged only, so check that the
+#'     coordinates are in that CRS. Set the CRS on `x` to avoid either. A
+#'     `target_crs` in longitude and latitude is not stamped on coordinates
+#'     that cannot be in it: an x outside -180 to 360 or a y beyond 90 north
+#'     or south, in the box of the coordinates that have a location, stops
+#'     the call with an error that gives the box.}
+#'   \item{Rows without a location}{Such rows (see [spatialkit-geometry],
+#'     "Rows without a location") take no part in the lon/lat test or the
+#'     choice of a projection. The lon/lat test reads the coordinates that
+#'     have a location vertex by vertex, so a polygon with one vertex beyond
+#'     1e150 is read on its other vertices. A layer in which no row has a
+#'     location, or each row of which is empty, has no location or has a
+#'     vertex at a latitude beyond 90, gets Web Mercator (Equal Earth for
+#'     `purpose = "area"`). Moved to another CRS, a row without a location
+#'     comes back empty, in its own geometry type. A row that has a location
+#'     and that the move cannot place in full comes back empty, or without
+#'     the vertices the CRS cannot place, with a warning of class
+#'     `spatialkit_rows_unplaced` that names the rows (`rows` on the
+#'     condition). With the projection chosen here that happens only at a
+#'     coordinate no CRS places, such as a latitude beyond 90; with a
+#'     `target_crs`, wherever that CRS cannot place the layer.}
 #' }
 #'
 #' `target_crs` overrides all of this. Pass it whenever you need a specific,
 #' reproducible projection: comparing runs, matching an existing layer, or
 #' fixing the units that [make_folds()]'s `block_size` will be interpreted in.
 #'
-#' @param x An sf or sfc object (other objects returned unchanged).
+#' A layer that mixes XY and XYZ (or XYM) geometries is returned in XY when
+#' it is transformed, with a warning of class `spatialkit_zm_dropped`, and
+#' the projection is chosen from the layer in XY; see [spatialkit-geometry],
+#' "Mixed dimensions, Z and M".  A layer that is not transformed is returned
+#' with its own geometry.
+#'
+#' @section Equal-area check:
+#' Under `purpose = "area"`, input that already has a projected CRS is
+#' returned as it is, but its area distortion over the extent is measured
+#' and logged as a warning when it exceeds 1 percent.  The measure is the
+#' spread of planar-to-geodesic area ratios over probe polygons.  The probes
+#' are the layer's distinct polygons (exact copies of a polygon count once).
+#' A 6 by 6 grid over the bounding box is used instead for a layer without
+#' polygons, a layer of one distinct polygon, which gives one ratio and no
+#' spread, and a layer with a polygon s2 cannot measure in degrees (edges
+#' that cross, a spike) or that [sf::st_is_valid()] rejects in its
+#' CRS (a hole outside its shell), whose planar area is not the area it
+#' encloses.  When the grid gives no figure either (a single point, a line
+#' along one axis), a warning says that the distortion could not be
+#' measured.  An equal-area projection still shows some spread, from the
+#' sphere the geodesic areas are computed on against the ellipsoid the
+#' projection uses.  [summarize_by_cell()] applies the
+#' same check before it computes a density.
+#'
+#' @param x An sf or sfc object (other objects are returned unchanged).
 #' @param target_crs Optional target CRS (sf object, integer EPSG, or crs).
 #'   Must resolve to a usable CRS via [sf::st_crs()]; an unusable value (one
 #'   that resolves to `NA_crs_`) raises an error, so `x` is never left
-#'   silently unprojected.
-#' @param purpose Which property the projection is for.  `"distance"` (the
-#'   default, and everything above): the candidate that distorts pairwise
-#'   distances least, which is what ranges, block sizes, bandwidths and
-#'   length-scales read off the coordinates.  `"area"`: densities or rates
-#'   per cell are going to be computed, so the CRS must be equal-area.  For
-#'   lon/lat input the choice is then made among equal-area projections only:
-#'   a Lambert azimuthal centred on the data, or an Albers conic where its
-#'   parallels do not degenerate or pass a pole, whichever distorts distances
-#'   less.  A UTM zone (conformal, not equal-area) never enters that
-#'   comparison, and global
-#'   coverage gets Equal Earth in place of Web Mercator.  Already-projected
-#'   input is still returned untouched, but its area distortion over the
-#'   extent is measured (the spread of planar-to-geodesic area ratios over
-#'   probe polygons) and logged as a warning when it exceeds 1 percent.  The
-#'   probes are the layer's distinct polygons (exact copies of a polygon
-#'   count once), or a 6 by 6 grid over its bounding box for a layer without
-#'   polygons, a layer of one distinct polygon, which gives one ratio and no
-#'   spread, and a layer with a polygon s2 cannot measure in degrees (edges
-#'   that cross, a spike) or that [sf::st_is_valid()] rejects in its CRS (a
-#'   hole outside its shell), whose planar area is not the area it encloses.
-#'   When the grid gives no figure either (a single
-#'   point, a line along one axis), a warning says that the distortion could
-#'   not be measured.
-#'   Measured: a zone's own width edge to edge, 0.25 percent; the
-#'   conterminous United States forced into one zone, 14 percent; Web
-#'   Mercator over 2.5 degrees of latitude at 48N, 4 percent; an equal-area
-#'   projection, a few tenths of a percent, which is the sphere the
-#'   geodesic areas are computed on against the ellipsoid the projection
-#'   uses.  [summarize_by_cell()] applies the same measurement before it
-#'   computes a density.  Ignored when `target_crs` is given.
-#' @return x, potentially with a new projected CRS.  When a projection was
-#'   chosen here (lon/lat input, no \code{target_crs}) the result carries
-#'   \code{attr(x, "crs_choice")}: a data.frame with one row per projection
-#'   considered, holding \code{name}, \code{crs} (its definition), the measured
-#'   worst-case \code{distance_error} (relative, over sampled pairs;
-#'   \code{NA} where it could not be measured) and \code{chosen}.  The
-#'   figure the log line quotes for the winner is therefore recoverable for
-#'   every candidate, and is measured for the single candidate on the paths
-#'   where no comparison runs (a UTM zone on a local extent, the equal-area
-#'   projection chosen for a layer straddling the antimeridian).  It is
-#'   \code{NULL} exactly when no local projection was chosen here: input
-#'   that already carried a projected CRS, a \code{target_crs} you supplied,
-#'   or an extent no local projection fits, which falls back to Web Mercator
-#'   or Equal Earth.  CRS-less input
-#'   additionally carries \code{attr(x, "crs_assumed")}: \code{"EPSG:4326"} when
-#'   the lon/lat heuristic fired, \code{"none"} when it declined.  That
-#'   attribute is also read on the way IN.  An object already carrying
-#'   \code{"none"} is returned untouched, with the heuristic skipped, which is
-#'   how a \code{predict()} method replays a fit's negative decision so that a
-#'   subset of the training rows is not judged differently from the whole.
-#'   A layer that mixes XY and XYZ (or XYM) geometries is returned in XY
-#'   when it is transformed, with a warning of class
-#'   \code{"spatialkit_zm_dropped"}: [sf::st_transform()] reads a layer in
-#'   the dimension of its first geometry and misplaces the others.  The
-#'   projection is then chosen from the layer in XY.  A layer in one
-#'   dimension is transformed with its Z and M, and so is a layer whose
-#'   only geometries of another dimension than the first are empty and not
-#'   points.  A layer that is not transformed is returned with its own geometry.
-#' @family spatial data preparation
+#'   unprojected without a word.
+#' @param purpose `"distance"` (default): the candidate that distorts
+#'   pairwise distances least, which is what ranges, block sizes, bandwidths
+#'   and length-scales read off the coordinates.  `"area"`: an equal-area
+#'   projection, for densities or rates per cell.  For lon/lat input the
+#'   choice is then made among a Lambert azimuthal centred on the data and
+#'   an Albers conic (where its parallels do not degenerate or pass a pole),
+#'   whichever distorts distances less; a UTM zone, which is not equal-area,
+#'   never enters that comparison, and global coverage gets Equal Earth in
+#'   place of Web Mercator.  For input already projected, the area
+#'   distortion is measured and a warning is logged above 1 percent; see
+#'   "Equal-area check".  Ignored when `target_crs` is given.
+#' @return `x` in `target_crs` when one is given.  Otherwise `x` in the
+#'   projected CRS chosen here, as it came when it already had a projected
+#'   CRS, or without a CRS when it had none and the lon/lat test declined it
+#'   (see "Missing CRS").
+#'   Two attributes record how the CRS was reached:
+#'   \describe{
+#'     \item{`crs_choice`}{Present when a projection was chosen here (lon/lat
+#'       input, no `target_crs`): a data.frame with one row per projection
+#'       considered, holding `name`, `crs` (its definition), the measured
+#'       worst-case `distance_error` (relative, over sampled pairs; `NA`
+#'       where it could not be measured) and `chosen`.  The figure is
+#'       measured for the single candidate on the paths where no comparison
+#'       runs (a UTM zone on a local extent, the equal-area projection chosen
+#'       for a layer straddling the antimeridian).  `NULL` when no local
+#'       projection was chosen here: input that already had a projected
+#'       CRS, a `target_crs` you supplied, or an extent no local projection
+#'       fits, which falls back to Web Mercator or Equal Earth.}
+#'     \item{`crs_assumed`}{On input without a CRS: `"EPSG:4326"` when the
+#'       lon/lat test took the coordinates for degrees, `"none"` when it
+#'       declined.  The attribute is also read on the way in: an object
+#'       already carrying `"none"` is returned as it is, without the test,
+#'       which is how a `predict()` method replays a fit's decision so that
+#'       a subset of the training rows is not judged differently from the
+#'       whole.}
+#'   }
+#' @family data preparation
+#' @seealso [spatialkit-geometry] for how input geometry and CRSs are read.
 #' @examples
 #' library(sf)
 #' pts_ll <- st_as_sf(
@@ -2396,16 +2383,19 @@
 #' st_crs(ensure_projected(pts_ll))$epsg  # 32632
 #' attr(ensure_projected(pts_ll), "crs_choice")
 #'
-#' # A continental extent is scored against the zone and may get an equal-area
-#' # projection instead; the choice and both error figures are LOGGED, not
-#' # warned -- see Details and ?spatialkit_quiet.
+#' # A continental extent is scored against the zone and may get an
+#' # equal-area projection instead.  The choice is logged with its distance
+#' # error and the zone's, not raised as an R warning (see ?spatialkit_quiet);
+#' # crs_choice holds every candidate scored.
 #' wide <- st_as_sf(
 #'   data.frame(lon = c(-120, -70), lat = c(30, 48)),
 #'   coords = c("lon", "lat"), crs = 4326
 #' )
-#' st_crs(ensure_projected(wide))$proj4string
+#' wide_p <- ensure_projected(wide)
+#' st_crs(wide_p)$proj4string
+#' attr(wide_p, "crs_choice")[, c("name", "distance_error", "chosen")]
 #'
-#' # target_crs overrides the choice entirely.
+#' # target_crs overrides the choice.
 #' st_crs(ensure_projected(pts_ll, target_crs = 3035))$epsg  # 3035
 #'
 #' # For densities per cell the CRS has to be equal-area.  Two candidates are
@@ -2580,53 +2570,49 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
 # CRS Harmonization
 # -----------------------------------------------------------------------------
 
-#' Harmonize CRS between two spatial objects
+#' Bring two spatial objects to one CRS
 #'
-#' Aligns two sf objects to a common CRS.
+#' Brings two sf or sfc objects to one CRS: the CRS of `a` or `b`, as
+#' `prefer` says, or `target_crs` when it is given.  Without `target_crs`,
+#' two objects that both lack a CRS are returned unchanged.
 #'
-#' When one input carries no CRS, the same lon/lat heuristic
-#' [ensure_projected()] uses decides what happens, so both entry points place
-#' identical data in the same place: coordinates that look like degrees are
-#' taken as EPSG:4326 and **reprojected** to the other object's CRS (or
-#' `target_crs`); coordinates that do not are *stamped* with
-#' [sf::st_set_crs()], which relabels without moving them.  Either way the
-#' assumption is announced with a warning.  A CRS in longitude and latitude
-#' is not stamped on coordinates that cannot be in it: a layer with an x
-#' outside -180 to 360 or a y beyond 90 north or south, read on the
-#' coordinates that have a location, stops the call with an error that names
-#' `a` or `b`, its box and the target CRS.
+#' When one input has no CRS, the lon/lat test that [ensure_projected()]
+#' uses decides what happens (see [spatialkit-geometry], "Layers without a
+#' CRS"), so both functions place the same data in the same place:
+#' coordinates the test takes for degrees are read as EPSG:4326 and
+#' reprojected to the other object's CRS (or `target_crs`); other
+#' coordinates are stamped with that CRS by [sf::st_set_crs()], which
+#' relabels them without moving them.  Either way a warning says so.  A CRS
+#' in longitude and latitude is not stamped on coordinates that cannot be
+#' in it: a layer with an x outside -180 to 360 or a y beyond 90 north or
+#' south, read on the coordinates that have a location, stops the call with
+#' an error that names `a` or `b`, its box and the target CRS.
+#'
+#' A layer that is transformed is read as [spatialkit-geometry] describes:
+#' a layer that mixes XY and XYZ (or XYM) geometries comes back in XY, with
+#' a warning of class `spatialkit_zm_dropped`, and a row without a location
+#' comes back empty, in its own geometry type.  So does a row of a projected
+#' layer moved to a CRS in degrees with a coordinate beyond 1e10 in its
+#' CRS's own unit, further out than any projected CRS places a point of the
+#' Earth.  A row that has a location and that the target CRS cannot place
+#' in full, such as a point far outside a UTM zone or a ring with a vertex
+#' at a latitude beyond 90, comes back empty, or without the vertices the
+#' CRS cannot place, and a warning of class `spatialkit_rows_unplaced` names
+#' such rows of `a` or `b` (`rows` on the condition).
 #'
 #' @param a,b Objects of class sf or sfc.
-#' @param prefer Which object's CRS to keep ("a" or "b").
+#' @param prefer Which object's CRS both are brought to when they differ:
+#'   `"a"` (default) or `"b"`.  Ignored when `target_crs` is given.
 #' @param target_crs Optional target CRS to apply to both: anything
 #'   [sf::st_crs()] accepts, including an sf or sfc object, whose CRS is used.
-#' @param on_transform_error What to do when st_transform() fails:
-#'   \code{"stop"} (default) raises an error immediately;
-#'   \code{"set_crs"} falls back to st_set_crs() (UNSAFE: coordinates are
-#'   NOT reprojected, only the CRS label is overwritten). The \code{"set_crs"}
-#'   option exists only for rare edge cases where you are certain the
-#'   coordinates already match the target CRS definition.
-#' @return A named list with components a and b.  A layer that is
-#'   transformed and mixes XY and XYZ (or XYM) geometries is returned in XY,
-#'   with a warning of class \code{"spatialkit_zm_dropped"}:
-#'   [sf::st_transform()] reads a layer in the dimension of its first
-#'   geometry and misplaces the others.  A layer in one dimension is
-#'   transformed with its Z and M, and so is a layer whose only geometries
-#'   of another dimension than the first are empty and not points.  A row
-#'   of a transformed layer with a coordinate that is not finite or lies
-#'   beyond 1e150 comes back empty, in its own geometry type: it has no
-#'   location to move, and [sf::st_transform()] would drop that vertex and
-#'   return the rest of the feature, or put the coordinate at a finite
-#'   place.  So does a row of a projected layer moved to a CRS in degrees
-#'   with a coordinate beyond 1e10 in its CRS's own unit, further out than
-#'   any projected CRS places a point of the Earth.  A row that has a
-#'   location and that the target CRS cannot place in full, such as a point
-#'   far outside a UTM zone or a ring with a vertex at a latitude beyond 90,
-#'   comes back empty, or without the vertices the CRS cannot place, and a
-#'   warning of class \code{"spatialkit_rows_unplaced"} names such rows of
-#'   \code{a} or \code{b} (\code{rows} on the condition).  A layer that is
-#'   not transformed is returned as it came.
-#' @family spatial data preparation
+#' @param on_transform_error What to do when [sf::st_transform()] fails:
+#'   `"stop"` (default) raises an error; `"set_crs"` relabels the CRS with
+#'   [sf::st_set_crs()] without moving the coordinates.  Use `"set_crs"` only
+#'   when the coordinates are already in the target CRS.
+#' @return A named list with components `a` and `b`, each of the class it
+#'   came in.  A layer that is not transformed is returned as it came.
+#' @family data preparation
+#' @seealso [spatialkit-geometry] for how input geometry and CRSs are read.
 #' @examples
 #' library(sf)
 #' a <- st_as_sf(data.frame(x = c(500000, 500100), y = c(4000000, 4000100)),
@@ -3193,31 +3179,60 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 # Point Coercion
 # -----------------------------------------------------------------------------
 
-#' Coerce arbitrary geometries to representative points
+#' Reduce each geometry to one representative point
 #'
-#' Converts the geometry column of an sf object to POINTs using one of several
-#' strategies.
+#' Replaces the geometry of each row of an sf object with a point, by the
+#' rule `mode` names.  The result has one row per row of `x`, in the same
+#' order.
 #'
-#' The result has one row per row of `x`, in the same order.  An EMPTY
-#' geometry of any type, lines included, becomes an EMPTY POINT in its own
-#' row; [prep_model_data()] and [make_folds()] then drop such rows, as they
-#' drop any other empty geometry.  Empty lines are never handed to
-#' [sf::st_line_sample()]: it yields no midpoint for them, which would
-#' misalign the result, and with sf 1.0.x an empty MULTILINESTRING (or an
-#' empty part of one) crashed the R session.  An empty part inside a
-#' non-empty feature is ignored, so the feature gets the point its other
-#' parts give; GEOS's interior point, used by `"point_on_surface"` and by
-#' the temporary projection's choice of CRS, segfaulted on an empty line
-#' part too.
+#' @section Modes:
+#' \describe{
+#'   \item{`"auto"` (default)}{POINT rows are kept.  POLYGON and MULTIPOLYGON
+#'     rows get a point on the surface.  A LINESTRING gets its midpoint, and
+#'     a MULTILINESTRING the midpoint of its longest part (see "Lines").
+#'     MULTIPOINT rows and rows of other types, such as geometry
+#'     collections, get their centroid.}
+#'   \item{`"centroid"`}{The centroid of every row.}
+#'   \item{`"point_on_surface"` (alias `"surface"`)}{A point that lies on
+#'     each geometry, taken with GEOS.}
+#'   \item{`"line_midpoint"`}{The midpoint of each LINESTRING, taken in a
+#'     temporary projection (with `tmp_project = FALSE` on lon/lat data, its
+#'     centroid).  Rows of other types (points, polygons and their MULTI
+#'     forms) get their centroid.  A MULTILINESTRING or GEOMETRYCOLLECTION
+#'     row is an error: cast it to LINESTRING first, or use `"auto"`, which
+#'     takes the midpoint of a MULTILINESTRING's longest part.}
+#'   \item{`"bbox_center"`}{The centre of each row's bounding box.}
+#' }
 #'
-#' A geometry of any type with a coordinate that is not finite (`NA`,
-#' `NaN`, `Inf`) or lies beyond 1e150 has no location (see
-#' [ensure_projected()], "Rows without a location"), and gets an EMPTY
-#' POINT in every mode, as an empty geometry does.  So does a geometry of a
-#' layer in a geographic CRS with a vertex at a latitude beyond 90 degrees,
-#' which is no place on the Earth, and a warning of class
+#' @section Empty geometries and rows without a location:
+#' An empty geometry of any type, lines included, becomes an empty POINT in
+#' its own row; [prep_model_data()] and [make_folds()] then drop such rows,
+#' as they drop any other empty geometry.  An empty part inside a non-empty
+#' feature is ignored, so the feature gets the point its other parts give.
+#'
+#' A geometry with no location (see [spatialkit-geometry], "Rows without a
+#' location") gets an empty POINT in every mode, as an empty geometry does.
+#' So does a geometry of a layer in a geographic CRS with a vertex at a
+#' latitude beyond 90 degrees, and a warning of class
 #' `spatialkit_lat_beyond_90` gives its rows of `x` (`rows`).
 #'
+#' @section Lines:
+#' Modes `"auto"` and `"line_midpoint"` take the midpoint of a line in a
+#' temporary projection (`tmp_project`), the one [ensure_projected()]
+#' chooses for the lines.  A line that projection returns empty or without
+#' some of its vertices is not sampled: the call stops with an error of
+#' class `spatialkit_features_degenerate` (see "Errors").
+#'
+#' In mode `"auto"` a MULTILINESTRING gets the midpoint of its longest part.
+#' When several parts share the greatest length (to one part in ten
+#' million, measured in the projection used), their midpoints are taken
+#' and the one lowest in x, then in y, is kept, so the point does not depend
+#' on the order in which the feature lists its parts.  x values within one
+#' part in ten million of the diagonal of the midpoints' bounding box count
+#' as one, so y decides between midpoints whose x differ only in their last
+#' bits, and the point does not move with the origin of the coordinates.
+#'
+#' @section Longitude and latitude:
 #' Modes `"auto"` (for polygons) and `"point_on_surface"` take the point
 #' with GEOS, which reads a layer in longitude and latitude on the plane in
 #' degrees, under either [sf::sf_use_s2()] setting. sf's warning that such a
@@ -3230,45 +3245,43 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' -180 to 180. A polygon whose point lies on it neither way, or that s2
 #' cannot read, keeps GEOS's point, and a warning of class
 #' `spatialkit_surface_point_off` gives its rows of `x` (`rows`). When `x`
-#' has no CRS and the lon/lat heuristic of [ensure_projected()] takes its
+#' has no CRS and the lon/lat test of [ensure_projected()] takes its
 #' coordinates for degrees, its polygons that span more than 180 units are
 #' read so too, as EPSG:4326, and a warning names the rows whose point that
 #' reading moves; the points keep the missing CRS.
 #'
-#' Mode `"bbox_center"`, and mode `"centroid"` (with the centroids
-#' `"line_midpoint"` takes of the rows that are not a LINESTRING, and
-#' `"auto"` of a MULTIPOINT and of the rows that are not points, lines or
-#' polygons, such as geometry collections) where GEOS takes the centroid on
-#' the plane in degrees (a lon/lat layer with s2 off), read a geometry
-#' written across longitude 180 the same way: one that spans more
-#' than 180 degrees of longitude as written, and no more than 180 with the
-#' longitudes below 0 read from 180 to 360, gets the centre of that box, or
-#' GEOS's centroid of the geometry so read, brought back into -180 to 180.
-#' A layer without a CRS that the lon/lat heuristic takes for degrees is
-#' read so too, with the same warning. A geometry wider than 180 degrees in
-#' both readings, such as one around a pole, keeps the centre of its box on
-#' the plane, or GEOS's planar centroid. The centroids s2 takes on the
-#' sphere are not changed.
+#' Mode `"bbox_center"`, and the centroids that GEOS takes on the plane in
+#' degrees (a lon/lat layer with s2 off) under `"centroid"`, for the rows
+#' other than LINESTRINGs under `"line_midpoint"`, and for MULTIPOINTs and
+#' collections under `"auto"`, read a geometry written across longitude 180
+#' the same way: one that spans more than 180 degrees of longitude as
+#' written, and no more than 180 with the longitudes below 0 read from 180
+#' to 360, gets the centre of that box, or GEOS's centroid of the geometry
+#' so read, brought back into -180 to 180. A layer without a CRS that the
+#' lon/lat test takes for degrees is read so too, with the same warning. A
+#' geometry wider than 180 degrees in both readings, such as one around a
+#' pole, keeps the centre of its box on the plane, or GEOS's planar
+#' centroid. The centroids s2 takes on the sphere are not changed.
 #'
-#' In mode `"auto"` a MULTILINESTRING gets the midpoint of its longest part.
-#' When several parts share the greatest length (to one part in ten
-#' million, measured in the projection used), their midpoints are taken
-#' and the one lowest in x, then in y, is kept, so the point does not depend
-#' on the order in which the feature lists its parts.  x values within one
-#' part in ten million of the diagonal of the midpoints' bounding box count
-#' as one, so y decides between midpoints whose x differ only in their last
-#' bits, and the point does not move with the origin of the coordinates.
+#' With s2 on, sf takes the centroids of a lon/lat layer with s2 (under
+#' `"centroid"`, for the rows other than LINESTRINGs under
+#' `"line_midpoint"`, and for collections under `"auto"`), and s2 refuses
+#' some polygons GEOS accepts.  A polygon s2 refuses because a vertex
+#' repeats the one before it, on its own or inside a collection, gets the
+#' centroid of the same ring without the repeat; the ring's points are
+#' unchanged.  A polygon s2 refuses for another reason (edges that cross, a
+#' figure eight) is an error (see "Errors").  With s2 off, the centroids
+#' are GEOS's, planar in degrees.
 #'
+#' @section Z and M coordinates:
 #' A layer whose geometries do not all have the same dimensions (XY beside
 #' XYZ or XYM, as `rbind()` of an XY and an XYZ layer gives) is read in x
-#' and y: sf hands GEOS and s2 every geometry in the dimension of the first,
-#' and the points of such a layer are returned in one dimension.
-#' Z and M are dropped, the points come back in XY, and a warning of class
-#' `spatialkit_zm_dropped` says so, with the rows that carried Z or M as its
-#' `rows`.  Mode `"bbox_center"` reads the box of each geometry and gives XY
-#' points for any layer, with no warning about Z or M.  A layer in one dimension, XY or
-#' XYZ throughout, is read as it is, and so is a layer whose only
-#' geometries of another dimension than the first are empty and not points.
+#' and y, and its points come back in XY with a warning of class
+#' `spatialkit_zm_dropped` whose `rows` are the rows that carried Z or M
+#' (see [spatialkit-geometry], "Mixed dimensions, Z and M").  A layer in one
+#' dimension, XY or XYZ throughout, is read as it is, and so is a layer
+#' whose only geometries of another dimension than the first are empty and
+#' not points.
 #'
 #' GEOS does not read M coordinates.  When the mode reduces a geometry that
 #' carries M (XYM or XYZM) to a point (any such geometry under
@@ -3276,47 +3289,37 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' not a POINT under `"auto"`), the layer is reduced in x and y: Z and M
 #' are dropped from every geometry, the points come back in XY, and a
 #' warning of class `spatialkit_zm_dropped` says so, with the rows whose
-#' geometry carries M as its `rows`.  Empty geometries are not counted.
-#' A POINT layer that carries M is returned as it is under `"auto"`, and
-#' `"bbox_center"` gives XY points with no warning about M, as for any
-#' layer.
+#' geometry carries M as its `rows`.  Empty geometries are not counted.  A
+#' POINT layer that carries M is returned as it is under `"auto"`.  Mode
+#' `"bbox_center"` reads the box of each geometry and gives XY points for
+#' any layer, with no warning about Z or M.
 #'
-#' On a layer in longitude and latitude with [sf::sf_use_s2()] on, sf takes
-#' centroids with s2 (under `"centroid"`, for the rows other than
-#' LINESTRINGs under `"line_midpoint"`, and for collections under
-#' `"auto"`), and s2 refuses some polygons GEOS accepts.  A polygon s2
-#' refuses because a vertex repeats the one before it, on its own or inside
-#' a collection, gets the centroid of the same ring without the repeat; the
-#' ring's points are unchanged.  A
-#' polygon s2 refuses for another reason (edges that cross, a figure eight)
-#' stops the call with an error of class `spatialkit_features_degenerate`
-#' that gives its rows of `x` (`rows` on the condition), quotes s2, and
-#' says to transform `x` to a projected CRS or to use another `mode`.  With
-#' s2 off, the centroids are GEOS's, planar in degrees, as before.
-#'
-#' GEOS, which takes the centroids in a projected CRS, without a CRS, and in
-#' degrees with s2 off, weights each part of a ring by its signed area.
-#' Where the edges of a ring cross (a bowtie), or a hole lies outside its
-#' shell, parts of the feature count with opposite signs, and the point can
-#' lie far outside the feature: a bowtie 10 km across, one corner 1 m off
-#' symmetric, got a point over 33,000 km away.  A centroid outside the bounding
-#' box of a feature GEOS reports invalid stops the call with an error of
-#' the same class, `spatialkit_features_degenerate`, that gives its rows of
-#' `x` (`rows`), quotes GEOS's reason for each (`reasons`), carries
-#' `site = "geos_centroid"`, and says to pass `mode = "point_on_surface"`
-#' or to repair the features with [sf::st_make_valid()].  A centroid
-#' inside the box is returned as GEOS gives it.
-#'
-#' Modes `"auto"` and `"line_midpoint"` take the midpoint of a line in a
-#' temporary projection (`tmp_project`), the one [ensure_projected()]
-#' chooses for the lines.  A line that projection returns empty or without
-#' some of its vertices is never sampled, since [sf::st_line_sample()] ends
-#' the R session on an empty line: the call stops with an error of the
-#' same class, `spatialkit_features_degenerate`, that gives its rows of `x`
-#' (`rows`), carries `site = "projection"`, and says to pass
-#' `mode = "centroid"` or `tmp_project = FALSE`, which take the point in
-#' longitude and latitude, without the projection.
-#'
+#' @section Errors:
+#' Each of these is an error of class `spatialkit_features_degenerate` that
+#' gives the rows of `x` (`rows` on the condition):
+#' \describe{
+#'   \item{A polygon s2 refuses}{In longitude and latitude with s2 on, a
+#'     polygon whose centroid s2 cannot take even without its repeated
+#'     vertices.  The message quotes s2 and says to transform `x` to a
+#'     projected CRS or to use another `mode`.}
+#'   \item{A centroid outside its feature}{GEOS, which takes the centroids
+#'     in a projected CRS, without a CRS, and in degrees with s2 off,
+#'     weights each part of a ring by its signed area.  Where the edges of a
+#'     ring cross (a bowtie), or a hole lies outside its shell, parts of the
+#'     feature count with opposite signs, and the point can lie far outside
+#'     the feature.  A centroid outside the bounding box of a feature GEOS
+#'     reports invalid is refused: the condition carries
+#'     `site = "geos_centroid"` and GEOS's reason for each row
+#'     (`reasons`), and the message says to pass
+#'     `mode = "point_on_surface"` or to repair the features with
+#'     [sf::st_make_valid()].  A centroid inside the box is returned as GEOS
+#'     gives it.}
+#'   \item{A line the temporary projection cannot place}{A line that the
+#'     projection returns empty or without some of its vertices.  The
+#'     condition carries `site = "projection"`, and the message says to pass
+#'     `mode = "centroid"` or `tmp_project = FALSE`, which take the point in
+#'     longitude and latitude, without the projection.}
+#' }
 #' The functions that reduce a layer they are given to points this way
 #' ([prep_model_data()], [make_folds()], [fold_separation()],
 #' [estimate_sac_range()], [resolution_profile()],
@@ -3324,22 +3327,25 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' [select_features_forward()], [compare_models_cv()],
 #' [area_of_applicability()], [predict_surface()]) raise each of these
 #' errors in their own name, with the same class and fields, naming their
-#' argument and its rows.
+#' argument and its rows.  [spatialkit-conditions] lists every class.
 #'
 #' @param x An sf object.
-#' @param mode One of "auto", "centroid", "point_on_surface", "surface",
-#'   "line_midpoint", "bbox_center".
-#' @param tmp_project Logical; temporarily project for line-based midpoints.
-#'   When \code{x} has no CRS and the lon/lat heuristic of
-#'   \code{\link{ensure_projected}()} takes its coordinates for degrees
-#'   (inside the lon/lat envelope and more than one unit across, or with
-#'   decimal-degree precision), that temporary projection interprets them as
-#'   EPSG:4326 (with a warning) and the midpoints returned are geodesic ones
-#'   brought back to the input's numbers, not planar midpoints.  Set the CRS,
-#'   or pass \code{tmp_project = FALSE}, for planar data.
-#' @return An sf object with geometry coerced to POINTs, row for row with
-#'   `x`; an empty input geometry gives an empty POINT.
-#' @family spatial data preparation
+#' @param mode How each geometry becomes a point: `"auto"` (default),
+#'   `"centroid"`, `"point_on_surface"`, `"surface"` (an alias for
+#'   `"point_on_surface"`), `"line_midpoint"` or `"bbox_center"`.  See
+#'   "Modes".
+#' @param tmp_project Logical; take line midpoints in a temporary
+#'   projection.  Default `TRUE`.  With `FALSE`, lines in longitude and
+#'   latitude get their centroid.  When `x` has no CRS and the lon/lat test
+#'   of [ensure_projected()] takes its coordinates for degrees, the temporary
+#'   projection reads them as EPSG:4326 (with a warning), and the midpoints
+#'   returned are geodesic ones brought back to the input's numbers, not
+#'   planar midpoints.  Set the CRS, or pass `tmp_project = FALSE`, for
+#'   planar data.
+#' @return An sf object with its geometry reduced to POINTs, row for row
+#'   with `x`; an empty input geometry gives an empty POINT.
+#' @family data preparation
+#' @seealso [spatialkit-geometry] for how input geometry and CRSs are read.
 #' @examples
 #' library(sf)
 #' poly <- st_sf(
@@ -3348,7 +3354,7 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #'     c(0, 0), c(2, 0), c(2, 2), c(0, 2), c(0, 0)
 #'   ))), crs = 32632)
 #' )
-#' coerce_to_points(poly, "auto")  # interior representative point
+#' coerce_to_points(poly, "auto")  # a point on the polygon's surface
 #' @export
 coerce_to_points <- function(
     x,
@@ -3629,7 +3635,7 @@ coerce_to_points <- function(
   if (mode == "line_midpoint") {
     gtypes <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
     if (any(gtypes %in% c("MULTILINESTRING", "GEOMETRYCOLLECTION"))) {
-      stop("coerce_to_points(): method \"line_midpoint\" only supports LINESTRING; cast MULTILINESTRING first.", call. = FALSE)
+      stop("coerce_to_points(): mode \"line_midpoint\" only supports LINESTRING; cast MULTILINESTRING first.", call. = FALSE)
     }
     idx_ls <- which(gtypes == "LINESTRING")
     idx_other <- which(gtypes != "LINESTRING")

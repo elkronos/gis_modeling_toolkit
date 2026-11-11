@@ -184,7 +184,7 @@ test_that("coerce_to_points(mode = 'line_midpoint') names itself when it refuses
     sf::st_multilinestring(list(rbind(c(0, 0), c(1, 1)), rbind(c(2, 2), c(3, 3)))),
     crs = 32632))
   expect_error(coerce_to_points(ml, mode = "line_midpoint"),
-               "^coerce_to_points\\(\\): method \"line_midpoint\" only supports LINESTRING")
+               "^coerce_to_points\\(\\): mode \"line_midpoint\" only supports LINESTRING")
 })
 
 

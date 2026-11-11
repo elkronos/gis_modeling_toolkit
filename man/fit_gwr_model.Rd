@@ -459,7 +459,6 @@ Other model fitting:
 \code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},
 \code{\link[=fit_rf_model]{fit_rf_model()}},
 \code{\link[=gp_lengthscale_bounds]{gp_lengthscale_bounds()}},
-\code{\link[=new_spatial_fit]{new_spatial_fit()}},
-\code{\link[=prep_model_data]{prep_model_data()}}
+\code{\link[=new_spatial_fit]{new_spatial_fit()}}
 }
 \concept{model fitting}

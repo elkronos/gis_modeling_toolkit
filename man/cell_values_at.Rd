@@ -383,11 +383,7 @@ prediction applies.
 
 Other aggregation:
 \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
-\code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
 \code{\link[=kriging_adequacy]{kriging_adequacy()}},
-\code{\link[=resolution_profile]{resolution_profile()}},
-\code{\link[=select_resolution]{select_resolution()}},
-\code{\link[=summarize_by_cell]{summarize_by_cell()}},
-\code{\link[=summary.resolution_profile]{summary.resolution_profile()}}
+\code{\link[=summarize_by_cell]{summarize_by_cell()}}
 }
 \concept{aggregation}

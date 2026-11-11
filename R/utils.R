@@ -1162,12 +1162,14 @@ setOldClass(c("spatialkit_rows", "sf"))
 #'              resp = c(1, 2, NA, 4, 5), pred = c(1, 2, 3, 4, Inf)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
-#' clean <- prep_model_data(dat, "resp", "pred")   # warns: 2 of 5 rows dropped
+#' # prep_model_data() warns that it dropped 2 of the 5 rows.
+#' clean <- suppressWarnings(prep_model_data(dat, "resp", "pred"))
 #' attr(clean, "dropped")$n          # 2
-#' attr(clean[1:2, ], "dropped")     # NULL -- the record does not follow
+#' attr(clean[1:2, ], "dropped")     # NULL: the record does not follow
 #' @seealso \code{\link{prep_model_data}()} and
 #'   \code{\link{assign_features_to_polygons}()}, the two functions that
 #'   attach the records this method removes.
+#' @family data preparation
 #' @export
 `[.spatialkit_rows` <- function(x, ...) {
   y <- NextMethod()

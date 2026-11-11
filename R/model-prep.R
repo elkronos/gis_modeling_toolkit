@@ -1,35 +1,59 @@
-#' Prepare and sanitize an sf dataset for spatial modeling
+#' Prepare an sf layer for model fitting
 #'
-#' Ensures point geometry, projected CRS, and removes rows with missing or
-#' non-finite values in modeling columns, \emph{including} rows without a
-#' location: an empty geometry, or a coordinate that is not finite or lies
-#' beyond 1e150, which no model backend can use, and in a layer with a
-#' geographic CRS a vertex at a latitude beyond 90 degrees, which is no place
-#' on the Earth.  The bound is read on the
-#' coordinates as given, before the projection, and again after it: a move
-#' between CRSs can bring a coordinate beyond it back finite, and that point
-#' is not a place the caller gave.  All non-POINT geometries (including
-#' MULTIPOINT) are coerced to representative points via
-#' \code{coerce_to_points()}, so
-#' downstream coordinate extraction always aligns one row per observation.
-#' Any Z or M coordinate (POINT Z from a GPS, a GeoPackage or KML) is
-#' dropped, because every backend works in 2-D map distance.
+#' Reduces the layer to 2-D points in a projected CRS and drops the rows a
+#' model cannot use: rows with a missing or non-finite value in the response
+#' or a predictor, and rows without a location.  Every fitter and every
+#' \code{cv_*()} function prepares its data here.
+#'
+#' @details
+#' Non-POINT geometries (MULTIPOINT included) are reduced to representative
+#' points by \code{\link{coerce_to_points}()}, so that coordinates line up
+#' one row per observation.  Any Z or M coordinate (POINT Z from a GPS, a
+#' GeoPackage or KML) is dropped, because every backend works in 2-D
+#' distance.
+#'
+#' A row has no location when its geometry is empty, a coordinate is not
+#' finite or lies beyond 1e150, or, in a geographic CRS, a vertex lies at a
+#' latitude beyond 90 degrees (see \link{spatialkit-geometry}, "Rows without
+#' a location").  The 1e150 bound is read on the coordinates as given and
+#' again after the projection, because a move between CRSs can bring a
+#' coordinate beyond it back finite, and that point is not a place the
+#' caller gave.
+#'
+#' The CRS is projected whenever one can be established
+#' (\code{\link{ensure_projected}()}).  A layer without a CRS is read by the
+#' lon/lat test of \link{spatialkit-geometry} ("Layers without a CRS"):
+#' coordinates the test takes for degrees are read as EPSG:4326 and
+#' projected, with a warning, and others are passed through as they are.
+#' A small planar survey inside the lon/lat envelope is read as degrees, so
+#' set the CRS on \code{data_sf} if the data are planar.
 #'
 #' The response may not appear in \code{predictor_vars}.  Using it as its own
-#' predictor is leakage no backend catches: an out-of-bag R^2 near 1 in the
-#' random forest, a silently reduced design matrix in GWR, duplicated rows and
-#' a phantom \code{<none>} entry in the GWR selection table.  It is refused
-#' here.
+#' predictor is leakage no backend catches (an out-of-bag \eqn{R^2} near 1 in
+#' the random forest, a silently reduced design matrix in GWR, duplicated
+#' rows and a phantom \code{<none>} entry in the GWR selection table), so it
+#' is refused here.
 #'
-#' Column names must be syntactically valid R names (\code{make.names(x) == x}).
-#' Every backend builds a model formula from these names.  A name R parses as
-#' an expression would fit a different model from the one requested while the
-#' fit object still recorded the name you asked for: \code{"B5-B4"} is
-#' \code{B5 - B4}, and \code{"log(a)"} is a function call.  Rename the column
-#' (for example with \code{make.names()}) before fitting.
+#' Column names must be syntactically valid R names
+#' (\code{make.names(x) == x}).  Every backend builds a model formula from
+#' these names, and a name R parses as an expression would fit another model
+#' than the one requested while the fit still recorded the name you asked
+#' for: \code{"B5-B4"} is \code{B5 - B4}, and \code{"log(a)"} is a function
+#' call.  Rename the column (for example with \code{make.names()}) before
+#' fitting.
 #'
-#' @param data_sf An sf object.
-#' @param response_var Response variable column name.
+#' The \code{"dropped"} record describes the rows this call returned and
+#' does not survive subsetting: \code{clean[i, ]}, like
+#' \code{dplyr::filter()}, \code{slice()} or \code{arrange()} of it, is a
+#' plain layer with no \code{"dropped"} attribute, and a fit given such a
+#' subset with \code{.already_prepped = TRUE} reports \code{n_dropped = 0}
+#' even when the parent layer dropped rows.  \code{sf::st_drop_geometry()}
+#' keeps the record, since the rows are the same; see
+#' \code{\link{[.spatialkit_rows}} for what binding such data frames does.
+#'
+#' @param data_sf An sf object.  Rows without a location are dropped (see
+#'   Details).
+#' @param response_var Name of the response column.
 #' @param predictor_vars Predictor column names.  May be \code{character(0)}
 #'   for an intercept-only model (\code{fit_bayesian_spatial_model()} supports
 #'   one; the GWR and random-forest backends do not and reject it themselves).
@@ -37,63 +61,47 @@
 #'   is not a clip: rows that fall outside it are kept.  Subset
 #'   \code{data_sf} yourself (for example with \code{sf::st_filter()}) to
 #'   restrict the rows.  One that mixes XY and XYZ (or XYM) geometries is
-#'   read in x and y, since sf reads a layer in the dimension of its first
-#'   geometry.
-#' @param pointize Strategy for non-point geometry coercion, passed to
-#'   \code{\link{coerce_to_points}}.  One of \code{"auto"} (default),
-#'   \code{"centroid"}, \code{"point_on_surface"}, \code{"surface"} (an alias
-#'   for \code{"point_on_surface"}), \code{"line_midpoint"} or
-#'   \code{"bbox_center"}.  In longitude and latitude with s2 on, a polygon
-#'   whose centroid s2 cannot take even without its repeated vertices (edges
-#'   that cross) stops the call with the error of class
-#'   \code{"spatialkit_features_degenerate"}, which gives its rows of
-#'   \code{data_sf}; see \code{\link{coerce_to_points}}.
-#' @param require_response Logical; if FALSE the response column is not
-#'   required to be present (useful for out-of-sample prediction where the
-#'   response is unknown).  Default TRUE.
-#' @return An sf object with 2-D (XY) POINT geometry, cleaned of rows
-#'   carrying missing or non-finite values in the modelling columns and of
-#'   rows without a location.  What
-#'   was removed is recorded on the attribute \code{"dropped"}, a list with
-#'   \code{n} (rows dropped), \code{n_geometry} (how many of them for no
-#'   location: an empty point, a coordinate that is not finite or lies
-#'   beyond 1e150, or a latitude beyond 90 degrees in a geographic CRS),
-#'   \code{which} (their positions in
-#'   \code{data_sf}), \code{row_id} (their \code{..row_id} values when the
-#'   layer carries that column, else \code{NULL}) and \code{reason} (one per
-#'   dropped row: \code{"geometry"}, \code{"missing"} or
-#'   \code{"non_finite"}, in that order of precedence when several apply),
-#'   \code{by_column} (for each modelling column, and for
-#'   \code{"(geometry)"}, how many of the dropped rows it is missing or
-#'   non-finite in; a row can count under several),
-#'   \code{response_std_diff} (the mean response of the dropped rows minus
-#'   that of the kept rows, in standard deviations of the response over both;
-#'   \code{NA} when the response is not numeric, is itself missing in
-#'   every dropped row, or takes one value up to the rounding of its
-#'   values),
-#'   plus \code{n_rows}, the number of rows returned, which the record was
-#'   made for.  The same record carries two marks on the rows that were
-#'   kept: \code{constant_predictors}, the names of the predictors that take
-#'   one value in every returned row (\code{character(0)} when none does),
-#'   and \code{n_duplicate_locations}, the number of returned rows whose
-#'   coordinates repeat those of an earlier row.
-#'   Every fit stores \code{n} as \code{$info$n_dropped}.  The record
-#'   describes the rows this call returned and does not survive subsetting:
-#'   \code{clean[i, ]}, like \code{dplyr::filter()}, \code{slice()} or
-#'   \code{arrange()} of it, is a plain layer with no \code{"dropped"}
-#'   attribute, and a fit given such a subset with \code{.already_prepped =
-#'   TRUE} reports \code{n_dropped = 0} even when the parent layer dropped
-#'   rows.  \code{sf::st_drop_geometry()} keeps the record, since the rows are
-#'   the same; see \code{\link{[.spatialkit_rows}} for what binding such data
-#'   frames does.  The CRS is
-#'   projected whenever one can be established.  A CRS-less layer is decided by
-#'   the lon/lat heuristic (see \code{\link{ensure_projected}}): if its bounding
-#'   box fits the lon/lat envelope \emph{and} it either spans more than one unit
-#'   on some axis or carries decimal-degree-like precision, it is read as
-#'   EPSG:4326 and projected, with a warning.  A small planar survey inside that
-#'   envelope is included in that, deliberately; only coordinates the heuristic
-#'   declines are passed through as-is.  Set the CRS on \code{data_sf} if the
-#'   data are planar.
+#'   read in x and y.
+#' @param pointize How non-point geometries become points, passed to
+#'   \code{\link{coerce_to_points}()} as its \code{mode}: \code{"auto"}
+#'   (default), \code{"centroid"}, \code{"point_on_surface"},
+#'   \code{"surface"} (an alias for \code{"point_on_surface"}),
+#'   \code{"line_midpoint"} or \code{"bbox_center"}.  Its errors, such as the
+#'   one of class \code{spatialkit_features_degenerate} for a polygon s2
+#'   cannot take a centroid of, are raised in this function's name and give
+#'   the rows of \code{data_sf}.
+#' @param require_response Logical; if \code{FALSE} the response column is
+#'   not required to be present (useful for out-of-sample prediction where
+#'   the response is unknown).  Default \code{TRUE}.
+#' @return An sf object with 2-D (XY) POINT geometry, without the rows that
+#'   were dropped.  The attribute \code{"dropped"} records what was removed
+#'   and two marks on the rows that were kept, in a list with these fields:
+#'   \describe{
+#'     \item{\code{n}}{Rows dropped.  Every fit stores it as
+#'       \code{$info$n_dropped}.}
+#'     \item{\code{n_geometry}}{How many of them were dropped for having no
+#'       location.}
+#'     \item{\code{which}}{Their positions in \code{data_sf}.}
+#'     \item{\code{row_id}}{Their \code{..row_id} values when the layer
+#'       carries that column, else \code{NULL}.}
+#'     \item{\code{reason}}{One per dropped row: \code{"geometry"},
+#'       \code{"missing"} or \code{"non_finite"}, in that order of
+#'       precedence when several apply.}
+#'     \item{\code{by_column}}{For each modelling column, and for
+#'       \code{"(geometry)"}, how many of the dropped rows it is missing or
+#'       non-finite in; a row can count under several.}
+#'     \item{\code{response_std_diff}}{The mean response of the dropped rows
+#'       minus that of the kept rows, in standard deviations of the response
+#'       over both; \code{NA} when the response is not numeric, is itself
+#'       missing in every dropped row, or takes one value up to the rounding
+#'       of its values.}
+#'     \item{\code{n_rows}}{The number of rows returned, which the record was
+#'       made for.}
+#'     \item{\code{constant_predictors}}{The predictors that take one value
+#'       in every returned row (\code{character(0)} when none does).}
+#'     \item{\code{n_duplicate_locations}}{The returned rows whose
+#'       coordinates repeat those of an earlier row.}
+#'   }
 #' @section Warnings:
 #' When preparing data for a fit (\code{require_response = TRUE}) three
 #' conditions are raised as R warnings, each with a class so it can be caught
@@ -109,8 +117,9 @@
 #'   \item{\code{spatialkit_response_imprecise}}{The response lies so far
 #'     from zero that doubles there are spaced more than a millionth of its
 #'     standard deviation apart (a standard deviation of 1 at about 1e10,
-#'     \eqn{2^{33}}, or beyond).  Its values are rounded to that spacing, and so is every
-#'     mean and prediction computed at that size: the fit, its scores and
+#'     \eqn{2^{33}}, or beyond).  Its values are rounded to that spacing,
+#'     and so is every mean and prediction computed at that size: the fit, its
+#'     scores and
 #'     any choice made on them read that rounding.  The rows are kept;
 #'     subtract a constant from the response first.}
 #'   \item{\code{spatialkit_constant_predictor}}{A predictor takes a single
@@ -119,8 +128,8 @@
 #'     its prior, and a forest ignores it.  The predictor is kept; drop it
 #'     from \code{predictor_vars}.}
 #' }
-#' Every fitter and every \code{cv_*()} function prepares its data here and
-#' passes these on.  \code{\link{compare_models_cv}()},
+#' The fitters and the \code{cv_*()} functions pass these warnings on.
+#' \code{\link{compare_models_cv}()},
 #' \code{\link{cv_block_size_sweep}()} and
 #' \code{\link{select_features_forward}()} run several cross-validations
 #' of one layer, each of which prepares it, and raise
@@ -136,8 +145,7 @@
 #' \code{NA}, so nothing is lost without a trace.  Repeated locations are
 #' legitimate (repeat visits to one site) and are counted in the record and
 #' the log, never warned about.
-#' @family model fitting
-#' @family spatial data preparation
+#' @family data preparation
 #' @examples
 #' library(sf)
 #' dat <- st_as_sf(
@@ -532,65 +540,83 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 }
 
 
-#' Heuristic length-scale bounds for a squared-exponential GP
+#' Compute length-scale bounds for a squared-exponential GP
 #'
-#' Computes sensible prior bounds for the GP length-scale parameter \eqn{\ell}
-#' of a squared-exponential (exponentiated-quadratic) kernel,
-#' \eqn{k(h) = \exp(-h^2 / (2\ell^2))}{k(h) = exp(-h^2 / (2 l^2))}.
-#' The "effective range" where correlation drops to ~5% is
-#' \eqn{\ell \sqrt{2 \ln 20} \approx 2.45\,\ell}{l * sqrt(2 log(20)) ≈ 2.45 l}.
+#' Computes lower and upper bounds for the length-scale \eqn{\ell} of a
+#' squared-exponential (exponentiated-quadratic) kernel,
+#' \eqn{k(h) = \exp(-h^2 / (2\ell^2))}{k(h) = exp(-h^2 / (2 l^2))}, from the
+#' spread of the pairwise distances between the points.
+#' \code{\link{fit_bayesian_spatial_model}()} calibrates its length-scale
+#' prior over them.  The effective range, where the correlation drops to 5
+#' percent, is
+#' \eqn{\ell \sqrt{2 \ln 20} \approx 2.45\,\ell}{l * sqrt(2 log(20)), about
+#' 2.45 l}.
 #'
-#' Subsamples large datasets to avoid O(n^2) memory and time cost.
+#' The lower bound is the \code{q_small} quantile of the pairwise distances
+#' (by default the 25th percentile) taken as an effective range, and the
+#' upper bound is the largest pairwise distance taken as an effective range.
+#' The inverse-gamma prior that \code{fit_bayesian_spatial_model()}
+#' calibrates on them puts 1 percent of its mass below the lower bound and
+#' 1 percent above the upper.  Both are
+#' fixed fractions of the spread of pairwise distances, so they do not
+#' shrink as points are added to the same area: more points help the data
+#' identify a short range, but they make neither these bounds nor the basis
+#' derived from them finer.
 #'
-#' These are the bounds a length-scale \emph{prior} is calibrated over, not
-#' the scales a fitted model can resolve: that depends on the basis size
+#' These are the bounds a length-scale prior is calibrated over, not the
+#' scales a fitted model can resolve, which depend on the basis size
 #' (\code{gp_k} in \code{\link{fit_bayesian_spatial_model}()}, which reports
-#' it as \code{$info$gp_ell_min}, and in map units as
-#' \code{$info$gp_resolution}).  Both bounds are fixed fractions of the
-#' spread of pairwise distances, so they do not shrink as points are added to
-#' the same area: more points help the data identify a short range, but they
-#' make neither these bounds nor the derived basis finer.
+#' it as \code{$info$gp_ell_min}, and in CRS units as
+#' \code{$info$gp_resolution}).  A surface whose range is shorter than the
+#' lower bound needs a basis fine enough to represent it and a prior that
+#' allows it.  A larger \code{gp_k} under the prior calibrated here changes
+#' almost nothing, because the prior still holds the length-scale above this
+#' bound.  \code{fit_bayesian_spatial_model()} therefore moves the prior's
+#' lower tail down to the length-scale the basis resolves whenever
+#' \code{gp_resolution} or an explicit \code{gp_k} asks for a finer basis
+#' than the one derived from these bounds.
 #'
-#' The lower bound is the 25th percentile of the pairwise distances, as an
-#' effective range.  On real layouts that is 14 to 33 percent of the extent
-#' along each axis (about 32 km on a uniform 100 km square), and the prior
-#' built on it puts 1 percent of its mass below it.  A surface whose range
-#' is shorter needs two things, not one: a basis fine enough to represent it
-#' and a prior that allows it.  A larger \code{gp_k} under the prior
-#' calibrated here changes almost nothing, because the prior still holds the
-#' length-scale above this bound.  \code{fit_bayesian_spatial_model()}
-#' therefore moves the prior's lower tail down to the length-scale the basis
-#' resolves whenever \code{gp_resolution} or an explicit \code{gp_k} asks
-#' for a finer basis than the one derived from these bounds.
+#' Large layers are subsampled (\code{max_n}) to bound the cost of the
+#' pairwise distances, which grows with the square of the points.
 #'
 #' @param coords_xy Numeric matrix or data.frame of coordinates with at least
 #'   two columns; the first two are used, and replicated rows are collapsed
-#'   before the distance quantiles are taken.  A row with a coordinate that
-#'   is missing, not finite or beyond 1e150 has no location: it is left out,
-#'   with a warning of class \code{spatialkit_rows_dropped} that gives the
-#'   count.  \code{brms::gp()} defaults to
-#'   \code{gr = TRUE} and reduces its covariates to unique rows, so a
-#'   heavily-sampled station would otherwise weight the quantile by how often it
-#'   was measured rather than by where the sites are.
-#' @param q_small Numeric quantile for the lower bound, a single number in
-#'   \code{[0, 1]}. Default 0.25.
-#'   Previous versions used 0.1, but the 10th percentile can be
-#'   dominated by within-cluster spacing in clustered data, producing
-#'   a misleadingly small lower bound.
+#'   before the distance quantiles are taken, because \code{brms::gp()}
+#'   (\code{gr = TRUE}, its default) reduces its covariates to unique rows:
+#'   a station sampled many times would otherwise weight the quantile by how
+#'   often it was measured rather than by where the sites are.  A row with a
+#'   coordinate that is missing, not finite or beyond 1e150 has no location:
+#'   it is left out, with a warning of class \code{spatialkit_rows_dropped}
+#'   that gives the count.
+#' @param q_small Quantile of the pairwise distances for the lower bound, a
+#'   single number in \code{[0, 1]}.  Default 0.25.  On clustered data a low
+#'   quantile reflects the spacing within clusters.
 #' @param max_n Maximum number of \emph{distinct} points to use in the distance
-#'   computation.  Default 1000. Set to \code{Inf} to use all of them.  Above
+#'   computation.  Default 1000.  Set to \code{Inf} to use all of them.  Above
 #'   it, a subsample is drawn with a fixed seed from the distinct points in
 #'   coordinate order, so the bounds do not depend on the row order of
 #'   \code{coords_xy}, and the caller's random-number stream is left where it
 #'   was.
-#' @return Named numeric vector \code{c(lower, upper)} on the length-scale;
+#' @return Named numeric vector \code{c(lower, upper)}: length-scales in the
+#'   units of \code{coords_xy}.  \code{lower} is the \code{q_small} quantile
+#'   of the distinct pairwise distances divided by \eqn{\sqrt{2 \ln 20}}
+#'   (about 2.45); \code{upper} is the largest pairwise distance divided by
+#'   the same factor, and at least 1.2 times \code{lower}.
 #'   \code{c(lower = 0.001, upper = 1)} when fewer than two distinct located
 #'   rows or no positive distances remain.
+#'   \code{\link{fit_bayesian_spatial_model}()} standardises the
+#'   coordinates before it calls this function, so its bounds are in those
+#'   standardised units.
 #' @family model fitting
 #' @examples
+#' # 500 points spread evenly over a square of side 100 km, in metres.
 #' set.seed(1)
-#' xy <- cbind(runif(50), runif(50))
-#' gp_lengthscale_bounds(xy)
+#' xy <- cbind(runif(500, 0, 1e5), runif(500, 0, 1e5))
+#' b <- gp_lengthscale_bounds(xy)
+#' b
+#' # The bounds as effective ranges: the 25th percentile of the pairwise
+#' # distances, about a third of the side, and the largest distance.
+#' b * sqrt(2 * log(20))
 #' @export
 gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
   # Without these, a vector `coords_xy` fails inside .safe_dist() with

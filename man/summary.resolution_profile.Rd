@@ -2,7 +2,7 @@
 % Please edit documentation in R/resolution-profile.R
 \name{summary.resolution_profile}
 \alias{summary.resolution_profile}
-\title{Every criterion's pick, side by side}
+\title{Compare every criterion's pick on a resolution profile}
 \usage{
 \method{summary}{resolution_profile}(object, criteria = NULL, tol = 0.02, ...)
 }
@@ -45,15 +45,15 @@ criterion's flat region in full, since \code{flat_min} and
 \code{moran_z} left out; an integer vector that is
 empty when the regions do not overlap), \code{scored} (the levels each
 criterion returned a finite value at, which is what decides whether a gap
-in a band is a rejection or a level nothing was computed at),
+in a flat region is a rejection or a level nothing was computed at),
 \code{ladder} (every level on the profile), \code{n_levels}, \code{tol}
 and \code{variable} (what the criteria were scored on), and, only when
 some row has \code{structured} \code{FALSE} although its cells beat one
 cell by more than \code{tol}, \code{not_identified} (a character vector
 named by criterion that says why: the F test, or for \code{cp} the
 profile's variogram).  The print method recomputes the closing
-comparison from \code{bands}, so a row subset of the result reads
-honestly.
+comparison from \code{bands}, so a row subset of the result prints its
+own comparison.
 }
 \description{
 \code{\link{select_resolution}()} reads one criterion at a time.  This puts
@@ -63,32 +63,29 @@ the criterion.  The closing line gives the levels that lie in \emph{every}
 flat region, the cell counts no criterion objects to.
 }
 \details{
-The criteria are not peers, and the table should be read with what each
-returns in practice in mind (see \code{\link{resolution_profile}()}):
-\code{reliability} is read at or above the range floor and usually
-returns it, \code{elbow} is absent unless the points cluster, and
+Read the table with what each criterion returns in mind (see
+\code{\link{resolution_profile}()}): \code{reliability} is read at or
+above the range floor and often returns it, \code{elbow} is absent unless
+the points cluster, and
 \code{cp}'s optimum is often the support ceiling.  \code{moran_z} is a
 diagnostic of the cell means and not a count rule, so it is not in the
 default set; named in \code{criteria} it gets a row, and it is left out
 of the closing comparison.
 
-A flat region is a set, not an interval.  The criterion curves are not
-monotone, so a region can skip a rung of the ladder, and the table prints
-what the criterion actually accepts (\code{"26, 31"}, not \code{"26 to
-31"}) rather than a range that would quietly include the levels it
-rejected.
+The criterion curves are not monotone, so a flat region can skip rungs
+of the ladder, and the table lists the levels it accepts
+(\code{"26, 31"}) rather than a range (\code{"26 to 31"}) that would
+include the levels it rejected.
 
-That set is often empty, and an empty one is a result rather than a
-failure.  The criteria answer different questions: how well the cells
-represent the field (\eqn{C_p}), whether the cell values are
-distinguishable from noise (\code{reliability}), and where the
-within-cluster sum of squares bends (\code{elbow}).  A field with no
-single right resolution shows up here as disjoint bands, and the spread
-between the picks is printed for the same reason.
+The levels common to every flat region are often none.  The criteria
+answer different questions: how well the cells represent the field
+(\eqn{C_p}), whether the cell values are distinguishable from noise
+(\code{reliability}), and where the within-cluster sum of squares bends
+(\code{elbow}).  An empty set means the criteria favour different
+counts, and the print gives the spread between the picks.
 
-Nothing in the table is a decision procedure.  Each flat region is
-routinely wide, the choice within it belongs to the analyst, and
-\code{\link{plot.resolution_profile}()} draws the curves the bands were
+A flat region can be wide, and the choice within it is the analyst's;
+\code{\link{plot.resolution_profile}()} draws the curves the regions were
 read from.
 
 A profile whose ladder is one size (\code{obs_per_cell} set to one
@@ -99,37 +96,33 @@ that the count is set by the size and that no criterion chooses among
 levels.  The result carries the size as \code{attr(, "obs_per_cell")}.
 }
 \examples{
-if (requireNamespace("gstat", quietly = TRUE)) {
-  library(sf)
-  # An exponential field with range parameter 200 (true effective range
-  # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill.
-  set.seed(4)
-  n <- 400
-  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-  D  <- as.matrix(dist(xy))
-  xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) \%*\% rnorm(n))
-  pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-  prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
+\dontshow{if (requireNamespace("gstat", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+# An exponential field with range parameter 200 (true effective range
+# 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill.
+set.seed(4)
+n <- 400
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+D  <- as.matrix(dist(xy))
+xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) \%*\% rnorm(n))
+pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+prof <- resolution_profile(pts, response_var = "z", n_levels = 12,
+                           estimate = NULL)
 
-  # print() is explicit because only the last value of a braced block is
-  # shown, and the table is the thing worth seeing here.
-  print(summary(prof))
-  print(attr(summary(prof), "common")) # the levels all of them accept, if any
-  attr(summary(prof), "bands")         # each criterion's region in full
-}
+s <- summary(prof)
+s
+attr(s, "common")   # the levels every flat region accepts, if any
+attr(s, "bands")    # each criterion's flat region in full
+\dontshow{\}) # examplesIf}
 }
 \seealso{
 \code{\link{select_resolution}()} for one criterion, with the
 per-level values attached; \code{\link{plot.resolution_profile}()} for
-the curves behind these bands.
+the curves behind these flat regions.
 
-Other aggregation:
-\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
-\code{\link[=cell_values_at]{cell_values_at()}},
+Other resolution:
 \code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
-\code{\link[=kriging_adequacy]{kriging_adequacy()}},
 \code{\link[=resolution_profile]{resolution_profile()}},
-\code{\link[=select_resolution]{select_resolution()}},
-\code{\link[=summarize_by_cell]{summarize_by_cell()}}
+\code{\link[=select_resolution]{select_resolution()}}
 }
-\concept{aggregation}
+\concept{resolution}

@@ -169,5 +169,12 @@ from the coordinates to bring them nearer the origin.
 \link{spatialkit-conditions} for every condition class named here,
 \code{\link[=ensure_projected]{ensure_projected()}} for the choice of a projected CRS, and
 \code{\link[=harmonize_crs]{harmonize_crs()}} for aligning two layers.
+
+Other data preparation:
+\code{\link[=[.spatialkit_rows]{[.spatialkit_rows()}},
+\code{\link[=coerce_to_points]{coerce_to_points()}},
+\code{\link[=ensure_projected]{ensure_projected()}},
+\code{\link[=harmonize_crs]{harmonize_crs()}},
+\code{\link[=prep_model_data]{prep_model_data()}}
 }
 \concept{data preparation}
