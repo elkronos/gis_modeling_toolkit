@@ -314,3 +314,78 @@ test_that("make_folds() quotes block dimensions, distances outside blocks and nn
   }
   .df_expect_same(out$m, out[["1e6"]], "make_folds")
 })
+
+test_that("the GWR fallback bandwidth is quoted in any unit, and an adaptive one as a count", {
+  skip_if_not_installed("sp")
+  # The fallback is reached only when the bandwidth search fails, so the
+  # search is made to fail.  A fixed fallback is a third of the bounding
+  # box's diagonal in CRS units: 46.15 on this 100 m square in metres and
+  # 4.615e-05 in units of 1000 km, where "%.4f" printed 0.0000 (BUG-273).
+  local_mocked_bindings(.gwr_bw_search = function(...) stop("forced failure"),
+                        .package = "spatialkit")
+  .df_seed(1)
+  xy <- data.frame(x = stats::runif(80, 0, 100), y = stats::runif(80, 0, 100),
+                   w = stats::rnorm(80), v = stats::rnorm(80))
+  xy$yy <- 1 + 2 * xy$w - xy$v + stats::rnorm(80, sd = 0.3)
+  out <- list()
+  for (unit in c("m", "1e6")) {
+    L <- .df_layer(xy, unit)
+    f <- NULL
+    txt <- .df_text(f <- fit_gwr_model(L, "yy", c("w", "v"), adaptive = FALSE))
+    expect_true(isTRUE(f$info$bandwidth_is_fallback))
+    bw <- f$info$bandwidth
+    fit_f <- .df_one(txt, "arbitrary fallback bandwidth", c(bw = "fallback bandwidth = "),
+                     paste(unit, "fit"))
+    cmp_f <- .df_one(.df_text(compare_models(list(G = f))), "used a fallback bandwidth",
+                     c(bw = "used a fallback bandwidth \\("), paste(unit, "compare"))
+    sel <- NULL
+    txt_s <- .df_text(sel <- gwr_model_selection(L, "yy", c("w", "v"), adaptive = FALSE))
+    sel_f <- .df_one(txt_s, "arbitrary fallback bandwidth", c(bw = "fallback bandwidth = "),
+                     paste(unit, "selection"))
+    expect_identical(sel$bandwidth_source, "fallback")
+    # The bounding box's diagonal does not come from a fit, and 46.1534
+    # lies far from a rounding boundary in its fourth digit, so the last
+    # bits the projection moves between platforms leave the four digits
+    # alone: the read-back is exact against signif().
+    for (fig in list(fit_f, cmp_f, sel_f))
+      .df_expect_four_digits(fig, bw, info = unit)
+    .df_expect_four_digits(sel_f, sel$bandwidth, info = paste(unit, "selection value"))
+    expect_false(any(grepl("0.0000", c(txt, txt_s), fixed = TRUE)), info = unit)
+    out[[unit]] <- c(fit = fit_f, compare = cmp_f, selection = sel_f)
+  }
+  expect_equal(unname(out$m), rep(46.15, 3))
+  expect_equal(unname(out[["1e6"]]), rep(4.615e-05, 3))
+  .df_expect_same(out$m, out[["1e6"]], "fallback bandwidth")
+
+  # Adaptive: a whole count of neighbours, 50 here, and on six rows the
+  # count of 10 clamped to 6, with both counts whole.
+  L <- .df_layer(xy, "m")
+  f <- NULL
+  txt <- .df_text(f <- fit_gwr_model(L, "yy", c("w", "v"), adaptive = TRUE))
+  expect_equal(f$info$bandwidth, 50)
+  line <- grep("arbitrary fallback bandwidth", txt, value = TRUE, fixed = TRUE)
+  expect_match(line, "fallback bandwidth = 50. ", fixed = TRUE)
+  expect_match(.df_text(compare_models(list(G = f))), "used a fallback bandwidth (50)",
+               fixed = TRUE, all = FALSE)
+  expect_match(.df_text(gwr_model_selection(L, "yy", c("w", "v"), adaptive = TRUE)),
+               "fallback bandwidth = 50. ", fixed = TRUE, all = FALSE)
+  f6 <- NULL
+  txt <- .df_text(f6 <- fit_gwr_model(L[1:6, ], "yy", c("w", "v"), adaptive = TRUE))
+  expect_equal(f6$info$bandwidth, 6)
+  expect_match(txt, "fallback bandwidth = 6 (derived as 10, then clamped", fixed = TRUE,
+               all = FALSE)
+  expect_false(any(grepl(".0000", txt, fixed = TRUE)))
+})
+
+test_that(".fmt_bw() prints a whole adaptive count in full and a fixed bandwidth to four digits", {
+  # A reachable adaptive fallback is below 10000, where four significant
+  # digits print the same count, so a larger count pins the branch: as a
+  # count of neighbours 12345 prints whole, as a length it rounds to 12340.
+  expect_identical(.fmt_bw(12345, TRUE), "12345")
+  expect_identical(.fmt_bw(12345, FALSE), "12340")
+  expect_identical(.fmt_bw(123456789, TRUE), "123456789")
+  expect_identical(.fmt_bw(4.61534e-05, FALSE), "4.615e-05")
+  # A count that is not whole, or a missing flag, prints as a length.
+  expect_identical(.fmt_bw(10.25, TRUE), "10.25")
+  expect_identical(.fmt_bw(46.1534, NULL), "46.15")
+})

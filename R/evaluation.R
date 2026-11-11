@@ -1723,8 +1723,8 @@ compare_models <- function(fits, newdata = NULL, ...) {
       if (is_fb) {
         warning(
           sprintf(
-            "compare_models(): GWR model '%s' used a fallback bandwidth (%.4f). Metrics may be unreliable; consider re-fitting with an explicit bandwidth.",
-            nm, obj$info$bandwidth
+            "compare_models(): GWR model '%s' used a fallback bandwidth (%s). Metrics may be unreliable; consider re-fitting with an explicit bandwidth.",
+            nm, .fmt_bw(obj$info$bandwidth, obj$info$adaptive)
           ),
           call. = FALSE
         )

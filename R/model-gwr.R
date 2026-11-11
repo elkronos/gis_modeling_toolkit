@@ -197,6 +197,27 @@
 }
 
 
+#' A GWR bandwidth, for a message
+#'
+#' An adaptive bandwidth is a count of neighbours and prints as a whole
+#' number; a fixed one is a length in CRS units and prints with four
+#' significant digits (.fmt_len()), as the coefficient plot's caption does.
+#' "%.4f" printed a fixed fallback of 4.6e-05 (a 100 m layer in units of
+#' 1000 km) as 0.0000.
+#'
+#' @param bw Numeric scalar bandwidth.
+#' @param adaptive Logical; whether it is a count of neighbours.
+#' @return Character scalar.
+#' @keywords internal
+#' @noRd
+.fmt_bw <- function(bw, adaptive) {
+  bw <- suppressWarnings(as.numeric(bw)[1L])
+  if (isTRUE(adaptive) && is.finite(bw) && bw == round(bw))
+    format(bw, scientific = FALSE)
+  else .fmt_len(bw)
+}
+
+
 #' Extract fitted or predicted values from a GWR engine object
 #'
 #' Used by \code{fitted.gwr_fit()} (in-sample evaluation,
@@ -1268,14 +1289,14 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     warning(
       sprintf(
         paste0("fit_gwr_model(): automatic bandwidth selection failed; using ",
-               "arbitrary fallback bandwidth = %.4f%s. This fallback has no ",
+               "arbitrary fallback bandwidth = %s%s. This fallback has no ",
                "relationship to the data's spatial structure and may produce ",
                "a poor fit. Consider supplying an explicit `bandwidth` ",
                "argument."),
-        bw_used,
+        .fmt_bw(bw_used, adaptive),
         if (isTRUE(bw_used == bw_fallback_raw)) ""
-        else sprintf(" (derived as %.4f, then clamped for %d observation(s) and %d parameter(s))",
-                     bw_fallback_raw, n_obs, n_params)
+        else sprintf(" (derived as %s, then clamped for %d observation(s) and %d parameter(s))",
+                     .fmt_bw(bw_fallback_raw, adaptive), n_obs, n_params)
       ),
       call. = FALSE
     )

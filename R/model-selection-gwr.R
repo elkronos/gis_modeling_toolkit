@@ -357,8 +357,9 @@
       bandwidth_source <- "fallback"
       warning(sprintf(paste0("gwr_model_selection(): automatic bandwidth ",
                              "selection failed; using arbitrary fallback ",
-                             "bandwidth = %.4f. Supply `bandwidth` explicitly ",
-                             "for a defensible comparison."), bw),
+                             "bandwidth = %s. Supply `bandwidth` explicitly ",
+                             "for a defensible comparison."),
+                      .fmt_bw(bw, adaptive)),
               call. = FALSE)
     } else if (isTRUE(bw_search$none_defined)) {
       bandwidth_source <- "widest (no bandwidth has a defined criterion)"

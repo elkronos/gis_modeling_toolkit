@@ -8400,12 +8400,16 @@ old behaviour where there is a way.
   median distances of its `nndm` and `knndm` log lines; the ranges and lags
   in `plot()` of an `estimate_sac_range()` result and of a fit's residual
   variogram; the range in `resolution_profile()`'s support warnings and
-  print; and the range in the prints and plot of `cv_block_size_sweep()`
-  and the print of `kriging_adequacy()`.  The size `make_folds()` advises
-  for supplied blocks smaller than the range is the range rounded up as
-  its other advice rounds it, not up to a whole unit, which advised blocks
-  of 1 unit for a range of 0.0004.  Percentages and counts keep their
-  formats, and no value or rule changes.
+  print; the range in the prints and plot of `cv_block_size_sweep()` and
+  the print of `kriging_adequacy()`; and a fixed fallback bandwidth in the
+  warnings of `fit_gwr_model()` (also passed on by `cv_gwr()`),
+  `gwr_model_selection()` and `compare_models()`, which quoted 0.0000 of a
+  bandwidth of 4.6e-05.  An adaptive fallback bandwidth is quoted there as
+  a whole count of neighbours ("10", not "10.0000").  The size
+  `make_folds()` advises for supplied blocks smaller than the range is the
+  range rounded up as its other advice rounds it, not up to a whole unit,
+  which advised blocks of 1 unit for a range of 0.0004.  Other percentages
+  and counts keep their formats, and no value or rule changes.
 
 ## Documentation
 
