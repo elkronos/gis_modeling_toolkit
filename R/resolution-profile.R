@@ -808,12 +808,24 @@
 #' those ties.  So squared distances within one part in ten million of each
 #' other count as equal, a tie between neighbours goes to the lower first
 #' coordinate and then the lower second, a tie between centres goes to the
-#' lower-numbered one, first coordinates within that part of the extent count
+#' lower-numbered one (between centres a squared distance ties with the least
+#' when it is no more than the square of the least distance lengthened by a
+#' margin, plus one part in ten million of the least squared distance; the
+#' margin is one part in 1e10 of the largest coordinate of the centres, at
+#' most a millionth of the diagonal of their bounding box and at least four
+#' times the spacing of doubles at that coordinate), first coordinates within that part of the extent count
 #' as equal when the rows and the locations are put in order, and so do
 #' weights within that part of each other when the first k-means++ centre is
 #' drawn.  The cells are then the same in another unit or with another origin
 #' as long as no coordinate moves by more than about a two-hundred-millionth
-#' of the distance between neighbouring locations.  The rounding PROJ leaves
+#' of the distance between neighbouring locations, but for one case: the
+#' margin of the centres grows with their largest coordinate (about 0.46 mm
+#' at a UTM northing near 4,550 km, about half a micrometre once the origin
+#' lies next to data 5 km across), and the rows are given to the centres in
+#' the layer's own coordinates, so a row whose distances to two centres
+#' differ by less than the margin with one origin and by more with another
+#' goes to the lower-numbered centre with the first and to the nearer with
+#' the second.  The rounding PROJ leaves
 #' when it changes the unit or the false origin, about \eqn{10^{-9}} m, is
 #' below that for locations more than about a quarter of a metre apart.
 #' Coordinates rounded more coarsely can give other cells: a lattice at

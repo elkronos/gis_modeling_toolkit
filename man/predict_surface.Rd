@@ -80,8 +80,13 @@ CRS.  Read in x and y: a layer whose geometries mix XY with XYZ or XYM,
 or carry M, is read without its Z and M, with no warning.  A row
 without a location (an empty geometry, or a coordinate that is not
 finite or lies beyond 1e150) is never the nearest feature.  A grid
-point the same distance from several points of \code{covariates}
-(squared distances within one part in ten million of the least) takes
+point the same distance from several points of \code{covariates} (a
+squared distance no more than the square of the least distance
+lengthened by a margin, plus one part in ten million of the least
+squared distance; the margin is one part in 1e10 of the largest
+coordinate of the points that have a location, at most a millionth of
+the diagonal of their bounding box and at least four times the spacing
+of doubles at that coordinate) takes
 the one lowest in x, x values within one part in ten million of the
 diagonal of the points' bounding box, or within one part in 1e10 of
 their largest coordinate (at most a millionth of that diagonal, and
@@ -90,13 +95,10 @@ that is more, counting as one, then the
 one lowest in y, y values read the same way, then the first in row
 order, so a grid laid between the points of a lattice takes the same
 covariates in another unit or with another origin, and with or without
-the \pkg{FNN} package, as does a grid point the same distance from two
-points that differ only in the last bits of their coordinates.  A grid
-point closer to such a pair than about twenty million times the
-distance between them (2 cm for points one billionth of a metre apart)
-need not be the same distance from both by that rule, and takes the
-nearer as its coordinates give it, which can change with the unit or
-the origin.  A grid
+the \pkg{FNN} package, as does a grid point near two points that lie
+within that margin of each other (two records of one station that
+differ only in the last bits of their coordinates), however near it
+lies.  A grid
 point the same distance from several features of a layer of lines or
 polygons, or of one that mixes them with points (on the edge two
 polygons share, say: distances within one part in ten million of the
@@ -110,7 +112,13 @@ one part in ten million of the diagonal of the bounding box of
 layer in degrees the nearest feature is
 \code{sf::st_nearest_feature()}'s, which settles
 such a tie in the order its search meets the features (GEOS, or s2 for
-a layer in degrees while \code{sf::sf_use_s2()} is on).}
+a layer in degrees while \code{sf::sf_use_s2()} is on).  Both margins
+grow with the largest coordinate (about 0.46 mm
+at a UTM northing near 4,550 km, about half a micrometre once the
+origin lies next to data 5 km across), so a grid point whose distances
+to two features differ by less than the margin with one origin and by
+more with another takes the one the tie rule picks with the first and
+the nearer with the second.}
 
 \item{chunk_size}{Rows per prediction call. Default 5000.  A pure
 performance knob: rows do not interact, and for a \code{bayesian_fit} the

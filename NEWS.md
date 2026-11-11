@@ -4659,7 +4659,8 @@ old behaviour where there is a way.
   midpoints, 147 of 266 grid points took another covariate row in UTM 15N
   in US feet than in EPSG:26915, and 189 with the false origin moved by
   0.1 m; `.pred` moved by up to 0.03.  For point covariates, squared
-  distances within one part in ten million of the least are now a tie, and
+  distances within one part in ten million of the least, plus a margin, are
+  now a tie, and
   the tie goes to the point lowest in x (x values within one part in ten
   million of the diagonal of the points' bounding box, or within one part
   in 1e10 of their largest coordinate where that is more, counting as
@@ -4670,7 +4671,9 @@ old behaviour where there is a way.
   billionth of a metre apart) now take the tie the same way with another
   origin, where a grid point the same distance from both, 570 m away, took
   one row in metres and US feet and the other with the false origin moved
-  by 0.1 m; the first in row order takes it now.  A grid point that ties
+  by 0.1 m; the first in row order takes it now, and so does a grid point
+  near the pair, however near (see the entry on a point a hair from two
+  records of one station).  A grid point that ties
   with no other point takes the row it took before.  Lines and polygons
   had the same fault: a grid point on the edge two covariate
   polygons share, or at the shared end of two lines, is at distance 0 from
@@ -4697,6 +4700,45 @@ old behaviour where there is a way.
   with lines or polygons, or with a layer in degrees, it got a finite
   `.pred` from that row where `?predict_surface` (`grid`) states `NA`, and
   now gets `NA`.
+
+* **A point a hair from two records of one station took the nearer record
+  by the last bits of the coordinates, which move with the unit and the
+  origin.**  The nearest-centre search of `predict_surface()` (point
+  covariates), `cell_values_at()` (the nearest scored location, seed or
+  centre), `resolution_profile()` (the cell of each scored row and the
+  steps of the density partition), `make_folds()` (`"knndm"`),
+  `assign_features_to_polygons()` (a point on the edge between two cells
+  a profile scored) and `get_voronoi_seeds()` (the seeds of a selection)
+  counted two centres as a tie when their squared distances agreed to
+  within one part in ten million.  Two records one billionth of a metre
+  apart have squared distances from a point r away that differ by about
+  2r times that billionth, within one part in ten million of r^2 only
+  while r is more than about 2 cm.  Closer, the nearer by the last bits
+  was taken: of 320 grid points 0.1 mm to 2 cm from such a pair, 48 to 60
+  took another covariate row in UTM 15N in US feet or with the false
+  origin moved by 0.1 m than in EPSG:26915, and `cell_values_at()` filled
+  20 of 160 locations 1 mm from the station from another cell.  A squared
+  distance now ties with the least when it is no more than the square of
+  the least distance lengthened by a margin, plus one part in ten million
+  of the least squared distance.  The margin is one part in 1e10 of the
+  largest coordinate of the centres, at most a millionth of the diagonal
+  of their bounding box and at least four times the spacing of doubles at
+  that coordinate, as for the lines and polygons of `covariates`.  No grid
+  point and no location of those layouts moves between the frames.  A
+  point whose two nearest centres differ in distance by less than the
+  margin, and that took the nearer, now takes the lower-numbered one (for
+  `predict_surface()` and `cell_values_at()`, the one their column order
+  puts first).  The margin grows with the largest coordinate, as that of
+  lines and polygons does: about 0.46 mm at a UTM northing near 4,550 km,
+  about half a micrometre once the origin lies next to data 5 km across.
+  A point whose distances to two centres differ by less than the margin
+  with one origin and by more with another takes the lower-numbered centre
+  with the first and the nearer with the second, in the searches above
+  that work in the layer's own coordinates (the k-means steps of the
+  density partition and of `"knndm"` run in a frame centred on the data and
+  do not).  `?predict_surface`, `?cell_values_at`,
+  `?resolution_profile`, `?make_folds`, `?summarize_by_cell` and
+  `?assign_features_to_polygons` state the rule.
 
 * **The `attr(, "kmeans")` record of `get_voronoi_seeds()` for the scored
   centres of a profile or selection gave a point the same distance from two

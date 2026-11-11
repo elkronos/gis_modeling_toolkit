@@ -239,8 +239,13 @@ that class can hold every ID (see Value).
 }
 \section{Ties}{
 
-Two distances count as the same when their squares agree to within one part
-in ten million. A location the same distance from two seeds takes the one
+A distance to a seed, a centre or a scored location counts as the same as
+the least when its square is no more than the square of the least distance
+lengthened by a margin, plus one part in ten million of the least squared
+distance. The margin is one part in 1e10 of the largest coordinate of the
+seeds, centres or scored locations searched, at most a millionth of the
+diagonal of their bounding box and at least four times the spacing of
+doubles at that coordinate. A location the same distance from two seeds takes the one
 that comes first in \code{seeds}. For the seeds of a \code{\link[=select_resolution]{select_resolution()}}
 result that is the lower-numbered centre, the rule \code{\link[=resolution_profile]{resolution_profile()}}
 scores with. When the summary's record of the count holds the centres the
@@ -266,13 +271,20 @@ location that lie in different cells, the cell that comes first in the
 order of the IDs (ascending for numbers, the C-locale order for strings,
 the order of the levels for a factor), and the same among locations in one
 column and one row (two records of one station that differ only in the
-last bits of their coordinates). Neither rule depends on the order of
+last bits of their coordinates, which are the same distance from any
+location, however near, while they lie within the margin of each
+other). Neither rule depends on the order of
 the rows of \code{points}, or on whether the \pkg{FNN} package is installed. A
 tie is a tie between distances computed from the coordinates in the working
 CRS, so on gridded locations the same layer in another projected CRS can
 put a location on a boundary in the other cell; another unit or origin of
 the same CRS moves only the last bits of the distances and settles the ties
-the same way.
+the same way, but for one case. The margin grows with the largest
+coordinate (about 0.46 mm at a UTM northing near 4,550 km, about half a
+micrometre once the origin lies next to data 5 km across), so a location
+whose distances to two of them differ by less than the margin with one
+origin and by more with another is a tie with the first, settled as
+above, and takes the nearer with the second.
 }
 
 \section{Away from the observations}{

@@ -439,8 +439,12 @@ neither warning.
 A row that is the same distance from two centres lies on the boundary
 between their cells, which happens on gridded locations.
 \code{\link[=resolution_profile]{resolution_profile()}} scores such a row in the cell of the lower-numbered
-centre (two distances count as the same when their squares agree to within
-one part in ten million), and \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, on cells
+centre (a distance counts as the same as the least when its square is no
+more than the square of the least distance lengthened by a margin, plus
+one part in ten million of the least squared distance; the margin is one
+part in 1e10 of the largest coordinate of the centres, at most a
+millionth of the diagonal of their bounding box and at least four times
+the spacing of doubles at that coordinate), and \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, on cells
 built from the centres the profile scored, gives a point on that boundary
 the same cell, measured in the CRS the record names, so the comparison
 reads \code{"match"} on gridded locations too. It does so on cells that carry

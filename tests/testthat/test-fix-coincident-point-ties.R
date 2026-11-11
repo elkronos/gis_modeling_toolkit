@@ -300,15 +300,14 @@ test_that("?predict_surface states which grid points beside two points within th
   file <- testthat::test_path("..", "..", "man", "predict_surface.Rd")
   rd <- if (file.exists(file)) tools::parse_Rd(file) else tools::Rd_db("spatialkit")[["predict_surface.Rd"]]
   txt <- gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
-  # A grid point that ties the two by the rule takes the same row in every
-  # frame; one a few centimetres from them need not tie, and the nearer by
-  # its coordinates, which move with the unit and the origin, takes it.
-  expect_match(txt, paste0("as does a grid point the same distance from two points that differ ",
-                           "only in the last bits of their coordinates"), fixed = TRUE)
-  expect_match(txt, paste0("closer to such a pair than about twenty million times the distance ",
-                           "between them (2 cm for points one billionth of a metre apart) need ",
-                           "not be the same distance from both by that rule, and takes the ",
-                           "nearer as its coordinates give it, which can change with the unit ",
-                           "or the origin"), fixed = TRUE)
+  # A grid point near two points within the margin of the point tie of each
+  # other takes the same row in every frame, however near it lies
+  # (BUG-268): the tie adds a length margin, so the help no longer says
+  # that a grid point a few centimetres from them takes the nearer by its
+  # coordinates.
+  expect_match(txt, paste0("as does a grid point near two points that lie within that margin of ",
+                           "each other (two records of one station that differ only in the last ",
+                           "bits of their coordinates), however near it lies"), fixed = TRUE)
+  expect_no_match(txt, "twenty million times the distance", fixed = TRUE)
   expect_no_match(txt, "or over two points that differ only in the last bits", fixed = TRUE)
 })

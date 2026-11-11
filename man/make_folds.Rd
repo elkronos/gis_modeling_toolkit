@@ -633,7 +633,12 @@ rounded to \eqn{2^{-30}} of it (about a billionth), as the
 lattice many merges and many assignments tie exactly, and the last bits of
 the coordinates, which move with the unit and the origin, would settle
 them.  A point as near two k-means centres to one part in ten million
-goes to the lower-numbered one.  The clusters are then the same in another
+goes to the lower-numbered one: a squared distance ties with the least
+when it is no more than the square of the least distance lengthened by a
+margin, plus one part in ten million of the least squared distance, the
+margin one part in 1e10 of the largest coordinate of the centres in that
+frame, at most a millionth of the diagonal of their bounding box and at
+least four times the spacing of doubles at that coordinate.  The clusters are then the same in another
 unit or with another origin, but for a location within its own rounding
 noise of the middle of a step.  Clusters are merged by the packing
 \code{"block_kfold"} uses for its blocks, largest first and each to the

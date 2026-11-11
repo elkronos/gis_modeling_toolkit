@@ -2473,7 +2473,8 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   cl  <- integer(0); d2 <- numeric(0)
   # The seed of each point by the profile's rule (.nearest_centre()), with
   # the seeds numbered by seed_id: squared distances within .TIE_TOL of the
-  # least are a tie, and a tie goes to the lower-numbered seed.
+  # least, plus the margin .centres_tol() on the distance, are a tie, and a
+  # tie goes to the lower-numbered seed.
   # sf::st_nearest_feature() settled a point the same distance from two
   # seeds by the last bits of its distances, which move with the unit and
   # the origin, and not always as the profile scored it.  A seed without a

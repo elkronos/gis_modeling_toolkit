@@ -263,8 +263,13 @@
 #'   on the edge between two or more of those cells is given the cell
 #'   [resolution_profile()] scored it in: that of its nearest centre,
 #'   measured in the CRS the record names, and of centres the same distance
-#'   away the lower-numbered one (two distances count as the same when their
-#'   squares agree to within one part in ten million). Such points occur on
+#'   away the lower-numbered one (a distance counts as the same as the least
+#'   when its square is no more than the square of the least distance
+#'   lengthened by a margin, plus one part in ten million of the least
+#'   squared distance; the margin is one part in 1e10 of the largest
+#'   coordinate of the centres, at most a millionth of the diagonal of their
+#'   bounding box and at least four times the spacing of doubles at that
+#'   coordinate). Such points occur on
 #'   gridded locations (raster cell centres, a regular sampling grid), where
 #'   a row can lie the same distance from two centres and the polygons hold
 #'   it in either cell or in both. The rows each cell holds are then the rows
@@ -1519,7 +1524,8 @@ assign_features_to_polygons <- function(
 #' On cells whose record of their count sits beside the centres the profile
 #' scored (\code{.scored_centres()}), \code{resolution_profile()} gave each
 #' row to its nearest centre in the record's CRS, squared distances within
-#' \code{.TIE_TOL} of each other a tie and a tie to the lower-numbered
+#' \code{.TIE_TOL} of the least, plus the margin \code{.centres_tol()} on
+#' the distance (\code{.tie_bound()}), a tie and a tie to the lower-numbered
 #' centre (\code{.nearest_centre()}), and the polygons hold a row that is the
 #' same distance from two centres in either cell, or in both.  A point the
 #' join placed in a cell, that lies within the margin of the edge of that
@@ -1527,7 +1533,7 @@ assign_features_to_polygons <- function(
 #' that cell.  The margin is \code{.edge_tol()}, plus, for a point the rule
 #' gives to another centre than that of the cell it is in, the point's
 #' distance from the bisector of the two centres in the join's CRS: a point
-#' whose squared distances to two centres tie within \code{.TIE_TOL} can lie
+#' whose squared distances to two centres tie by that rule can lie
 #' farther from their shared edge than \code{.edge_tol()} when the centres
 #' are far apart (by about \code{1.25e-8} of their distance midway between
 #' them).  A point farther from that cell than the margin keeps the cell it
@@ -3027,8 +3033,12 @@ assign_features_to_polygons <- function(
 #'   A row that is the same distance from two centres lies on the boundary
 #'   between their cells, which happens on gridded locations.
 #'   [resolution_profile()] scores such a row in the cell of the lower-numbered
-#'   centre (two distances count as the same when their squares agree to within
-#'   one part in ten million), and [assign_features_to_polygons()], on cells
+#'   centre (a distance counts as the same as the least when its square is no
+#'   more than the square of the least distance lengthened by a margin, plus
+#'   one part in ten million of the least squared distance; the margin is one
+#'   part in 1e10 of the largest coordinate of the centres, at most a
+#'   millionth of the diagonal of their bounding box and at least four times
+#'   the spacing of doubles at that coordinate), and [assign_features_to_polygons()], on cells
 #'   built from the centres the profile scored, gives a point on that boundary
 #'   the same cell, measured in the CRS the record names, so the comparison
 #'   reads `"match"` on gridded locations too. It does so on cells that carry

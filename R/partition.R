@@ -887,27 +887,90 @@
 }
 
 
+#' The length margin of the nearest-centre searches
+#'
+#' \code{.edge_tol()} of the box of the centres that have a location: one
+#' part in 1e10 of their largest coordinate, at most a millionth of the
+#' diagonal of their box and at least four units in the last place of their
+#' largest coordinate.  Taken once per search from the full set of centres,
+#' so that the exact search, the FNN shortlist and the points searched again
+#' all use one margin.
+#'
+#' @param cx,cy Coordinates of the centres.
+#' @return One number, in the units of the coordinates; 0 when no centre has
+#'   a location.
+#' @keywords internal
+#' @noRd
+.centres_tol <- function(cx, cy) {
+  ok <- is.finite(cx) & is.finite(cy)
+  if (!any(ok)) return(0)
+  .edge_tol(.xy_box(cx[ok], cy[ok]))
+}
+
+
+#' The squared distance up to which a centre ties with the nearest
+#'
+#' A squared distance ties with the least, \code{best}, when it is at most
+#' \code{best * (1 + .TIE_TOL) + tol * (2 * sqrt(best) + tol)}: within one
+#' part in ten million of it, plus what the margin \code{tol} adds to the
+#' distance (\code{(sqrt(best) + tol)^2 - best}).  The relative part alone
+#' fails near a pair of centres: two records of one station that differ in
+#' the last bits of their coordinates, \code{delta} apart, have squared
+#' distances from a point \code{r} away that differ by about
+#' \code{2 r delta}, within one part in ten million of \code{r^2} only
+#' while \code{r} is more than about twenty million times \code{delta}.
+#' Closer than that the nearer by those bits was taken, and they move with
+#' the unit and the origin.  With \code{tol} 0 the bound is the relative
+#' one to the bit, also where a squared distance overflows to \code{Inf}
+#' (\code{0 * Inf} would make it \code{NaN}).  The margin grows with the
+#' largest coordinate, so it is not the same with another origin: a point
+#' whose distances to two centres differ by less than it in one frame and
+#' by more in the other takes the lower-numbered centre in the first and
+#' the nearer in the second.
+#'
+#' @param best The least squared distance of each point.
+#' @param tol The margin, \code{.centres_tol()}.
+#' @param slack Added to \code{.TIE_TOL} in the relative part: the FNN
+#'   pre-checks pass a little more than the exact search ties, so that every
+#'   point the exact search could tie is searched again.
+#' @return The bound, one per point.
+#' @keywords internal
+#' @noRd
+.tie_bound <- function(best, tol, slack = 0) {
+  rel <- best * (1 + .TIE_TOL + slack)
+  if (isTRUE(tol > 0)) rel + tol * (2 * sqrt(best) + tol) else rel
+}
+
+
 #' For chosen points, the nearest centre by exact search
 #'
 #' Two passes over the centres, each compared with every point at once: the
 #' first finds the least squared distance, the second takes the
-#' lowest-numbered centre whose squared distance is within \code{.TIE_TOL}
-#' (one part in ten million) of it.  Centres the same distance away but for
-#' the last bits of the coordinates are a tie, so on a lattice the cells do
-#' not depend on the unit or the origin of the coordinates.
+#' lowest-numbered centre whose squared distance ties with it
+#' (\code{.tie_bound()}: within \code{.TIE_TOL}, one part in ten million,
+#' of it, plus the margin \code{tol} on the distance).  Centres the same
+#' distance away but for the last bits of the coordinates are a tie, so on a
+#' lattice, and near two records of one station that differ in those bits,
+#' the cells do not depend on the unit or the origin of the coordinates.  A
+#' point whose distances to two centres differ by less than the margin
+#' takes the lower-numbered one; the margin grows with the largest
+#' coordinate, so with the origin moved by a large part of the coordinates
+#' such a point can take the nearer (\code{.tie_bound()}).
 #'
 #' @param x,y Coordinates of the points.
 #' @param cx,cy Coordinates of the centres.
+#' @param tol The length margin, \code{.centres_tol()} of all the centres
+#'   of the search.
 #' @return Integer vector: the centre of each point.
 #' @keywords internal
 #' @noRd
-.nearest_exact <- function(x, y, cx, cy) {
+.nearest_exact <- function(x, y, cx, cy, tol = .centres_tol(cx, cy)) {
   best <- (x - cx[1L])^2 + (y - cy[1L])^2
   for (j in seq_along(cx)[-1L]) best <- pmin.int(best, (x - cx[j])^2 + (y - cy[j])^2)
   # Not "replace when nearer by more than the tolerance" in one pass: with
   # squared distances 1 + 1.5e-7, 1 + 0.8e-7 and 1 that keeps centre 3,
   # where the rule takes centre 2.
-  lim <- best * (1 + .TIE_TOL)
+  lim <- .tie_bound(best, tol)
   idx <- rep.int(NA_integer_, length(x))
   for (j in seq_along(cx)) {
     hit <- is.na(idx) & (x - cx[j])^2 + (y - cy[j])^2 <= lim
@@ -920,26 +983,29 @@
 #' The nearest centre of every point
 #'
 #' With \pkg{FNN} the kd-tree shortlists the two nearest centres and R
-#' recomputes both distances.  A point whose two candidates are within
-#' \code{.TIE_TOL} and one part in a thousand million of each other is
-#' searched exactly, so the answer is the one \code{.nearest_exact()} gives
-#' for every point, with or without \pkg{FNN}: on a lattice, where a point
-#' can be the same distance from two centres, the cells do not depend on
-#' which is installed.  Up to 16
+#' recomputes both distances.  A point whose two candidates tie by
+#' \code{.tie_bound()} with one part in a thousand million more on its
+#' relative part is searched exactly, so the answer is the one
+#' \code{.nearest_exact()} gives for every point, with or without
+#' \pkg{FNN}: on a lattice, where a point can be the same distance from two
+#' centres, the cells do not depend on which is installed.  Up to 16
 #' centres the exact search is the faster of the two and is used either way
 #' (measured at 1,500 to 100,000 points; the kd-tree wins from about 32).
 #'
 #' @param x,y Coordinates of the points.
 #' @param cx,cy Coordinates of the centres.
 #' @param use_fnn Whether to use \pkg{FNN}.
+#' @param tol The length margin of the tie, \code{.centres_tol()} of all
+#'   the centres of the search.
 #' @return Integer vector: the centre of each point.
 #' @keywords internal
 #' @noRd
 .nearest_centre <- function(x, y, cx, cy,
-                            use_fnn = requireNamespace("FNN", quietly = TRUE)) {
+                            use_fnn = requireNamespace("FNN", quietly = TRUE),
+                            tol = .centres_tol(cx, cy)) {
   K <- length(cx)
   if (K == 1L) return(rep.int(1L, length(x)))
-  if (!isTRUE(use_fnn) || K <= 16L) return(.nearest_exact(x, y, cx, cy))
+  if (!isTRUE(use_fnn) || K <= 16L) return(.nearest_exact(x, y, cx, cy, tol))
   nn <- FNN::get.knnx(cbind(cx, cy), cbind(x, y), k = 2L)$nn.index
   a <- nn[, 1L]; b <- nn[, 2L]
   da <- (x - cx[a])^2 + (y - cy[a])^2
@@ -947,8 +1013,8 @@
   out <- a
   swap <- db < da
   out[swap] <- b[swap]
-  close <- which(pmax(da, db) <= pmin(da, db) * (1 + .TIE_TOL + 1e-9))
-  if (length(close)) out[close] <- .nearest_exact(x[close], y[close], cx, cy)
+  close <- which(pmax(da, db) <= .tie_bound(pmin(da, db), tol, slack = 1e-9))
+  if (length(close)) out[close] <- .nearest_exact(x[close], y[close], cx, cy, tol)
   out
 }
 
