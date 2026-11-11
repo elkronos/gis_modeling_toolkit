@@ -22,7 +22,16 @@ create_grid_polygons_cached(
 
 - boundary:
 
-  An sf or sfc polygonal object.
+  An sf or sfc polygonal object. One that mixes XY and XYZ (or XYM)
+  geometries, or whose geometries carry M (XYM or XYZM), is read without
+  Z and M, as in
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md),
+  and shares its cache entry with the same boundary in XY. Its rows
+  without a location, and those the repair leaves without a polygon, are
+  left out, and a boundary with none left, or in a geographic CRS with a
+  latitude beyond 90 degrees, is refused, as in
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md);
+  a boundary shares its cache entry with its rows that have a location.
 
 - target_cells:
 
@@ -64,6 +73,20 @@ does not do: the same cell therefore carries a different `poly_id`
 depending on which of the two builders produced it. Use one builder
 throughout an analysis; joining a summary keyed on IDs from one onto
 geometries from the other draws the values on the wrong polygons.
+
+## Details
+
+A grid returned in degrees (a geographic `crs` passed through `...`) is
+cached once per
+[`sf::sf_use_s2()`](https://r-spatial.github.io/sf/reference/s2.html)
+setting: a grid laid in degrees is clipped by s2 with the setting on and
+by GEOS with it off, and
+[`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md)
+rebuilds the cells s2 or GEOS calls invalid with s2's rebuild with the
+setting on and repairs every cell with GEOS with it off, so the grid
+differs between the two settings. A call is handed the grid of the
+session's setting. A grid laid and returned in a projected CRS is
+clipped and repaired by GEOS under either setting and is cached once.
 
 ## See also
 

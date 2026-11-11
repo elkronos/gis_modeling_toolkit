@@ -34,7 +34,9 @@ predict(object, newdata = NULL, se.fit = FALSE, ...)
 
   An sf object with the same predictors. The response variable need not
   be present (true out-of-sample prediction is supported). NULL = fitted
-  values.
+  values. A layer whose geometries mix XY with XYZ or XYM (as
+  [`rbind()`](https://rdrr.io/r/base/cbind.html) of an XY and an XYZ
+  layer gives) is read in x and y.
 
 - se.fit:
 
@@ -52,7 +54,9 @@ local regression cannot be estimated (see **When a prediction is NA**);
 a warning counts those. If the design matrix for `newdata` cannot be
 built, every value is `NA` and a warning says why. CRS-less `newdata`
 first receives the interpretation the training data got, so the same
-rows land where they did at fit time.
+rows land where they did at fit time; when that is longitude and
+latitude, `newdata` with an x outside -180 to 360 or a y beyond 90 north
+or south cannot be in it, and the call stops.
 
 With `se.fit = TRUE`, a list: `fit` (that vector), `se.fit` (the
 standard error of the fitted value, \\\hat\sigma\sqrt{s^\top s}\\ with

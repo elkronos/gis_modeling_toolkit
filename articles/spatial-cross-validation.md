@@ -5,17 +5,20 @@ variogram behind the autocorrelation range, and **ggplot2** for the
 figures. When either is missing the code is shown but not run, and a
 note at the top says so.*
 
-## The problem with a random fold
+## What a fold measures
 
 A random fold puts a test point’s neighbours in the training set. When
 the field is spatially autocorrelated, those neighbours carry the test
-point’s value, and a model with any capacity to memorise location will
-look up the answer. The cross-validation score then measures
-interpolation between nearby training points, and reports it as a
-prediction error for ground the model has never seen.
+point’s value, and a model that draws on nearby observations uses them.
+The cross-validation score then measures the error of predicting among
+the samples. Blocks hold out whole areas, and their score measures the
+error of predicting into an unsampled gap the size of a block.
 
-Everything else in this vignette follows from wanting a number that does
-not do that.
+A cross-validated error is the error at the distance the folds put
+between the held-out points and their training data. It reads low for a
+map whose locations sit farther from the data than that, and high for
+one whose locations sit closer. Everything else in this vignette follows
+from matching the folds to the map.
 
 ## A learner you can read
 
@@ -108,16 +111,42 @@ Blocked folds put the error 29% higher on this fixture. Both numbers
 come from the same 400 observations and the same smoother; the
 difference is entirely in which rows were allowed to train on which.
 
-Neither number is the truth. The blocked one answers a harder question,
-and it is the question most maps are used for: what happens at a
-location with no observation nearby.
+Neither number is the error of every map. The random one is the error of
+predicting among the samples; the blocked one is the error of predicting
+into a gap a block wide. Which one a map has is a question of where it
+predicts, and
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+answers it: given the locations the map will predict at, it sets their
+distances to the data beside the held-out distances of each design. For
+a map of the square, the cells of a grid over it:
+
+``` r
+
+cells <- st_make_grid(pts, n = c(30, 30), what = "centers")
+c(random  = attr(fold_separation(fr, pts, prediction_points = cells), "target")$reading,
+  blocked = attr(fold_separation(fb, pts, prediction_points = cells), "target")$reading)
+```
+
+    ##    random   blocked 
+    ## "matched" "farther"
+
+`"matched"` says the held-out points sit about as far from their
+training data as the map’s cells do, so the score is the error of that
+map; `"farther"` says they sit farther, and the score reads high for it;
+`"closer"`, the reading of random folds on clustered samples with a map
+of the whole region, says it reads low.
+[`print()`](https://rdrr.io/r/base/print.html) on a
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+result gives the distances fold by fold, and
+`make_folds(method = "knndm", prediction_points = cells)` builds folds
+matched to the cells.
 
 ## The six fold schemes
 
 | `method` | holds out | use it when |
 |----|----|----|
-| `random_kfold` | a random 1/k of rows | you want the optimistic bound, or the data are not autocorrelated |
-| `block_kfold` | contiguous spatial blocks | the general case; size the blocks from the correlation range |
+| `random_kfold` | a random 1/k of rows | the map predicts among the samples (an area they cover evenly), or the data are not autocorrelated |
+| `block_kfold` | contiguous spatial blocks | the map predicts into unsampled gaps; size the blocks from the width of the gaps, or from the correlation range |
 | `buffered_loo` | one point, and everything within `buffer` of it | n is small and you can afford n fits |
 | `leave_location_out` | every observation from one site, named by `group_var` | you have repeat visits and the site is the unit |
 | `nndm` | one point, and a distance-matched exclusion | you know where you will predict, and want the fold geometry to match it |
@@ -142,9 +171,12 @@ way no summary statistic will tell you about.
 
 ## How wide should a block be?
 
-Wide enough that a test block’s points are uncorrelated with the
-training points outside it, which makes the autocorrelation range the
-natural scale.
+As wide as the gaps the map has to bridge. The wider the blocks, the
+farther the held-out points sit from their training data, and the score
+is the error at that distance. The autocorrelation range is the distance
+beyond which an observation says little about a location; `auto_range`
+uses it as the block size, which is one way to choose a separation
+distance, and suits a map that has to reach that far from the data.
 
 ``` r
 
@@ -153,12 +185,12 @@ c(range = as.numeric(sac), nugget = sac_nugget(sac))
 ```
 
     ##       range      nugget 
-    ## 190.8824820   0.1404058
+    ## 190.8824784   0.1404058
 
 [`sac_nugget()`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md)
 reads the nugget off the same fitted model. A nugget that is most of the
-sill says the field has little spatial structure left to leak, and the
-blocked and random scores will be close.
+sill says the field has little spatial structure for nearby observations
+to carry, and the blocked and random scores will be close.
 
 `make_folds(auto_range = TRUE)` runs this estimate and uses it as a
 minimum block size:
@@ -189,7 +221,7 @@ lists the reasons and what each one means;
 [`plot()`](https://rdrr.io/r/graphics/plot.default.html) on the returned
 object draws the variogram that produced it.
 
-## Sizing it by measurement
+## The error at each block size
 
 [`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md)
 runs the cross-validation at several block sizes and reports the curve,
@@ -232,14 +264,19 @@ reference throughout. A dotted line marks the estimated autocorrelation
 range.](spatial-cross-validation_files/figure-html/plot-sweep-1.png)
 
 Error climbs away from the random-fold reference as blocks widen, and
-the estimated range is marked. The height of the climb is what random
-folds were hiding.
+the estimated range is marked. The climb is the error growing with the
+distance from the data: each point of the curve is the error of a map
+whose locations sit as far from the data as that size’s held-out points
+do. The curve does not say which size to report; the size to read is the
+one whose folds match the map, which
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+checks on the folds of each size (the `$folds` of each element of
+`attr(sw, "results")`).
 
-Read the curve up to the range, and watch `blocks_used` past it. Once
-`blocks_used` approaches `k`, each fold is holding out a large
-contiguous piece of the study area, and the model is being asked to
-extrapolate across it. Error keeps rising for a second reason at that
-point, and the number stops being about leakage.
+Watch `blocks_used` as the blocks grow. Once it approaches `k`, each
+fold is holding out a large contiguous piece of the study area, and the
+model is being asked to extrapolate across it, which is the error of a
+map only if the map has to do the same.
 
 ## Reading the result
 

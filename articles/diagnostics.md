@@ -340,15 +340,16 @@ c(inside = sum(inside), outside_or_unknown = sum(!inside))
     ##             inside outside_or_unknown 
     ##                 64                161
 
-## 5. Two ways to leak
+## 5. Coordinates as predictors, and selection inside the folds
 
 **Coordinates as predictors.** A model given `x` and `y` can reproduce
-the training surface by memorising location, and random folds will not
-detect it. `fit_rf_model(include_coords = TRUE)` logs a caution (once
-per session) for this reason. Score any such model with blocked folds,
-and read
+the training surface by memorising location, so its error grows quickly
+with the distance from the data, and random folds score it among the
+samples. `fit_rf_model(include_coords = TRUE)` logs a caution (once per
+session) for this reason. Score any such model on folds at the distances
+its map will predict at, and read
 [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md)
-for what the blocking has to be wide enough to do.
+for how to match the two.
 
 **Selection outside the fold.** Choosing predictors on the whole data
 set and then cross-validating the chosen set gives the selection a look
@@ -398,10 +399,12 @@ pooled `gain` exceeds `tol` and the mean of its per-fold gains
 (`fold_gain`) exceeds one standard error of that mean (`fold_gain_se`),
 from step 1 on; `rule = "tol"` tests the pooled gain alone.
 
-Its inner folds default to the scheme you pass. Passing `random_kfold`
-there logs a caution, because a leaky inner loop can select a variable
-for being spatially close to the response and an honest outer loop will
-then report a respectable number for a dishonestly chosen feature set.
+Its inner folds are `block_kfold` unless `method` names another scheme,
+whatever folds the outer loop uses. Passing `random_kfold` there logs a
+caution: random inner folds choose the variables that predict best among
+the samples, where one that only tracks nearby values of the response
+can win, and a blocked outer loop then scores the chosen set at the
+blocks’ distance, for which it was not chosen.
 
 ## 6. Warnings about pooled cell values
 
@@ -499,8 +502,8 @@ rbind(scored = unlist(w$scored), found = unlist(w$found))
 ```
 
     ##          n cells      loo
-    ## scored 350    78 2.935117
-    ## found  330    78 3.004029
+    ## scored 350    78 2.934356
+    ## found  330    78 2.986366
 
 `what` names the first comparison that failed: `"n"` for another number
 of rows with a response, `"cells"` for another number of cells that hold
@@ -510,19 +513,29 @@ assigned layer and `cells_sf` carry different records. The usual causes
 are rows filtered after the assignment, a boundary that leaves points in
 no cell, and a layer other than the one profiled. On gridded locations a
 row can lie the same distance from two centres, on the boundary between
-their cells. The profile scores it in the cell of the lower-numbered
-centre, and
+their cells (a distance counts as the same as the least when its square
+is no more than the square of the least distance lengthened by a small
+margin, plus one part in ten million of the least squared distance;
+[`?summarize_by_cell`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+gives the margin). The profile scores it in the cell of the
+lower-numbered centre, and
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
 gives a point there the same cell when the cells carry the record of the
-centres scored, so a lattice passes the check.
+centres scored, for rows that have a CRS exactly when the record names
+one, so a lattice passes the check. Rows without a CRS beside a record
+that names one, rows with a CRS beside a record that names none, rows
+assigned to the cells after they lost the record (written to a file and
+read back, say) and summarised with `cells_sf` set to the cells that
+carry it, and rows given their cells by another join are placed by the
+polygons alone, so a row on a boundary can sit in either cell.
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-draws those cells in the profile’s CRS whatever CRS the seeds come back
-in. Cells built in another projected CRS, named with its `crs`, are the
-nearest-centre cells of that CRS, so rows near a boundary, on it or not,
-can sit in another cell, and the warning then speaks of them. The values
-returned describe the cells as given, and `attr(, "count_rule")$check`
-keeps the outcome. Cells the caller brings carry no record and are not
-checked.
+draws the scored centres’ cells in the profile’s CRS whatever CRS the
+seeds come back in. Cells built in another projected CRS, named with its
+`crs`, are the nearest-centre cells of that CRS, so rows near a
+boundary, on it or not, can sit in another cell, and the warning then
+speaks of them. The values returned describe the cells as given, and
+`attr(, "count_rule")$check` keeps the outcome. Cells the caller brings
+carry no record and are not checked.
 
 **`spatialkit_no_structure`: the cells predict no better than one
 mean.** `b` is noise by construction:
@@ -541,8 +554,8 @@ as.data.frame(attr(noise, "pooled")$columns$resp_b[
   c("loo", "loo_one_cell", "structure_p", "own_weight", "structured")])
 ```
 
-    ##        loo loo_one_cell structure_p own_weight structured
-    ## 1 1.109034     1.074528   0.7556459 0.03572578      FALSE
+    ##       loo loo_one_cell structure_p own_weight structured
+    ## 1 1.10873     1.074528   0.4467413  0.1475108      FALSE
 
 `structured` is `FALSE` when the leave-one-out error of one mean for all
 rows (`loo_one_cell`) is within 2 percent of that of the pooled values

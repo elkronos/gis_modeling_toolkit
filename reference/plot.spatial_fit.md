@@ -31,7 +31,8 @@ plot(
   (optional, see
   [`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md))
   they are the response minus `fitted(x)`, which is what the built-in
-  backends' methods return.
+  backends' methods return. The maps are drawn in x and y: a `data_sf`
+  whose geometries mix XY with XYZ or XYM is drawn without its Z and M.
 
 - type:
 

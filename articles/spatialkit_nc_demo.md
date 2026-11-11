@@ -83,8 +83,9 @@ varying response:
 - `pop_density` — decays with distance from two fake “cities”
 - `y` — driven by the two predictors **plus a spatial field neither of
   them explains**. That last term is deliberate: it is the unmodelled
-  spatial structure that makes random cross-validation optimistic, and
-  it is what section 5 measures.
+  spatial structure that nearby observations carry, so a model’s error
+  depends on how far from the data it predicts, and it is what section 5
+  measures.
 
 ``` r
 
@@ -164,23 +165,28 @@ tess_voronoi <- build_tessellation(
   seeds, boundary = nc_boundary,
   method = "voronoi", clip = TRUE, quiet = TRUE
 )
-sum(is.na(tess_voronoi$index))   # seeds that lie in no cell
+outside <- lengths(st_intersects(seeds, nc_boundary)) == 0
+sum(outside)                   # seeds that lie outside the state outline
 ```
 
     ## [1] 1
 
+``` r
+
+tess_voronoi$index[outside]    # the cell each of them generates
+```
+
+    ## [1] 38
+
 A k-means centre is a mean of observations, and it can lie outside a
 boundary that is not convex. Here one density-weighted centre lies just
 outside the state outline, over a sound that coastal observations
-surround, and
-[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-warns (class `spatialkit_unassigned`) that one point falls in no cell;
-this vignette does not print warnings. The points are the seeds, not the
-observations: the seed’s cell is built inside the outline, every
-observation falls in a cell, and the seed has `NA` in
-`tess_voronoi$index`.
-[`?cell_values_at`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md)
-shows how to give such a seed its cell’s ID.
+surround. Its cell, the part of the state nearer it than any other seed,
+is built inside the outline, and `tess_voronoi$index` gives the seed
+that cell, as it gives every seed the cell it generates.
+`seeds$cell_id <- tess_voronoi$index` is then what
+[`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md)
+reads to place other locations.
 
 ### 3b and 3c. Hex and square grids (~50 cells)
 
@@ -508,8 +514,9 @@ be handed to `make_folds(auto_range = TRUE)`, which is why it comes back
 # No range was identified in 5a, so the block size cannot come from the
 # variogram.  The field was built as a sine wave with a quarter-wavelength of
 # about 390,000 ft, the scale over which it changes sign; 400,000-ft blocks
-# hold out whole lobes of it.  cv_block_size_sweep() is the tool for sizing
-# blocks by measurement when nothing is known in advance.
+# hold out whole lobes of it.  cv_block_size_sweep() gives the cross-validated
+# error at each block size, and fold_separation() says which size matches a
+# map (5c below).
 folds_random  <- make_folds(points_sf, k = 5, method = "random_kfold", seed = 42)
 folds_blocked <- make_folds(points_sf, k = 5, method = "block_kfold",
                             block_size = 400000, seed = 42)
@@ -522,8 +529,8 @@ c(random = folds_random$k, blocked = folds_blocked$k,
     ##       5       5      12
 
 [`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
-is the fastest way to see whether the blocks actually separate the data
-or are smaller than the autocorrelation range and therefore leaking:
+is the fastest way to see whether the blocks actually separate the data,
+and how wide they are:
 
 ``` r
 
@@ -547,9 +554,9 @@ corner.](spatialkit_nc_demo_files/figure-html/plot-folds-1.png)
 and
 [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
 need `ranger`. `include_coords = TRUE` hands the forest the coordinates,
-which lets it fit the training surface by location. A random hold-out
-then overstates its accuracy, which random folds cannot show. Scoring
-the same model on both fold schemes shows the size of the gap:
+which lets it fit the training surface by location, so its error grows
+quickly with the distance from the data. Scoring the same model on both
+fold schemes shows how much:
 
 ``` r
 
@@ -568,14 +575,38 @@ data.frame(
 ```
 
     ##          folds        R2     RMSE
-    ## 1 random_kfold 0.7945653 6.089268
-    ## 2  block_kfold 0.6310837 8.997421
+    ## 1 random_kfold 0.7945102 6.090085
+    ## 2  block_kfold 0.6313066 8.994703
 
 Random folds report R² = 0.795; blocked folds report 0.631 on the same
 fitted model, a drop of 21% of the reported skill.
 
-The blocked estimate is the one to report. The random one describes
-interpolation between points you already have, which is not the task.
+Which of the two to report depends on where the map will predict. The
+random estimate is the error of predicting among the points you have;
+the blocked one is the error of predicting whole blocks of the state
+from the rest. The map of section 7 predicts over the state these points
+were sampled across at random.
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+sets the distances from such a map’s locations to the data beside the
+held-out distances of each scheme, and says which way each score errs
+for that map:
+
+``` r
+
+cells <- st_sample(nc_boundary, size = 2000, type = "regular")
+c(random  = attr(fold_separation(folds_random,  points_sf,
+                                 prediction_points = cells), "target")$reading,
+  blocked = attr(fold_separation(folds_blocked, points_sf,
+                                 prediction_points = cells), "target")$reading)
+```
+
+    ##    random   blocked 
+    ## "matched" "farther"
+
+`"matched"` is the scheme whose score is the error of that map,
+`"farther"` one that reads high for it, and `"closer"` one that reads
+low. A map that has to reach far beyond the points, into a region they
+never sampled, would turn the answer round.
 
 ------------------------------------------------------------------------
 
@@ -598,8 +629,11 @@ rf_fit
     ##   OOB RMSE: 9.7284   OOB R^2: 0.4733
     ##   Importance (permutation): elevation=105.4, pop_density=83.25
     ## 
-    ##   OOB is a random hold-out and is optimistic under spatial
-    ##   autocorrelation; use cv_rf() for a spatial estimate.
+    ##   OOB is a random hold-out: under spatial autocorrelation it is the error
+    ##   of predicting among the samples, and reads low for predictions made
+    ##   farther from the data than the samples sit from each other. Score a map
+    ##   that predicts farther with cv_rf() on folds at its distances
+    ##   (?fold_separation).
 
 Note that [`summary()`](https://rdrr.io/r/base/summary.html) on an
 `rf_fit` reports **out-of-bag** metrics, not in-sample ones —
@@ -745,11 +779,11 @@ blocked folds it scores worse than the coordinate forest in 5c did. That
 is not a contradiction. The field is a smooth wave that the two
 predictors do not carry, so the coordinates are informative out of block
 as well as in, and the blocked score says how much. What 5c measured was
-how much of the *random*-fold score was interpolation between
-neighbours; what this table measures is what the predictors alone are
-worth. `Adj_R2` is `NA` in every `cv_*()` result’s `overall`: the pooled
-predictions come from `k` separately fitted models and have no single
-parameter count to adjust for.
+how much worse the coordinate forest predicts whole blocks of the state
+than it predicts among the points; what this table measures is what the
+predictors alone are worth. `Adj_R2` is `NA` in every `cv_*()` result’s
+`overall`: the pooled predictions come from `k` separately fitted models
+and have no single parameter count to adjust for.
 
 ------------------------------------------------------------------------
 
@@ -869,21 +903,21 @@ argues about it:
 |:---|:---|
 | getting your own data in, and what the coordinates are in | [`vignette("getting-started")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md) |
 | how many cells, and the criteria that disagree | [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md) |
-| the six fold schemes, and sizing a block by measurement | [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md) |
-| residual autocorrelation, aggregation standard errors, and two ways to leak | [`vignette("diagnostics")`](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md) |
+| what a fold’s score estimates, the six fold schemes, and the error at each block size | [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md) |
+| residual autocorrelation, aggregation standard errors, coordinates as predictors and selection inside the folds | [`vignette("diagnostics")`](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md) |
 | handing the regions to someone else, and what to report | [`vignette("reporting")`](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.md) |
 
 Ten numbered scripts in `system.file("scripts", package = "spatialkit")`
 run the same ground at the console, printing what to look for in each
 figure before drawing it.
 
-    ## R version 4.6.1 (2026-06-24)
+    ## R version 4.6.2 (2026-10-29)
     ## Platform: x86_64-pc-linux-gnu
-    ## Running under: Ubuntu 24.04.5 LTS
+    ## Running under: Ubuntu 26.04.1 LTS
     ## 
     ## Matrix products: default
     ## BLAS:   /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 
-    ## LAPACK: /usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblasp-r0.3.26.so;  LAPACK version 3.12.0
+    ## LAPACK: /usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblasp-r0.3.32.so;  LAPACK version 3.12.0
     ## 
     ## locale:
     ##  [1] LC_CTYPE=C.UTF-8       LC_NUMERIC=C           LC_TIME=C.UTF-8       
@@ -903,14 +937,14 @@ figure before drawing it.
     ## 
     ## loaded via a namespace (and not attached):
     ##  [1] s2_1.1.13          magic_1.6-1-1      sass_0.4.10        generics_0.1.4    
-    ##  [5] class_7.3-23       KernSmooth_2.23-26 lattice_0.22-9     digest_0.6.39     
-    ##  [9] magrittr_2.0.5     evaluate_1.0.5     grid_4.6.1         RColorBrewer_1.1-3
-    ## [13] fastmap_1.2.0      jsonlite_2.0.0     Matrix_1.7-5       e1071_1.7-17      
+    ##  [5] class_7.3-24       KernSmooth_2.23-27 lattice_0.23-1     digest_0.6.39     
+    ##  [9] magrittr_2.0.5     evaluate_1.0.5     grid_4.6.2         RColorBrewer_1.1-3
+    ## [13] fastmap_1.2.0      jsonlite_2.0.0     Matrix_1.7-6       e1071_1.7-17      
     ## [17] DBI_1.3.0          viridisLite_0.4.3  scales_1.4.0       textshaping_1.0.5 
     ## [21] jquerylib_0.1.4    abind_1.4-8        cli_3.6.6          rlang_1.3.0       
     ## [25] units_1.0-1        intervals_0.15.5   withr_3.0.3        cachem_1.1.0      
-    ## [29] yaml_2.3.12        otel_0.2.0         FNN_1.1.4.1        geometry_0.5.2    
-    ## [33] tools_4.6.1        ranger_0.18.0      spacetime_1.3-4    logger_0.4.3      
+    ## [29] yaml_2.3.12        otel_0.3.0         FNN_1.1.4.1        geometry_0.5.2    
+    ## [33] tools_4.6.2        ranger_0.18.0      spacetime_1.3-4    logger_0.4.3      
     ## [37] vctrs_0.7.3        R6_2.6.1           proxy_0.4-29       classInt_0.4-11   
     ## [41] zoo_1.9-1          lifecycle_1.0.5    fs_2.1.0           htmlwidgets_1.6.4 
     ## [45] ragg_1.5.2         pkgconfig_2.0.3    desc_1.4.3         pkgdown_2.2.1     
@@ -918,4 +952,4 @@ figure before drawing it.
     ## [53] Rcpp_1.1.2         gstat_2.1-6        systemfonts_1.3.2  xfun_0.62         
     ## [57] tibble_3.3.1       tidyselect_1.2.1   knitr_1.52         farver_2.1.2      
     ## [61] htmltools_0.5.9    labeling_0.4.3     rmarkdown_2.32     xts_0.14.3        
-    ## [65] wk_0.9.5           compiler_4.6.1     S7_0.2.2           sp_2.2-4
+    ## [65] wk_0.9.5           compiler_4.6.2     S7_0.2.2           sp_2.2-4

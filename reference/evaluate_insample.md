@@ -68,9 +68,20 @@ convention every `cv_*()` function uses: the model is measured against
 the prediction it had to beat, the training mean, not against the new
 rows' own mean, which it could not have known. It is below 0 when the
 model predicts the new rows worse than the training mean does, and it is
-`NA` when the response does not vary about that baseline by more than
-rounding error (100 machine epsilons of its magnitude, whatever its
-units).
+`NA` when the response does not vary about that baseline beyond the
+rounding of its values, whatever its units and origin.
+
+A `gwr_fit` whose response
+[`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+took about a centre (`fit$engine$centres$response`, a response at a
+large offset) is scored on the response and the fitted values or
+predictions less that centre, which keep the spread a double rounds away
+at the response's size: `RMSE`, `MAE` and \\R^2\\ are those of the same
+values at 0, and `MAPE` and `SMAPE` divide the same errors by the values
+in the response's units.
+[`fitted()`](https://rdrr.io/r/stats/fitted.values.html) and
+[`predict()`](https://rdrr.io/r/stats/predict.html) still return values
+in the response's units.
 
 ## Percentage errors on responses with zeros
 

@@ -17,7 +17,9 @@ gp_lengthscale_bounds(coords_xy, q_small = 0.25, max_n = 1000L)
 
   Numeric matrix or data.frame of coordinates with at least two columns;
   the first two are used, and replicated rows are collapsed before the
-  distance quantiles are taken.
+  distance quantiles are taken. A row with a coordinate that is missing,
+  not finite or beyond 1e150 has no location: it is left out, with a
+  warning of class `spatialkit_rows_dropped` that gives the count.
   [`brms::gp()`](https://paulbuerkner.com/brms/reference/gp.html)
   defaults to `gr = TRUE` and reduces its covariates to unique rows, so
   a heavily-sampled station would otherwise weight the quantile by how
@@ -33,13 +35,17 @@ gp_lengthscale_bounds(coords_xy, q_small = 0.25, max_n = 1000L)
 - max_n:
 
   Maximum number of *distinct* points to use in the distance
-  computation. Default 1000. Set to `Inf` to use all of them.
+  computation. Default 1000. Set to `Inf` to use all of them. Above it,
+  a subsample is drawn with a fixed seed from the distinct points in
+  coordinate order, so the bounds do not depend on the row order of
+  `coords_xy`, and the caller's random-number stream is left where it
+  was.
 
 ## Value
 
 Named numeric vector `c(lower, upper)` on the length-scale;
-`c(lower = 0.001, upper = 1)` when fewer than two distinct locations or
-no positive distances remain.
+`c(lower = 0.001, upper = 1)` when fewer than two distinct located rows
+or no positive distances remain.
 
 ## Details
 

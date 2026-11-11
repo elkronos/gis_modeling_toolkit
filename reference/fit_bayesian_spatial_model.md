@@ -149,9 +149,12 @@ fit_bayesian_spatial_model(
   of dollars and shrank the same slope to nothing when it was in
   dollars. The prior brms used is stored as `$info$b_prior` and shown by
   [`print()`](https://rdrr.io/r/base/print.html). When `prior` is given,
-  no slope prior is added. A data-informed GP length-scale prior is
-  always appended automatically unless `prior` already contains an entry
-  with `class = "lscale"`.
+  no slope prior is added. A prior given here on a class that lives on
+  the response's scale (`b`, `Intercept`, `sigma`, `sdgp`, and `beta` of
+  `exgaussian()`) keeps the response as it is; see "The response's
+  centre and scale". A data-informed GP length-scale prior is always
+  appended automatically unless `prior` already contains an entry with
+  `class = "lscale"`.
 
 - chains:
 
@@ -192,10 +195,26 @@ fit_bayesian_spatial_model(
 - control:
 
   Named list of sampler controls, *merged* over the package defaults
-  `list(adapt_delta = 0.9, max_treedepth = 12)` instead of replacing
+  `list(adapt_delta = 0.99, max_treedepth = 12)` instead of replacing
   them. Passing `list(max_treedepth = 15)` therefore keeps
-  `adapt_delta = 0.9`, which matters, because that is exactly the
+  `adapt_delta = 0.99`, which matters, because that is exactly the
   setting the divergence warning tells you to raise.
+
+  `adapt_delta` is 0.99, not Stan's 0.8, because one divergent
+  transition sets `convergence_ok` to `FALSE` (see `check_convergence`)
+  and lower values leave a few on ordinary data. Four layers of 250
+  points over a smooth field with a 60 km range, fitted at the default
+  four chains of 2,000 iterations from three seeds each, had 1 to 24
+  divergent transitions in every fit at 0.9, the default of earlier
+  versions, and none at 0.99; at 0.95 and 0.975 some fits still had one
+  or more. The smaller step costs time: sampling took about twice as
+  long as at 0.9 (1.3 to 2.7 times). `list(adapt_delta = 0.9)` runs
+  faster and can leave a few divergent transitions. Some can remain at
+  0.99 too, for example on a layer whose spatial field is weak against
+  the noise; then raise it to 0.995 or 0.999, which took three to four
+  and a half times the sampling time of 0.9 on the four layers. No
+  transition reached `max_treedepth = 12` there at any of these
+  settings.
 
 - compute_loo:
 
@@ -242,16 +261,17 @@ fit_bayesian_spatial_model(
   number of parameters. This model has one weight per basis function,
   about 540 parameters at the usual basis, and the largest of that many
   R-hat values sits near 1.01 in a fit that has converged: four fits at
-  the default four chains of 2,000 iterations had largest values of
-  1.005, 1.009, 1.009 and 1.011, with every effective sample size at
-  least 1,086 against the 400 required. Chains that have converged by
-  construction (540 independent parameters, four chains of 1,000 draws)
-  had a largest value of 1.008 to 1.011 at an effective sample size near
-  1,300, and 130 to 160 values above 1.01, none above 1.05, at an
-  effective sample size near 450. Vehtari et al. give 1.01 beside an
-  effective sample size above 400, and an R-hat of 1.01 is about what an
-  effective sample size of 400 gives (1.009 on average in the same
-  chains), so the two are read together here.
+  the default four chains of 2,000 iterations, with `adapt_delta` at 0.9
+  or 0.95, had largest values of 1.005, 1.009, 1.009 and 1.011, with
+  every effective sample size at least 1,086 against the 400 required.
+  Chains that have converged by construction (540 independent
+  parameters, four chains of 1,000 draws) had a largest value of 1.008
+  to 1.011 at an effective sample size near 1,300, and 130 to 160 values
+  above 1.01, none above 1.05, at an effective sample size near 450.
+  Vehtari et al. give 1.01 beside an effective sample size above 400,
+  and an R-hat of 1.01 is about what an effective sample size of 400
+  gives (1.009 on average in the same chains), so the two are read
+  together here.
 
   Transitions that stop at `max_treedepth` are counted and logged but do
   not change the verdict: Stan treats them as a cost, not as invalid
@@ -339,25 +359,26 @@ warns; `"below_floor_no_autocorrelation"` and
 or the floor-distance test did not bear out; `"not_estimated"` or
 `"not_run"`), `range` (the estimated range in map units), `floor`,
 `k_needed`, `moran` and `moran_floor` (the two Moran's I tests, each
-with `I`, `z` and a one-sided `p`), `reason` and `unit`; gp_adequacy: a
-list with `status` (see Details), `frac_below` (the share of
-length-scale draws below `gp_ell_min`), `identified` and `identified_by`
-(`"spatial_share"` or `"length_scale"`, the rule that decided it; see
-Details), `contraction` (one minus the ratio of posterior to prior
-variance, per length-scale, negative when the posterior is the wider of
-the two) and `prior_gap` (the largest gap between the posterior's and
-the prior's distribution functions, per length-scale; both `NA` for a
-length-scale prior this function did not set), `spatial_share` and
-`sdgp` (2.5, 50 and 97.5 percent quantiles; the share only for a
-gaussian or lognormal family), `effective_range` (the posterior
-effective range per axis in map units, same quantiles), `residual_moran`
-(the test on the residuals the status rests on: `I`, `z`, a one-sided
-`p` and `k`, the number of neighbours; absent when it could not be run,
-and `residual_untested` then says why), `resolution`, `unit` and
-`prior_mass_below`; b_prior: the slope prior brms used (`"(flat)"` for
-its default, `NA` for a model with no slopes), and b_prior_source: where
-it came from; predictor_levels: the levels each factor or character
-predictor has in the training rows, which
+with `I`, `z` and a one-sided `p`; `NULL` where the test is not run, or
+where the residuals are the rounding of an exact fit), `reason` and
+`unit`; gp_adequacy: a list with `status` (see Details), `frac_below`
+(the share of length-scale draws below `gp_ell_min`), `identified` and
+`identified_by` (`"spatial_share"` or `"length_scale"`, the rule that
+decided it; see Details), `contraction` (one minus the ratio of
+posterior to prior variance, per length-scale, negative when the
+posterior is the wider of the two) and `prior_gap` (the largest gap
+between the posterior's and the prior's distribution functions, per
+length-scale; both `NA` for a length-scale prior this function did not
+set), `spatial_share` and `sdgp` (2.5, 50 and 97.5 percent quantiles;
+the share only for a gaussian or lognormal family), `effective_range`
+(the posterior effective range per axis in map units, same quantiles),
+`residual_moran` (the test on the residuals the status rests on: `I`,
+`z`, a one-sided `p` and `k`, the number of neighbours; absent when it
+could not be run, and `residual_untested` then says why), `resolution`,
+`unit` and `prior_mass_below`; b_prior: the slope prior brms used
+(`"(flat)"` for its default, `NA` for a model with no slopes), and
+b_prior_source: where it came from; predictor_levels: the levels each
+factor or character predictor has in the training rows, which
 [`predict()`](https://rdrr.io/r/stats/predict.html) holds new data to;
 gp_S: the pooled centred range `brms::gp(c = )` multiplies; gp_cmeans:
 the column means brms centred the scaled coordinates on; gp_xy_range:
@@ -383,7 +404,10 @@ fail the verdict, plus `gp_lscale_below_resolution` and `gp_adequacy`,
 the share and status described under Details; and n_dropped: the rows
 [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
 removed for missing or non-finite values or a bad geometry, so `$n` can
-be read against `nrow(data_sf)`). The raw brmsfit is in `$engine`.
+be read against `nrow(data_sf)`); response_scaling: the `centre` and
+`scale` the response was handed to brms with, absent when it was handed
+over as it is (see "The response's centre and scale"). The raw brmsfit
+is in `$engine`.
 
 ## Details
 
@@ -653,6 +677,13 @@ caller can catch or muffle exactly one of them by name:
   incomplete rows were dropped, with the counts; a predictor takes one
   value in every row kept.
 
+- `spatialkit_response_scale`:
+
+  The response lies far from zero or its standard deviation far from 1,
+  and `prior` sets a prior on a class on the response's scale, so the
+  response is handed to brms as it is; see "The response's centre and
+  scale".
+
 - `spatialkit_gp_basis_size`:
 
   Fewer than one row per ten basis functions.
@@ -675,13 +706,64 @@ caller can catch or muffle exactly one of them by name:
   are autocorrelated at short range (`"unresolved_short_range"`).
 
 A response that takes a single value is an error, raised before anything
-is compiled. The convergence warning carries the checks that failed as
-`failed` (`"divergent"`, `"ebfmi"`, `"rhat"`, `"ess"`).
+is compiled, and so is one whose values differ only by rounding (1e15
+and the next double). A fit that comes back from brms with no posterior
+draws, as when Stan rejects every starting value, is an error that names
+the response's size as brms was given it. The convergence warning
+carries the checks that failed as `failed` (`"divergent"`, `"ebfmi"`,
+`"rhat"`, `"ess"`).
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
 fits once per fold; it collects the last four classes from its folds and
 raises each once for the run, naming the folds, and
 [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
 does the same for a `fit_fn` that calls this function.
+
+## The response's centre and scale
+
+Stan starts every parameter between -2 and 2, and brms sets its default
+priors for the intercept, the residual standard deviation and the
+Gaussian process's standard deviation from the response it is given,
+with scales of at least 2.5 in its units. A response at 1e8 plus a
+spread of 1, or in units of 1e-20, lies far from both, and its fit
+missed the data by orders of magnitude. So under the gaussian, student,
+skew_normal, exgaussian and asym_laplace families with an identity link,
+a response whose centre is more than 1,000 times its spread from zero is
+handed to brms less that centre, and one whose standard deviation lies
+outside \\2^{-20}\\ to \\2^{20}\\ is divided by the power of two nearest
+that standard deviation. Under exgaussian and asym_laplace the rule is
+narrower: a centre more than 4 times the spread from zero is taken off,
+and a standard deviation outside \\2^{-2}\\ to \\2^{2}\\ is divided out.
+brms's default prior on exgaussian's `beta` and Stan's starting values
+do not follow the response, so an exgaussian fit at a standard deviation
+near 1,000, or 300 standard deviations from zero, had no draws, and an
+asym_laplace fit 300 standard deviations from zero, or at a standard
+deviation near 1e-4, came back with `sigma` at twice its value or more.
+Both steps are exact, and the model is the same model of the response:
+the shift moves the location only, and the scale multiplies the
+location, `sigma` and the mean `beta` of exgaussian's exponential part,
+and leaves the degrees of freedom of student, the skewness of
+skew_normal and the quantile of asym_laplace as they are. Every other
+response, and every response under another family, is handed over as it
+is.
+
+[`fitted()`](https://rdrr.io/r/stats/fitted.values.html),
+[`predict()`](https://rdrr.io/r/stats/predict.html) and its draws,
+[`residuals()`](https://rdrr.io/r/stats/residuals.html),
+[`coef()`](https://rdrr.io/r/stats/coef.html), `$info$loo`,
+`$info$looic` and `$info$gp_adequacy$sdgp` are put back in the
+response's units, and `$info$b_prior` gives the automatic slope prior in
+those units. The same data from another origin or in other units then
+give the same fit, up to Monte Carlo error. The centre and scale are in
+`$info$response_scaling`. `$engine` is the fit of the response brms was
+given, so brms's own functions on it
+([`brms::fixef()`](https://rdrr.io/pkg/nlme/man/fixed.effects.html),
+[`brms::posterior_epred()`](https://mc-stan.org/rstantools/reference/posterior_epred.html))
+answer on that scale.
+
+A prior given in `prior` on a class on the response's scale (`b`,
+`Intercept`, `sigma`, `sdgp`, and `beta` of exgaussian) is read by brms
+on the response it is given. With such a prior the response is handed
+over as it is, and the warning `spatialkit_response_scale` says so.
 
 ## Non-Gaussian responses
 
@@ -860,7 +942,7 @@ if (requireNamespace("brms", quietly = TRUE)) {
   )
   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
     2 * dat$elev + rnorm(n)
-  # Two short chains keep this to a few minutes; expect Stan to warn about
+  # Two short chains keep this to a few minutes; Stan may warn about
   # effective sample size, which is the cost of that.  Use its defaults
   # (chains = 4, iter = 2000) for a fit to report.
   fit <- fit_bayesian_spatial_model(dat, "price", "elev",

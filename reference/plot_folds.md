@@ -1,12 +1,12 @@
 # Map a cross-validation fold scheme
 
 Shows which fold each observation belongs to. This is the fastest way to
-see whether spatial blocks are actually separating the data, or whether
-the blocks are smaller than the autocorrelation range and therefore
-leaking. For `"block_kfold"` folds the block outlines are drawn too,
-from `folds$params$blocks`, so a fold can be seen to be one region or
-several and an empty block can be seen to be empty. The subtitle states
-the parameter that decides whether the scheme leaks, read from
+see whether spatial blocks are actually separating the data, and how
+wide they are beside the autocorrelation range. For `"block_kfold"`
+folds the block outlines are drawn too, from `folds$params$blocks`, so a
+fold can be seen to be one region or several and an empty block can be
+seen to be empty. The subtitle states the parameter that sets how far
+the held-out points sit from their training data, read from
 `folds$params`: the block size (and the estimated range when
 `auto_range` found one), the buffer, the number of location groups, the
 median NNDM exclusion, or, for kNNDM folds, that they are matched to the
@@ -27,7 +27,16 @@ plot_folds(folds, points_sf, boundary = NULL, blocks = TRUE)
 
 - points_sf:
 
-  The `sf` layer the folds were built from.
+  The `sf` layer the folds were built from. Drawn in x and y: a layer
+  whose geometries mix XY with XYZ or XYM (as
+  [`rbind()`](https://rdrr.io/r/base/cbind.html) of an XY and an XYZ
+  layer gives) is drawn without its Z and M, and so are `boundary` and
+  the blocks. A row without a location (a coordinate that is not finite
+  or lies beyond 1e150, or a point that
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  left out of every fold because it is empty or the CRS the folds were
+  built in cannot place it) is not drawn, and neither is a row of
+  `boundary` with such a coordinate; one warning says how many.
 
 - boundary:
 

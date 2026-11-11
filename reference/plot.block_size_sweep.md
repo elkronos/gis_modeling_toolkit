@@ -4,13 +4,14 @@ The curve from
 [`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md):
 the pooled metric at each block size, the fold-to-fold range as a band,
 the random-fold reference as a dashed line, and the estimated
-autocorrelation range as a vertical marker. Blocks smaller than the
-range leak, so the curve rises from the reference towards the range and
-plateaus beyond it; the height of the rise is what the random-fold
-number overstated. The caption says which way is better: higher for `R2`
-and `Adj_R2`, closer to the nominal level for a `coverage_*` column
-(0.975 for `coverage_97.5`), since over-coverage is miscalibration too,
-and lower for everything else.
+autocorrelation range as a vertical marker. The curve rises as the
+blocks widen because the held-out points sit farther from their training
+data: its height at a size is the error at that distance from the data,
+and the error of a map only where the locations it predicts at sit that
+far from the observations. The caption says which way is better: higher
+for `R2` and `Adj_R2`, closer to the nominal level for a `coverage_*`
+column (0.975 for `coverage_97.5`), since over-coverage is
+miscalibration too, and lower for everything else.
 
 ## Usage
 
@@ -66,10 +67,9 @@ if (requireNamespace("ranger", quietly = TRUE) &&
                  seed = 1)
   sw <- cv_block_size_sweep(dat, "z", "a", fit_fn = rf_fn, k = 4, n_sizes = 4,
                             quiet = TRUE)
-  # Error rises from the random-fold reference (dashed) as the blocks grow
-  # towards the estimated autocorrelation range (vertical marker).  The
-  # height of that rise is what random folds were hiding; with four sizes the
-  # ladder stops near the range, so the plateau beyond it is not drawn here.
+  # Error rises from the random-fold reference (dashed) as the blocks grow,
+  # since the held-out points sit farther from their training data.  The
+  # vertical marker is the estimated autocorrelation range.
   plot(sw)
 }
 ```

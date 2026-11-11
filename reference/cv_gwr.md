@@ -62,7 +62,18 @@ cv_gwr(
   cross-validation split and is refused with an error. IDs naming no row
   in the prepared data are dropped with a logged count (expected when
   rows were removed for missing values; a sign the folds came from other
-  data when they were not).
+  data when they were not). With `folds = NULL` the score estimates the
+  error at the distance the block grid built here puts between the
+  held-out points and their training data, which overstates the error of
+  a map where the samples cover the area it predicts over. The excess is
+  how much the model's error grows from the map's distances to the data
+  to the block grid's, and is small for a model whose error changes
+  little with the distance from the data.
+  [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+  with `prediction_points` compares the held-out distances with those of
+  the locations the model will predict at, and
+  `make_folds(method = "knndm", prediction_points = )` builds folds
+  matched to them.
 
 - k:
 
@@ -156,14 +167,25 @@ scored; each case raises one warning for the whole run (classes
 `"spatialkit_gwr_not_estimable"` and `"spatialkit_gwr_extrapolation"`),
 with the totals over the folds that had any. See
 [`predict.gwr_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.gwr_fit.md).
+Where a fold's fit took the response about a centre (a response at a
+large offset; see
+[`fit_gwr_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)),
+`predictions` also carries `y_centre` (that centre, 0 in the rows of a
+fold fitted on the raw response), `yhat_centred` and
+`y_train_mean_centred` (`yhat` and `y_train_mean` less the centre, to
+the spread a double rounds away at the response's size), and the metrics
+are those of the centred values, as
+[`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
+computes them.
 
 ## Details
 
 Folds default to spatial blocks
 ([`make_folds`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)`(method = "block_kfold")`),
-not random ones. With autocorrelated data a random split leaves a
-held-out point's neighbours in the training set and the score comes back
-flattering. Use
+not random ones. A random split leaves a held-out point's neighbours in
+the training set, so its score is the error of predicting among the
+samples; blocks hold out whole areas, and `folds` says what their score
+estimates. Use
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
 for the same treatment of a Bayesian GP model,
 [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)

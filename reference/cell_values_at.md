@@ -28,9 +28,14 @@ cell_values_at(
 
   The locations: an sf layer. A feature that is not a point is reduced
   to one with
-  [`coerce_to_points(, "auto")`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md).
-  No column of it is read. With no CRS while `points` has one, the call
-  stops.
+  [`coerce_to_points(, "auto")`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md);
+  a collection holding a polygon s2 cannot take a centroid of in
+  longitude and latitude (edges that cross), or whose centroid GEOS puts
+  outside it, stops the call with the error of class
+  `spatialkit_features_degenerate`, raised in this function's name and
+  naming its rows of `newdata`. No column of it is read. With no CRS
+  while `points` has one, the call stops. A layer whose geometries mix
+  dimensions or carry M (XYM or XYZM) is read in x and y (step 1).
 
 - values:
 
@@ -39,7 +44,10 @@ cell_values_at(
   result for `points`. It must hold the ID column and a cell value of
   `response_var`: the pooled value (`estimate = "pooled"`) or the mean
   (the default `agg_funs`). With `seeds = NULL` it must also carry the
-  cell polygons, which it does when it was made with `cells_sf`.
+  cell polygons, which it does when it was made with `cells_sf`. A
+  `values` with no row, or whose IDs are all `NA`, stops the call, with
+  or without `seeds`. Its polygons are read in x and y when they mix
+  dimensions or carry M (XYM or XYZM).
 
 - points:
 
@@ -64,11 +72,32 @@ cell_values_at(
   `NULL`, or the seeds the cells were built on: an sf POINT layer with a
   column named as the ID column that gives each seed's cell. For cells
   from `tess <- build_tessellation(seeds)` that is
-  `seeds$cell_id <- tess$index` when the ID column is `"cell_id"`, after
-  which a seed outside a boundary that is not convex needs its cell's ID
-  (see "Seeds outside the boundary"). Two seeds at different locations
-  with one ID are an error; seeds that share a location share its cell,
-  as `index` gives them. `NA` marks a seed without a cell.
+  `seeds$cell_id <- tess$index` when the ID column is `"cell_id"`. For
+  seeds a seeding function returned and the seeds of a
+  [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+  result, `index` gives each seed the cell it generates. Other points
+  are indexed by the cell that holds them, and one outside the boundary
+  is `NA`, or the ID of the nearest cell, which can be the cell of
+  another seed, when it lies within a thousandth of the median cell
+  width of it; with the cell polygons in `values` a seed that is `NA` is
+  given its cell when step 3 can tell which it is (it is not when the
+  points inside several cells no seed names find it as their nearest
+  seed), and without them the locations nearest it have none. Passed
+  through `get_voronoi_seeds(method = "provided", seeds = )` before the
+  tessellation, points placed by hand are seeds (see
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)).
+  Two seeds at different locations with one ID are an error; seeds that
+  share a location share its cell, as `index` gives them. `NA` marks a
+  seed without a cell. When no seed with a location has the ID of a cell
+  of `values` (an ID column from another tessellation, IDs that are all
+  `NA`, or the IDs of cells on seeds with an empty point or a coordinate
+  that is not finite or lies beyond 1e150, as given or once placed in
+  the working CRS, such as metres given EPSG:4326), counting the cells
+  step 3 gives seeds outside the polygons, the call stops, since no
+  location could take its own cell's value; one seed with such an ID and
+  a location is enough, and a seed whose ID `values` has no row for
+  stands for a cell without a value. Without a CRS beside `points` with
+  one, the seeds are read as step 1 says.
 
 ## Value
 
@@ -114,10 +143,10 @@ A data frame with one row per row of `newdata`, in its order:
   location.
 
 A row of `newdata` with an empty geometry, or with a coordinate that is
-not finite or lies beyond 1e150, has `NA` in every column. The two ID
-columns have the class of the ID column of `values`; when a cell that
-`values` has no row for has an ID that class cannot hold (a string
-beside numbers), both are character.
+not finite or lies beyond 1e150 as given or in the working CRS, has `NA`
+in every column. The two ID columns have the class of the ID column of
+`values`; when a cell that `values` has no row for has an ID that class
+cannot hold (a string beside numbers), both are character.
 
 What produced the frame is in `attr(, "values_at")`, a list of class
 `"spatialkit_values_at"` with a print method: `assignment` (`"seeds"` or
@@ -131,13 +160,23 @@ location), `filled` (how many rows of `newdata` were filled) and
 `NULL`). It describes the call: a subset of the frame's rows keeps it as
 it is.
 
-The function raises no classed warning of its own. It passes on what
+The function raises no classed warning of its own; the warning that says
+how `seeds` without a CRS were read (step 1) and the one that counts the
+seeds outside the polygons of `values` left without a cell (step 3) are
+plain ones. It passes on what
 [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md),
 a CRS transformation and
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
-raise, but for one warning: the one that function raises when no
-location at all falls in a polygon is neither raised nor logged, since
-every such row has `filled = TRUE`, which says the same row by row.
+raise, but for one error and one warning. The error of class
+`spatialkit_features_degenerate` with which
+[`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
+refuses a polygon s2 cannot take a centroid of, or a centroid GEOS puts
+outside its feature, is raised in this function's name, with the same
+class and fields, naming `newdata` or `points` and its rows. The warning
+[`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
+raises when no location at all falls in a polygon is neither raised nor
+logged, since every such row has `filled = TRUE`, which says the same
+row by row.
 
 ## Details
 
@@ -149,28 +188,68 @@ The function works in six steps.
     when it is projected and the one
     [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
     picks for it when it is not. `points`, `newdata` and `seeds` are
-    transformed to it. When neither `points` nor `newdata` has a CRS the
-    coordinates are used as they are, unless those of `points` look like
-    longitude and latitude: both are then read as EPSG:4326, as
+    transformed to it. `newdata`, `seeds` and `points` are read in x and
+    y: a layer whose points, or the points taken from its other
+    features, do not all have the same dimensions (some with a Z or M
+    coordinate) is read without its Z and M, since sf reads a layer in
+    the dimension of its first point. So is a layer of points, polygons
+    or lines in `newdata` or `points` whose geometries carry M (XYM or
+    XYZM), which GEOS does not read. So are the polygons of `values`
+    when they do not all have the same dimensions. Polygons of `values`
+    whose geometries carry M are read in x and y as well. When neither
+    `points` nor `newdata` has a CRS the coordinates are used as they
+    are, unless those of `points` look like longitude and latitude: both
+    are then read as EPSG:4326, as
     [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
     reads `points`, with
     [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)'s
-    warning.
+    warning; `newdata` or `seeds` with an x outside -180 to 360 or a y
+    beyond 90 north or south cannot be in degrees, and stop the call.
+    `seeds` without a CRS beside `points` with one are read as
+    [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+    reads a boundary without a CRS, with a warning: beside a projected
+    CRS, coordinates that look like longitude and latitude are taken as
+    EPSG:4326 and transformed, and others are taken to be in the CRS of
+    `points`; beside a geographic CRS, coordinates within the ranges of
+    longitude and latitude are taken to be in it, and others stop the
+    call. `newdata` without a CRS beside `points` with one stops the
+    call.
 
 2.  *The scored rows.* The rows of `points` with a finite
-    `response_var`, a cell ID and finite coordinates. Their distinct
-    locations are the observations every distance below is taken from.
+    `response_var`, a cell ID and a location: a point whose coordinates
+    are finite and within 1e150, as given and in the working CRS. Their
+    distinct locations are the observations every distance below is
+    taken from.
 
 3.  *The cell of a location.* With `seeds`, the cell of the nearest
     seed. That is the Voronoi cell before its clip to the cover, so
-    every location has one, unless its nearest seed has an `NA` ID. A
-    location nearest such a seed has no cell, even where the polygon
-    that holds it has scored rows.
+    every location has one, unless its nearest seed has an `NA` ID: a
+    location nearest such a seed has no cell.
     [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-    gives `NA` in `index` to a seed that lies in no cell: one whose cell
-    the clip removed, and one outside a boundary that is not convex,
-    whose clipped cell exists (see "Seeds outside the boundary").
-    Without `seeds`, the polygon of `values` that holds the location, by
+    gives each seed of a layer it takes for seeds (see
+    [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md))
+    the cell it generates, a seed outside a boundary that is not convex
+    (a k-means centre over a bay) included, and `NA` only to a seed
+    whose cell the clip removed whole. Other points, such as points
+    placed by hand, are indexed by the cell that holds them, so one
+    outside a boundary that is not convex is `NA` although its cell is
+    built. One that lies in no cell but within a thousandth of the
+    median cell width of a cell takes the ID of the nearest cell
+    instead, which beside a boundary that is not convex can be the cell
+    of another seed; two seeds with one ID stop the call (see `seeds`).
+    When `values` carries the cell polygons, a seed that is `NA` is
+    given its cell here: a seed with an `NA` ID that lies in no polygon
+    of `values` takes the ID of the polygon, among those no seed names,
+    that a point inside it finds as its nearest seed. That is the cell
+    the seed generates, since every point of a Voronoi cell is nearer
+    its own seed than any other. A seed that the points inside several
+    such polygons find as their nearest seed generates at most one of
+    them (the seeds of the others are missing from `seeds` or have no
+    location), and nothing says which: it keeps its `NA` ID, with a
+    warning, so the locations nearest it have no cell and are filled
+    (step 5). A seed with an `NA` ID inside a polygon keeps it, and so
+    does one whose cell `values` does not hold. Without `seeds`, the
+    polygon of `values` that holds the location, by
     [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
     with its default `tie_break` and the summary's record of the count,
     so a location on the edge between two cells the profile scored is
@@ -178,7 +257,13 @@ The function works in six steps.
     in no polygon has no cell. Polygons without a CRS are read as that
     function read them for the rows of `points`: the locations are
     handed to it in the CRS of `points`, whatever CRS `newdata` arrived
-    in.
+    in. Where that join runs on the sphere and s2 refuses a polygon of
+    `values` (see Details in
+    [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)),
+    the call stops with an error of class
+    `"spatialkit_cells_degenerate"` that gives the rows of `values` s2
+    refuses (`rows` on the condition), names the cause and says to
+    transform `values` to a projected CRS.
 
 4.  *The value.* The cell's pooled value of `response_var`,
     `..pooled_<prefix><response_var>` with the prefix `resp_` or
@@ -214,33 +299,17 @@ they had; the IDs of all three are written out as text before any match,
 and both ID columns returned have the class of the ID column of `values`
 wherever that class can hold every ID (see Value).
 
-## Seeds outside the boundary
-
-A k-means seed can lie outside a boundary that is not convex, in a bay
-or a bend of a coast (see
-[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)).
-Its cell, clipped to the boundary, holds ground and observations, but
-the seed lies in no cell, so `seeds$cell_id <- tess$index` gives it
-`NA`. The locations nearest it then have `NA` in the ID column and are
-filled from the cell of their nearest scored row, which can be another
-cell than the one that holds them. Every point of a Voronoi cell is
-nearer its own seed than any other, so a point inside each cell that no
-seed lies in finds that cell's seed. In a projected CRS:
-
-    seeds$cell_id <- tess$index
-    own  <- tess$cells[!tess$cells$cell_id %in% tess$index, ]
-    near <- sf::st_nearest_feature(sf::st_point_on_surface(sf::st_geometry(own)),
-                                   seeds)
-    seeds$cell_id[near] <- own$cell_id
-
-Each location inside the boundary then has the cell that holds it, and
-none is filled for want of a seed. A seed whose cell the clip removed
-keeps `NA`.
-
 ## Ties
 
-A location the same distance from two seeds takes the one that comes
-first in `seeds`. For the seeds of a
+A distance to a seed, a centre or a scored location counts as the same
+as the least when its square is no more than the square of the least
+distance lengthened by a margin, plus one part in ten million of the
+least squared distance. The margin is one part in 1e10 of the largest
+coordinate of the seeds, centres or scored locations searched, at most a
+millionth of the diagonal of their bounding box and at least four times
+the spacing of doubles at that coordinate. A location the same distance
+from two seeds takes the one that comes first in `seeds`. For the seeds
+of a
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
 result that is the lower-numbered centre, the rule
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
@@ -258,15 +327,30 @@ cells then takes the cell
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
 gives a row there, with `seeds` and without. Other seeds, among them a
 subset of the centres, are searched as given. A location the same
-distance from two locations of scored rows takes the one with the lower
-x coordinate, then the lower y; among scored rows at one location that
-lie in different cells, the cell that comes first in the order of the
-IDs (ascending for numbers, the C-locale order for strings, the order of
-the levels for a factor). Neither rule depends on the order of the rows
-of `points`, or on whether the FNN package is installed. A tie is a tie
-between distances computed from the coordinates in the working CRS, so
-on gridded locations the same layer in another CRS or unit can put a
-location on a boundary in the other cell.
+distance from two locations of scored rows takes the one in the lower
+column (x values within one part in ten million of the diagonal of the
+scored locations' bounding box, or within one part in 1e10 of their
+largest coordinate (at most a millionth of that diagonal, and at least
+four times the spacing of doubles at that coordinate) where that is
+more, counting as one), then the one lower in y, y values read the same
+way; among scored rows at one location that lie in different cells, the
+cell that comes first in the order of the IDs (ascending for numbers,
+the C-locale order for strings, the order of the levels for a factor),
+and the same among locations in one column and one row (two records of
+one station that differ only in the last bits of their coordinates,
+which are the same distance from any location, however near, while they
+lie within the margin of each other). Neither rule depends on the order
+of the rows of `points`, or on whether the FNN package is installed. A
+tie is a tie between distances computed from the coordinates in the
+working CRS, so on gridded locations the same layer in another projected
+CRS can put a location on a boundary in the other cell; another unit or
+origin of the same CRS moves only the last bits of the distances and
+settles the ties the same way, but for one case. The margin grows with
+the largest coordinate (about 0.46 mm at a UTM northing near 4,550 km,
+about half a micrometre once the origin lies next to data 5 km across),
+so a location whose distances to two of them differ by less than the
+margin with one origin and by more with another is a tie with the first,
+settled as above, and takes the nearer with the second.
 
 ## Away from the observations
 
@@ -304,15 +388,17 @@ short of `obs_level` on one kind of field.
 ## Without the FNN package
 
 The function makes three nearest-neighbour searches: each location's
-nearest scored location, each location's nearest seed, and each scored
-location's nearest other one (for the spacing). With FNN each uses a
-kd-tree. Without it each compares every pair, and a search that would
-compare more than `getOption("spatialkit.exact_pairs_max", 2e9)` pairs
-stops the call first, with an error of class `spatialkit_work_limit`
-that names the search (the fields `work`, `limit` and `what`). The
-search for the spacing does not depend on the number of locations asked
-for: above about 44,700 distinct scored locations the call stops without
-FNN however few they are. The result is the same with and without the
+nearest scored location, each location's nearest seed (and that of a
+point inside each cell no seed names, when a seed with an `NA` ID lies
+outside every cell; see step 3), and each scored location's nearest
+other one (for the spacing). With FNN each uses a kd-tree. Without it
+each compares every pair, and a search that would compare more than
+`getOption("spatialkit.exact_pairs_max", 2e9)` pairs stops the call
+first, with an error of class `spatialkit_work_limit` that names the
+search (the fields `work`, `limit` and `what`). The search for the
+spacing does not depend on the number of locations asked for: above
+about 44,700 distinct scored locations the call stops without FNN
+however few they are. The result is the same with and without the
 package.
 
 ## See also
@@ -370,12 +456,12 @@ at <- cell_values_at(newpts, out, asg, "income", id_col = "cell_id",
                      seeds = seeds)
 head(at)
 #>   cell_id    value estimate   obs_lo   obs_hi filled filled_from dist_nearest
-#> 1      41 28.48055   pooled 26.02536 31.09205  FALSE          NA     238.4435
-#> 2       5 37.30667   pooled 34.85149 39.91818  FALSE          NA     115.6546
-#> 3      64 22.93542   pooled 20.48023 25.54692  FALSE          NA     271.2353
-#> 4      28 38.91665   pooled 36.46147 41.52815  FALSE          NA     367.1291
-#> 5      75 20.96892   pooled 18.51374 23.58042  FALSE          NA     227.2415
-#> 6      10 34.21084   pooled 31.75566 36.82234  FALSE          NA     351.8853
+#> 1      39 28.44976   pooled 25.99484 30.80471  FALSE          NA     238.4435
+#> 2       4 37.27735   pooled 34.82244 39.63230  FALSE          NA     115.6546
+#> 3      58 23.90035   pooled 21.44544 26.25530  FALSE          NA     271.2353
+#> 4      29 38.39229   pooled 35.93738 40.74724  FALSE          NA     367.1291
+#> 5      75 21.00320   pooled 18.54829 23.35815  FALSE          NA     227.2415
+#> 6      19 34.78451   pooled 32.32960 37.13946  FALSE          NA     351.8853
 #>   dist_ratio
 #> 1  0.9403784
 #> 2  0.4561211
@@ -401,9 +487,9 @@ beyond <- st_sf(geometry = st_sfc(st_point(c(5e5 + 2e4, 5e6 + 5e3)), crs = 32632
 cell_values_at(rbind(st_sf(geometry = st_geometry(newpts[1:2, ])), beyond),
                out, asg, "income", id_col = "cell_id")
 #>   cell_id    value estimate   obs_lo   obs_hi filled filled_from dist_nearest
-#> 1      41 28.48055   pooled 26.02536 31.09205  FALSE          NA     238.4435
-#> 2       5 37.30667   pooled 34.85149 39.91818  FALSE          NA     115.6546
-#> 3      NA 25.14089   pooled 22.68570 27.75239   TRUE          78   10204.7354
+#> 1      39 28.44976   pooled 25.99484 30.80471  FALSE          NA     238.4435
+#> 2       4 37.27735   pooled 34.82244 39.63230  FALSE          NA     115.6546
+#> 3      NA 25.39825   pooled 22.94334 27.75320   TRUE          74   10204.7354
 #>   dist_ratio
 #> 1  0.9403784
 #> 2  0.4561211

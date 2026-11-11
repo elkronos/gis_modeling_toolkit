@@ -104,9 +104,12 @@ summarize_by_cell(
       with distance, which matters increasingly as cells get larger and
       Kish's single-`rho` assumption degrades. Supply the fit via `sac`,
       or it is estimated when `response_var` is given and 'gstat' is
-      available. Exponential, spherical and Gaussian models are
-      supported, with a nugget and with several structured components
-      (each weighted by its partial sill) and with gstat's 2-D geometric
+      available. The distances are taken in x and y: a layer whose
+      features, or the points taken from them, do not all have the same
+      dimensions (some with a Z or M coordinate) is read without its Z
+      and M. Exponential, spherical and Gaussian models are supported,
+      with a nugget and with several structured components (each
+      weighted by its partial sill) and with gstat's 2-D geometric
       anisotropy (`vgm(..., anis = c(angle, ratio))`), applied as gstat
       applies it. A request that cannot be met falls back to `"kish"`,
       with a warning of class `"spatialkit_deff_fallback"` that gives
@@ -114,19 +117,24 @@ summarize_by_cell(
       warning), or no usable model (none supplied and none could be
       estimated, or a rejected fit that could not be replaced by an
       estimate). The standard errors, intervals and `cell_weight` are
-      then Kish's, and the uncorrected ones only where Kish's own ICC is
-      0; the `deff_method` column says which on every row (see "Value").
-      The variogram route needs an identified range, which a layer does
-      not always have, so read `deff_method` for the fallback. A model
-      with no structured component (a pure nugget) implies that distinct
-      observations are uncorrelated, so it is applied as a design effect
-      of 1 in every cell, not treated as a fallback. That includes the
-      model
+      then Kish's, the uncorrected ones where Kish's own ICC is 0 and
+      `NA` where it cannot be estimated; the `deff_method` column says
+      which on every row (see "Value"). The variogram route needs an
+      identified range, which a layer does not always have, so read
+      `deff_method` for the fallback. A layer whose geometries carry M
+      (XYM or XYZM), which GEOS does not read, is read in x and y too. A
+      model with no structured component (a pure nugget) implies that
+      distinct observations are uncorrelated, so it is applied as a
+      design effect of 1 in every cell, not treated as a fallback. That
+      includes the model
       [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
       returns when it finds no spatial structure (an `NA` range whose
       `rejected_reason` says so): the answer is then a design effect of
       1, `deff_method` reads `"variogram"`, and no fallback warning is
-      raised. Points with empty geometry count towards their cells'
+      raised. Predictor columns summarised under that verdict get the
+      same design effect of 1, and a warning of class
+      `"spatialkit_deff_no_structure"` names them (fields `columns` and
+      `reason`). Points with empty geometry count towards their cells'
       values but not towards the correlation, with a warning.
 
   `"kish"`
@@ -146,12 +154,31 @@ summarize_by_cell(
       ICC is never applied to a predictor, nor one predictor's to
       another. It is the response's ICC that sets `cell_weight` whenever
       a response was given, and the first predictor's own ICC otherwise.
-      Requires at least 2 cells with 2+ observations and at least 2
-      residual degrees of freedom (`N - k >= 2`); the ICC is taken as 0
-      (no correction for that column) otherwise, and likewise when the
-      estimate itself comes out at or below 0. The `"deff_applied"`
+      An ICC needs at least 2 cells with 2+ observations of the column
+      and at least 2 residual degrees of freedom (`N - k >= 2`). Where a
+      column has fewer (all its values in one cell, say), its ICC cannot
+      be estimated: it is `NA`, `attr(, "icc")$reason` says why, and the
+      column's standard errors, `..neff_*` and `..ci_*` are `NA` in
+      every cell of two or more observations (`..df_*` stays `n - 1`),
+      as is `cell_weight` when that column sets it, with a warning of
+      class `"spatialkit_icc_unavailable"` (fields `columns` and
+      `reason`). Rows with no cell id (kept by `keep_unassigned = TRUE`
+      in
+      [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md))
+      give a summary row of their own but no cell to the ICC, so a
+      column whose values all fall in them, or differ only there, has an
+      ICC that cannot be estimated. An estimate at or below 0 is another
+      case: the ICC is 0 and the column's standard errors are the
+      uncorrected ones. A column that does not vary (all its values
+      equal, those of rows with no cell id included) has an ICC of `NA`
+      and standard errors of 0, with no warning: its mean has no error
+      whatever the correlation. A column whose values differ only by
+      their rounding (0.1 beside 0.3 / 3) is read the same way, as one
+      that does not vary, at any size of its values; its standard errors
+      are 0 in a cell whose values are equal and of the size of that
+      rounding in one whose values differ. The `"deff_applied"`
       attribute is attached when any ICC is positive, so when all are 0
-      there is none.
+      or `NA` there is none.
 
   A positive number
 
@@ -188,7 +215,10 @@ summarize_by_cell(
   Cells with more than this many points are subsampled before forming
   the `n x n` correlation matrix used by `deff = "variogram"`.
   Default 500. It must be a single number of at least 2 when
-  `deff = "variogram"`; anything else is an error.
+  `deff = "variogram"`; anything else is an error. The subsample is
+  drawn with a fixed seed from the cell's points in coordinate order, so
+  it does not depend on the row order of `assigned_points_sf`, and the
+  caller's random-number stream is left where it was.
 
 - quiet:
 
@@ -215,22 +245,59 @@ summarize_by_cell(
   thing's `agg_funs` sum over `cell_area`). The request is **refused**
   with an error, not answered with a number, when the cells' CRS
   distorts areas across them by more than 1 percent, measured as the
-  spread of planar-to-geodesic area ratios over the cells: a density is
-  a comparison between cells and is meaningless where the map scale
+  spread of planar-to-geodesic area ratios over the cells (over 200 of
+  them when there are more, taken at even spacing along the cells sorted
+  by their bounding boxes in that CRS and then by the means of their
+  vertices, together with the cells that reach furthest along x and y
+  either way, so the order of the rows does not matter): a density is a
+  comparison between cells and is meaningless where the map scale
   differs from one cell to the next. Inside a UTM zone the spread is
   under 0.3 percent and the request goes through; the conterminous
   United States forced into one zone (14 percent), or a few degrees of
-  latitude in Web Mercator (4 percent at 48N), does not.
+  latitude in Web Mercator (4 percent at 48N), does not. Exact copies of
+  one cell count once. A layer of one distinct cell gives one ratio and
+  no spread, so its distortion is measured on a 6 by 6 grid over the
+  cell's bounding box. Projected cells are first checked with
+  [`sf::st_is_valid()`](https://r-spatial.github.io/sf/reference/valid.html)
+  in their CRS, every non-empty cell before any summary: a cell GEOS
+  calls invalid (edges that cross, a spike, parts that overlap) has no
+  planar area to vouch for, and the request is refused with an error
+  that names the first such cells and GEOS's reason and says to repair
+  the cells with
+  [`sf::st_make_valid()`](https://r-spatial.github.io/sf/reference/valid.html).
+  A valid projected cell with two vertices that fall on one point once
+  in degrees, where s2 refuses it, is measured there without the repeat,
+  which moves no area; when s2 refuses a valid cell it measures for
+  another reason, the spread cannot be measured and the request is
+  refused.
   [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
   with `purpose = "area"` chooses an equal-area CRS for lon/lat input;
   build the cells in it. Lon/lat cells are measured geodesically
   instead: their `cell_area` is
   [`sf::st_area()`](https://r-spatial.github.io/sf/reference/geos_measures.html)'s
   area in square metres (on the sphere with s2, sf's default), not a
-  planar area in squared degrees, and the distortion check passes by
-  construction; with s2 switched off, sf needs the lwgeom package for
-  that area and the request is refused without it. The measured spread
-  is attached as `attr(, "area_error")`.
+  planar area in squared degrees, and on the cells s2 measures the
+  distortion check passes by construction. Every cell's area is taken
+  before any summary, and when s2 refuses a cell that is not valid on
+  the sphere, such as one with two corners it reads as one point (cells
+  returned in lon/lat can hold them; see `crs` in
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)),
+  the request stops with an error of class
+  `"spatialkit_cells_degenerate"` that gives the rows of `cells_sf` s2
+  refuses (`rows` on the condition) and says to transform the cells to a
+  projected CRS, such as the one they were built in or the equal-area
+  one `ensure_projected(purpose = "area")` picks. With s2 switched off,
+  sf needs the lwgeom package for that area and the request is refused
+  without it. The measured spread is attached as `attr(, "area_error")`.
+  Cells that mix XY and XYZ (or XYM) geometries are measured, and their
+  spread taken, without Z and M, since sf reads a layer in the dimension
+  of its first geometry; so are cells that carry M throughout, which
+  GEOS does not read. The cells are returned with their own geometry. In
+  a projected CRS whose unit sf has no name for (a `+to_meter` such as
+  1e6),
+  [`sf::st_area()`](https://r-spatial.github.io/sf/reference/geos_measures.html)
+  gives square metres; `cell_area` is the planar area in that CRS's unit
+  squared all the same.
 
 - estimate:
 
@@ -257,7 +324,11 @@ summarize_by_cell(
   measured in; a layer projected beforehand is used in its own CRS. When
   the input carries the record of its cells' count (see "Value") and
   that record names a projected CRS, the one the profile worked in, the
-  distances are measured in it, whatever CRS the layer is in. The value
+  distances are measured in it, whatever CRS the layer is in. The
+  distances are taken in x and y: a layer whose features, or the points
+  taken from them, do not all have the same dimensions (some with a Z or
+  M coordinate) is read without its Z and M. So is a layer whose
+  geometries carry M (XYM or XYZM), which GEOS does not read. The value
   is matched as [`match.arg()`](https://rdrr.io/r/base/match.arg.html)
   matches a choice, so an abbreviation (`"m"`) is accepted and `NULL` is
   the default. See "Pooled values" for what the pooled value estimates
@@ -292,15 +363,16 @@ column also called `n` is not allowed to shadow the count.
 `deff_applied` is `TRUE` on every row when a design-effect correction
 was applied (exactly when the `"deff_applied"` attribute below is
 attached; under `"kish"`, when any standard-error column was corrected)
-and `FALSE` when the standard errors are the uncorrected ones: a refused
-`deff`, or `"kish"` ICCs of 0 for every column (and `NA` on a `cells_sf`
-row no point fell in). `deff_method` names the correction the standard
-errors carry, since their column names do not change with it:
+and `FALSE` when none was: a refused `deff`, or `"kish"` ICCs of 0 or
+`NA` for every column (the standard errors are then the uncorrected
+ones, or `NA` where an ICC cannot be estimated). It is `NA` on a
+`cells_sf` row no point fell in. `deff_method` names the correction the
+standard errors carry, since their column names do not change with it:
 `"variogram"`, `"kish"` or `"fixed"` when the one requested was applied,
 `"none"` when none was, and `"kish (variogram fallback)"` or
 `"none (variogram fallback)"` when a `"variogram"` request could not be
-met and Kish stood in for it (the second when Kish's ICCs were 0 too).
-So `deff_applied` is `TRUE` on a Kish fallback row: test
+met and Kish stood in for it (the second when Kish's ICCs were 0 or `NA`
+too). So `deff_applied` is `TRUE` on a Kish fallback row: test
 `deff_method == "variogram"` to keep only rows the variogram corrected.
 Unlike the attribute, both columns survive
 [`rbind()`](https://rdrr.io/r/base/cbind.html) and
@@ -312,29 +384,38 @@ is reported on `attr(, "icc")` instead), which
 message. It is raised when the correction requested was not the one
 applied: a refused number (the standard errors are then the uncorrected
 ones) or a `"variogram"` request that fell back to Kish; the condition
-of the second carries `requested` and `used`.
+of the second carries `requested` and `used`. Two more classes say what
+a design effect could not do: `"spatialkit_icc_unavailable"` names the
+columns whose Kish ICC cannot be estimated, and
+`"spatialkit_deff_no_structure"` the predictor columns given a design
+effect of 1 by a variogram that found no spatial structure.
 
 When a correction was actually applied, an attribute `"deff_applied"` is
 attached recording it: `method` plus `icc_resp`/`icc_pred` and `deff`
 for `"kish"` (`icc_pred` is a vector named by predictor column, one ICC
 each; `deff` is the primary variable's per-cell design effect, all 1
-when only a predictor's ICC was positive; `requested` and
-`fallback_reason` are added when a `"variogram"` request fell back to
-it), `deff`/`deff_rows`/`rbar`/`crs`/`max_n` for `"variogram"` (`deff`
-is the design effect at the primary variable's non-missing count per
-cell, `deff_rows` at the cell's row count, which is the vector the log
-line summarises as a median and a max), and `deff` alone for a fixed
-number. When `cells_sf` is supplied, *every* per-cell vector in that
-attribute (`deff`, `deff_rows` and `rbar` alike) is realigned to the
-joined row order, so `deff[i]` and `rbar[i]` still describe row `i`;
-cells with no observations carry `NA`. No attribute is attached when no
-correction was applied: `deff = 1`, or a `deff = "kish"` request (or
-Kish fallback) whose ICCs are all 0. A `deff = "kish"` request, and a
+when only a predictor's ICC was positive, except that it is `NA` in each
+cell of two or more of the primary variable's values when that
+variable's ICC cannot be estimated, and its entry in `icc_resp` or
+`icc_pred` is then `NA` too; `requested` and `fallback_reason` are added
+when a `"variogram"` request fell back to it),
+`deff`/`deff_rows`/`rbar`/`crs`/`max_n` for `"variogram"` (`deff` is the
+design effect at the primary variable's non-missing count per cell,
+`deff_rows` at the cell's row count, which is the vector the log line
+summarises as a median and a max), and `deff` alone for a fixed number.
+When `cells_sf` is supplied, *every* per-cell vector in that attribute
+(`deff`, `deff_rows` and `rbar` alike) is realigned to the joined row
+order, so `deff[i]` and `rbar[i]` still describe row `i`; cells with no
+observations carry `NA`. No attribute is attached when no correction was
+applied: `deff = 1`, or a `deff = "kish"` request (or Kish fallback)
+whose ICCs are all 0 or `NA`. A `deff = "kish"` request, and a
 `"variogram"` request that fell back to it, always records the ICCs it
 estimated on an attribute `"icc"` (`resp`, and `pred`, a vector named by
-predictor column; `NA` for a variable type with no numeric column),
-whether or not they were positive enough to apply, so a result with no
-`"deff_applied"` still says what the ICCs came out as.
+predictor column; `NA` for a variable type with no numeric column and
+for a column whose ICC cannot be estimated; `reason`, a character vector
+named by column, is then added and says why), whether or not they were
+positive enough to apply, so a result with no `"deff_applied"` still
+says what the ICCs came out as.
 
 The ID column keeps its input type when `cells_sf`'s ID column and the
 summarised IDs already have the same class. When the classes differ,
@@ -420,23 +501,48 @@ brings, are not checked and raise neither warning.
 A row that is the same distance from two centres lies on the boundary
 between their cells, which happens on gridded locations.
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-scores such a row in the cell of the lower-numbered centre, and
+scores such a row in the cell of the lower-numbered centre (a distance
+counts as the same as the least when its square is no more than the
+square of the least distance lengthened by a margin, plus one part in
+ten million of the least squared distance; the margin is one part in
+1e10 of the largest coordinate of the centres, at most a millionth of
+the diagonal of their bounding box and at least four times the spacing
+of doubles at that coordinate), and
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md),
 on cells built from the centres the profile scored, gives a point on
 that boundary the same cell, measured in the CRS the record names, so
-the comparison reads `"match"` on gridded locations too.
+the comparison reads `"match"` on gridded locations too. It does so on
+cells that carry the record, for rows that have a CRS exactly when the
+record names one. Rows without a CRS beside a record that names one,
+rows with a CRS beside a record that names none, rows assigned to the
+cells after they lost the record (written to a file and read back, say)
+and summarised with `cells_sf` set to the cells that carry it, and rows
+given their cells by another join are placed by the polygons alone, so a
+row on a boundary can sit in either cell.
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
 draws those cells in the CRS the record names, whatever CRS the seeds
 arrive in, unless its `crs` names another projected CRS. Cells built in
-another projected CRS are the nearest-centre cells of that CRS, so a row
+another projected CRS are the nearest-centre cells of that CRS, and
+cells transformed to another projected CRS are joined there, so a row
 near a boundary, on it or not, can sit in another cell than the profile
-put it in. So can a row joined in longitude and latitude (rows and cells
-both in degrees), and a row that reached the record's CRS by another
+put it in. So can a row joined in longitude and latitude, as rows and
+cells in degrees are when the cells do not carry the record or carry one
+in degrees (the Voronoi cells of the scored centres that
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+returns in a geographic `crs` are joined in the record's CRS while they
+carry it), a row in cells that carry the record but are not the Voronoi
+cells of its centres (seeds moved, or cells edited, after the
+selection), and a row that reached the record's CRS by another
 transformation than the profile's, which can settle a tie the other way.
-The comparison then reports `"differ"`, with `what = "loo"` when it
-finds the same rows in the same number of cells with another
-leave-one-out error. The summary's own numbers describe the cells as
-assigned.
+Cells returned in a geographic `crs` are moved back to the record's CRS
+for that join, and for a layer wider than a UTM zone the round trip can
+move a corner by more than the margin of
+[`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md),
+so a row on an edge there can sit in another cell too. The comparison
+then reports `"differ"`, with `what = "loo"` when it finds the same rows
+in the same number of cells with another leave-one-out error, and the
+warning names these cases. The summary's own numbers describe the cells
+as assigned.
 
 The comparison uses the fit of the pooled columns when that is a fit of
 the estimate the profile scored, and fits the response once more
@@ -497,6 +603,16 @@ mean. A function in `agg_funs` therefore never sees an infinite value:
 `max` returns the largest finite value, and infinities cannot be counted
 through `agg_funs`.
 
+`..sd_*` is the standard deviation of the cell's values in the units of
+the column, at any size. Where the raw squares overflow or lose their
+bits (a standard deviation that is not finite or is below 1e-150), it is
+taken on the values centred on their median and divided by powers of
+two, which keeps their spread. A cell whose standard deviation is beyond
+the largest double (about 1.8e308) has `..sd_*` of `Inf` and standard
+errors and interval of `NA`, with a warning of class
+`"spatialkit_sd_overflow"` (the condition carries `columns` and `cells`,
+the number of such cells of each column).
+
 ## Spatial autocorrelation and standard-error bias
 
 By default (`deff = 1`), the `..se_*` columns are computed as
@@ -522,7 +638,8 @@ is used for that column's SE adjustment, and each cell's effective
 sample size is reduced to `n_i / (1 + (n_i - 1) * rho)`. This is a
 first-order correction that does not require a full spatial covariance
 model but does require enough cells and observations for a stable ICC
-estimate.
+estimate. A column whose ICC cannot be estimated at all gets `NA`
+standard errors (see `deff`).
 
 A design effect estimated from the data (`"kish"` or `"variogram"`)
 comes with a second, small-sample correction. The within-cell
@@ -598,13 +715,20 @@ accepts **one** correlation function and applies it to every numeric
 column, because a variogram is a property of the field being modelled
 rather than of a variable type; a predictor whose spatial structure
 differs markedly from the response's will have its SE corrected by the
-response's correlation. The internally estimated variogram is fitted to
-the **response itself**, never to OLS residuals, whatever
-`predictor_vars` holds: the `..se_resp_*` columns estimate the grand
-mean of the response, so the correlation to correct for is the
-response's own. (A residual variogram, whose correlation is that of the
-part the predictors do not explain, is weaker; using it here dropped
-grand-mean coverage from 0.93 to 0.51 the moment a predictor was
+response's correlation. When that variogram finds no spatial structure
+(the pure nugget
+[`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+returns with that verdict), every column gets a design effect of 1, the
+predictors included, and a warning of class
+`"spatialkit_deff_no_structure"` names the predictor columns: the
+verdict is about the variable the variogram was fitted to, not about
+them. `deff = "kish"` gives each predictor its own ICC. The internally
+estimated variogram is fitted to the **response itself**, never to OLS
+residuals, whatever `predictor_vars` holds: the `..se_resp_*` columns
+estimate the grand mean of the response, so the correlation to correct
+for is the response's own. (A residual variogram, whose correlation is
+that of the part the predictors do not explain, is weaker; using it here
+dropped grand-mean coverage from 0.93 to 0.51 the moment a predictor was
 listed.) Pass `sac` explicitly when you want a different variogram, such
 as a residual one from `estimate_sac_range(..., predictor_vars = )`. A
 `sac` whose `attr(sac, "detrended")` is `TRUE` is used as given, but
@@ -737,14 +861,34 @@ is estimated from few values and every weight rests on it: `df` in
 its target; with two cells that is the other cell's mean, so the two
 values change places.
 
-A tie between two candidate neighbours goes to the centroid with the
-lower x, then the lower y, and the centroids are summed with the rows in
-coordinate order, so a cell's neighbours do not depend on the order of
-the rows. The values then agree to rounding: a cell's sums are taken in
-the order of its rows. The tie is between distances computed from the
-coordinates in the CRS the distances are measured in (see `estimate`),
-so on gridded locations the same layer in another CRS or unit can give a
-cell another neighbour.
+Two candidate neighbours are a tie when their squared distances differ
+by no more than one part in ten million. A tie goes to the centroid with
+the lower x, then the lower y, coordinates within that part of the
+distance counting as equal, and then to the cell whose ID sorts first.
+The centroids are summed with the rows in coordinate order, so a cell's
+neighbours do not depend on the order of the rows, and on gridded
+locations they do not depend on the unit or the origin of the
+coordinates either. The values agree to rounding under another order of
+the rows, since a cell's sums are taken in the order of its rows, and
+under another unit or origin where three to eight cells' centroids
+coincide, since the rounding then sets the order in which a cell's
+neighbours on that point are summed. A cell whose centroid shares its
+point with as many other cells as it has neighbours, or more, takes its
+neighbours from them, the first by ID, without a search. Centroids count
+as one point there when they are equal, or when they lie within a
+ten-millionth of the largest coordinate of one another, in x and in y.
+Where other centroids that close to them chain on further than that, the
+chain is taken again at half that reach, and so on, until its parts span
+no more than the reach they were taken at. So those cells keep their
+neighbours and their values in another unit, and with the origin moved
+by little against the coordinates. On such a point, cells whose
+centroids lie that close without coinciding take each other by ID as
+well, not by distance. The reach follows the largest coordinate, so with
+the origin moved far, to the corner of the data say, such centroids can
+lie beyond it, and their cells then take the nearest. Distances are
+measured in the CRS named under `estimate`, so the same layer in another
+projection can still give a cell other neighbours, and so can a lattice
+whose spacing is below about a ten-millionth of its coordinates.
 
 The figures on this page that describe pooled values and the two
 intervals come from one simulation, `dev/sim-pooled-values.R` in the
@@ -915,24 +1059,32 @@ named by those columns, and the numbers of each column are in
   `reason` is `"no coordinates"` (a layer without geometry),
   `"no located value"` (no row with a value, a cell and a location),
   `"no cell holds two values"` (the condition also carries `n` and
-  `cells` by column) or `"work limit"`. The last is the case of many
-  cells without the 'FNN' package: the neighbour search then compares
-  every pair of cells and is not made above
-  `getOption("spatialkit.exact_pairs_max", 2e9)` pairs, which is about
-  44,700 cells (the condition also carries `work`, `limit`, and `cells`
-  by column). With 'FNN' there is no such limit, and the result is the
-  same.
+  `cells` by column), `"values out of range"` (values so large, or so
+  close to their median, that the squares of many such values can
+  overflow or lose their precision; the message gives the bounds, and
+  the column rescaled by a power of ten is pooled) or `"work limit"`.
+  The last is the case of many cells without the 'FNN' package: the
+  neighbour search then compares every pair of cells and is not made
+  above `getOption("spatialkit.exact_pairs_max", 2e9)` pairs, which is
+  about 44,700 cells (the condition also carries `work`, `limit`, and
+  `cells` by column). With 'FNN' there is no such limit, and the result
+  is the same.
 
 - `"spatialkit_pool_degenerate"`: the pooled values were computed and
   carry no pooling. `reason` is `"one cell"` (the pooled value is the
-  plain mean; also `n` by column), `"no spread inside any cell"` (every
-  own weight is 1; also `constant` by column) or
-  `"no signal between cells"` (`tau2` is 0 and every own weight is 0;
-  also `sigma2` by column).
+  plain mean; also `n` by column), `"no spread inside any cell"` (the
+  values do not vary inside any cell to their precision, so every own
+  weight is 1; also `constant` by column) or `"no signal between cells"`
+  (`tau2` is 0 and every own weight is 0; also `sigma2` by column).
 
 - `"spatialkit_pool_few_cells"`: 2 to 9 cells, so each target is the
-  mean of all the other cells (`cells`, and `own_weight`, the smallest,
-  by column).
+  mean of all the other cells, and a cell whose own weight is below its
+  share of the column's rows gets a pooled value on the far side of the
+  overall mean from its plain mean (`cells`, and `own_weight`, the
+  smallest, by column). The text also names each column with two cells
+  and `tau2` at 0, which has `cells` 2 and `own_weight` 0: each cell's
+  pooled value is then the other cell's mean, so the two values change
+  places.
 
 - `"spatialkit_pool_few_df"`: `sigma2` rests on fewer than 30 values
   beyond one per cell (`needed`, and `df`, `n` and `cells` by column).
@@ -944,9 +1096,12 @@ named by those columns, and the numbers of each column are in
   `estimate = "pooled"`, and by column `n`, the cells, `one_cell`, `loo`
   and `structure_p`).
 
-- `"spatialkit_pool_rows_skipped"`: rows with a value and a cell have
-  empty or non-finite coordinates. They count in `n` and the plain
-  columns and take no part in the pooled ones (`n`, `cells`).
+- `"spatialkit_pool_rows_skipped"`: rows with a value and a cell have no
+  location: an empty point, a coordinate that is not finite or lies
+  beyond 1e150, as given or in the CRS the distances are measured in, or
+  in a geographic CRS a vertex at a latitude beyond 90 degrees. They
+  count in `n` and the plain columns and take no part in the pooled ones
+  (`n`, `cells`).
 
 - `"spatialkit_repeated_locations"`, with `obs_level`: rows with a value
   share a location. A residual leaves one row out and keeps the others

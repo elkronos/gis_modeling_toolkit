@@ -51,7 +51,10 @@ cv_spatial(
   inside it (scaling, tuning, an inner variable sweep) is already nested
   and leak-free. The `subclass` it stamps must have a
   `predict.<subclass>()` method registered, because that is how each
-  fold is scored.
+  fold is scored. The fit models `response_var` (its `response_var` is
+  the call's): a fold whose fit models another column fails, with the
+  two names in `fold_status`, since its predictions are scored against
+  `response_var`.
 
 - folds:
 
@@ -66,7 +69,18 @@ cv_spatial(
   be disjoint: a fold that trains on its own test rows is not a
   cross-validation split and is refused with an error. IDs naming no row
   in the prepared data are dropped with a logged count. Built via
-  `block_kfold` when `NULL`.
+  `block_kfold` when `NULL`. With `folds = NULL` the score estimates the
+  error at the distance the block grid built here puts between the
+  held-out points and their training data, which overstates the error of
+  a map where the samples cover the area it predicts over. The excess is
+  how much the model's error grows from the map's distances to the data
+  to the block grid's, and is small for a model whose error changes
+  little with the distance from the data.
+  [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+  with `prediction_points` compares the held-out distances with those of
+  the locations the model will predict at, and
+  `make_folds(method = "knndm", prediction_points = )` builds folds
+  matched to them.
 
 - k:
 
@@ -206,7 +220,10 @@ uses the same baseline. `overall$Adj_R2` is always `NA`: the pooled
 out-of-sample predictions come from `k` separately fitted models and
 have no single parameter count to adjust for. The per-fold
 `fold_metrics$Adj_R2` carries the adjusted value when `p` is supplied,
-and is `NA` otherwise.
+and is `NA` otherwise. A `fit_fn` that returns a `gwr_fit` of a response
+at a large offset gives `predictions` the columns `y_centre`,
+`yhat_centred` and `y_train_mean_centred` (see
+[`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)).
 
 ## Name collision with blockCV
 

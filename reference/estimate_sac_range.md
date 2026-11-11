@@ -36,8 +36,9 @@ estimate_sac_range(
   [`gstat::variogram()`](https://r-spatial.github.io/gstat/reference/variogram.html)
   uses every coordinate dimension and an XYZ layer would otherwise
   return a range in 3-D while every consumer of it works in 2-D map
-  distance; and rows with empty or non-finite coordinates are dropped
-  with a logged count.
+  distance; and rows without a location (an empty point, or a coordinate
+  that is not finite or lies beyond 1e150, as given or once projected)
+  are dropped with a logged count.
 
 - response_var:
 
@@ -58,11 +59,15 @@ estimate_sac_range(
   `detrend`, and it matters: see "Detrending and the residual-variogram
   bias". Rows whose response or predictor is missing or infinite are
   left out of that fit, and so of the variogram, with a logged count.
-  When that leaves fewer than 30 rows the result is the unclassed `NA`
-  that says how many were left (see Value). One case differs, as it
-  always has: when no row at all has every predictor (one is missing on
-  every row) no trend can be fitted, and the variogram is of the raw
-  response, with an R warning and `detrended` set to `FALSE`.
+  When that leaves fewer than 30 rows, or fewer than 30 distinct
+  locations, the result is the unclassed `NA` that says how many were
+  left (see Value). One case differs, as it always has: when no row at
+  all has every predictor (one is missing on every row) no trend can be
+  fitted, and the variogram is of the raw response, with an R warning
+  and `detrended` set to `FALSE`. Where nothing is fitted then either
+  (fewer than 30 distinct locations, a constant response, or points with
+  no extent), the result is the `NA` with its reason, and there is no
+  such warning.
 
 - n_max:
 
@@ -73,6 +78,13 @@ estimate_sac_range(
   model have been left out and with the rows in a fixed order, so the
   subsample does not depend on how the layer is sorted. The counts are
   returned as the attributes `n_used`, `n_missing` and `n_subsampled`.
+  The floor of 30 distinct locations applies to the rows the variogram
+  is computed on, and a subsample of a layer with many rows a location
+  can hold fewer locations than the layer. When the layer itself has 30
+  locations or more and the subsample holds fewer, the reason of the
+  `NA` says `"of the n_max subsample"`, and a larger `n_max` keeps more
+  of them; when the layer has fewer than 30, the reason gives the
+  layer's counts.
 
 - cutoff:
 
@@ -84,18 +96,19 @@ estimate_sac_range(
 - range_frac:
 
   Positive numeric. A fitted range exceeding
-  `range_frac * cutoff * max_dist` (that is, beyond the longest lag the
-  empirical variogram was actually fitted over) is treated as
-  unidentified and `NA_real_` is returned. A model fit yields a finite
-  number even when the variogram never reaches a sill, and such a value
-  extrapolates past the observed lags instead of measuring a long
-  autocorrelation range. Passing it to `make_folds(auto_range = TRUE)`
-  would collapse the block grid to a single block. Default 1.0; raise it
-  to accept ranges extrapolated beyond the fitted lags. The bound does
-  not guarantee room for two blocks: at the defaults it is half the
-  farthest-pair distance, about 0.71 of the side of a square layer, and
-  a block grid needs a range below half the width of the bounding box in
-  one direction or the other. An accepted range between the two leaves
+  `range_frac * cutoff * max_dist` (at the default of 1, beyond the
+  longest lag the empirical variogram was actually fitted over) is
+  treated as unidentified and `NA_real_` is returned. A model fit yields
+  a finite number even when the variogram never reaches a sill, and such
+  a value extrapolates past the observed lags instead of measuring a
+  long autocorrelation range. Passing it to
+  `make_folds(auto_range = TRUE)` would collapse the block grid to a
+  single block. Default 1.0; raise it to accept ranges extrapolated
+  beyond the fitted lags. The bound does not guarantee room for two
+  blocks: at the defaults it is half the farthest-pair distance, about
+  0.71 of the side of a square layer, and a block grid needs a range
+  below half the width of the bounding box in one direction or the
+  other. An accepted range between the two leaves
   `make_folds(auto_range = TRUE)` room for a single block of that size
   (see its `auto_range` argument for what it does then). Lowering
   `range_frac` to fit the grid would turn those estimates into `NA` and
@@ -110,9 +123,12 @@ estimate_sac_range(
   identical input and silently advance the caller's RNG. Pass `NULL` for
   an unseeded subsample, or a different number to check how sensitive
   the estimate is to the subsample. Ignored when no more than `n_max`
-  rows carry a value, where nothing is sampled. The `reml_max_n`
-  subsample uses the same seed, and so does the draw of one row a
-  location that `detrend = "reml"` makes on a layer with repeat visits.
+  rows carry a value, where nothing is sampled. On a layer whose rows
+  crowd onto few locations the subsample can also decide whether 30
+  distinct locations remain, and so whether a range is estimated at all
+  (see `n_max`). The `reml_max_n` subsample uses the same seed, and so
+  does the draw of one row a location that `detrend = "reml"` makes on a
+  layer with repeat visits.
 
 - detrend:
 
@@ -124,11 +140,15 @@ estimate_sac_range(
   [`nlme::gls()`](https://rdrr.io/pkg/nlme/man/gls.html), returns the
   REML range, and attaches the empirical variogram of the REML residuals
   for inspection. It needs nlme, costs \\O(n^3)\\, and so runs on at
-  most `reml_max_n` points; when it does not converge the `"ols"` path
-  runs instead with an R warning saying so. The start of the fit is
-  chosen from the profile REML likelihood on a grid of ranges and nugget
-  proportions, and when more than one start is fitted the fit with the
-  largest log-likelihood is kept.
+  most `reml_max_n` points; it takes one row a location and needs 30
+  locations, which every layer needs anyway (a layer with fewer gets the
+  unclassed `NA`, see Value, and no fit is tried). When it is not fitted
+  (no nlme), cannot be fitted (the design of the trend cannot be built,
+  as on a factor with one level) or does not converge, the `"ols"` path
+  runs instead with an R warning that says which. The start of the fit
+  is chosen from the profile REML likelihood on a grid of ranges and
+  nugget proportions, and when more than one start is fitted the fit
+  with the largest log-likelihood is kept.
 
 - reml_max_n:
 
@@ -209,34 +229,34 @@ ordinary number. The shapes carry different attributes:
   built from the REML parameters), `nugget` (that model's nugget
   variance; see
   [`sac_nugget`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md)),
-  `nugget_at_bound` (`TRUE` when the nugget is at its lower bound,
-  within 1e-4 of the sill, and so is not an estimate), `first_lag` (the
-  mean separation in the first bin: the shortest lag resolved, from
-  which the nugget is extrapolated), `bins_below_range` (how many bins
-  lie inside the fitted range; with fewer than three the split between
-  nugget and structure rests on very little), `short_lag_semivariance`,
-  `short_lag_pairs` and `short_lag_dist` (the semivariance of
-  nearest-neighbour pairs of locations with no model, their number and
-  their median separation: an upper bound on the nugget),
-  `zero_lag_semivariance` and `zero_lag_pairs` (the semivariance of the
-  pairs of rows that share a location, which is the variance between
-  visits to one place and a lower bound on the nugget, and their number;
-  `NA` and 0 when no location has two rows), `nugget_floor` (the value
-  the fitted nugget was not let under: `zero_lag_semivariance` when the
-  rows outnumber the locations by 30 or more, else 0, and always 0 with
-  `detrend = "reml"`), `structure_p`, `morans_i` and `structure_test`
-  (the adjusted p-value of the test for spatial structure, Moran's I on
-  the 8 nearest neighbours, and the statistic, z and p for each
-  neighbourhood size), `structures` and `short_range` (how many
-  structures the model has besides the nugget, and the effective range
-  of the short one when there are two, `NA` otherwise), `lags`,
-  `lag_boundaries` and `lag_fallback` (the binning behind the result,
-  its upper bin edges, and `TRUE` when adaptive lags were asked for and
-  the equal-lag result is returned; see "The lags"), and `n_used`,
-  `n_missing` and `n_subsampled` (the points the variogram was computed
-  on, the rows left out for a missing response or predictor, and the
-  rows left out by the `n_max` subsample), so the fit can be inspected
-  and need not be taken on trust.
+  `nugget_at_bound` (`TRUE` when the nugget is at its lower bound, 0 or
+  at most \\10^{-4}\\ of the sill, and so is not an estimate),
+  `first_lag` (the mean separation in the first bin: the shortest lag
+  resolved, from which the nugget is extrapolated), `bins_below_range`
+  (how many bins lie inside the fitted range; with fewer than three the
+  split between nugget and structure rests on very little),
+  `short_lag_semivariance`, `short_lag_pairs` and `short_lag_dist` (the
+  semivariance of nearest-neighbour pairs of locations with no model,
+  their number and their median separation: an upper bound on the
+  nugget), `zero_lag_semivariance` and `zero_lag_pairs` (the
+  semivariance of the pairs of rows that share a location, which is the
+  variance between visits to one place and a lower bound on the nugget,
+  and their number; `NA` and 0 when no location has two rows),
+  `nugget_floor` (the value the fitted nugget was not let under:
+  `zero_lag_semivariance` when the rows outnumber the locations by 30 or
+  more, else 0, and always 0 with `detrend = "reml"`), `structure_p`,
+  `morans_i` and `structure_test` (the adjusted p-value of the test for
+  spatial structure, Moran's I on the 8 nearest neighbours, and the
+  statistic, z and p for each neighbourhood size), `structures` and
+  `short_range` (how many structures the model has besides the nugget,
+  and the effective range of the short one when there are two, `NA`
+  otherwise), `lags`, `lag_boundaries` and `lag_fallback` (the binning
+  behind the result, its upper bin edges, and `TRUE` when adaptive lags
+  were asked for and the equal-lag result is returned; see "The lags"),
+  and `n_used`, `n_missing` and `n_subsampled` (the points the variogram
+  was computed on, the rows left out for a missing response or
+  predictor, and the rows left out by the `n_max` subsample), so the fit
+  can be inspected and need not be taken on trust.
 
 - Rejected range:
 
@@ -278,8 +298,8 @@ ordinary number. The shapes carry different attributes:
 
   - `"fitted range is non-positive or non-finite"`.
 
-  - `"no variogram model could be fitted (singular fits)"`: fewer than
-    three lag bins hold point pairs. `variogram_model` is `NULL` and
+  - `"no variogram model could be fitted: fewer than three lag bins hold point pairs"`,
+    which is when it is returned. `variogram_model` is `NULL` and
     `nugget` is `NA`.
 
   The reason names one ground for the refusal, in the order above.
@@ -307,7 +327,11 @@ ordinary number. The shapes carry different attributes:
   `"<n> points, fewer than the 30 a variogram range is estimated from"`,
   `"<n> point(s) with a finite value to model, fewer than the 30 a variogram range is estimated from"`
   (the count is of the whole layer's rows with a value),
-  `"the response is constant"`,
+  `"<k> distinct location(s) among the <n> point(s) with a finite value to model, fewer than the 30 a variogram range is estimated from"`
+  (rows that share a location count once; when the layer has 30 or more
+  locations and the `n_max` subsample kept fewer, the counts are the
+  subsample's and `"of the n_max subsample"` stands in place of
+  `"with a finite value to model"`), `"the response is constant"`,
   `"the residuals on predictor_vars are constant: the predictors explain the response exactly"`
   or
   `"the points have no extent (the largest distance between them is zero or could not be computed)"`.
@@ -329,24 +353,68 @@ values changes the answer by about as much. Three things make it so. The
 rows are sorted by their coordinates as supplied, then by the response
 and the predictors, before anything else, so the projection chosen for
 lon/lat input, the `n_max` subsample and the pair sums do not depend on
-their order. (Rows that share a location are therefore in the order of
-their values, and no step treats the first of them as special.) The
-variogram is computed on the standardised variable, and a response is
-called constant only when its standard deviation is under 1e-12 of its
-largest absolute value, which no change of unit alters. And the model is
+their order. First coordinates within 1e-7 of the diagonal of the
+points' bounding box count as one column, sorted by the second
+coordinate, so that a lattice, whose first coordinates in one column
+differ in their last bits after another unit or origin, gets the same
+order and the same subsample in each. (Rows that share a location are
+therefore in the order of their values, and no step treats the first of
+them as special.) The variogram is computed on the standardised
+variable, and a response is called constant only when its standard
+deviation is under 1e-12 of its largest absolute value, which no change
+of unit alters, and the values centred on their median and scaled have a
+standard deviation of at most three units in the last place of that
+value. Residuals of the predictors are called constant when they are no
+more than the rounding of the regression, taken on the size of the fit's
+terms, or three such units of the response, whether or not the floor
+finds spread in them, as the test for `cp` of
+[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+reads them. So 1e15 plus a spread of 1, stored to an eighth, is not
+constant, and the residuals of a response the predictors fit exactly
+are, on a predictor far from 0 (a northing) as well. A response that
+loses its spread on the raw values is centred on its median before the
+predictors are fitted to it and before the test for spatial structure,
+neither of which changes under a shift, and so is a response whose OLS
+residuals on the raw values lose their spread (1e15 plus 1e5 times a
+predictor plus a spread of 1, on that predictor). The test for spatial
+structure, the semivariances and the REML fit are taken on the response
+divided by a power of two near its spread, so a response near 1e-160 or
+1e160, whose squares lie past what doubles hold, gives the range, the
+test and the folds it gives in ordinary units; the variogram, the
+nugget, the short-lag semivariances and the REML variance are returned
+in the response's units squared, which near 1e160 are `Inf` and near
+1e-160 are subnormal doubles that keep few bits, or 0. A response so far
+from zero that doubles there are spaced more than a millionth of its
+standard deviation apart (a standard deviation of 1 at about 1e10,
+\\2^{33}\\, or beyond) is read as stored, rounded to that spacing, with
+a warning of class `spatialkit_response_imprecise`. And the model is
 fitted without iteration: the criterion is gstat's weighted least
 squares (weights \\N / h^2\\) on lags divided by the cutoff; for each
 trial range the nugget and the partial sill are solved exactly, with
 both kept at or above zero; and the range is found by a search over a
 logarithmic grid from a quarter of the first lag to four cutoffs,
 refined in one dimension. There is no start value, no iteration limit
-and no fit that fails to converge.
+and no fit that fails to converge. With `detrend = "reml"` there is a
+fourth: the REML fit reads the coordinates of the rows it uses centred
+on the middle of their bounding box, divided by its diagonal and rounded
+to \\2^{-30}\\ of it, and the response and each numeric predictor
+centred on the middle of their range on those rows, divided by it and
+rounded the same way; its range, coefficients and variance are taken
+back to the layer's units. Where the REML range is not identified the
+likelihood is flat, and whether the fit converged or fell back to OLS
+was set by the last bits of the coordinates, the response and the
+predictors; in that frame it does not depend on their units or origins.
+A value within its own rounding noise of the middle of a step, about a
+billionth of the diagonal or the range, can still fall on either side of
+it.
 
 Only the exponential family is fitted. On fields smoother than
-exponential that makes the range long, which is the safe side (blocks
-too large, cross-validation pessimistic). Choosing the family by the
-smaller weighted sum of squares would correct a spherical field but send
-exponential fields low, the direction that leaks.
+exponential that makes the range long, and blocks sized from it come out
+larger: they still hold the test points at least the field's range from
+their training data, which blocks sized from a short range do not.
+Choosing the family by the smaller weighted sum of squares would correct
+a spherical field but send exponential fields short, and blocks sized
+from them smaller than the range.
 
 **Spatial structure is tested first.** A variogram model can be fitted
 to anything, and on a layer with no structure the fit returns a finite
@@ -354,7 +422,17 @@ range for a large share of draws. So Moran's I of the modelled variable
 is computed on its 2, 4, 8 and 16 nearest neighbours, each standardised
 with the moments that fit the variable (those of regression residuals
 when `predictor_vars` are given), and the smallest one-sided p-value is
-multiplied by four. When that adjusted p-value is not below
+multiplied by four. Neighbours tied at the k-th distance, those whose
+squared distances are within one part in ten million of the k-th's,
+share its slot's weight equally, as in
+[`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md),
+so the graphs do not depend on the unit or the origin of the coordinates
+wherever the doubles hold them to better than about one part in 1e8 of
+the distances between neighbours. Where they do not, and a distance lies
+past a tie by less than that rounding, the call warns, with class
+`"spatialkit_xy_imprecise"`; the same holds for the nearest other
+location of the short-lag semivariances. The results are those the
+coordinates as stored give. When that adjusted p-value is not below
 `structure_alpha`, the result is `NA` with `rejected_reason`
 `"no spatial structure detected at the nearest-neighbour scale"`, a
 pure-nugget model and no fitted range. The test uses no random numbers.
@@ -371,7 +449,15 @@ location (repeat visits) are one place and not each other's neighbours,
 so on such a layer the test is made on the means of the locations: what
 it asks is whether locations near each other are alike, which a
 location's own effect, however large, does not answer. With very unequal
-numbers of visits the p-value is approximate.
+numbers of visits the p-value is approximate. For the same reason a
+layer needs 30 distinct locations, not only 30 rows: below that the
+result is the unclassed `NA` whose reason gives the count (see Value),
+and nothing is fitted. Five locations visited 20 times give ten pairs of
+locations and five means, from which neither a range nor a verdict on
+structure can be read. Two rows are at one location when both their
+coordinates are equal to the last bit after the projection, so repeat
+visits recorded with slightly different coordinates count as separate
+locations; round the coordinates first to pool them.
 
 **The lags.** With `lags = "adaptive"` (the default) the first bin runs
 from zero to the distance within which the closest `max(50, n / 4)`
@@ -416,14 +502,14 @@ range of the short structure) and the range is the long one, unless the
 long structure carries under 3 percent of the model's semivariance at
 the largest lag: then the lags that resolve the layer give the equal-lag
 range nothing, and the single structure stands. The bar is low because
-the two mistakes are not alike. A long structure that is missed sizes
-blocks too small, which leaks. One that is believed in error returns the
-equal-lag range, which is too long and makes a validation pessimistic,
-and `short_range` still holds the short one. When the equal-lag range is
-one that `lags = "equal"` would itself refuse (past the fitted lags, as
-under an unremoved trend), the model with it is refused as well, the
-answer is taken away and not lengthened, and the long structure has to
-carry 10 percent.
+the two mistakes are not alike. A long structure that is missed is lost:
+the range returned is the short one alone. One that is believed in error
+returns the equal-lag range, which is too long, and `short_range` still
+holds the short one. When the equal-lag range is one that
+`lags = "equal"` would itself refuse (past the fitted lags, as under an
+unremoved trend), the model with it is refused as well, the answer is
+taken away and not lengthened, and the long structure has to carry 10
+percent.
 
 Measured on a clustered layer of 1200 points over a 1000 m square, 30
 draws each. With structures of range 20 and 200 both are kept in 20
@@ -451,12 +537,12 @@ The all-pairs fit is the best-powered estimate available and is
 invariant to rotation. When it identifies no range, no range is
 returned: the largest directional range does not stand in for it.
 
-Where a field is *known* to be anisotropic, blocks must be at least as
-large as the longest autocorrelation range to avoid leakage, and the
-conservative choice is to size them from the longest directional range
-explicitly. Read it from `directional_fitted`, not `directional`: on a
-strongly anisotropic field the major axis is the direction most likely
-to run past the fitted lags, which leaves it `NA` in `directional`, so
+Where a field is *known* to be anisotropic and blocks are to be at least
+as large as its autocorrelation range in every direction, size them from
+the longest directional range explicitly. Read it from
+`directional_fitted`, not `directional`: on a strongly anisotropic field
+the major axis is the direction most likely to run past the fitted lags,
+which leaves it `NA` in `directional`, so
 [`max()`](https://rdrr.io/r/base/Extremes.html) of that is `NA`, or with
 `na.rm = TRUE` the second-longest range. Check `directional_status`
 first: a major axis marked `"over_cutoff"` has no identified range at
@@ -490,21 +576,23 @@ blocks are at least as wide as the autocorrelation range.
 Fitting a variogram to the residuals of a least-squares trend
 underestimates both the sill and the range, because the trend fit
 absorbs part of the long-wavelength spatial variation (Lark, Cullis and
-Welham 2006). Blocks sized from that range are then too small and a
-blocked validation is less conservative than it claims. How large the
-effect is depends on how smooth the trend terms are in space, and on how
-many there are: for ordinary covariates it is a few percent, and for
-trend surfaces in the coordinates it is large. Iterating between a GLS
-trend fit and a variogram refit (Neuman and Jacobson 1984) recovers only
-part of it, because the variogram of GLS residuals is biased too; REML
-does not fit a variogram to residuals at all, which is why
-`detrend = "reml"` returns its own range estimate. Its price is a single
-family (exponential with nugget), a cubic cost in `n`, and a somewhat
-wider sampling spread. The default stays `"ols"` so that existing
-scripts keep their method; a script that detrends on smooth or
-coordinate-based terms should pass `detrend = "reml"`, or size its
-blocks with a margin. Detrending removes a trend the predictors explain.
-It does not make an unidentified range identified.
+Welham 2006). Blocks sized from that range are then narrower than the
+field's range, and hold the test points less far from their training
+data than range-sized blocks are meant to. How large the effect is
+depends on how smooth the trend terms are in space, and on how many
+there are: for ordinary covariates it is a few percent, and for trend
+surfaces in the coordinates it is large. Iterating between a GLS trend
+fit and a variogram refit (Neuman and Jacobson 1984) recovers only part
+of it, because the variogram of GLS residuals is biased too; REML does
+not fit a variogram to residuals at all, which is why `detrend = "reml"`
+returns its own range estimate. Its price is a single family
+(exponential with nugget), a cubic cost in `n`, and a somewhat wider
+sampling spread. The default stays `"ols"` so that existing scripts keep
+their method; a script that detrends on smooth or coordinate-based terms
+should pass `detrend = "reml"`, or size its blocks with a margin above
+the range returned, to make up the shortfall. Detrending removes a trend
+the predictors explain. It does not make an unidentified range
+identified.
 
 ## Count and other non-Gaussian responses
 
@@ -525,7 +613,7 @@ structure: the residuals of an OLS fit to a count still have a variance
 that tracks the fitted mean. The principled remedy is a variogram of
 Pearson residuals from a model in the right family, which this function
 does not compute. Treat the range from a count response as no more than
-an order of magnitude, size blocks conservatively from it, and prefer
+an order of magnitude, since it can come out long or short, and prefer
 [`make_folds`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)`(method = "nndm")`,
 which does not depend on a fitted range at all.
 

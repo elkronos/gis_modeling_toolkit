@@ -16,7 +16,7 @@ determine_optimal_levels(
   predictor_vars = NULL,
   criterion = c("geometric", "morans_i", "combined"),
   select_on = c("all", "split"),
-  on_no_elbow = c("warn", "na", "error")
+  on_no_elbow = c("na", "warn", "error")
 )
 ```
 
@@ -24,8 +24,15 @@ determine_optimal_levels(
 
 - data_sf:
 
-  An sf object. Features with empty or non-finite coordinates are
-  dropped with a warning.
+  An sf object. Features without a location (an empty point, or a
+  coordinate that is not finite or lies beyond 1e150, as given or once
+  projected) are dropped with a warning. A layer that mixes XY and XYZ
+  (or XYM) geometries is read in x and y, before and after it is reduced
+  to points, since sf reads a layer in the dimension of its first
+  geometry. So is a layer whose geometries carry M (XYM or XYZM), which
+  GEOS refuses. The points a layer is reduced to are read in x and y
+  when they mix dimensions, as those of a layer XYZ throughout that
+  holds points and polygons do.
 
 - max_levels:
 
@@ -39,6 +46,10 @@ determine_optimal_levels(
   `criterion = "geometric"` the candidate set is the elbow and its two
   immediate neighbours, so at most 3 values are ever returned no matter
   how large `top_n` is; only the model-aware criteria can return more.
+  Under those it also sets the counts scored, the elbow plus or minus
+  `max(4, top_n)`: a `top_n` above 4 scores more counts, and under
+  `"morans_i"` one of them can rank first. A count scores the same
+  whichever `top_n` puts it in the window.
 
 - sample_n:
 
@@ -53,48 +64,51 @@ determine_optimal_levels(
 
 - response_var:
 
-  Optional response column name. When provided alongside
-  `predictor_vars`, or with `criterion = "morans_i"` or `"combined"`,
-  enables model-aware level selection via Moran's I of the cell means.
-  Must be numeric or logical (logicals are read as 0/1); a factor or
-  character response raises an error and is never coerced, because the
-  residuals of an OLS fit to arbitrary level codes carry no meaning to
-  test for autocorrelation. Rows where it, or a predictor, is missing or
-  non-finite stay in the WSS sweep and the cells and are left out of
-  Moran's I; a logged warning gives their number.
+  Optional response column name. Read under `criterion = "morans_i"`,
+  which ranks the counts around the elbow by Moran's I of the cell
+  means, and `"combined"`, which reports that statistic beside the
+  elbow's ranking; under `"geometric"`, the default, it is not read.
+  Where it is read it must be numeric or logical (logicals are read as
+  0/1); a factor or character response raises an error and is never
+  coerced, because the residuals of an OLS fit to arbitrary level codes
+  carry no meaning to test for autocorrelation. Rows where it, or a
+  predictor, is missing or non-finite stay in the WSS sweep and the
+  cells and are left out of Moran's I; a logged warning gives their
+  number.
 
 - predictor_vars:
 
-  Optional predictor column names. Must be numeric or logical (logicals
-  are read as 0/1); factor/character columns raise an error. Without
-  them the model-aware criteria regress the cell means on an intercept
-  alone, as
+  Optional predictor column names, read where `response_var` is. Must be
+  numeric or logical (logicals are read as 0/1); factor/character
+  columns raise an error. Without them the model-aware criteria regress
+  the cell means on an intercept alone, as
   [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
   does.
 
 - criterion:
 
-  One of `"geometric"` (default when no response given), `"morans_i"`
-  (among the candidates around the elbow, the k at which Moran's I of
-  the cell means, or of their regression residuals, is least
-  *significant*: the count at which neighbouring cells stop resembling
-  each other, not the count that represents the response best), or
-  `"combined"` (rank-average of the WSS curve's log-log sag, the
-  quantity the elbow is read from, and that same significance). Whenever
-  Moran's z orders the candidates returned, under either, a warning of
-  class `spatialkit_diagnostic_ranking` says that the ranking is by a
-  diagnostic of the cell means; its condition carries `k` (the count
-  ranked first), `criterion`, `first_computable` (the first count at
-  which the statistic is finite), `window` (the first and last count
-  tried) and `upgraded` (whether `"combined"` was taken because both
-  model variables were supplied). Falls back to `"geometric"`, with a
-  warning, when `response_var` is not given, and with a logged warning
-  when no candidate clears the nine-cell resolution floor described in
+  One of `"geometric"` (default: the elbow and its two neighbours, read
+  off the coordinates alone), `"morans_i"` (among the candidates around
+  the elbow, the k at which Moran's I of the cell means, or of their
+  regression residuals, is least *significant*: the count at which
+  neighbouring cells stop resembling each other, not the count that
+  represents the response best), or `"combined"` (the candidates around
+  the elbow in the order of the WSS curve's log-log sag, the quantity
+  the elbow is read from, with Moran's I of the cell means and its z in
+  the diagnostics; the statistic does not take part in the ranking).
+  Under `"morans_i"` a warning of class `spatialkit_diagnostic_ranking`
+  says that the ranking is by a diagnostic of the cell means; its
+  condition carries `k` (the count ranked first), `criterion`,
+  `first_computable` (the first count at which the statistic is finite)
+  and `window` (the first and last count tried). `"morans_i"` and
+  `"combined"` fall back to `"geometric"`, with a warning, when
+  `response_var` is not given, and with a logged warning when no
+  candidate clears the nine-cell resolution floor described in
   **Details**. A `response_var` or `predictor_vars` naming a column that
-  is not in `data_sf` is an error. Supplying both `response_var` and
-  `predictor_vars` upgrades `"geometric"` to `"combined"`: the selection
-  then depends on the response (see "Post-selection inference"). A
-  `response_var` alone leaves `"geometric"` as it is.
+  is not in `data_sf` is an error under every criterion. Supplying both
+  `response_var` and `predictor_vars` does not change the criterion:
+  under `"geometric"` neither is read, and a line logged at the INFO
+  level says that `"combined"` reports Moran's I.
 
 - select_on:
 
@@ -108,54 +122,74 @@ determine_optimal_levels(
 
   What to do when the count is not a finding about the data: the WSS
   curve has no elbow, the ladder is too short to show one, or there are
-  too few points or locations for a ladder at all. `"warn"` (default)
-  returns the count the chord rule or the ladder gives, with a warning
-  of class `spatialkit_no_elbow` whose condition carries `k` (that
-  count), `sag` (the largest log-log sag of the curve; an elbow needs
-  \\\log 1.25\\) and `structured = FALSE`, so a caller can catch it
-  without matching the message. `"na"` returns `NA_integer_` there and
-  logs the reason, and every result under `"na"` carries the attributes
-  `structured` (`FALSE` with the `NA`, `TRUE` with a count the elbow
-  chose) and `sag`, so one test of `attr(k, "structured")` covers both
-  outcomes; `"error"` stops with an error of that class. Under the
-  model-aware criteria the candidates are scored around the elbow, so
-  with no elbow the ladder places that window and the same applies.
+  too few points or locations for a ladder at all. Each choice raises a
+  condition of class `spatialkit_no_elbow` there, which carries `k` (the
+  count the chord rule or the ladder gives), `sag` (the largest log-log
+  sag of the curve; an elbow needs \\\log 1.25\\) and
+  `structured = FALSE`, so a caller can catch it without matching the
+  message. `"na"` (default) returns `NA_integer_` there, with a warning
+  of that class, and every result under `"na"` carries the attributes
+  `structured` (`TRUE` when the WSS curve has an elbow, `FALSE` with the
+  `NA`) and `sag`, so one test of `attr(k, "structured")` covers both
+  outcomes. `"warn"` returns the counts the chord rule or the ladder
+  gives (see Value), with the same warning; its results carry neither
+  attribute. `"error"` stops with an error of that class. Under the
+  model-aware criteria the candidates are scored around the elbow: with
+  no elbow, `"na"` and `"error"` score none, and under `"warn"` the
+  ladder places that window.
 
 ## Value
 
 An integer vector of candidate level counts, **best first**: under the
-geometric criterion the elbow, then its lower and upper neighbours (with
-a warning of class `spatialkit_no_elbow` when the WSS curve has no elbow
-and the first is the ladder's choice, or `NA_integer_` under
-`on_no_elbow = "na"`, where the result also carries the attributes
-`structured` and `sag`; see Details); under the model-aware criteria the
-candidates in rank order, with a warning of class
-`spatialkit_diagnostic_ranking` when Moran's z took part in the ranking.
-A layer with no points is an error, and one with fewer than three
-points, or with every point on one location, has no ladder: it returns 1
-under the same `on_no_elbow` rule. `k[1]` is therefore the top-ranked
-count on every path, and `top_n = 1` returns it alone. When
-`criterion != "geometric"`, an attribute `"diagnostics"` is attached
-with per-k Moran's I values (`moran_i`) and their standardised deviates
-(`moran_z`), the WSS curve (`wss`) with the relative between-restart
-spread at each `k` (`wss_spread`), the number of rising steps on it
-(`wss_bumps`), the restart budget (`nstart`), the geometric elbow the
-evaluated neighbourhood was drawn around (`knee_k`), whether the WSS
-curve has an elbow (`structured`) and its largest log-log sag (`sag`),
-the `k` at which k-means failed (`failed_k`; their `wss` entries are
-interpolated from the neighbours, not measured) and the `k` the
-model-aware pass actually scored (`eval_ks`, the elbow's neighbourhood).
-Under `"combined"` it also carries the WSS of the re-run clustering at
-those `k` (`wss_eval`), the rank average that ordered them
-(`combined_rank`, named by `k`) and `criterion = "combined"`; when
-`"combined"` returned the geometric ranking because the elbow is below
-ten cells, it carries `criterion = "geometric"` and `fallback` (the
-reason) in place of `combined_rank`. When the model-aware path itself
-falls back to the geometric result (no viable k in the elbow
-neighbourhood, or Moran's I could not be computed for any candidate), no
-diagnostics are available and the attribute is absent. Both fallbacks
-are logged as warnings. The geometric path returns a plain integer
-vector; a rising WSS curve is still logged there. With
+geometric criterion the elbow, then its lower and upper neighbours;
+under `"morans_i"` the candidates in the order of \\\|z\|\\, with a
+warning of class `spatialkit_diagnostic_ranking`; under `"combined"` the
+candidates around the elbow in the order of the sag. When the WSS curve
+has no elbow it is `NA_integer_`, with a warning of class
+`spatialkit_no_elbow` (under `on_no_elbow = "warn"` the ladder's choice
+and its neighbours, with the same warning; see Details), and so it is
+when the ladder is too short to show an elbow (`max_levels` of 1 or 2).
+At the default `on_no_elbow = "na"` every result carries the attributes
+`structured` (`TRUE` when the WSS curve has an elbow, `FALSE` with the
+`NA`) and `sag`. A layer with no points is an error, and one with fewer
+than three points, or with every point on one location, has no ladder:
+it returns `NA` under the same rule, and 1 under `"warn"`. `k[1]` is
+therefore the top-ranked count, or `NA`, on every path, and `top_n = 1`
+returns it alone. When `criterion != "geometric"`, an attribute
+`"diagnostics"` is attached with per-k Moran's I values (`moran_i`) and
+their standardised deviates (`moran_z`), the WSS curve (`wss`) with the
+relative between-restart spread at each `k` (`wss_spread`), the number
+of rising steps on it (`wss_bumps`), the restart budget (`nstart`), the
+geometric elbow the evaluated neighbourhood was drawn around (`knee_k`),
+whether the WSS curve has an elbow (`structured`) and its largest
+log-log sag (`sag`), the `k` at which k-means failed (`failed_k`; their
+`wss` entries are interpolated from the neighbours, not measured) and
+the `k` the model-aware pass actually scored (`eval_ks`, the elbow's
+neighbourhood). Under `"combined"` it also carries the WSS of the re-run
+clustering at those `k` (`wss_eval`, the clustering Moran's I is
+computed on; reported, not ranked on), the rank of the sag of `wss` that
+ordered them (`combined_rank`, named by `k`; with no elbow every
+candidate ties and the order is by distance from `knee_k`) and
+`criterion = "combined"`; when `"combined"` returned the geometric
+ranking because the elbow is below ten cells, it carries
+`criterion = "geometric"` and `fallback` (the reason) in place of
+`combined_rank`. The `NA` the default returns on a model-aware call
+whose WSS curve has no elbow (or a ladder too short to show one) carries
+the attribute too, with what the sweep measured: `moran_i` and `moran_z`
+all `NA` and `eval_ks` empty, since no count was scored, `knee_k` the
+count the chord rule lands on, and `structured = FALSE`. When the
+model-aware path itself falls back to the geometric result (no viable k
+in the elbow neighbourhood, a neighbourhood that ends at nine cells or
+fewer, or, under `"morans_i"`, Moran's I computable at no candidate), no
+diagnostics are available and the attribute is absent; these fallbacks
+are logged as warnings. Under `"combined"` a Moran's I computable at no
+candidate of a neighbourhood that reaches ten cells is not a fallback:
+the attribute is there, with `moran_i` and `moran_z` all `NA`, and a
+logged warning says so. The attribute is absent on the `NA` of a layer
+with no ladder (fewer than three points, one location, or k-means
+failing at every `k` from 2). The geometric path returns an integer
+vector with no attribute but `structured` and `sag` (none under `"warn"`
+or `"error"`); a rising WSS curve is still logged there. With
 `select_on = "split"` every path adds a `"split"` attribute: a list with
 `selection` and `estimation` (integer row positions in `data_sf`),
 `method` and `seed`. For a full per-level table of criteria, cell
@@ -179,53 +213,59 @@ fifth below the power law through the ends). Measured on 60 to 1500
 points with ladders to 3–40, uniform layouts over squares, discs,
 triangles, an L-shape, density gradients and jittered lattices sagged at
 most 0.16, and two to ten separated clusters at least 0.6 once
-`max_levels` passed the cluster count. With no elbow the function warns
-(a warning of class `spatialkit_no_elbow`, which carries the count as
-`k` and the largest sag as `sag`) and returns the linear-axis answer,
-which the ladder chose, not the data: about \\\sqrt{K\_{max}}\\, 3 or 4
-cells at the default, close to one mean for the whole layer.
-`on_no_elbow = "na"` returns `NA` there and `"error"` stops, so that a
-count which is not a finding is not passed on as one. An elongated
-extent also bends, at about its aspect ratio, because the first cuts go
-across its long axis (0.2–0.45 for a 4:1 rectangle); past the threshold
-that bend is reported as an elbow, and it describes the extent's shape
-rather than clusters in it. When locations repeat (stations visited many
-times), the sweep can reach one cell per distinct location, where the
-WSS is zero (to within \\10^{-12}\\ of the total). That `k` has no place
-on log axes and is left out of the line, but the fall to zero is the
-sharpest bend there is: when the rest of the curve has no elbow, the
-number of distinct locations is the elbow.
+`max_levels` passed the cluster count. With no elbow the function
+returns `NA`, so that a count which is not a finding is not passed on as
+one: the result carries `structured = FALSE` and the largest sag as
+`sag`, and a warning of class `spatialkit_no_elbow` says why. The
+linear-axis answer there is the ladder's, not the data's: about
+\\\sqrt{K\_{max}}\\, 3 or 4 cells at the default, close to one mean for
+the whole layer, and the warning carries it as `k` and the largest sag
+as `sag`. `on_no_elbow = "warn"` returns that count all the same, with
+the same warning, and `"error"` stops. An elongated extent also bends,
+at about its aspect ratio, because the first cuts go across its long
+axis (0.2–0.45 for a 4:1 rectangle); past the threshold that bend is
+reported as an elbow, and it describes the extent's shape rather than
+clusters in it. When locations repeat (stations visited many times), the
+sweep can reach one cell per distinct location, where the WSS is zero
+(to within \\10^{-12}\\ of the total). That `k` has no place on log axes
+and is left out of the line, but the fall to zero is the sharpest bend
+there is: when the rest of the curve has no elbow, the number of
+distinct locations is the elbow.
 
-When `response_var` and `predictor_vars` are provided, the geometric WSS
-elbow is supplemented with Moran's I of the cell means at each candidate
-k: the cell means are regressed on the cell-mean predictors (on an
-intercept alone when `criterion = "morans_i"` or `"combined"` is asked
-for with a response and no predictors) and Moran's I is computed on the
-residuals over each cell's 8 nearest cells. That statistic tests whether
-*neighbouring cells* are independent. It does not measure the
-autocorrelation the cells leave unexplained in the response, and it does
-not say how well they represent it: on an autocorrelated response it
-grows as the cells get finer than the range, because neighbouring cells
-then resemble each other, and it is close to 0 at about 10 to 20 cells
-whatever the data, where the neighbour graph is nearly complete. The
-model-aware criteria prefer the candidate with the smallest \\\|z\|\\,
-which is the count at which neighbouring cell means stop resembling each
-other, cells about as wide as the range. Only the elbow's neighbourhood
-is scored, so the response moves the answer by at most a few cells
-either side of the geometric elbow. **A ranking that Moran's z took part
-in is a ranking by a diagnostic, not by a count rule**, and it is
-returned with a warning of class `spatialkit_diagnostic_ranking` that
-says so and gives the count ranked first, the first count the statistic
-could be computed at and the counts scored. Measured on 500 points with
-a response alone and `criterion = "morans_i"`: the first-ranked count
-was 10 to 13 on 16 of 16 white-noise layers and on 16 of 16 exponential
-fields (`max_levels` 40 and 80), and 10 was the first count the
-statistic could be computed at on all 32.
+Under `criterion = "morans_i"` or `"combined"`, with a `response_var`,
+the geometric WSS elbow is supplemented with Moran's I of the cell means
+at each candidate k: the cell means are regressed on the cell-mean
+predictors (on an intercept alone when no `predictor_vars` are given)
+and Moran's I is computed on the residuals over each cell's 8 nearest
+cells. That statistic tests whether *neighbouring cells* are
+independent. It does not measure the autocorrelation the cells leave
+unexplained in the response, and it does not say how well they represent
+it: on an autocorrelated response it grows as the cells get finer than
+the range, because neighbouring cells then resemble each other, and it
+is close to 0 at about 10 to 20 cells whatever the data, where the
+neighbour graph is nearly complete. `"morans_i"` prefers the candidate
+with the smallest \\\|z\|\\, which is the count at which neighbouring
+cell means stop resembling each other, cells about as wide as the range.
+Only the elbow's neighbourhood is scored, so the response moves the
+answer by at most a few cells either side of the geometric elbow. **A
+ranking by Moran's z is a ranking by a diagnostic, not by a count
+rule**, and it is returned with a warning of class
+`spatialkit_diagnostic_ranking` that says so and gives the count ranked
+first, the first count the statistic could be computed at and the counts
+scored. Measured on 500 points with a response alone and
+`criterion = "morans_i"`: the first-ranked count was 10 to 13 on 16 of
+16 white-noise layers and on 16 of 16 exponential fields (`max_levels`
+40 and 80), and 10 was the first count the statistic could be computed
+at on all 32. Those layers have no elbow, so their counts are ranked
+under `on_no_elbow = "warn"` only; at the default they return `NA`.
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
 refuses the same statistic unless asked with `diagnostic = TRUE`; here
-the criterion is asked for by name, or taken when both model variables
-are supplied, so the count is returned and the warning carries the
-caveat.
+the criterion is asked for by name, so the count is returned and the
+warning carries the caveat. `"combined"` does not rank by the statistic:
+it orders the same counts by the WSS curve's sag and reports Moran's I
+and its z beside them in the `"diagnostics"` attribute, with no such
+warning. Under `"geometric"`, the default, `response_var` and
+`predictor_vars` are not read, whether one or both are given.
 
 To keep memory use and runtime bounded for large `max_levels`, the
 initial k-means sweep records only within-cluster sum-of-squares (WSS)
@@ -233,7 +273,12 @@ without retaining cluster assignments. Moran's I is then evaluated
 lazily: k-means is re-run only for a focused neighbourhood around the
 elbow (±4 by default, or ±`top_n` if larger), so that only the most
 promising candidate k values incur the cost of the full Moran's I
-computation.
+computation. The re-run at each count draws its starts from a stream of
+its own, seeded before the sweep, so for one `set_seed` a count gets the
+same cells, `wss_eval` and Moran's I in any neighbourhood that holds it,
+whichever `top_n` and `max_levels` set the neighbourhood: a larger
+`top_n` adds counts to the neighbourhood and leaves the scores of the
+others as they were.
 
 **The WSS curve is read for its shape, so it is fitted to be smooth.**
 Every point on it is a k-means local optimum, and with a few random
@@ -262,14 +307,14 @@ nothing about density-weighted regions;
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
 whose regions are of that kind by default, scores counts of those.
 
-**The model-aware criteria rank on the standardised deviate, not on
-\|Moran's I\|.** Both \\E\[I\]\\ and \\Var\[I\]\\ depend on the number
-of cells, so \\\|I\|\\ falls as `k` grows whether or not the finer
-tessellation is capturing anything. Measured over 300 replicates of a
-response with *no* spatial structure, mean \\\|I\|\\ fell monotonically
-from 0.114 at `k = 10` to 0.050 at `k = 60` (\\-56\\\\), which made an
-\\\|I\|\\ ranking prefer the largest candidate for arithmetic reasons
-alone. Candidates are therefore ordered by \\\|z\| = \|I - E\[I\]\| /
+**`"morans_i"` ranks on the standardised deviate, not on \|Moran's
+I\|.** Both \\E\[I\]\\ and \\Var\[I\]\\ depend on the number of cells,
+so \\\|I\|\\ falls as `k` grows whether or not the finer tessellation is
+capturing anything. Measured over 300 replicates of a response with *no*
+spatial structure, mean \\\|I\|\\ fell monotonically from 0.114 at
+`k = 10` to 0.050 at `k = 60` (\\-56\\\\), which made an \\\|I\|\\
+ranking prefer the largest candidate for arithmetic reasons alone.
+Candidates are therefore ordered by \\\|z\| = \|I - E\[I\]\| /
 \mathrm{sd}(I)\\ using the Cliff & Ord regression residual moments. The
 cell-level residuals are OLS residuals by construction, which is the
 case those moments are derived for, but the derivation also assumes
@@ -289,59 +334,74 @@ on cell-level residuals with an 8-nearest-neighbour weight matrix, so it
 only carries information once there are more than nine cells. At nine or
 fewer, every cell is a neighbour of every other, the row-standardised
 weight matrix is complete, and Moran's I collapses to exactly \\-1/(k -
-1)\\ for *any* residual vector (a function of `k` alone). The criterion
+1)\\ for *any* residual vector (a function of `k` alone). `"morans_i"`
 ranks on \\\|z\|\\, not on \\\|I\|\\, and at the floor the residual
 moments give \\E\[I\] = I\\ and \\\mathrm{Var}\[I\] = 0\\ identically
 (the algebra holds to \\10^{-16}\\), so the standardised deviate is
 \\0/0\\: it carries no information about the tessellation, and whichever
 way rounding noise resolves it those candidates would rank first or last
-on nothing. They therefore return `NA` and are excluded from the
-model-aware ranking. When no candidate in the elbow neighbourhood clears
-the floor, the whole call falls back to the geometric ranking and logs a
+on nothing. They therefore return `NA` and are excluded from the ranking
+of `"morans_i"`. When no candidate in the elbow neighbourhood clears the
+floor, the whole call falls back to the geometric ranking and logs a
 warning that says so. That is the usual outcome well past
 `max_levels = 10`: the neighbourhood is the elbow plus or minus
 `max(4, top_n)`, and on points with no cluster structure the elbow sits
 near \\\sqrt{K\_{max}}\\, so the neighbourhood reaches ten cells only
-from about `max_levels = 40`. Measured on 1000 uniform points,
-`max_levels` of 12, 20 and 30 all fell back, and 40 scored `k` = 10 and
-11 alone. On such a layer
+from about `max_levels = 40`. Measured on 1000 uniform points under
+`on_no_elbow = "warn"` (at the default they return `NA` before any
+window is placed), `max_levels` of 12, 20 and 30 all fell back, and 40
+scored `k` = 10 and 11 alone. On such a layer
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
 which scores Moran's z at every level of its ladder, is the model-aware
 view. Under `criterion = "combined"`, an elbow below ten cells is a
-count Moran's I cannot score, so it cannot weigh the response there: the
-geometric ranking is returned, with a logged warning, and the
-diagnostics record it (see Value). (Ranking the window anyway put the
-smallest count Moran's I scores, ten, first whatever the response did.)
-Otherwise the candidates below the floor that sit alongside candidates
-above it all take the last place on the Moran's I axis, after every
-candidate it scored, while still competing on the geometric axis. That
-axis is the elbow's own log-log sag at each candidate; when the WSS
-curve has no elbow it is flat, every candidate tied, and Moran's I alone
-orders them.
+count Moran's I cannot score: the geometric ranking is returned, the
+elbow and its two neighbours, with a logged warning, and the diagnostics
+record it (see Value). Otherwise `"combined"` orders the window by the
+elbow's own log-log sag at each candidate, the candidates below the
+floor among them. When the WSS curve has no elbow (under
+`on_no_elbow = "warn"`) the sag is flat, every candidate tied, and the
+window comes out in order of distance from the count the chord rule
+lands on, which is the geometric order.
 
-`"combined"` is not an estimate of the number of clusters. Where the
-elbow is at ten cells or more, Moran's I can move the pick away from it
-when the response is still spatially structured at the elbow's
-resolution. Use `"geometric"` when the cell count should follow the
-clustering of the points, and
+`"combined"` is the elbow's ranking of the counts around it, best sag
+first, with Moran's I of the cell means beside it in the diagnostics. It
+is not an estimate of the number of clusters, and Moran's I does not
+take part in the ranking. Averaged with the sag, as it was, it put first
+ten, the lowest count it scores, or the count after it: on a curve with
+no elbow the sag is flat and the counts below the floor took the last
+place on its axis, and with an elbow its \\\|z\|\\ is near 0 at the
+coarsest counts it scores whatever the response. The sag is read off the
+sweep's WSS curve, the one the elbow is read from, so with an elbow the
+first count is the elbow and the counts after it come in order of sag;
+they can differ from the two neighbours `"geometric"` returns. The
+k-means re-run at each candidate, whose cells Moran's I is computed on,
+can land in a different optimum than the sweep; its WSS is reported as
+`wss_eval` and does not rank. The response reaches the diagnostics
+alone: where Moran's I can be computed at no candidate of a window that
+reaches ten cells (a constant response, too few cells holding a row with
+one, or too few in the half that `select_on = "split"` reads), `moran_i`
+and `moran_z` are `NA`, the log gives the reason at the WARN level, and
+the counts are ranked as they would be otherwise. Use `"geometric"` when
+the cell count should follow the clustering of the points, `"morans_i"`
+for a ranking by the diagnostic, and
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-when the response should drive it.
+when the response should drive the count.
 
 ## Post-selection inference
 
-When the selection reads the response (here, whenever a model-aware
-criterion runs: both `response_var` and `predictor_vars` supplied, or
-`"morans_i"` or `"combined"` asked for with a response), everything
-estimated afterwards on the chosen cells is estimated on data that
-already influenced the choice, and its standard errors are
-post-selection ones: descriptive, not at nominal coverage (Gao, Bien and
-Witten 2022; Chen and Witten 2023 give the exact selective test for two
-k-means clusters, the first link of this chain). The exposure is
-narrower than "the partition was chosen on the response": every
-partition here is k-means on the coordinates alone, and the response
-only decides which *count* is ranked first. It is not zero, because the
-count determines every cell the downstream standard errors are computed
-over.
+When the selection reads the response (here, under
+`criterion = "morans_i"` with a response), everything estimated
+afterwards on the chosen cells is estimated on data that already
+influenced the choice, and its standard errors are post-selection ones:
+descriptive, not at nominal coverage (Gao, Bien and Witten 2022; Chen
+and Witten 2023 give the exact selective test for two k-means clusters,
+the first link of this chain). The exposure is narrower than "the
+partition was chosen on the response": every partition here is k-means
+on the coordinates alone, and the response only decides which *count* is
+ranked first. It is not zero, because the count determines every cell
+the downstream standard errors are computed over. Under `"combined"` the
+response reaches the diagnostics and not the ranking, which is the same
+whether or not Moran's I can be computed.
 
 `select_on = "split"` is sample splitting: the layer is cut into two
 spatially blocked halves
@@ -366,9 +426,10 @@ the two halves are not interchangeable. Two alternatives keep the whole
 sample: data thinning for count responses (Neufeld et al. 2024) and data
 fission for Gaussian-like ones (Leiner et al. 2023). Neither is
 implemented here; the split needs no distributional assumption, which is
-why it comes first. Selection on coordinates alone (`"geometric"` with
-no response) is not exposed in this way, and `"split"` then changes
-nothing but the attribute.
+why it comes first. Under `"combined"` the split changes only the rows
+the diagnostics read. Selection on coordinates alone (`"geometric"`,
+whatever variables are given) is not exposed in this way, and `"split"`
+then changes nothing but the attribute.
 
 The estimation rows cover only the estimation half's blocks, while the
 cells cover the whole layer, so the estimation rows do not fill every
@@ -426,7 +487,7 @@ and
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md),
 which accept this function's result directly as `approx_n_cells` and `n`
 (the first candidate is used, and the output records that it came from
-here);
+here; an `NA` from it stops them with a note on where it came from);
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
 and
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
@@ -454,4 +515,21 @@ pts <- st_as_sf(
 )
 determine_optimal_levels(pts, max_levels = 6)   # 2 1 3: the elbow first
 #> [1] 2 1 3
+#> attr(,"structured")
+#> [1] TRUE
+#> attr(,"sag")
+#> [1] 3.046636
+
+# Points spread evenly have no elbow: NA, with structured = FALSE and a
+# warning of class spatialkit_no_elbow that says why
+even <- st_as_sf(data.frame(x = 5e5 + runif(200, 0, 100),
+                            y = 5e6 + runif(200, 0, 100)),
+                 coords = c("x", "y"), crs = 32632)
+determine_optimal_levels(even, max_levels = 6)
+#> Warning: determine_optimal_levels(): the WSS curve has no elbow: on log-log axes it falls in a straight line, as it does for points with no cluster structure. k = 3 is where the chord rule lands on such a curve, set by the ladder (k = 1 to 6, max_levels) rather than by the data. Choose the count on other grounds, e.g. resolution_profile() with a response. Returning NA (on_no_elbow = "na").
+#> [1] NA
+#> attr(,"structured")
+#> [1] FALSE
+#> attr(,"sag")
+#> [1] 0
 ```

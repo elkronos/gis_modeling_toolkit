@@ -34,10 +34,10 @@ regions  <- build_tessellation(centres, method = "hex", approx_n_cells = 12,
 nrow(regions)
 ```
 
-    ## [1] 18
+    ## [1] 17
 
 `approx_n_cells` is approximate, as its name says: hexagons over this
-bounding box came out at 18 for a request of 12, and some of them will
+bounding box came out at 17 for a request of 12, and some of them will
 hold no counties at all.
 
 ### Grouping a layer you already have
@@ -68,7 +68,7 @@ range(table(grouped$cell_id))
 
     ## [1]  2 13
 
-100 counties in, 100 rows out, spread over 12 of the 18 regions, from 2
+100 counties in, 100 rows out, spread over 12 of the 17 regions, from 2
 to 13 counties each. That row-count equality is the property to check
 after any grouping:
 [`sf::st_join()`](https://r-spatial.github.io/sf/reference/st_join.html)
@@ -101,13 +101,13 @@ names(cells)
 sum(is.na(cells$n))
 ```
 
-    ## [1] 6
+    ## [1] 5
 
 The three `..pooled_` columns are each region’s pooled value, its weight
 on the region’s own mean and the mean it is pulled toward;
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
 adds them by default, `estimate = "mean"` leaves them out, and
-“Reporting a cell value” below reads them. 6 of the 18 regions are
+“Reporting a cell value” below reads them. 5 of the 17 regions are
 empty, carrying `NA` rather than being silently dropped. A region with
 no data in it is a fact about the map, and one worth keeping: it is
 where the model has nothing to stand on.
@@ -153,8 +153,8 @@ st_drop_geometry(inside)
 ```
 
     ##         site cell_id
-    ## 1    Raleigh      13
-    ## 2 Wilmington      14
+    ## 1    Raleigh      12
+    ## 2 Wilmington      13
     ## 3   Atlantic      NA
     ## 4 Norfolk VA      NA
 
@@ -357,13 +357,20 @@ cat(paste0("- ", names(report), ": ", unlist(report)), sep = "\n")
     ## - applicability: 0 of 937 prediction cells outside (DI > 0.073)
     ## - range: estimated range 279,835 m against blocks of 100,000 m
 
-Read together, those lines say the run failed its own checks, which is
-what a report is for.
+Read together, those lines say the run failed two of its own checks, the
+score and the residuals, which is what a report is for.
 
-The blocks are 100,000 m across and the correlation reaches about
-279,835 m, so training and test data sit inside one correlation length
-of each other. The score is still optimistic, and the fix is blocks at
-least as wide as the range, or `auto_range = TRUE` to size them from it.
+The range line is not a third. The blocks are 100,000 m across and the
+correlation reaches about 279,835 m, so training and test data sit
+inside one correlation length of each other, and the score is the error
+of predicting that close to the data. Whether that is the error of the
+map depends on where the map predicts. Against the cells of the surface
+above,
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+reads `farther`: the held-out points sit farther from their training
+data than the cells do, so the score tends to read high for this map;
+narrower blocks, or
+`make_folds(method = "knndm", prediction_points = surface)`, match it.
 
 The cross-validated R2 of -0.063 is below zero, which says the trend
 surface predicts held-out blocks worse than their own mean does, and
@@ -384,7 +391,7 @@ works through what to do when it is not.
 
 | Report | From | Because |
 |----|----|----|
-| The fold scheme, the block size and the estimated range, in named CRS units | `folds$params` | A cross-validation score means nothing without the geometry that produced it: blocks below the range leak, and the score comes back flattering (Roberts et al. 2017) |
+| The fold scheme, the block size and the estimated range, in named CRS units, and how the folds compare with the map | `folds$params`, [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md) | A cross-validation score means nothing without the geometry that produced it: it is the error at the distance the folds put between the held-out points and their training data, which reads low for a map that predicts farther from the data and high for one that predicts closer (Milà et al. 2022) |
 | The metric **with its per-fold spread**, not the pooled value alone | `cv$fold_metrics`, [`plot_cv_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_cv_metrics.md) | 0.9 in four folds and 14 in one is a model that fails in one region, and the pooled number cannot tell that from uniform mediocrity |
 | Residual Moran’s I with its null | [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md) | It is the check on whether the spatial structure the model was built for actually got modelled |
 | The share of the prediction area outside the area of applicability | [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md) | A fitted model returns a number everywhere, including ground nothing like its training data, and the CV score does not apply there (Meyer and Pebesma 2021) |
@@ -469,16 +476,16 @@ st_drop_geometry(vals)[1:4, c("cell_id", "n", "resp_mean_yield",
                               "..obs_lo_resp_yield", "..obs_hi_resp_yield")]
 ```
 
-    ##   cell_id  n resp_mean_yield ..pooled_resp_yield ..pooled_w_resp_yield
-    ## 1       1  3        54.96304            56.37643             0.4859504
-    ## 2       2  3        53.30889            55.97057             0.4859504
-    ## 3       3 11        47.98111            48.73113             0.7760979
-    ## 4       4  9        52.11726            52.57068             0.7393126
+    ##   cell_id n resp_mean_yield ..pooled_resp_yield ..pooled_w_resp_yield
+    ## 1       1 5        47.02646            48.21422             0.5948201
+    ## 2       2 3        53.30889            55.94499             0.4683181
+    ## 3       3 5        55.26101            56.30355             0.5948201
+    ## 4       4 4        51.52654            51.46519             0.5401097
     ##   ..obs_lo_resp_yield ..obs_hi_resp_yield
-    ## 1            50.94400            61.67927
-    ## 2            50.53815            61.27341
-    ## 3            43.29871            54.03397
-    ## 4            47.13826            57.87352
+    ## 1            42.54607            53.63585
+    ## 2            50.27684            61.36662
+    ## 3            50.63540            61.72518
+    ## 4            45.79704            56.88682
 
 Each earlier default is one argument away: `estimate = "mean"` in the
 summary for the plain means alone,
@@ -499,14 +506,14 @@ attr(vals, "pooled")
 
     ## Cell values: yield, 600 rows in 133 cells
     ##   value       : ..pooled_resp_yield, pooled toward the 8 nearest cells (centroids of the rows)
-    ##   variances   : inside cells 9.38e+00 (from 467 values beyond one per cell);
-    ##                 between a cell and its target 2.96e+00
-    ##   own weight  : median 0.56 (..pooled_w_resp_yield)
-    ##   alone       : 0.5% of the rows are the only one in their cell
-    ##   loo         : 1.07e+01 (leave-one-out mean squared error of the pooled value);
+    ##   variances   : inside cells 9.52e+00 (from 467 values beyond one per cell);
+    ##                 between a cell and its target 2.79e+00
+    ##   own weight  : median 0.54 (..pooled_w_resp_yield)
+    ##   alone       : 0.3% of the rows are the only one in their cell
+    ##   loo         : 1.08e+01 (leave-one-out mean squared error of the pooled value);
     ##                 one mean for all rows: 4.21e+01
     ##   interval    : 90% for ONE OBSERVATION (..obs_lo_resp_yield, ..obs_hi_resp_yield):
-    ##                 value - 5.43 to value + 5.3, quantiles of 600 leave-one-out residuals
+    ##                 value - 5.67 to value + 5.42, quantiles of 600 leave-one-out residuals
     ## Away from the observations no interval here is calibrated.
 
 ``` r
@@ -514,12 +521,12 @@ attr(vals, "pooled")
 attr(vals, "count_rule")
 ```
 
-    ## Count: 133 cells, set by size (4.5 rows per cell asked; 600 rows / 133 cells = 4.51)
+    ## Count: 133 cells, set by size (4.5 rows per cell, the default; 600 rows / 133 cells = 4.51)
     ##   chosen for  : the pooled value
     ##   cells       : density, 3 density-weighted k-means++ starts (power 1, 8
     ##                 neighbours; seed 123), fitted to every row;
     ##                 these are the cells the profile scored
-    ##   scored      : loo 1.07e+01 on 600 rows in 133 cells (one cell: 4.21e+01); 0.5% of rows alone
+    ##   scored      : loo 1.08e+01 on 600 rows in 133 cells (one cell: 4.21e+01); 0.3% of rows alone
     ##   checked     : the cells and rows summarised are the ones scored
 
 A report of cell values reads four things off them.
@@ -571,10 +578,10 @@ cat(
 ```
 
     ## - cells: 133, set by a size of 4.5 observations per cell; checked: match
-    ## - value: the cell mean pooled toward its 8 nearest cells; median own weight 0.56
+    ## - value: the cell mean pooled toward its 8 nearest cells; median own weight 0.54
     ## - ..obs_lo_, ..obs_hi_: 90% for one further observation in the cell, located like the data; on average over observations, not cell by cell
-    ## - leave-one-out error 10.7 against 42.1 for one mean; structured: TRUE
-    ## - 0.5% of observations are the only one in their cell
+    ## - leave-one-out error 10.8 against 42.1 for one mean; structured: TRUE
+    ## - 0.3% of observations are the only one in their cell
 
 [`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md)
 gives the value at other locations, with each location’s distance from
@@ -594,9 +601,9 @@ cell_values_at(elsewhere, vals, asg, "yield", id_col = "cell_id",
 ```
 
     ##   cell_id    value estimate   obs_lo   obs_hi filled filled_from dist_nearest
-    ## 1      36 53.88710   pooled 48.45468 59.18994  FALSE          NA     257.1487
-    ## 2      82 38.95122   pooled 33.51880 44.25406  FALSE          NA     650.4402
-    ## 3     128 47.42130   pooled 41.98887 52.72414  FALSE          NA    6285.9837
+    ## 1      35 54.27669   pooled 48.60854 59.69831  FALSE          NA     257.1487
+    ## 2      85 39.29042   pooled 33.62227 44.71205  FALSE          NA     650.4402
+    ## 3     129 46.75437   pooled 41.08622 52.17599  FALSE          NA    6285.9837
     ##   dist_ratio
     ## 1  0.6501451
     ## 2  1.6444979
@@ -653,18 +660,18 @@ Estimating the area of applicability of spatial prediction models.
 *Methods in Ecology and Evolution* 12(9), 1620-1633.
 <https://doi.org/10.1111/2041-210X.13650>
 
-Roberts, D. R., Bahn, V., Ciuti, S., et al. (2017). Cross-validation
-strategies for data with temporal, spatial, hierarchical, or
-phylogenetic structure. *Ecography* 40(8), 913-929.
-<https://doi.org/10.1111/ecog.02881>
+Milà, C., Mateu, J., Pebesma, E. and Meyer, H. (2022). Nearest neighbour
+distance matching Leave-One-Out Cross-Validation for map validation.
+*Methods in Ecology and Evolution* 13, 1304-1316.
+<https://doi.org/10.1111/2041-210X.13851>
 
-    ## R version 4.6.1 (2026-06-24)
+    ## R version 4.6.2 (2026-10-29)
     ## Platform: x86_64-pc-linux-gnu
-    ## Running under: Ubuntu 24.04.5 LTS
+    ## Running under: Ubuntu 26.04.1 LTS
     ## 
     ## Matrix products: default
     ## BLAS:   /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 
-    ## LAPACK: /usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblasp-r0.3.26.so;  LAPACK version 3.12.0
+    ## LAPACK: /usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblasp-r0.3.32.so;  LAPACK version 3.12.0
     ## 
     ## locale:
     ##  [1] LC_CTYPE=C.UTF-8       LC_NUMERIC=C           LC_TIME=C.UTF-8       
@@ -682,14 +689,14 @@ phylogenetic structure. *Ecography* 40(8), 913-929.
     ## [1] ggplot2_4.0.3         spatialkit_2.0.0.9000 sf_1.1-3             
     ## 
     ## loaded via a namespace (and not attached):
-    ##  [1] s2_1.1.13          sass_0.4.10        generics_0.1.4     class_7.3-23      
-    ##  [5] KernSmooth_2.23-26 lattice_0.22-9     digest_0.6.39      magrittr_2.0.5    
-    ##  [9] evaluate_1.0.5     grid_4.6.1         RColorBrewer_1.1-3 fastmap_1.2.0     
-    ## [13] Matrix_1.7-5       jsonlite_2.0.0     e1071_1.7-17       DBI_1.3.0         
+    ##  [1] s2_1.1.13          sass_0.4.10        generics_0.1.4     class_7.3-24      
+    ##  [5] KernSmooth_2.23-27 lattice_0.23-1     digest_0.6.39      magrittr_2.0.5    
+    ##  [9] evaluate_1.0.5     grid_4.6.2         RColorBrewer_1.1-3 fastmap_1.2.0     
+    ## [13] Matrix_1.7-6       jsonlite_2.0.0     e1071_1.7-17       DBI_1.3.0         
     ## [17] viridisLite_0.4.3  scales_1.4.0       textshaping_1.0.5  jquerylib_0.1.4   
     ## [21] cli_3.6.6          rlang_1.3.0        units_1.0-1        intervals_0.15.5  
-    ## [25] withr_3.0.3        cachem_1.1.0       yaml_2.3.12        otel_0.2.0        
-    ## [29] FNN_1.1.4.1        tools_4.6.1        dplyr_1.2.1        spacetime_1.3-4   
+    ## [25] withr_3.0.3        cachem_1.1.0       yaml_2.3.12        otel_0.3.0        
+    ## [29] FNN_1.1.4.1        tools_4.6.2        dplyr_1.2.1        spacetime_1.3-4   
     ## [33] logger_0.4.3       vctrs_0.7.3        R6_2.6.1           zoo_1.9-1         
     ## [37] proxy_0.4-29       lifecycle_1.0.5    classInt_0.4-11    fs_2.1.0          
     ## [41] htmlwidgets_1.6.4  ragg_1.5.2         pkgconfig_2.0.3    desc_1.4.3        
@@ -697,5 +704,5 @@ phylogenetic structure. *Ecography* 40(8), 913-929.
     ## [49] Rcpp_1.1.2         glue_1.8.1         gstat_2.1-6        systemfonts_1.3.2 
     ## [53] xfun_0.62          tibble_3.3.1       tidyselect_1.2.1   knitr_1.52        
     ## [57] farver_2.1.2       htmltools_0.5.9    labeling_0.4.3     rmarkdown_2.32    
-    ## [61] xts_0.14.3         wk_0.9.5           compiler_4.6.1     S7_0.2.2          
+    ## [61] xts_0.14.3         wk_0.9.5           compiler_4.6.2     S7_0.2.2          
     ## [65] sp_2.2-4

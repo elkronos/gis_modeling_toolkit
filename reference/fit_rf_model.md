@@ -140,7 +140,31 @@ when ranger did not compute it; forwarding `oob.error = FALSE` through
 metrics), `seed` and `n_dropped` (the rows
 [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
 removed for missing or non-finite values or a bad geometry, so `$n` can
-be read against `nrow(data_sf)`). The raw forest is in `$engine`.
+be read against `nrow(data_sf)`), and `response_centre` and
+`response_scale` (below). The raw forest is in `$engine`.
+
+The forest is grown on the response taken about its centre where that
+centre is more than 1000 times the response's spread (as at 1e8 plus a
+spread of 1), and divided by a power of two where the response is so
+large or its spread so small that its squares overflow or lose their
+bits (beyond about 1e100 or 1e-100). The splits of a forest do not
+change under a shift or a scale of the response, and ranger's split
+scores, formed from squares of the response, read the rounding of the
+offset otherwise. `$info$response_centre` (0 where none is taken) and
+`$info$response_scale` (1 where none is applied) record them, and they
+are put back on
+[`fitted()`](https://rdrr.io/r/stats/fitted.values.html),
+[`predict()`](https://rdrr.io/r/stats/predict.html),
+[`residuals()`](https://rdrr.io/r/stats/residuals.html), `oob_rmse` and
+`importance` (squared units, so multiplied by the scale twice; beyond
+the range of doubles it is `Inf` or loses its bits, and a WARN line says
+so). The permutation importance under
+`scale.permutation.importance = TRUE` and the impurity importance under
+`splitrule = "maxstat"` have no units and are left as ranger reports
+them. The forest in `$engine` predicts
+`(y - response_centre) / response_scale`, and its own `predictions` and
+`prediction.error` are in those units. Every other response is passed to
+ranger as it is.
 
 ## Coordinates as predictors
 
@@ -164,15 +188,19 @@ carry the spatial structure themselves, expect less from the
 coordinates.
 
 What does not change is how such a forest has to be scored. It fits
-location closely, nearby points leak between random folds, and the
-out-of-bag error is a random hold-out too, so both overstate its
-accuracy. Score it with
+location closely, so its error grows quickly with the distance from the
+data, and a cross-validated score is the error at the distance its folds
+put between the held-out points and their training data. Random folds,
+and the out-of-bag error, a random hold-out too, measure it among the
+samples: the error of a map over an area the samples cover evenly, which
+reads low for predictions made farther from the data. Score it with
 [`cv_rf`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
-and blocked folds (`make_folds(method = "block_kfold")`) or folds
-matched to the prediction distance (`method = "nndm"`), at the distances
-the map will be used at, never with the out-of-bag error, and compare
-the two forests on the same folds. That comparison is two calls: build
-the folds once and hand them to
+on folds at the distances the map will be used at (folds matched to the
+prediction distance, `make_folds(method = "nndm")` or `"knndm"`, or
+blocks, `method = "block_kfold"`, for predictions into unsampled gaps),
+not with the out-of-bag error, and compare the two forests on the same
+folds. That comparison is two calls: build the folds once and hand them
+to
 [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
 with and without the coordinates.
 
@@ -210,11 +238,14 @@ left alone and split on their own order, and with
 ## The out-of-bag error is a random hold-out
 
 `ranger`'s OOB error holds each observation out of the trees that did
-not sample it. That is a random hold-out, so under spatial
-autocorrelation it is optimistic for exactly the reason random k-fold
-is: the trees that "did not see" a point almost certainly saw its
-neighbours. It is reported as `$info$oob_rmse` and `$info$oob_r_squared`
-and labelled as OOB everywhere it appears. Use
+not sample it. That is a random hold-out: the trees that "did not see" a
+point almost certainly saw its neighbours, so under spatial
+autocorrelation it is the error of predicting among the samples, as
+random k-fold is, and reads low for predictions made farther from the
+data than the samples sit from each other (see
+[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)).
+It is reported as `$info$oob_rmse` and `$info$oob_r_squared` and
+labelled as OOB everywhere it appears. Use
 [`cv_rf`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
 for a spatial estimate.
 
@@ -269,7 +300,9 @@ which weights the predictors by `pmax(fit$info$importance, 0)` by
 default when that importance is finite and the forest has out-of-bag
 skill (it is `NaN` when no row is out of bag; see "What fitted()
 returns"), and which needs `categorical = "indicator"` or `"drop"` for a
-forest with a factor predictor.
+forest with a factor predictor. For a forest fitted with
+`include_coords = TRUE` it also measures location on an index of its
+own.
 
 Other model fitting:
 [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md),
@@ -305,8 +338,11 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 #>   OOB RMSE: 0.6995   OOB R^2: 0.9093
 #>   Importance (permutation): a=6.886, b=1.583
 #> 
-#>   OOB is a random hold-out and is optimistic under spatial
-#>   autocorrelation; use cv_rf() for a spatial estimate.
+#>   OOB is a random hold-out: under spatial autocorrelation it is the error
+#>   of predicting among the samples, and reads low for predictions made
+#>   farther from the data than the samples sit from each other. Score a map
+#>   that predicts farther with cv_rf() on folds at its distances
+#>   (?fold_separation).
 #>        a        b 
 #> 6.886377 1.583079 
 ```

@@ -31,8 +31,15 @@ coef(object, ...)
 A matrix of fixed-effect posterior summaries, as returned by
 [`brms::fixef()`](https://rdrr.io/pkg/nlme/man/fixed.effects.html), on
 the fitted scale (per standard deviation of each predictor under
-`standardize_predictors = TRUE`; see above). Never `NULL`: a missing
-'brms' or a failing `fixef()` call errors, following the
+`standardize_predictors = TRUE`; see above), in the units of the
+response: where the response was handed to brms less a centre or divided
+by a scale, the intercept has the centre added back and every column is
+multiplied by the scale (see "The response's centre and scale" in
+[`fit_bayesian_spatial_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)).
+Read on `object$engine`,
+[`brms::fixef()`](https://rdrr.io/pkg/nlme/man/fixed.effects.html)
+answers on the scale brms was given. Never `NULL`: a missing 'brms' or a
+failing `fixef()` call errors, following the
 [`coef()`](https://rdrr.io/r/stats/coef.html) contract described in
 [`new_spatial_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md).
 

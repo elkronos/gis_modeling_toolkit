@@ -31,7 +31,21 @@ create_grid_polygons(
 
 - boundary:
 
-  Polygonal sf or sfc object.
+  Polygonal sf or sfc object. One that mixes XY and XYZ (or XYM)
+  geometries is read without Z and M, since sf reads a layer in the
+  dimension of its first geometry. So is one whose geometries carry M
+  (XYM or XYZM), which GEOS refuses. A row that is empty, or has a
+  coordinate that is not finite or lies beyond 1e150 (read as given, and
+  again after any move into another CRS), covers no ground and is left
+  out; a boundary with no such row left is refused with an error that
+  says so. A boundary in a geographic CRS with a vertex at a latitude
+  beyond 90 degrees, which is no place on the Earth, is refused with an
+  error of class `"spatialkit_cells_degenerate"` that names its rows and
+  says to check its CRS. A row the repair of `boundary` leaves without a
+  polygon (a ring with no height: every vertex on one line, or in
+  degrees on one parallel) is left out as well, and a boundary with no
+  polygon left is refused. A boundary without a CRS that `crs` stamps
+  with a geographic CRS is tested for its latitude in the same way.
 
 - target_cells:
 
@@ -63,7 +77,19 @@ create_grid_polygons(
   exactly one of `target_cells`, `cellsize` and `n`. For `type = "hex"`
   a hexagon is defined by a single edge-to-edge distance, so only
   `cellsize[1]` is used and a differing `cellsize[2]` is ignored with a
-  logged warning.
+  logged warning. A side of the boundary's bounding box that exceeds a
+  whole number of square cells, of this size or of the size derived from
+  `target_cells`, by no more than a margin of one part in 1e10 of the
+  largest coordinate of the boundary, at most a millionth of the
+  diagonal of its bounding box and at least four times the spacing of
+  doubles at that coordinate, gets that number of cells, so a box of
+  9000 by 6000 at 1000 gets 9 by 6 cells in any unit or origin, where
+  rounding could add a row or column. A boundary so far from the origin
+  of its coordinates that doubles there are spaced more than a millionth
+  of its extent apart (0.125 at 1e15, beside a boundary a few kilometres
+  across) has its grid lines rounded to that spacing; the grid is laid,
+  and a warning of class `"spatialkit_xy_imprecise"` gives the spacing
+  and the extent.
 
 - n:
 
@@ -81,7 +107,15 @@ create_grid_polygons(
 
 - clip:
 
-  Logical; clip grid to boundary.
+  Logical; clip grid to boundary. In a projected or CRS-less grid, a
+  cell that meets the boundary only within a margin of the cell's edge
+  (the margin `cellsize` gives: one part in 1e10 of the largest
+  coordinate of the boundary, within its bounds; a cell whose edge lies
+  on the boundary's edge but for rounding) is dropped, rather than kept
+  as a sliver. The call stops when the clip leaves no cell, as it does
+  when the lattice has none: in degrees with s2 on, a boundary edge that
+  spans more than 180 degrees of longitude is read as the shorter
+  great-circle arc, the other way round the globe.
 
 - crs:
 
@@ -101,7 +135,23 @@ create_grid_polygons(
   projected CRS and then transformed, with long edges densified. A
   `cellsize` is in the units of `crs`, so with a geographic `crs` it is
   in degrees and the grid is laid in degrees, as asked; such cells are
-  not equal-area.
+  not equal-area. With
+  [`sf::sf_use_s2()`](https://r-spatial.github.io/sf/reference/s2.html)
+  on (the default) such a grid is clipped with sf's spherical engine s2,
+  and s2 measures and joins its cells after; s2 refuses a polygon that
+  is not valid on the sphere. The rows of `boundary` and the cells are
+  checked with s2 whatever
+  [`sf::sf_use_s2()`](https://r-spatial.github.io/sf/reference/s2.html)
+  says. Before the clip, a row of `boundary` that s2 refuses is
+  repaired, with crossing edges split. A cell that lists a corner twice
+  in a row, or two corners within 1e-12 degrees of each other, which s2
+  reads as one point, is returned with one of them, which moves no
+  corner and changes the cell's area by rounding. A row of `boundary`,
+  or a cell, that s2 refuses even then (a cell of a grid laid past
+  latitude 90, say) stops the call with an error of class
+  `"spatialkit_cells_degenerate"` that names its rows and s2's reason,
+  and says to pass a projected `crs` or to size the grid by
+  `target_cells` or `n`.
 
 - quiet:
 

@@ -3,8 +3,9 @@
 Thin wrapper over
 [`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
 that refits a `ranger` forest on each training fold. Unlike the
-out-of-bag error, this holds out whole spatial blocks, so neighbours of
-a held-out point are not sitting in the training set.
+out-of-bag error, this holds out whole spatial blocks by default, so
+most neighbours of a held-out point are not in the training set; `folds`
+says what that score estimates.
 
 ## Usage
 
@@ -53,7 +54,20 @@ cv_rf(
   as `$folds_ids`. Train and test must be disjoint: a fold that trains
   on its own test rows is not a cross-validation split and is refused
   with an error. IDs naming no row in the prepared data are dropped with
-  a logged count.
+  a logged count. Built via `block_kfold` when `NULL`, as in
+  [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md).
+  With `folds = NULL` the score estimates the error at the distance the
+  block grid built here puts between the held-out points and their
+  training data, which overstates the error of a map where the samples
+  cover the area it predicts over. The excess is how much the model's
+  error grows from the map's distances to the data to the block grid's,
+  and is small for a model whose error changes little with the distance
+  from the data.
+  [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+  with `prediction_points` compares the held-out distances with those of
+  the locations the model will predict at, and
+  `make_folds(method = "knndm", prediction_points = )` builds folds
+  matched to them.
 
 - k:
 

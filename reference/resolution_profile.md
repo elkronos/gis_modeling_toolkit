@@ -46,8 +46,15 @@ resolution_profile(
 - data_sf:
 
   An sf object of points (other geometries are reduced to representative
-  points). Features with empty or non-finite coordinates are dropped
-  with a warning.
+  points). Features without a location (an empty point, or a coordinate
+  that is not finite or lies beyond 1e150, as given, once projected or
+  in the CRS of `sac`) are dropped with a warning. A layer that mixes XY
+  and XYZ (or XYM) geometries is read in x and y, before and after it is
+  reduced to points, since sf reads a layer in the dimension of its
+  first geometry. So is a layer whose geometries carry M (XYM or XYZM),
+  which GEOS refuses. The points a layer is reduced to are read in x and
+  y when they mix dimensions, as those of a layer XYZ throughout that
+  holds points and polygons do.
 
 - response_var:
 
@@ -77,7 +84,9 @@ resolution_profile(
   or above the number of points, are dropped (k-means cannot place more
   centres than there are distinct points, and
   [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) refuses as
-  many centres as points).
+  many centres as points). When none is left the call stops with an
+  error, before the variogram is estimated or read, so it raises no
+  warning about the variogram.
 
 - n_levels:
 
@@ -108,7 +117,15 @@ resolution_profile(
   columns, `rss`, `moran_i`, `moran_z`) describe the subsample; the
   bounds, `supported`, the variance term of `cp` and `reliability`
   describe the whole layer, so the answer does not change with
-  `sample_n` except through the fits.
+  `sample_n` except through the fits. The fits are those of the
+  subsample, which `seed` draws, so on a layer of more than `sample_n`
+  points the count read off the profile can move with `seed` and with
+  `sample_n`. The level
+  [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+  chooses off such a profile without an estimate is refitted to every
+  point before its seeds are handed on (see `refit_rows` under "Value");
+  a profile with an estimate scores it on every row in the cells of the
+  centres fitted, and hands those centres on.
 
 - nstart:
 
@@ -123,7 +140,16 @@ resolution_profile(
 
   RNG seed for the subsample and the restarts; restored afterwards.
   Default 123. The rows are put in coordinate order before either, so
-  the profile does not depend on the order they come in.
+  the profile does not depend on the order they come in. Each level's
+  restarts run on a stream of their own, seeded from `seed` and the
+  level, so for one `seed` a level gets the same cells on any ladder
+  that holds it and is fitted to the same rows, and with them the same
+  `wss`, `rss`, `moran_z` and the other columns read off its cells. On a
+  layer of more than `sample_n` rows a ladder of counts is fitted to a
+  subsample and a ladder of sizes to every row, so there the two can
+  give a level other cells. `cp` also reads its noise variance, which
+  without a usable variogram comes from the ladder's finest level
+  (`attr(, "cp_noise")`).
 
 - sac:
 
@@ -137,14 +163,15 @@ resolution_profile(
   (`attr(sac, "crs")`), to which the points are transformed first, so
   the area, the floor and `cell_diam_median` are then in that CRS's
   units. A sac whose range was rejected (`NA` with a `rejected_reason`)
-  gives `cp` its nugget, with a warning, and leaves `reliability` `NA`,
-  since that needs the range; one whose model did not converge (its fit
-  has no minimum inside the ranges searched, so its nugget and sill are
-  not fitted values), or whose range is below the shortest lag fitted (a
-  structure that cannot be told from a nugget, so the nugget is not
-  identified either), gives neither, and `cp` takes its noise variance
-  from the finest level (see `cp` above). Whether the model converged is
-  read from the model
+  gives `cp` its nugget (held to the semivariance of nearest-neighbour
+  pairs, and not at all when it is at the fit's lower bound), with a
+  warning, and leaves `reliability` `NA`, since that needs the range;
+  one whose model did not converge (its fit has no minimum inside the
+  ranges searched, so its nugget and sill are not fitted values), or
+  whose range is below the shortest lag fitted (a structure that cannot
+  be told from a nugget, so the nugget is not identified either), gives
+  neither, and `cp` takes its noise variance from the finest level (see
+  `cp` above). Whether the model converged is read from the model
   (`attr(attr(sac, "variogram_model"), "converged")`, which
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
   sets and describes), not from the reason: the reason names one ground
@@ -160,7 +187,8 @@ resolution_profile(
   is taken as the range alone, in the units of the CRS the profile is
   computed in (metres for lon/lat input): it gives the range floor,
   `reliability`, which needs a fitted model, is `NA`, and `cp` takes its
-  noise variance from the finest level. A sac refused because the
+  noise variance from the finest level whose cells hold at least two
+  scored rows on average (see `cp` above). A sac refused because the
   response shows no spatial structure (either of the two
   `rejected_reason` values of
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
@@ -282,7 +310,9 @@ resolution_profile(
   are errors without a `response_var`, with `predictor_vars` (the
   profile would then score residuals, and the summary reports cell
   values of the response), with a logical response, and with a response
-  that has no finite value.
+  that has no finite value. Under `select_on = "split"` a selection half
+  with no finite response is not an error: the five columns are `NA` at
+  every level, with a warning of class `spatialkit_no_scored_rows`.
 
 - obs_per_cell:
 
@@ -325,61 +355,85 @@ it with `min_cell_n`). Like the other columns read off the fitted cells,
 the last two count rows of the subsample when the layer is larger than
 `sample_n`: the cells of the layer then hold about
 `n_response / n_scored` times as many scored rows as `cell_resp_mean`
-shows. Columns a missing input leaves undefined are `NA`. Attributes:
-`bounds` (a list with `floor`, `ceiling`, `ceiling_from`
-(`"min_cell_n"`, `"min_cell_n (rows with a response)"`,
-`"distinct locations"`, `"sample_n"`, `"fewer than two supported cells"`
-or `"fewer than two distinct locations"`, whichever bound it),
-`supported`, `area`, `range`, `n` (the points in the layer), `n_sample`
-(the points the k-means fits ran on), `n_distinct`, `min_cell_n`,
-`range_floor`, `n_response` (the rows of the layer that carry a response
-and, with `predictor_vars`, every predictor, which the support ceiling
-counts; `NA` without a `response_var`), `n_scored` (the rows of the
-subsample the response criteria read; `NA` without a `response_var`),
-`levels_given` (whether `levels` set the ladder) and `predictors`
-(whether `predictor_vars` were given)), `variogram` (a list with
-`nugget`, `psill`, `range` (`NA` when rejected), `model` and `detrended`
-(whether the sac says it is a variogram of residuals; `NA` when it does
-not say); `NULL` when none was usable), `variable` (`"response"`,
-`"residuals"` or `NA`), `wss_bumps`, `nstart`, `sac` (the range object
-used) and, with `select_on = "split"`, `split` (a `spatialkit_split`:
-`selection` and `estimation`, integer row positions in `data_sf`, with
-the `method` and `seed` that made them), `cp_noise` (a list with
-`source`, `"variogram nugget"` or `"finest-level residual mean square"`,
+shows (under `select_on = "split"`, `split$n_response / n_scored`: both
+count the rows of the selection half). Columns a missing input leaves
+undefined are `NA`. Attributes: `bounds` (a list with `floor`,
+`ceiling`, `ceiling_from` (`"min_cell_n"`,
+`"min_cell_n (rows with a response)"`, `"distinct locations"`,
+`"sample_n"`, `"fewer than two supported cells"` or
+`"fewer than two distinct locations"`, whichever bound it), `supported`,
+`area`, `range`, `n` (the points in the layer), `n_sample` (the points
+the k-means fits ran on), `n_distinct`, `min_cell_n`, `range_floor`,
+`n_response` (the rows of the layer that carry a response and, with
+`predictor_vars`, every predictor, which the support ceiling counts;
+`NA` without a `response_var`), `n_scored` (the rows of the subsample
+the response criteria read; `NA` without a `response_var`),
+`levels_given` (whether `levels` set the ladder), `predictors` (whether
+`predictor_vars` were given) and, where rows have a response and none of
+them every predictor, `n_response_only` (the rows with a finite
+response)), `variogram` (a list with `nugget`, `psill`, `range` (`NA`
+when rejected), `model` and `detrended` (whether the sac says it is a
+variogram of residuals; `NA` when it does not say); `NULL` when none was
+usable), `variable` (`"response"`, `"residuals"` or `NA`), `wss_bumps`,
+`nstart`, `sac` (the range object used) and, with `select_on = "split"`,
+`split` (a `spatialkit_split`: `selection` and `estimation`, integer row
+positions in `data_sf`, with the `method` and `seed` that made them, and
+with a response `n_response`, the rows of the selection half with a
+finite response and every predictor, counted on the layer before any
+subsample), `cp_noise` (a list with `source`, `"variogram nugget"`,
+`"finest-level residual mean square"` or `"short-lag semivariance"`,
 `value`, the \\\tau^2\\ used, and `level`, the level it was read at or
-`NA`; `NULL` when `cp` has neither), `one_cell` (what one cell for the
-whole layer scores, the reference a level has to beat: a list with `n`,
-the scored rows, `rss`, their total sum of squares, `cp`, the same
-formula at one cell or `NA` when `cp` has no noise variance, `constant`,
-whether the scored variable is constant to within rounding, `cp_levels`,
-the `cp` column it belongs to, and `f_p`, named by level, the p-value of
-the F test of that level's cell means against one mean, \\(TSS - RSS) /
-(L - 1)\\ over \\RSS / (m - L)\\ on the \\L\\ cells that hold a scored
-row and the \\m\\ scored rows; `NULL` without a response), `centres` (a
-list named by level of the two-column matrices of the scored partitions'
-centres), `centres_crs` (the CRS they are in) and `hull` (the convex
-hull of the points profiled, an `sfc` in that CRS). A k-means partition
-is the Voronoi partition of its centres, so these seed the very cells
-each level was scored on:
+`NA`; under the short-lag semivariance also `cap`, that semivariance,
+and `uncapped`, a list of the `source`, `value` and `level` it held;
+when the finest level whose cells hold two scored rows on average has a
+residual mean square of 0 to within rounding, `source` and `value` `NA`,
+`level`, that level, `rows_per_cell`, its scored rows a cell, `rms`, its
+residual mean square (0, or the rounding it was read as), and `reason`,
+which
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+gives; `NULL` when `cp` has none for another reason; see `cp` above),
+`one_cell` (what one cell for the whole layer scores, the reference a
+level has to beat: a list with `n`, the scored rows, `rss`, their total
+sum of squares, `cp`, the same formula at one cell or `NA` when `cp` has
+no noise variance, `constant`, whether the scored variable is constant
+to within rounding, `cp_levels`, the `cp` column it belongs to, and
+`f_p`, named by level, the p-value of the F test of that level's cell
+means against one mean, \\(TSS - RSS) / (L - 1)\\ over \\RSS / (m - L)\\
+on the \\L\\ cells that hold a scored row and the \\m\\ scored rows;
+`NULL` without a response), `centres` (a list named by level of the
+two-column matrices of the scored partitions' centres), `centres_crs`
+(the CRS they are in) and `hull` (the convex hull of the points
+profiled, an `sfc` in that CRS), and, when the centres were fitted to a
+subsample and the profile has no estimate, `refit_rows`: a list with
+`xy`, the coordinates of every point in that CRS, and `iter_max`, the
+iteration limit of the fits, from which
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+refits the level it chooses to every point. A k-means partition is the
+Voronoi partition of its centres, so these seed the very cells each
+level was scored on:
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
 returns the chosen level's as `$seeds`, and
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
 and
 [`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)
-use them when given the selection or the profile. The centres carry the
-hull as their `"cover"` attribute, which those two functions hand on so
-that Voronoi cells built on the seeds reach the edge of the points. A
-profile built with `partition = "density"` or `init = "random"` also
-carries `partition`: a list with `kind`, `init`, `density_power` and
-`density_k` (both `NA` for `kind = "kmeans"`); for `kind = "density"`,
-`objective`, the weighted sum the centres minimise, named by level;
-`iter_max`, the iteration limit; and `iter` and `converged`, the
-iterations each level's kept start took and whether it stopped before
-the limit, named by level. The selection carries the first four as
-`$partition`, its seeds and the seeds the seeding functions return as
-`attr(, "partition")`, and a Voronoi tessellation built on them as
-`params$partition`. A profile of the kind `"kmeans"` from k-means++
-starts has no such attribute, and neither has anything made from it.
+use them when given the selection or the profile. On a profile fitted to
+a subsample without an estimate the seeds are the chosen level's centres
+refitted to every point, whose cells are not the cells scored (see
+[`select_resolution`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
+"Value"). The centres carry the hull as their `"cover"` attribute, which
+those two functions hand on so that Voronoi cells built on the seeds
+reach the edge of the points. A profile built with
+`partition = "density"` or `init = "random"` also carries `partition`: a
+list with `kind`, `init`, `density_power` and `density_k` (both `NA` for
+`kind = "kmeans"`); for `kind = "density"`, `objective`, the weighted
+sum the centres minimise, named by level; `iter_max`, the iteration
+limit; and `iter` and `converged`, the iterations each level's kept
+start took and whether it stopped before the limit, named by level. The
+selection carries the first four as `$partition`, its seeds and the
+seeds the seeding functions return as `attr(, "partition")`, and a
+Voronoi tessellation built on them as `params$partition`. A profile of
+the kind `"kmeans"` from k-means++ starts has no such attribute, and
+neither has anything made from it.
 
 With an `estimate` the frame has five more columns, after
 `cell_resp_mean`: `scored_per_cell` (the rows `loo` read over the cells
@@ -392,15 +446,28 @@ difference between two levels, whose errors come from the same rows),
 of their cell) and `own_weight` (the median over cells of the weight a
 pooled value gives the cell's own mean; `NA` under `"mean"`). `loo`,
 `loo_se` and `own_weight` are `NA` at a level where no cell holds two
-scored rows, and at every level when the response is constant over the
-rows `loo` reads. It also carries `estimate`: a list with `value`
-(`"mean"` or `"pooled"`), `neighbours` (8, or `NA` under `"mean"`),
-`response` (the column), `n` (the rows `loo` read), `rows` (`"all"` or
-`"selection half"`), `features` (`"points"`, or `"other"` when the layer
-held features that were reduced to points), `seed`, `constant` (whether
-the response is constant over those rows; `FALSE` for fewer than two),
-`loo_one_cell` and `loo_one_cell_se` (the same error with one mean for
-all those rows, the reference a level has to beat), `loo_levels` (the
+scored rows, at every level when the response is constant over the rows
+`loo` reads, and at every level when those rows' values lie beyond what
+the arithmetic of the estimate holds, values so large or so close to
+their median that the squares of many such values can overflow or lose
+their precision (`spatialkit_pool_unavailable`). All five are `NA` at
+every level when no row of the selection half has a response
+(`select_on = "split"`; `spatialkit_no_scored_rows`). It also carries
+`estimate`: a list with `value` (`"mean"` or `"pooled"`), `neighbours`
+(8, or `NA` under `"mean"`), `response` (the column), `n` (the rows
+`loo` read), `rows` (`"all"` or `"selection half"`), `features`
+(`"points"`, or `"other"` when the layer held features that were reduced
+to points), `seed`, `constant` (whether the response is constant over
+those rows by the estimate's test, which reads the raw values and the
+values centred on their median and scaled, so that 1e15 plus a spread of
+1 is not constant while values that differ only by their rounding, 0.1
+beside 0.3 / 3, are; `FALSE` for fewer than two rows;
+`one_cell$constant`, the test for `cp`, reads the scored rows of the
+subsample the same way, and residuals against the rounding of the
+regression and of the response), `loo_one_cell` and `loo_one_cell_se`
+(the same error with one mean for all those rows, the reference a level
+has to beat; `NA` for a constant response, for fewer than two rows and
+for values beyond the arithmetic of the estimate), `loo_levels` (the
 `loo` column those references belong to, named by level), and, named by
 level, `sigma2` (the spread of the rows about their cell's mean), `tau2`
 (the mean squared distance between a cell's level and its target; `NA`
@@ -434,7 +501,9 @@ gives the ladder of counts described below, scored for pooled values as
 well.
 `estimate = NULL, obs_per_cell = NULL, sac = NULL, partition = "kmeans"`
 gives the profile of earlier versions: the ladder, its columns and its
-k-means regions from 25 starts.
+k-means regions from 25 starts, but for the rounding of the coordinates
+described in "The partition", which can give other regions on gridded
+locations.
 
 ## The partition
 
@@ -488,7 +557,9 @@ the default count go together. A coarse ladder the caller sets (with
 `levels`, large sizes, or the low levels of the automatic ladder) may
 not, and at those levels the density kind does not even the counts.
 `partition = "kmeans"` gives the k-means regions, with 25 k-means++
-starts, as earlier versions built them.
+starts, as earlier versions built them, but for the rounding of the
+coordinates described below, which can give other regions on gridded
+locations.
 
 `init` says how each of the `nstart` starts is drawn before it is
 refined; the best start is kept. `"kmeans++"` draws the centres one at a
@@ -505,25 +576,86 @@ one. A start of the kind `"density"` is refined by Lloyd's iteration,
 for at most 100 steps: each point goes to its nearest centre, each
 centre moves to the weighted mean of its points, and a centre left
 without a point stays where it is. `iter_max` sets another limit. The
-start with the lowest sum is kept, and a kept start that was cut off at
-the limit is reported (see "Conditions"): its centres are those of the
-last step. Large layers can need more than 100 steps: on a simulated
-layer of 30,000 points no start of six at 100 and 300 cells took more
-than 68, and on one of 60,000 points three of six took 102 to 152.
+start with the lowest sum is kept (under the density kind a later start
+replaces an earlier one only when its sum is lower by more than one part
+in ten million, so of starts whose sums agree to rounding the first is
+kept), and a kept start that was cut off at the limit is reported (see
+"Conditions"): its centres are those of the last step. Large layers can
+need more than 100 steps: on a simulated layer of 30,000 points no start
+of six at 100 and 300 cells took more than 68, and on one of 60,000
+points three of six took 102 to 152.
 
 The density kind depends on the points alone. It works on the distinct
-locations in coordinate order, so the order of the rows does not matter.
-Its two tolerances are fractions of the extent of the points (the
-diagonal of their bounding box), so the unit of the coordinates does not
-matter: the neighbour distance is not taken below a millionth of the
-extent, and the iteration stops when no centre moves by \\10^{-12}\\ of
-it. Points at one location count as that many points at it and share a
-cell; the neighbour distance is measured to the `density_k`-th nearest
-*other* location, so it is not zero where locations repeat. The
-neighbour searches use FNN when it is installed. The result is the same
-without it; the search then takes time that grows with the square of the
-number of points, about thirty times as long for 10,000 points and 2,000
+locations in coordinate order (see below for first coordinates equal but
+for their last bits), so the order of the rows does not matter. Its
+tolerances do not depend on the unit of the coordinates: the neighbour
+distance is not taken below a millionth of the extent of the points (the
+diagonal of their bounding box), the iteration stops when no centre
+moves by \\10^{-12}\\ of it, and the tie rules below are fractions of
+the extent or of the quantities they compare. On gridded locations many
+points are equally near two neighbours or two centres, and the last bits
+of the coordinates, which move with the unit and the origin, would
+settle those ties. So squared distances within one part in ten million
+of each other count as equal, a tie between neighbours goes to the lower
+first coordinate and then the lower second, a tie between centres goes
+to the lower-numbered one (between centres a squared distance ties with
+the least when it is no more than the square of the least distance
+lengthened by a margin, plus one part in ten million of the least
+squared distance; the margin is one part in 1e10 of the largest
+coordinate of the centres, at most a millionth of the diagonal of their
+bounding box and at least four times the spacing of doubles at that
+coordinate), first coordinates within that part of the extent count as
+equal when the rows and the locations are put in order, and so do
+weights within that part of each other when the first k-means++ centre
+is drawn. The cells are then the same in another unit or with another
+origin as long as no coordinate moves by more than about a
+two-hundred-millionth of the distance between neighbouring locations,
+but for one case: the margin of the centres grows with their largest
+coordinate (about 0.46 mm at a UTM northing near 4,550 km, about half a
+micrometre once the origin lies next to data 5 km across), and the rows
+are given to the centres in the layer's own coordinates, so a row whose
+distances to two centres differ by less than the margin with one origin
+and by more with another goes to the lower-numbered centre with the
+first and to the nearer with the second. The rounding PROJ leaves when
+it changes the unit or the false origin, about \\10^{-9}\\ m, is below
+that for locations more than about a quarter of a metre apart.
+Coordinates rounded more coarsely can give other cells: a lattice at 250
+m with its coordinates stored in feet to four decimals does. Points at
+one location count as that many points at it and share a cell; the
+neighbour distance is measured to the `density_k`-th nearest *other*
+location, so it is not zero where locations repeat. The neighbour
+searches use FNN when it is installed. The result is the same without
+it; the search then takes time that grows with the square of the number
+of points, about thirty times as long for 10,000 points and 2,000
 centres.
+
+The kind `"kmeans"` meets the same ties inside
+[`kmeans()`](https://rdrr.io/r/stats/kmeans.html), which settles them by
+the last bits of the coordinates and takes no tolerance. So it is handed
+the coordinates centred on the middle of their bounding box, divided by
+its diagonal and rounded to \\2^{-30}\\ of it (about a billionth); the
+starts are drawn from those coordinates and ranked by their sums, and
+the cells it returns are read back in the layer's own coordinates, so
+the centres, `wss` and every column are in its unit. The rows are put in
+order as for the density kind. The cells are then the same in another
+unit or with another origin unless the change moves a coordinate across
+the middle of a rounding step, which the rounding PROJ leaves (about
+\\10^{-9}\\ m) does more often the smaller the extent. Over 60 lattices
+with 5 m to 1 km between neighbouring locations, each in US feet, in
+feet, in kilometres and with two other false origins, at 5, 25 and 60
+cells from two seeds and both starting rules, the cells were the same in
+all 2,040 partitions of the 34 lattices that span a kilometre or more,
+and other cells came back in 205 of the 1,560 partitions of the 26
+lattices that span less (78 to 719 m). Distinct locations that would
+round to one point keep their coordinates unrounded, so they stay
+distinct. [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) also
+settles such ties by the last bits of its own compiled arithmetic, which
+differ between platforms, so on a layer where ties decide cells the kind
+`"kmeans"` can return other regions on another platform from the same
+coordinates and `seed`, and with them every column read off the cells:
+the 40 by 30 lattice at 250 m of the package's NEWS gets other regions
+on Linux on x86-64 than on macOS on arm64, the same in all of its units
+and origins on each.
 
 The columns keep their meaning under `"density"`, because each is read
 off the cells and not off the way they were drawn. `wss` is the
@@ -622,14 +754,14 @@ the floor exceeds the ceiling the data cannot support a tessellation
 that respects their own correlation structure; that is reported as a
 finding (a warning of class `spatialkit_not_supported`, and
 `attr(x, "bounds")$supported` is `FALSE`) and the ladder runs from 2 to
-the ceiling, so the profile still shows what each level costs. A floor
-equal to the ceiling would leave one level and nothing to compare it
-with, so that ladder starts at 2 as well. On a layer larger than
-`sample_n` the ceiling is also held to half the subsample's scored rows
-(two per cell, the least a fitted cell can be scored on; half the
-subsample without a response); `ceiling_from` is then `"sample_n"`, a
-floor above that is logged with a request to raise `sample_n`, and it
-does not make `supported` `FALSE`.
+the ceiling (or the `levels` asked for are scored, as given), so the
+profile still shows what each level costs. A floor equal to the ceiling
+would leave one level and nothing to compare it with, so that ladder
+starts at 2 as well. On a layer larger than `sample_n` the ceiling is
+also held to half the subsample's scored rows (two per cell, the least a
+fitted cell can be scored on; half the subsample without a response);
+`ceiling_from` is then `"sample_n"`, a floor above that is logged with a
+request to raise `sample_n`, and it does not make `supported` `FALSE`.
 
 The floor moves with the range estimate, and the ceiling with \\n\\. To
 compare profiles of similar data (the folds of a cross-validation, say),
@@ -727,13 +859,16 @@ when the points times the cells of the finest level times `nstart`
 (times `iter_max` for the density kind without FNN) is above
 `getOption("spatialkit.fit_work_max", 1e10)`. The message names the ways
 on: fewer starts, which keep the best of fewer; a coarser size;
-`partition = "density"` with `init = "random"` and FNN installed, which
-leaves a cell without a point more often (see `spatialkit_empty_cells`
-under "Conditions"); or a higher limit. The limit counts the finest
-level, and a ladder of several sizes fits every one of its levels. At
-the default size the work grows with the square of the rows, and the
-limit is set where the default call's fit takes about a minute: a call
-just below it runs that long, and prints nothing while it runs.
+`partition = "density"` with `init = "random"`, which leaves a cell
+without a point more often (see `spatialkit_empty_cells` under
+"Conditions") and, where FNN could not be loaded, needs it reinstalled
+first; or a higher limit. The work and the limit are written in full, so
+that a work just above the limit does not print as the limit. The limit
+counts the finest level, and a ladder of several sizes fits every one of
+its levels. At the default size the work grows with the square of the
+rows, and the limit is set where the default call's fit takes about a
+minute: a call just below it runs that long, and prints nothing while it
+runs.
 
 Without FNN the density kind also finds its weights by comparing every
 pair of distinct locations. A profile on a ladder of sizes stops, with
@@ -812,22 +947,37 @@ and what it returns in practice.
   `min_cell_n` is what is choosing;
   [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
   says so when that happens. It becomes a genuine interior criterion
-  only when the nugget is a large share of the sill. With a nugget of 0
-  (under \\10^{-4}\\ of the sill; usually a fit clipped at its lower
-  bound) the penalty is 0 and \\C_p\\ descends to the ceiling whatever
-  the field; the profile warns. When the variogram gives no nugget (none
-  was fitted, its fit has no minimum inside the ranges searched, its
-  range is below the shortest lag, it found no spatial structure, or
-  `sac` is a range alone), \\\tau^2\\ is Mallows' own choice instead:
-  the residual mean square \\RSS / (m - L_m)\\ of the finest level whose
-  cells hold at least two scored rows on average. It counts the
-  structure within those cells as noise too, so on average it is no
-  smaller than the nugget and errs towards fewer cells; the profile
-  warns, and `attr(, "cp_noise")` records which was used. When no
-  level's cells hold that many, `cp` is `NA` at every level, as it is
-  for a constant response, which the profile warns about. **In practice
-  its minimum is often a bound**, the support ceiling when the nugget is
-  a small share of the sill, and
+  only when the nugget is a large share of the sill. A nugget of 0, or
+  of at most \\10^{-4}\\ of the sill, which
+  [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  marks as `nugget_at_bound`, is the fit's lower bound and not an
+  estimate, and as \\\tau^2\\ it would leave no penalty, with which
+  \\C_p\\ descended to the ceiling whatever the field: \\C_p\\ does not
+  take it. When the variogram gives no nugget (none was fitted, its
+  nugget is at that bound, its fit has no minimum inside the ranges
+  searched, its range is below the shortest lag, it found no spatial
+  structure, or `sac` is a range alone), \\\tau^2\\ is Mallows' own
+  choice instead: the residual mean square \\RSS / (m - L_m)\\ of the
+  finest level whose cells hold at least two scored rows on average. It
+  counts the structure within those cells as noise too, so on average it
+  is no smaller than the nugget and errs towards fewer cells. When no
+  level's cells hold that many, or the finest that does has a residual
+  mean square of 0 to within the rounding of the values scored (as when
+  each of its cells holds one location whose rows carry one value), `cp`
+  is `NA` at every level, as it is for a constant response, which the
+  profile warns about. Whatever its source, \\\tau^2\\ is held to the
+  semivariance of nearest-neighbour pairs the variogram carries
+  (`attr(sac, "short_lag_semivariance")`, see
+  [`sac_nugget`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md)):
+  a semivariance does not fall as the lag shrinks, so it bounds the
+  nugget from above, and a larger \\\tau^2\\ is contradicted by the
+  closest pairs and stops \\C_p\\ early. A semivariance of 0 holds
+  nothing. When \\\tau^2\\ is not the nugget as it stands, a warning of
+  class `spatialkit_cp_noise` says where it came from, and
+  `attr(, "cp_noise")` records the source and, when the semivariance
+  held it, the number it replaced. **In practice its minimum is often a
+  bound**, the support ceiling when the nugget is a small share of the
+  sill, and
   [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
   then names the bound in `edge`. The same formula at one cell, with the
   total sum of squares as its RSS, is kept in `attr(, "one_cell")`, with
@@ -954,6 +1104,21 @@ logged (see
   `resolution_profile()`: the scored variable is constant to within
   rounding (a response the predictors fit exactly leaves such
   residuals), so `cp`, `moran_i` and `moran_z` are `NA` at every level.
+  On a profile with an `estimate` whose rows are constant too, so are
+  `loo` and `loo_se`, and for pooled values `own_weight`; the message
+  names them. [`summary()`](https://rdrr.io/r/base/summary.html) of such
+  a profile stops with an error that says the response is constant. Both
+  tests read the raw values and, where those show no spread, the values
+  centred on their median and scaled, so 1e15 plus a spread of 1 is not
+  constant while values that differ only by their rounding (0.1 beside
+  0.3 / 3) are; residuals are read against the rounding of the
+  regression and of the response, and where the residuals of the raw
+  values show no spread, they are those of a fit to the response less
+  its median. The test for `cp` reads the scored rows of the subsample
+  and the estimate's every row of the layer (of its selection half under
+  `select_on = "split"`) with a value: where the first finds the
+  response constant and the second does not, the message says that `loo`
+  is scored, and the print does not call the response a constant.
 
 - `spatialkit_empty_cells`:
 
@@ -1024,16 +1189,17 @@ logged (see
 
   [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md):
   the WSS curve has no elbow, or the ladder is too short to show one, so
-  the count returned is the ladder's and not a finding. The condition
-  carries `k`, `sag` and `structured`.
+  the count is the ladder's and not a finding. A warning beside the `NA`
+  the function returns at the default, `on_no_elbow = "na"`, and beside
+  the count under `"warn"`; an error under `"error"`. The condition
+  carries `k` (the ladder's count), `sag` and `structured`.
 
 - `spatialkit_diagnostic_ranking`:
 
   [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-  under `criterion = "morans_i"` or `"combined"`: Moran's z of the cell
-  means, a diagnostic and not a count rule, ordered the candidates
-  returned. The condition carries `k`, `criterion`, `first_computable`,
-  `window` and `upgraded`.
+  under `criterion = "morans_i"`: Moran's z of the cell means, a
+  diagnostic and not a count rule, ordered the candidates returned. The
+  condition carries `k`, `criterion`, `first_computable` and `window`.
 
 - `spatialkit_ladder_unused`:
 
@@ -1049,10 +1215,12 @@ logged (see
   two cells while a finer one does not, and its level is 2 (`reason` is
   `"fewer than two cells"`); or a size asks for more cells than k-means
   can place, and its level is the most that can (`reason` is
-  `"more cells than can be placed"`). The condition carries
-  `obs_per_cell`, `wanted`, `used` and `reason`. When the finest size
-  gives fewer than two cells the warning is `spatialkit_not_supported`,
-  with `obs_per_cell` among its fields and `min_cell_n` `NA`; and
+  `"more cells than can be placed"`). It is raised once for each reason,
+  naming every size held for it. The condition carries `obs_per_cell`
+  and `wanted` (one element for each such size, in the order of the
+  ladder), `used` and `reason`. When the finest size gives fewer than
+  two cells the warning is `spatialkit_not_supported`, with
+  `obs_per_cell` among its fields and `min_cell_n` `NA`; and
   `spatialkit_response_ceiling` is not raised on such a ladder, since a
   size already counts the rows with a response.
 
@@ -1065,26 +1233,90 @@ logged (see
   is `NA` at every level. The condition carries `n` (the rows that share
   a location), `total` (the rows `loo` read) and `column`.
 
+- `spatialkit_no_scored_rows`:
+
+  `resolution_profile()` under `select_on = "split"`: no row of the
+  selection half has a response, and the rows of the layer with one are
+  all in the estimation half. `rss`, `cp`, `moran_i` and `moran_z`,
+  which read the selection half, are `NA` at every level. With an
+  `estimate`, whose check that it has rows to read is made on the layer,
+  `loo` and the estimate's other columns read no row and are `NA` at
+  every level too. With `predictor_vars` a row counts when it has a
+  response and every predictor. Not raised when no row of the layer has
+  a response. Raised once, after the levels are scored. The condition
+  carries `reason` (`"no response in the selection half"`), `n` (0, the
+  rows of the selection half scored), `selection` (the rows of the
+  selection half), `n_response` (the rows of the layer with a response)
+  and `column`. Raised too, with or without the split, when rows of the
+  layer have a response and none of them every predictor: then `reason`
+  is `"no row with a response and every predictor"`, `n_response` the
+  rows with a finite response, and `selection` `NA` without the split.
+
+- `spatialkit_pool_unavailable`:
+
+  `resolution_profile()` with an `estimate`: the values of the response
+  lie beyond what the arithmetic of the estimate holds, values so large,
+  or so close to their median, that the squares of many such values can
+  overflow or lose their precision, so `loo`, `loo_se` and `own_weight`
+  are `NA` at every level. Where the test for `cp` finds such a response
+  constant, `cp`, `moran_i` and `moran_z` are `NA` for the same reason,
+  and this message names them in place of
+  `spatialkit_constant_response`. The message gives the bounds; the
+  response rescaled by a power of ten is scored. Raised once, after the
+  levels are scored. The condition carries `reason`
+  (`"values out of range"`) and `columns`, the response, as
+  [`summarize_by_cell`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)`(estimate = "pooled")`
+  raises the class for its pooled columns.
+
 - `spatialkit_moran_skipped`:
 
   `resolution_profile()` with a level of more than 5,000 cells, on any
-  ladder, when FNN or Matrix is not installed: `moran_i` and `moran_z`
-  are `NA` at a level where more than 5,000 cells hold a scored row, and
-  every other column is computed. Raised once, before the first fit,
-  when such a level can occur: the cells that hold a scored row are
-  counted after a level's fit, so where rows without a response leave
-  fewer of them the two columns are computed after all. The condition
-  carries `limit`, `levels` (the levels above the limit) and `missing`.
+  ladder, when FNN cannot be loaded or Matrix is not installed:
+  `moran_i` and `moran_z` are `NA` at a level where more than 5,000
+  cells hold a scored row, and every other column is computed. Raised
+  once, before the first fit, when such a level can occur: the cells
+  that hold a scored row are counted after a level's fit, so where rows
+  without a response leave fewer of them the two columns are computed
+  after all. The condition carries `limit`, `levels` (the levels above
+  the limit) and `missing`.
+
+- `spatialkit_variogram_unusable`:
+
+  `resolution_profile()`: the variogram, the one estimated or `sac`,
+  gives no usable range (`rejected_reason` of
+  [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)),
+  so `reliability` is `NA`, and the message says whether `cp` may still
+  take its nugget. The condition carries `reason`, `converged` (whether
+  the variogram model converged; `NA` when it does not say), `nugget`
+  and `nugget_used`.
+
+- `spatialkit_cp_noise`:
+
+  `resolution_profile()`: `cp` does not take the variogram's nugget as
+  it stands. Its noise variance is the residual mean square of the
+  finest level (the variogram gives no nugget, or its nugget is at the
+  fit's lower bound), or the semivariance of nearest-neighbour pairs,
+  which holds the nugget or that residual mean square where they are
+  larger; or there is none and `cp` is `NA` at every level: the finest
+  level whose cells hold two scored rows on average has a residual mean
+  square of 0 to within rounding, or, with the nugget at its bound, no
+  level's cells hold that many. The condition carries `source`, `value`
+  and `level` (as `attr(, "cp_noise")` holds them; with no noise
+  variance `source` and `value` are `NA`, and `level` is the level whose
+  residual mean square is 0 to within rounding, or `NA`), `cap` (the
+  semivariance, `NA` when the variogram carries none), `uncapped_source`
+  and `uncapped_value` (what `cp` would take without the hold, and with
+  no noise variance what it refused: the nugget at its bound, or that
+  residual mean square).
 
 Two refusals are errors with a class: `spatialkit_diagnostic_criterion`
 (`select_resolution(criterion = "moran_z")` without `diagnostic = TRUE`)
 and `spatialkit_no_default_criterion` (a profile passed as a cell count
 whose `cp` is `NA` at every level while another criterion is finite).
 The remaining warnings of these functions (points dropped, a variogram
-that gives `cp` no nugget, a zero nugget, a variogram of another
-variable) are R warnings without a class; rows left out for a missing
-response, a rising WSS curve and a subsample too small to reach the
-floor are logged only.
+of another variable) are R warnings without a class; rows left out for a
+missing response, a rising WSS curve and a subsample too small to reach
+the floor are logged only.
 
 A third refusal is an error of class `spatialkit_work_limit`:
 `resolution_profile()` stops before a step whose count of comparisons is
@@ -1178,79 +1410,76 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   select_resolution(prof1)   # the count the size gives
 }
 #> Resolution profile: 12 levels on 400 points
-#>   ladder      : 2 to 44 cells (floor 4 from range 517, not applied, ceiling 44 from min_cell_n = 9)
-#>   variogram   : nugget 0.582, partial sill 0.819, range 517
+#>   ladder      : 2 to 44 cells (floor 4 from range 516.8, not applied, ceiling 44 from min_cell_n = 9)
+#>   variogram   : nugget 0.582, partial sill 0.819, range 516.8
 #>   scored on   : response; 3 density-weighted k-means++ starts (power 1, 8 neighbours) per level; WSS rises at 0 step(s)
 #>   one cell    : rss 490, cp 1.23 (one mean for the layer; a level has to beat it)
 #>   estimate    : pooled toward the 8 nearest cells; loo on 400 rows of the layer; one cell: loo 1.23
 #>   elbow       : none; the WSS curve falls as it does with no cluster structure
 #> 
 #>  levels      wss wss_spread elbow cell_n_min cell_n_median cell_diam_median rss
-#>       2 41800000   0.00e+00    NA        182         200.0              646 482
-#>       3 25400000   6.21e-05    NA        122         134.0              473 480
-#>       4 16900000   2.80e-01    NA         78         105.0              410 469
-#>       5 14400000   4.31e-02    NA         64          78.0              359 457
-#>       6 11600000   8.99e-02    NA         56          68.0              348 436
-#>       8  8320000   1.33e-01    NA         40          49.5              297 437
-#>      11  5670000   1.07e-01    NA         30          34.0              229 381
-#>      14  4480000   1.14e-01    NA         19          29.0              211 370
-#>      19  3350000   3.71e-03    NA         11          20.0              175 368
-#>      25  2300000   1.82e-01    NA          9          16.0              153 345
-#>      33  1820000   1.08e-01    NA          6          12.0              133 334
-#>      44  1260000   2.74e-02    NA          5           9.0              110 297
+#>       2 41800000   0.000000    NA        182         200.0              646 482
+#>       3 25400000   0.268000    NA        122         134.0              473 480
+#>       4 16900000   0.000112    NA         77         106.0              410 469
+#>       5 14100000   0.048400    NA         65          74.0              373 445
+#>       6 11600000   0.125000    NA         53          68.5              347 432
+#>       8  8550000   0.057700    NA         39          51.0              288 413
+#>      11  5950000   0.084200    NA         28          36.0              239 394
+#>      14  4430000   0.084100    NA         19          28.0              207 367
+#>      19  3360000   0.028100    NA         11          22.0              168 343
+#>      25  2530000   0.178000    NA          7          16.0              155 338
+#>      33  1790000   0.110000    NA          7          12.0              130 348
+#>      44  1250000   0.063900    NA          3           9.0              106 314
 #>     cp moran_i moran_z reliability cells_resp cell_resp_mean scored_per_cell
 #>  1.210      NA      NA       0.839          2         200.00          200.00
 #>  1.210      NA      NA       0.861          3         133.00          133.00
 #>  1.180      NA      NA       0.863          4         100.00          100.00
-#>  1.160      NA      NA       0.860          5          80.00           80.00
-#>  1.110      NA      NA       0.855          6          66.70           66.70
-#>  1.120      NA      NA       0.844          8          50.00           50.00
-#>  0.984 -0.0566   0.812       0.827         11          36.40           36.40
-#>  0.965 -0.0429   0.496       0.810         14          28.60           28.60
-#>  0.974  0.0195   1.020       0.784         19          21.10           21.10
-#>  0.935  0.1240   2.240       0.756         25          16.00           16.00
-#>  0.931  0.1610   2.710       0.722         33          12.10           12.10
-#>  0.871  0.2500   4.280       0.681         44           9.09            9.09
+#>  1.130      NA      NA       0.860          5          80.00           80.00
+#>  1.100      NA      NA       0.855          6          66.70           66.70
+#>  1.060      NA      NA       0.844          8          50.00           50.00
+#>  1.020 -0.0248   1.400       0.827         11          36.40           36.40
+#>  0.957 -0.0668   0.137       0.810         14          28.60           28.60
+#>  0.914  0.0123   0.915       0.784         19          21.10           21.10
+#>  0.918  0.0142   0.743       0.756         25          16.00           16.00
+#>  0.965  0.1870   3.110       0.722         33          12.10           12.10
+#>  0.914  0.2490   4.240       0.681         44           9.09            9.09
 #>    loo loo_se share_alone own_weight
 #>  1.220 0.0987           0      0.930
 #>  1.220 0.0984           0      0.843
-#>  1.190 0.0972           0      0.884
-#>  1.170 0.0891           0      0.890
-#>  1.120 0.0848           0      0.917
-#>  1.130 0.0911           0      0.871
-#>  1.000 0.0716           0      0.904
-#>  0.988 0.0695           0      0.905
-#>  1.010 0.0706           0      0.858
-#>  0.973 0.0697           0      0.842
-#>  0.970 0.0706           0      0.790
-#>  0.905 0.0631           0      0.747
-#> Resolution by cp: 44 cells
-#>   flat region : 44 (1 of 12 levels)
+#>  1.190 0.0972           0      0.885
+#>  1.140 0.0898           0      0.914
+#>  1.110 0.0846           0      0.924
+#>  1.070 0.0779           0      0.918
+#>  1.040 0.0737           0      0.891
+#>  0.979 0.0715           0      0.909
+#>  0.937 0.0701           0      0.899
+#>  0.950 0.0701           0      0.862
+#>  1.000 0.0714           0      0.740
+#>  0.943 0.0670           0      0.720
+#> Resolution by cp: 19 cells
+#>   flat region : 19 to 25, 44 (3 of 12 levels)
 #>   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
-#>   note        : the optimum is the support ceiling (n / min_cell_n); the
-#>                 bound is choosing, not the criterion. Lower min_cell_n to see
-#>                 whether the criterion keeps going.
 #>   note        : cp scores plain means, and this profile's estimate is the
 #>                 pooled value; criterion = "size" is the rule for it.
-#> Resolution profile: 1 levels on 400 points
+#> Resolution profile: 1 level on 400 points
 #>   ladder      : 89 cells (obs_per_cell = 4.5 on the 400 rows with a response; centres fitted to every row; floor 2 (no range))
 #>   variogram   : none fitted: a size ladder fits one only when `sac` is given (cp and reliability are NA)
-#>   scored on   : response; 3 density-weighted k-means++ starts (power 1, 8 neighbours) per level; WSS rises at 0 step(s)
+#>   scored on   : response; 3 density-weighted k-means++ starts (power 1, 8 neighbours) per level
 #>   one cell    : rss 490 (one mean for the layer; a level has to beat it)
 #>   estimate    : pooled toward the 8 nearest cells; loo on 400 rows of the layer; one cell: loo 1.23
 #> 
 #>  levels    wss wss_spread elbow cell_n_min cell_n_median cell_diam_median rss
-#>      89 519000     0.0338    NA          1             4             62.3 253
+#>      89 502000     0.0698    NA          1             4               64 255
 #>  cp moran_i moran_z reliability cells_resp cell_resp_mean scored_per_cell   loo
-#>  NA   0.402    8.53          NA         89           4.49            4.49 0.896
+#>  NA   0.389    8.28          NA         89           4.49            4.49 0.903
 #>  loo_se share_alone own_weight
-#>  0.0636       0.005      0.447
+#>  0.0645        0.01      0.397
 #> Resolution by size: 89 cells
-#>   size        : 4.5 rows per cell asked (obs_per_cell); 400 rows / 89 cells = 4.49
+#>   size        : 4.5 rows per cell, the default (obs_per_cell); 400 rows / 89 cells = 4.49
 #>   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
 #>   estimate    : pooled toward the 8 nearest cells
-#>   at this size: 0.5% of the rows are alone in their cell; median own weight 0.45
-#>   loo         : 0.896 (one cell for the layer: 1.23)
-#>   note        : the count is set by obs_per_cell = 4.5, the caller's choice;
-#>                 no criterion chose it.
+#>   at this size: 1.0% of the rows are alone in their cell; median own weight 0.40
+#>   loo         : 0.903 (one cell for the layer: 1.23)
+#>   note        : the count is set by obs_per_cell = 4.5, the default; no
+#>                 criterion chose it.
 ```

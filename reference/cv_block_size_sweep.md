@@ -1,15 +1,22 @@
 # Cross-validate at a ladder of block sizes
 
-A blocked cross-validation with blocks smaller than the autocorrelation
-range leaks: every held-out point has a near-identical neighbour in the
-training set, and the score is optimistic in proportion. The single
-number a `cv_*()` call returns cannot show this. This runs the same
-cross-validation at a ladder of block sizes, and by default once with
-random folds as the fully leaky reference. It returns the metric at
-each, with the estimated autocorrelation range alongside so that the
-curve can be read against it: it rises as the blocks pass the range and
-then plateaus, and the height of the rise is how much the random-fold
-number overstated the model.
+A cross-validated error is the error at the distance the folds put
+between the held-out points and their training data, and the wider the
+blocks, the farther that is. The single number a `cv_*()` call returns
+is the error at one such distance. This runs the same cross-validation
+at a ladder of block sizes, and by default once with random folds as the
+reference, whose held-out points keep most of their neighbours in the
+training data. It returns the metric at each, with the estimated
+autocorrelation range alongside. The rise of the curve with block size
+measures the error at that distance from the data: how much worse the
+model predicts a location the farther it lies from the observations. It
+is the error of a map only at locations that far from the data, so the
+curve does not by itself say which size to report. The size to read is
+the one whose held-out distances match those of the locations the model
+will predict at:
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+with `prediction_points` reads the folds of each size (the `$folds` of
+each element of `attr(x, "results")`) against them.
 
 ## Usage
 
@@ -71,8 +78,9 @@ cv_block_size_sweep(
 
 - include_random:
 
-  Also cross-validate with random folds, as the leaky reference. Default
-  `TRUE`.
+  Also cross-validate with random folds, as the reference: the error of
+  predicting among the samples, where each held-out point keeps most of
+  its neighbours in the training data. Default `TRUE`.
 
 - max_fits:
 
@@ -118,7 +126,10 @@ size, `NA` for the random reference). Attributes: `metric`, `sac_range`
 (the effective range, or `NA`), `crs`, `k` (the folds requested, which
 [`print()`](https://rdrr.io/r/base/print.html) and
 [`plot()`](https://rdrr.io/r/graphics/plot.default.html) report),
-`n_fits`, `response_var`, and `results`, the full
+`n_fits` (the fits planned, which the `max_fits` check reads;
+[`print()`](https://rdrr.io/r/base/print.html) and
+[`plot()`](https://rdrr.io/r/graphics/plot.default.html) count the fits
+made from the `k` column), `response_var`, and `results`, the full
 [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
 result at every size.
 [`plot()`](https://rdrr.io/r/graphics/plot.default.html) draws it.
@@ -130,9 +141,11 @@ Each block size is a full cross-validation, so the cost is
 `max_fits` caps that (default 60: room for up to eleven sizes at `k = 5`
 plus the reference; the default six-size ladder at `k = 5` needs at most
 35). A sweep that would run past the cap refuses to start, naming the
-number of fits it would have needed. Raise `max_fits` deliberately; the
-RF example below takes seconds, a Bayesian `fit_fn` takes minutes per
-fit.
+number of fits it would have needed; lower `n_sizes` or `k` to cut it
+(with `block_sizes` supplied: pass fewer `block_sizes` or a smaller
+`k`), or pass `include_random = FALSE` when the count includes the
+reference. Raise `max_fits` deliberately; the RF example below takes
+seconds, a Bayesian `fit_fn` takes minutes per fit.
 
 ## The ladder
 
@@ -146,8 +159,10 @@ a roughly square extent at the default `k = 5` the top is about a third
 of the side. Any size at which the grid would hold more than the
 1,000,000
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-will build is dropped. The count is of grid cells: on clustered data a
-grid of `k` or more cells can have fewer than `k` that hold points, and
+will build is dropped; when that drops every size, the sweep refuses and
+names the largest size whose grid holds `k` blocks, to pass as
+`block_sizes`. The count is of grid cells: on clustered data a grid of
+`k` or more cells can have fewer than `k` that hold points, and
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
 then lowers `k` at that size, which the `k` column shows; the sweep
 warns once, naming the sizes. On an extent much longer than it is wide
@@ -221,16 +236,16 @@ if (requireNamespace("ranger", quietly = TRUE) &&
   if (requireNamespace("ggplot2", quietly = TRUE)) plot(sw)
 }
 #> Cross-validation RMSE against block size (20 fits, k = 4, sizes in EPSG:32632)
-#>   estimated autocorrelation range: 460.0
+#>   estimated autocorrelation range: 460
 #>  block_size       method blocks_used k n_folds_succeeded  value fold_min
 #>      random random_kfold          NA 4                 4 0.9639   0.8346
-#>       38.73  block_kfold         172 4                 4 0.9438   0.7825
+#>       38.73  block_kfold         174 4                 4 0.9776   0.9566
 #>       89.89  block_kfold          87 4                 4 1.0380   0.8706
 #>      208.60  block_kfold          16 4                 4 1.1289   1.0262
 #>      484.10  block_kfold           4 4                 4 1.2438   0.9707
 #>  fold_max
 #>     1.146
-#>     1.079
+#>     1.016
 #>     1.117
 #>     1.233
 #>     1.540

@@ -5,8 +5,15 @@ that boundary (optionally buffered by `expand`); without one it is the
 axis-aligned bounding box of `points_sf` (the rectangle in the working
 CRS), again optionally buffered, or a small buffer around the points
 when they all share one x or one y, or nearly so (the short side of
-their bounding box below a millionth of the long side). Reach for it to
-build the `boundary` that `method = "hex"` and `"square"` require, to
+their bounding box below a millionth of the long side, or below about
+1.5e-154, a length whose square doubles cannot hold). When every point
+sits at one location, or the share of their spread the buffer would take
+(5 percent, or a fractional `expand`) is below that length, the box has
+no extent to take a share of, and the target is a disk of radius 1 unit
+of the CRS around it (1 m in a metre CRS, 1 km in a kilometre CRS),
+unless `expand` is 1 or more, which is then the radius; the message says
+so. Pass `boundary` for a target of real size. Reach for this function
+to build the `boundary` that `method = "hex"` and `"square"` require, to
 check that a study-area polygon actually contains the observations
 before tessellating, or to pass the same envelope to
 [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
@@ -24,7 +31,22 @@ clip_target_for(points_sf, boundary = NULL, expand = 0, quiet = FALSE)
 
 - points_sf:
 
-  An sf object with POINT/MULTIPOINT geometry.
+  An sf object with POINT/MULTIPOINT geometry. Points that mix XY and
+  XYZ (or XYM), or that carry M, are read in x and y, since sf reads a
+  layer in the dimension of its first geometry and GEOS refuses M. A
+  point that is empty, or has a coordinate that is not finite or lies
+  beyond 1e150, has no location and takes no part in the bounding box.
+  With no `boundary`, points none of which has a location (as given, or
+  after the move of lon/lat points into a projected CRS) are refused
+  with an error that says so. Points that take the buffer, so far from
+  the origin of their CRS that doubles there are spaced more than a
+  millionth of the target's size apart (0.125 at 1e15, beside a disk of
+  radius 1), give a buffer drawn at that rounding, with a warning of
+  class `"spatialkit_xy_imprecise"` that gives the spacing and the
+  radius. Where the buffer comes back empty or with no area, as a radius
+  below that spacing can make it, the call stops with an error of class
+  `"spatialkit_xy_imprecise_error"`. Shift such points nearer the
+  origin, or pass `boundary`.
 
 - boundary:
 
@@ -35,7 +57,21 @@ clip_target_for(points_sf, boundary = NULL, expand = 0, quiet = FALSE)
   does: coordinates that look like lon/lat are taken as EPSG:4326 and
   reprojected, anything else is stamped with the points' CRS. With
   lon/lat points it is read as lon/lat when its coordinates fit the
-  lon/lat envelope, and refused with an error otherwise.
+  lon/lat envelope, and refused with an error otherwise. A boundary that
+  mixes XY and XYZ (or XYM) geometries is read without Z and M, since sf
+  reads a layer in the dimension of its first geometry. So is one whose
+  geometries carry M (XYM or XYZM), which GEOS refuses. A row that is
+  empty, or has a coordinate that is not finite or lies beyond 1e150
+  (read as given, and again after any move into another CRS), covers no
+  ground and is left out; a boundary with no such row left is refused
+  with an error that says so. A boundary in a geographic CRS with a
+  vertex at a latitude beyond 90 degrees, which is no place on the
+  Earth, is refused with an error of class
+  `"spatialkit_cells_degenerate"` that names its rows and says to check
+  its CRS. A row the repair of `boundary` leaves without a polygon (a
+  ring with no height: every vertex on one line, or in degrees on one
+  parallel) is left out as well, and a boundary with no polygon left is
+  refused.
 
 - expand:
 

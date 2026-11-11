@@ -51,13 +51,14 @@ A `ggplot` object.
 
 ## Details
 
-When location has an index of its own (a `gwr_fit`, a `bayesian_fit`, or
-`coords = "yes"`; see
+When location has an index of its own (a `gwr_fit`, a `bayesian_fit`, a
+forest fitted with `include_coords = TRUE`, or `coords = "yes"`; see
 [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)),
-the curves and the dashed line are the predictor index alone. The
-subtitle then counts three things: the locations beyond the predictor
-threshold, those beyond the location threshold, and those outside the
-area of applicability, which is either.
+the curves and the dashed line are the predictor index alone (for the
+forest, its `..x` and `..y` columns included). The subtitle then counts
+three things: the locations beyond the predictor threshold, those beyond
+the location threshold, and those outside the area of applicability,
+which is either.
 
 ## See also
 

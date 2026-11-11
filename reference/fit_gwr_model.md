@@ -77,7 +77,19 @@ fit_gwr_model(
 - kernel:
 
   Kernel function type. One of "bisquare" (default), "gaussian",
-  "tricube", "boxcar", "exponential".
+  "tricube", "boxcar", "exponential". The boxcar gives weight 1 to every
+  observation within the bandwidth's distance (with an adaptive
+  bandwidth, the distance to the `bandwidth`-th nearest neighbour) and 0
+  to the others; an observation whose squared distance is within one
+  part in ten million of the edge counts as at the edge, and inside, so
+  on a regular grid every neighbour tied with the last one is in the
+  window in any unit and at any origin where the doubles hold the
+  coordinates to better than about one part in 1e8 of the distances
+  between neighbours. Farther from the origin the doubles round the
+  coordinates more coarsely, and where a neighbour lies past the edge by
+  less than that rounding the call warns, with class
+  `"spatialkit_xy_imprecise"`; the windows are those the coordinates as
+  stored give.
 
 - .already_prepped:
 
@@ -142,6 +154,23 @@ local coefficients, `y`, `yhat`, `residual`, `CV_Score`,
 `Stud_residual`, the standard errors `<term>_SE`, the t values
 `<term>_TV` and `Local_R2`), `GW.diagnostic`, `GW.arguments` and `lm`
 (the global least-squares fit). It is a plain list, not a `gwrm` object.
+Where a predictor or the response was taken less its centre (see **The
+local solve**), `lm` is solved on the centred columns and returned as
+the fit at the data's origin: its coefficients, fitted values, `qr` and
+`effects` are those of the raw columns, so
+[`summary()`](https://rdrr.io/r/base/summary.html),
+[`vcov()`](https://rdrr.io/r/stats/vcov.html),
+[`confint()`](https://rdrr.io/r/stats/confint.html) and
+[`predict()`](https://rdrr.io/r/stats/predict.html) on it give the
+intercept at the data's 0 and its standard error, and the slopes and
+residuals are those of the centred fit. With a predictor more than about
+1e7 times its spread from 0, `predict(se.fit = TRUE)` on it stops with
+"singular matrix": [`qr.solve()`](https://rdrr.io/r/base/qr.html) reads
+the triangular factor at the data's origin as singular.
+[`predict()`](https://rdrr.io/r/stats/predict.html) on the fit itself
+has no such limit. `centres` holds what was taken off: `predictors`, the
+centre of each column of the design (`Intercept` first, 0 for a column
+used as it is), `NULL` where none was, and `response`, 0 where none was.
 
 ## The local solve
 
@@ -154,6 +183,44 @@ weight, and each predictor is divided by its standard deviation over the
 whole data and centred in the window, so nothing below depends on a
 predictor's origin or units: an indicator coded 0/1 and one coded
 288.7/289.3 give the same fit.
+
+A predictor whose centre is more than 1000 times its spread (a timestamp
+in seconds, a northing, 1e8 plus a spread of 1) is taken less its centre
+first. So is a response whose centre is more than 1000 times its spread
+(1e8 plus a spread of 1), whose raw values lose their spread to rounding
+(1e15 plus a spread of 1, stored to an eighth), or whose least-squares
+residuals on the predictors do. The bandwidth search, the local
+regressions, the global least-squares fit and the centred condition
+indices (`info$condition_index`, `cn_slopes`) then work on the spread
+and not on the rounding of the offset, and the centres are added back
+only to what is returned in the data's units: the fitted values, the
+local intercepts, the intercept and fitted values of `$engine$lm`, and
+[`predict()`](https://rdrr.io/r/stats/predict.html)'s values, which take
+a new row's predictors about the same centres. Residuals, slopes and
+their standard errors, AICc and the bandwidth are those of the same
+values at 0, to rounding; the fitted values and predictions of a
+response at 1e15 are held to the eighth a double holds there.
+[`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md),
+[`summary()`](https://rdrr.io/r/base/summary.html) and the
+cross-validations score the fit on the response, the fitted values and
+the predictions less the response's centre, so their RMSE, MAE and
+R-squared are those of the same values at 0 too. Every other predictor
+and response is used as it is.
+
+A response whose values, less any centre, reach beyond 1e100, or whose
+spread is below 1e-100, is divided by a power of two, which rounds
+nothing: the residual sum of squares, AICc and the bandwidth search
+square the residuals, and at 1e160 those squares overflow and at 1e-160
+they lose their bits. The bandwidth is then that of the same values in
+ordinary units, and the fitted values, the residuals, the coefficients,
+their standard errors and `$engine$lm` are those of the same values
+times the factor; AICc, the AICc of `info$bandwidth_search` among them,
+gains \\2 n \log\\ of the factor, and a cross-validation score of the
+search is multiplied by its square. The residual sum of squares,
+`info$sigma2` and such a score are in the response's units squared, and
+are `NA`, with a warning, where a double cannot hold them there;
+`predict(se.fit = TRUE)` then takes its standard errors from the
+residual standard deviation, which it can hold.
 
 One tolerance, `1e-7`, decides what a window can estimate:
 

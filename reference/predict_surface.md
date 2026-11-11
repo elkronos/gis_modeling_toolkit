@@ -34,17 +34,34 @@ predict_surface(
   is built over the training extent. Must have at least one row. It is
   brought into the fit's CRS first: a CRS-less grid is given the
   interpretation the training data got (the assumption recorded on the
-  fit), with a warning, and then reprojected. Otherwise a CRS-less grid
-  can land thousands of kilometres from the covariates and every cell
-  takes the same nearest feature. A grid still without a CRS after that
-  is treated as `boundary` is: taken as EPSG:4326 and reprojected when
-  its coordinates look like lon/lat, otherwise stamped with the fit's
-  CRS, with a warning either way. A grid of polygons
+  fit), with a warning, and then reprojected; when that is longitude and
+  latitude, a grid with an x outside -180 to 360 or a y beyond 90 north
+  or south cannot be in it, and the call stops. Otherwise a CRS-less
+  grid can land thousands of kilometres from the covariates and every
+  cell takes the same nearest feature. A grid still without a CRS after
+  that is treated as `boundary` is: taken as EPSG:4326 and reprojected
+  when its coordinates look like lon/lat, otherwise stamped with the
+  fit's CRS, with a warning either way. A fit's CRS in longitude and
+  latitude is not stamped on coordinates outside longitude -180 to 360
+  and latitude -90 to 90: that is refused. A grid of polygons
   ([`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
   output, say) is reduced to one representative point per cell, as
   [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
   does, so covariates are taken at the location predicted for;
-  `boundary` then keeps the cells whose point falls inside it.
+  `boundary` then keeps the cells whose point falls inside it. The grid
+  is read in x and y: one whose geometries mix XY with XYZ or XYM (as
+  [`rbind()`](https://rdrr.io/r/base/cbind.html) of an XY and an XYZ
+  layer gives), or carry M (XYM or XYZM), is read without its Z and M. A
+  POINT grid whose coordinates are not moved (one in the fit's CRS, or
+  one without a CRS that is stamped with it) is returned with its rows
+  as given, Z and M included; one that mixes dimensions and is
+  reprojected into the fit's CRS comes back in XY with a warning of
+  class `"spatialkit_zm_dropped"`. The points a grid of polygons is
+  reduced to are in XY when its geometries mix dimensions or carry M. A
+  row without a location (an empty geometry, or a coordinate that is not
+  finite or lies beyond 1e150) gets an `NA` prediction; in a grid that
+  is reprojected, or reduced from polygons, it comes back as an empty
+  point.
 
 - cell_size:
 
@@ -70,14 +87,57 @@ predict_surface(
   through the same CRS replay and reprojection as `grid`. One still
   without a CRS after the replay is taken as EPSG:4326 and reprojected
   when its coordinates look like lon/lat, and is otherwise stamped with
-  the fit's CRS, with a warning either way.
+  the fit's CRS, with a warning either way, or refused as `grid` is.
+  Read in x and y: a boundary whose geometries mix XY with XYZ or XYM,
+  or carry M, is read without its Z and M.
 
 - covariates:
 
   Optional `sf` layer carrying the model's predictors. Required when the
   model has predictors and `grid` does not already contain them. Values
   are taken from the nearest feature. Aligned to the fit's CRS as `grid`
-  is, with the same warning when it has no CRS.
+  is, with the same warning when it has no CRS. Read in x and y: a layer
+  whose geometries mix XY with XYZ or XYM, or carry M, is read without
+  its Z and M, with no warning. A row without a location (an empty
+  geometry, or a coordinate that is not finite or lies beyond 1e150) is
+  never the nearest feature. A grid point the same distance from several
+  points of `covariates` (a squared distance no more than the square of
+  the least distance lengthened by a margin, plus one part in ten
+  million of the least squared distance; the margin is one part in 1e10
+  of the largest coordinate of the points that have a location, at most
+  a millionth of the diagonal of their bounding box and at least four
+  times the spacing of doubles at that coordinate) takes the one lowest
+  in x, x values within one part in ten million of the diagonal of the
+  points' bounding box, or within one part in 1e10 of their largest
+  coordinate (at most a millionth of that diagonal, and at least four
+  times the spacing of doubles at that coordinate) where that is more,
+  counting as one, then the one lowest in y, y values read the same way,
+  then the first in row order, so a grid laid between the points of a
+  lattice takes the same covariates in another unit or with another
+  origin, and with or without the FNN package, as does a grid point near
+  two points that lie within that margin of each other (two records of
+  one station that differ only in the last bits of their coordinates),
+  however near it lies. A grid point the same distance from several
+  features of a layer of lines or polygons, or of one that mixes them
+  with points (on the edge two polygons share, say: distances within one
+  part in ten million of the least, plus one part in 1e10 of the largest
+  coordinate of `covariates`, at most a millionth of the diagonal of its
+  bounding box and at least four times the spacing of doubles at that
+  coordinate, count as the same) takes the one whose bounding-box centre
+  is lowest in x, then lowest in y, x values and y values within one
+  part in ten million of the diagonal of the bounding box of
+  `covariates` counting as one, then the first in row order. For a layer
+  in degrees the nearest feature is
+  [`sf::st_nearest_feature()`](https://r-spatial.github.io/sf/reference/st_nearest_feature.html)'s,
+  which settles such a tie in the order its search meets the features
+  (GEOS, or s2 for a layer in degrees while
+  [`sf::sf_use_s2()`](https://r-spatial.github.io/sf/reference/s2.html)
+  is on). Both margins grow with the largest coordinate (about 0.46 mm
+  at a UTM northing near 4,550 km, about half a micrometre once the
+  origin lies next to data 5 km across), so a grid point whose distances
+  to two features differ by less than the margin with one origin and by
+  more with another takes the one the tie rule picks with the first and
+  the nearer with the second.
 
 - chunk_size:
 

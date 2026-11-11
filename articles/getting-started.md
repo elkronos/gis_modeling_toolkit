@@ -153,9 +153,9 @@ st_crs(counties)$units_gdal
 `nc.shp` arrives in NAD27, a geographic CRS in degrees.
 [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
 chose a local Albers equal-area projection and logged why: across this
-extent the UTM zone distorts distances by 0.20 percent at worst and the
-Albers projection by 0.01 percent. Pass `target_crs` to override the
-choice.
+extent the UTM zone distorts distances by 0.21 percent at worst and the
+Albers projection by 0.01 percent. `attr(counties, "crs_choice")` holds
+the figures the log gives. Pass `target_crs` to override the choice.
 
 A layer with no CRS at all is decided by a documented heuristic. If the
 bounding box fits the lon/lat envelope and the coordinates look like
@@ -205,11 +205,13 @@ Four more things about the data, each handled without stopping you:
 - Two observations at the same coordinates are fine for models and
   folds; a Voronoi tessellation keeps one seed per location, and every
   point at that location is indexed to its cell.
-- A point outside the boundary you tessellate gets no cell: `tess$index`
-  is `NA` for it and
+- An observation outside the boundary you tessellate gets no cell:
+  `tess$index` is `NA` for it and
   [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
   leaves it out, with a warning that gives the count, unless you ask for
-  it back with `keep_unassigned = TRUE`.
+  it back with `keep_unassigned = TRUE`. A seed from a seeding function
+  outside the boundary whose cell reaches into it keeps that cell
+  ([`?create_voronoi_polygons`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)).
 - A variogram, which is what sizes blocks from the data, needs about
   thirty points; below that
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
@@ -240,8 +242,11 @@ and the seeding functions gives k-means cells.
 ``` r
 
 # 1. How many cells can these data support?  The answer is a ranked vector,
-#    best first, and the next call takes it as it is.
-lv <- determine_optimal_levels(obs, max_levels = 40)
+#    best first, and the next call takes it as it is.  These points have no
+#    elbow: by default the call returns NA there, with a warning, and
+#    on_no_elbow = "warn" returns the count the ladder lands on, with the
+#    same warning.
+lv <- determine_optimal_levels(obs, max_levels = 40, on_no_elbow = "warn")
 lv
 ```
 
@@ -265,7 +270,7 @@ c(best_level = lv[1], cells = nrow(tess$cells))
 ```
 
     ## best_level      cells 
-    ##          5          8
+    ##          5          7
 
 ``` r
 
@@ -336,8 +341,10 @@ both when neither is named.
 
 Eight cells, four of them slivers at the state’s edge with no county
 inside, is coarse. A hundred county centroids spread fairly evenly have
-no elbow to find, and the call warns that `max_levels` chose this count
-rather than the data.
+no elbow to find. At its default the call then returns `NA`, with a
+warning that `max_levels` and not the data would have chosen the count,
+and the `NA` stops the next call; with `on_no_elbow = "warn"` it returns
+that count with the same warning.
 [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md)
 is where to argue with it:
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
@@ -368,17 +375,18 @@ exactly that. Either way the folds come from the points’ locations, and
 the cells can serve as the blocks that define them
 (`make_folds(blocks = tess$cells)`).
 
-### A model, scored honestly
+### A model, scored on held-out regions
 
 ``` r
 
 # 5. Build folds that hold out whole regions.  block_size is a distance in
-#    the CRS's units, here metres.  Blocks have to be at least as wide as the
-#    autocorrelation range for the folds to be honest; on these data no range
-#    could be identified for what the predictor leaves unexplained, so 100 km
-#    is set by hand.  vignette("spatial-cross-validation") is about that
-#    choice, and make_folds(auto_range = TRUE) makes it from the data when
-#    gstat is installed.
+#    the CRS's units, here metres.  The wider the blocks, the farther the
+#    held-out points sit from their training data, and the score is the
+#    error at that distance; on these data no range could be identified for
+#    what the predictor leaves unexplained, so 100 km is set by hand.
+#    vignette("spatial-cross-validation") is about that choice, and
+#    make_folds(auto_range = TRUE) makes it from the data when gstat is
+#    installed.
 random  <- make_folds(obs, k = 4, method = "random_kfold", seed = 1)
 blocked <- make_folds(obs, k = 4, method = "block_kfold", block_size = 100e3,
                       seed = 1)
@@ -419,10 +427,10 @@ The two pooled numbers differ by less than the folds do: the random
 folds’ RMSE runs from 1.04 to 2.19 and the blocked folds’ from 0.96 to
 1.94, and each pooled value sits inside the other scheme’s range. On a
 hundred observations that is all a fold scheme can say, and it is the
-reason to read the per-fold range before the pooled number. The gap that
-blocked folds exist to expose opens when a model can borrow from its
-neighbours, through the coordinates or a spatially smooth predictor; the
-README’s quick start shows one of about 1.6 on a larger simulated field.
+reason to read the per-fold range before the pooled number. The gap
+between the schemes opens when a model can borrow from its neighbours,
+through the coordinates or a spatially smooth predictor; the README’s
+quick start shows one of about 1.6 on a larger simulated field.
 
 [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
 and

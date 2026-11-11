@@ -35,7 +35,16 @@ fold_separation(folds, data_sf, sac = NULL, prediction_points = NULL)
   another layer, such as the points before
   [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
   dropped some) is refused; the location check is skipped when one of
-  the two layers is POINT and the other is not.
+  the two layers is POINT and the other is not. A layer that mixes XY
+  and XYZ (or XYM) geometries is read in x and y, for the distances and
+  for that check, since sf reads a layer in the dimension of its first
+  geometry. So is a layer whose geometries carry M (XYM or XYZM), which
+  GEOS refuses. The points a layer is reduced to are read in x and y
+  when they mix dimensions, as those of a layer XYZ throughout that
+  holds points and polygons do. A row without a location (an empty
+  point, or a coordinate that is not finite or lies beyond 1e150, read
+  as given and again in the CRS the distances are measured in) is left
+  out of the distances.
 
 - sac:
 
@@ -65,15 +74,21 @@ fold_separation(folds, data_sf, sac = NULL, prediction_points = NULL)
   reduced to one representative point per feature, as in
   `make_folds(method = "nndm")`, so pass grid cells or points, not one
   polygon of the region. It is brought into the CRS the distances are
-  measured in. Default `NULL`: no target and no reading, except for NNDM
-  and kNNDM folds (`method = "nndm"` and `"knndm"`), which carry the
-  distances from the prediction points they were built for and are
-  compared against those, measured to all sites. The carried distances
-  are lengths in the CRS the folds were built in (`folds$params$crs`).
-  When the distances here are measured in another CRS (`data_sf` is in
-  another projected CRS, or `sac` records another), the two are not
-  compared, [`print()`](https://rdrr.io/r/base/print.html) says so, and
-  passing `prediction_points` has the target measured here.
+  measured in; one that mixes XY and XYZ (or XYM) geometries is read in
+  x and y first. So is one whose geometries carry M (XYM or XYZM), and
+  so are the points it is reduced to when they mix dimensions. Default
+  `NULL`: no target and no reading, except for NNDM and kNNDM folds
+  (`method = "nndm"` and `"knndm"`), which carry the distances from the
+  prediction points they were built for and are compared against those,
+  measured to all sites. The carried distances are lengths in the CRS
+  the folds were built in (`folds$params$crs`). When the distances here
+  are measured in another CRS (`data_sf` is in another projected CRS, or
+  `sac` records another), the two are not compared,
+  [`print()`](https://rdrr.io/r/base/print.html) says so, and passing
+  `prediction_points` has the target measured here. A prediction point
+  without a location (an empty point, or a coordinate that is not finite
+  or lies beyond 1e150) as given or in the CRS the distances are
+  measured in takes no part in the target and is not counted.
 
 ## Value
 
@@ -190,7 +205,8 @@ quarter rule gives the reading.)
 - `"farther"`:
 
   The gap is above the tolerance and at least half of \\W_1\\: the
-  held-out points sit farther, and the error tends to read high.
+  held-out points sit farther, and the error tends to read high for that
+  target.
 
 - `"matched"`:
 
@@ -213,7 +229,9 @@ score low on clustered samples whose nearest-neighbour distances match.
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
 for the fold schemes and the block sizing this measures the outcome of;
 [`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md)
-for choosing a block size by cross-validated error instead.
+for the cross-validated error at each block size. The sweep does not say
+which size matches a map; this function does, read on the folds of each
+size with the map's locations as `prediction_points`.
 
 Other cross-validation:
 [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md),

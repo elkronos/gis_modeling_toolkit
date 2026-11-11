@@ -97,7 +97,9 @@ plot_tessellation_map(
 
 - labels:
 
-  Logical; draw per-cell labels. Default FALSE.
+  Logical; draw per-cell labels. Default FALSE. A cell is labelled when
+  its label is not NA and it has a location; when no cell has both, the
+  labels are skipped with a log line.
 
 - label_col:
 
@@ -140,7 +142,10 @@ plot_tessellation_map(
   arrives without a CRS is brought into the plot's CRS instead of being
   dropped: reprojected when its coordinates look like
   longitude/latitude, otherwise stamped with a warning, since a stamp
-  assumes the coordinates were already in that CRS.
+  assumes the coordinates were already in that CRS. A plot CRS in
+  longitude and latitude is not stamped on coordinates that cannot be in
+  it (an x outside -180 to 360, or a y beyond 90 north or south): the
+  call stops and asks for the layer's CRS or a projected `target_crs`.
 
 - title, subtitle, caption:
 
@@ -158,6 +163,20 @@ plot_tessellation_map(
 ## Value
 
 A ggplot2 object.
+
+## Details
+
+Every layer is drawn in x and y: a layer whose geometries mix XY with
+XYZ or XYM (as [`rbind()`](https://rdrr.io/r/base/cbind.html) of an XY
+and an XYZ layer gives) is drawn without its Z and M. The labels are
+placed in x and y, also on cells whose geometries carry M (XYM or XYZM).
+
+A row of any layer with a coordinate that is not finite or lies beyond
+1e150 has no location: it is left out of the map, with one warning that
+says how many rows of which argument were not drawn. A row the plot's
+CRS cannot place in full is drawn as the move leaves it (empty, or
+without the vertices it cannot place), with a warning of class
+`spatialkit_rows_unplaced` that names it.
 
 ## See also
 

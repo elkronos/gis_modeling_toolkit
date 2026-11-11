@@ -38,15 +38,18 @@ voronoi_seeds_kmeans(
 
 - points_sf:
 
-  An sf object with POINT geometries.
+  An sf object with POINT geometries. Points that mix XY and XYZ (or
+  XYM) are read without Z and M before they are projected or clustered,
+  since sf reads a layer in the dimension of its first geometry.
 
 - k:
 
   Integer; requested number of clusters, treated as an upper bound only.
   It is clamped, with a warning, to whichever is smaller of the number
-  of distinct point positions and `nrow(points_sf) - 1`, because k-means
-  can produce neither more centres than there are distinct points nor as
-  many centres as there are rows. Check
+  of distinct point positions and one fewer than the number of points
+  with a location (rows without one are dropped first), and not below 1,
+  because k-means can produce neither more centres than there are
+  distinct points nor as many centres as there are rows. Check
   [`nrow()`](https://rdrr.io/r/base/nrow.html) on the result. A
   [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
   result or a
@@ -96,10 +99,17 @@ voronoi_seeds_kmeans(
   compact cells whose counts are several times higher in dense places
   than in sparse ones. It is the run of earlier versions, whose default
   it was: [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) from
-  10 random starts on the rows as they come. Without the 'FNN' package
-  the density kind finds its weights by comparing every pair of distinct
-  locations, so its time grows with the square of their number; the
-  seeds are the same, and nothing stops the call. See "Details".
+  10 random starts on the rows as they come, with the coordinates
+  centred, divided by the diagonal of their bounding box and rounded to
+  2^-30 of it, so that the seeds do not move with the unit or the
+  origin; on gridded locations they can differ from those of earlier
+  versions, and where the locations span less than a kilometre a change
+  of unit or origin can still move them (see "The partition" in
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)).
+  Without the 'FNN' package the density kind finds its weights by
+  comparing every pair of distinct locations, so its time grows with the
+  square of their number; the seeds are the same, and nothing stops the
+  call. See "Details".
 
 - init:
 
@@ -142,26 +152,29 @@ voronoi_seeds_kmeans(
 
 ## Value
 
-An sf object of **at most** `k` cluster-centre POINTs (fewer when `k`
-exceeds the number of distinct positions), with `seed_id` and
-`method = "kmeans"` columns matching
+An sf object of **at most** `k` cluster-centre POINTs (fewer when `k` is
+clamped, see `k`), with `seed_id` and `method = "kmeans"` columns
+matching
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md),
-and `attr(, "cover")`, the convex hull of `points_sf` (an sfc in its
-CRS). Seeds placed with `partition = "density"` or `init = "kmeans++"`,
-and the scored centres of a profile of the density kind or from random
-starts, also carry `attr(, "partition")`: a list with `kind`, `init`,
-`density_power` and `density_k`, and for seeds this call placed `iter`,
-`iter_max` and `converged` (the iterations the kept start took, the
-limit, and whether it stopped before the limit).
+and `attr(, "cover")`, the convex hull of the coordinates of `points_sf`
+(an sfc in its CRS): for lon/lat points, the hull in degrees, with the
+longitudes of points on both sides of 180 degrees taken from 0 to 360
+(-170 as 190). Seeds placed with `partition = "density"` or
+`init = "kmeans++"`, and the scored centres of a profile of the density
+kind or from random starts, also carry `attr(, "partition")`: a list
+with `kind`, `init`, `density_power` and `density_k`, and for seeds this
+call placed `iter`, `iter_max` and `converged` (the iterations the kept
+start took, the limit, and whether it stopped before the limit).
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
 returns the list as `params$partition`. Seeds with no such record are
 plain k-means: from random starts when this call placed them, or the
 scored centres of a k-means profile from k-means++ starts. When `k` is a
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-result that carries `count_rule`, or a profile built with an `estimate`,
-the seeds carry that record as `attr(, "count_rule")`, with
-`scored_cells` `TRUE` for the scored centres and `FALSE` for centres
-this call fits itself at that count (see
+result that carries `count_rule`, or a profile built with an `estimate`
+or read by `cp`, the seeds carry that record as `attr(, "count_rule")`,
+with `scored_cells` `TRUE` for the scored centres and `FALSE` for
+refitted centres and for centres this call fits itself at that count
+(see
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)).
 
 ## Details
@@ -171,8 +184,11 @@ not degrees; so is input with no CRS whose coordinates look like lon/lat
 (the heuristic
 [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
 applies, with its warning), and the seeds come back in the input's own
-coordinates. Rows with empty or non-finite coordinates are dropped with
-a warning, and `k` is clamped to the number of distinct positions.
+coordinates. Rows without a location (an empty point, a coordinate that
+is not finite or lies beyond 1e150, or in a geographic CRS a latitude
+beyond 90 degrees, read as given before the projection) are dropped with
+a warning, and `k` is clamped to the number of distinct positions or one
+fewer than the number of points, whichever is smaller, and not below 1.
 
 A count given as a number gets a fresh partition, which is not the
 partition
@@ -184,7 +200,11 @@ or to a subsample, and keep the best of their own starts. Pass the
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
 result or the profile itself as `k` to get the scored one: the centres
 of the scored partition are then returned (in the CRS of `points_sf`,
-with `attr(, "n_from")`), and no k-means is run.
+with `attr(, "n_from")`), and no k-means is run. On a profile without an
+estimate whose centres were fitted to a subsample, they are those
+centres refitted to every point by
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
+with `attr(, "refit")`.
 
 `partition` says what the seeds minimise. `"kmeans"` is the sum of
 squared distances from the points to their nearest seed, from `nstart`

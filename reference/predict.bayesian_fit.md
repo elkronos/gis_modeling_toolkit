@@ -36,7 +36,9 @@ predict(
 
   An sf object with the same predictors. The response variable need not
   be present (true out-of-sample prediction is supported). NULL = fitted
-  values.
+  values. A layer whose geometries mix XY with XYZ or XYM (as
+  [`rbind()`](https://rdrr.io/r/base/cbind.html) of an XY and an XYZ
+  layer gives) is read in x and y.
 
 - summary:
 
@@ -59,13 +61,16 @@ predict(
 ## Value
 
 Numeric vector of length `nrow(newdata)`, or a `n_draws x nrow(newdata)`
-matrix when `draws = TRUE`. Rows with a missing or non-finite predictor
-or coordinate, and rows carrying a level of a categorical predictor the
-model was not fitted with, are `NA` (an `NA` column with
-`draws = TRUE`); the other rows are unaffected. If the posterior draw
-fails the result is all `NA` (a 1-row matrix for `draws = TRUE`) with a
-warning of class `spatialkit_predict_failed` that gives the cause. An
-ordinal or categorical family is not a failed draw and is an error under
+matrix when `draws = TRUE`, in the units of the response (see "The
+response's centre and scale" in
+[`fit_bayesian_spatial_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)).
+Rows with a missing or non-finite predictor or coordinate, and rows
+carrying a level of a categorical predictor the model was not fitted
+with, are `NA` (an `NA` column with `draws = TRUE`); the other rows are
+unaffected. If the posterior draw fails the result is all `NA` (a 1-row
+matrix for `draws = TRUE`) with a warning of class
+`spatialkit_predict_failed` that gives the cause. An ordinal or
+categorical family is not a failed draw and is an error under
 `type = "epred"`: its expected value is a probability per response
 category, not one number per row. Use `type = "predict", draws = TRUE`
 for posterior draws of the predicted category, as category indices; the

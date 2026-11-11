@@ -46,7 +46,7 @@ default, by the leave-one-out error of the cell values, and
 sets it; given a ladder of counts the profile scores every one against
 the spatial structure of the observations, and
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-reads one off their clustering when they have any.
+reads one off the elbow of their clustering when there is one.
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
 produces Voronoi, hex, square or Delaunay cells clipped to your study
 area, with IDs that stay stable when the input row order changes.
@@ -61,10 +61,12 @@ Redrawing boundaries is easy. Knowing whether the result means anything
 is the hard part, so the second half of the package is the evidence
 layer. Three model backends sit behind one `spatial_fit` class so they
 can be scored on identical folds. Cross-validation holds out whole
-regions sized to the data’s own autocorrelation range. An
-area-of-applicability estimate marks where the resulting score applies.
-All of it is built on [`sf`](https://r-spatial.github.io/sf/), with CRS
-handling that will not hand metres to a function expecting degrees.
+regions, blocks of a grid by default, which can be sized from the data’s
+own autocorrelation range or matched to the locations a map will predict
+at. An area-of-applicability estimate marks where the resulting score
+applies. All of it is built on [`sf`](https://r-spatial.github.io/sf/),
+with CRS handling that will not hand metres to a function expecting
+degrees.
 
 ![Raw spatial field and three tessellation methods aggregating it over
 North
@@ -233,9 +235,10 @@ gives the k-means cells, from their earlier numbers of starts. `NEWS.md`
 says what each of these changes in a result.
 
 Now score a model. The learner below is a cubic trend surface in the
-coordinates, which is a realistic thing to fit and also the leakage
-mechanism this package warns about: given `x` and `y`, a flexible model
-can reproduce the training surface by memorising location.
+coordinates, which is a realistic thing to fit and also the case this
+package warns about: given `x` and `y`, a flexible model can reproduce
+the training surface by memorising location, so its error grows quickly
+with the distance from the data.
 
 ``` r
 
@@ -281,8 +284,11 @@ c(random  = random$overall$RMSE,
 
 Same 400 observations, same model, one number more than half again the
 other. The difference is entirely in which rows were allowed to train on
-which, and the blocked figure is the one that answers the question a map
-is used for: what happens where there is no observation nearby.
+which: the random figure is the error of predicting among the samples,
+the blocked one the error of predicting into gaps a block wide. Which
+one a map has depends on where it predicts, and
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+compares the folds’ distances from the data with the map’s.
 
 Is there structure the model missed?
 
@@ -310,7 +316,7 @@ approximate.
 | get my data into a projected CRS | [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md), [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md), [`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md) |
 | cut my study area into cells | [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md) (`"voronoi"`, `"hex"`, `"square"`, `"triangles"`) |
 | place the seeds a Voronoi grows from | [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md) |
-| choose how many cells, quickly (coordinates only, no optional packages) | [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md) |
+| read a cell count off the elbow of the clustering of my points (coordinates only; `NA` when there is none) | [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md) |
 | set the cell count from a number of observations per cell | [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md), then [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md) (by default 4.5 per cell, for pooled values) |
 | see what every cell count costs | `resolution_profile(n_levels = )`, then [`summary()`](https://rdrr.io/r/base/summary.html) on it for every criterion’s pick, or `select_resolution(criterion = )` for one criterion’s pick |
 | read a cell’s value and interval at other locations | [`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md) |
@@ -318,16 +324,17 @@ approximate.
 | check whether a cell mean is the best estimate of that cell | [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md) |
 | draw the result | [`plot_tessellation_map()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_tessellation_map.md) |
 | know how far spatial correlation reaches | [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md), and [`sac_nugget()`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md) for its nugget |
-| build honest CV folds | [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md) (`random_kfold`, `block_kfold`, `buffered_loo`, `leave_location_out`, `nndm`, `knndm`) |
+| build CV folds | [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md) (`random_kfold`, `block_kfold`, `buffered_loo`, `leave_location_out`, `nndm`, `knndm`) |
 | see whether my folds actually separate | [`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md) |
-| size the blocks by measurement | [`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md), and [`plot()`](https://rdrr.io/r/graphics/plot.default.html) on the result |
+| check which way a CV score errs for my map | `fold_separation(prediction_points = )` |
+| see the CV error at each block size | [`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md), and [`plot()`](https://rdrr.io/r/graphics/plot.default.html) on the result |
 | fit a model | [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md), [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md), [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md) |
 | score it out of sample | [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md), [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md), [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md) |
 | score *my own* learner on the same folds | [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md) + [`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md) |
 | score it in sample | [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md), [`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md), [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md) |
 | see the fold-to-fold spread of a CV score | [`plot_cv_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_cv_metrics.md) |
 | check whether predicted intervals are the width they claim | [`plot_calibration()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_calibration.md) |
-| pick predictors without leaking | [`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md) ([`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md) for the AICc counterpart) |
+| pick predictors inside the cross-validation | [`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md) ([`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md) for the AICc counterpart) |
 | compare backends head to head | [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md) |
 | check for leftover spatial structure | [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md), `plot(fit, type = "variogram")` |
 | turn a fit into a map | [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md) |
@@ -352,8 +359,9 @@ The reference index lists everything, grouped by pipeline step.
 [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
 scores all three on identical folds and is the right answer when you can
 afford it. It is not always cheap. On one recorded run (one machine,
-4-fold CV, 2 chains × 1,000 iterations) the Bayesian GP took **1,186 s**
-at n = 2,000 against **109 s** for
+4-fold CV, 2 chains × 1,000 iterations, while the default `adapt_delta`
+was 0.9; the present 0.99 samples more slowly) the Bayesian GP took
+**1,186 s** at n = 2,000 against **109 s** for
 [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
 on the same data. At n = 300 it was 142 s against 0.8 s, so the ratio is
 not fixed either. A
@@ -385,7 +393,7 @@ in them is computed on the spot.
 | [`vignette("getting-started")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md) | installing, getting your data in, what the coordinates are in, and the pipeline from points to a scored model and a map |
 | [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md) | choosing a cell count, the criteria, and why they disagree |
 | [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md) | the six fold schemes, block sizing, and reading a CV result down to the last row |
-| [`vignette("diagnostics")`](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md) | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability, and two ways to leak |
+| [`vignette("diagnostics")`](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md) | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability, coordinates as predictors, and selection inside the folds |
 | [`vignette("spatialkit_nc_demo")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md) | the whole pipeline end to end on real boundaries, with maps |
 | [`vignette("reporting")`](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.md) | grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report |
 
@@ -545,7 +553,8 @@ covers what an `NA` there leaves you to decide about the block size.
 around the elbow sat at nine cells or fewer, where Moran’s I is
 arithmetically degenerate, so the call fell back to the geometric
 ranking. On points with no cluster structure that is the usual outcome
-below about `max_levels = 40`;
+below about `max_levels = 40` under `on_no_elbow = "warn"` (at the
+default such points return `NA` before any window is placed);
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
 scores Moran’s z at every level of its ladder. See
 [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md).
@@ -554,7 +563,10 @@ scores Moran’s z at every level of its ladder. See
 The candidates did pass nine cells, but too few of the cells hold a row
 with a response and every predictor, or the regression of the cell means
 on the predictors is singular (a predictor constant or collinear across
-cells). Check for missing values first.
+cells). Check for missing values first. Under `criterion = "morans_i"`
+the call then falls back to the geometric ranking; under `"combined"` it
+ranks the counts as usual, with `moran_i` and `moran_z` `NA` in the
+diagnostics.
 
 **Distances, bandwidths or block sizes look absurd.** Check the working
 CRS first: `st_crs(x)$units_gdal`. A block size that made sense in
@@ -1048,14 +1060,15 @@ the inputs, so they only need clearing when memory is the constraint.
 - [Spatial
   cross-validation](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md):
 
-  The six fold schemes, sizing blocks from the autocorrelation range,
-  and reading a cross-validation result down to the last row.
+  What a fold’s score estimates, the six fold schemes, block sizes and
+  the autocorrelation range, and reading a cross-validation result down
+  to the last row.
 
 - [Diagnostics](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md):
 
   Residual autocorrelation, aggregation standard errors, kriging
-  adequacy, the area of applicability, two ways a score can leak, and
-  the warnings about pooled cell values.
+  adequacy, the area of applicability, coordinates as predictors and
+  selection inside the folds, and the warnings about pooled cell values.
 
 ### End to end
 

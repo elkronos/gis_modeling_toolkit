@@ -40,7 +40,27 @@ harmonize_crs(
 
 ## Value
 
-A named list with components a and b.
+A named list with components a and b. A layer that is transformed and
+mixes XY and XYZ (or XYM) geometries is returned in XY, with a warning
+of class `"spatialkit_zm_dropped"`:
+[`sf::st_transform()`](https://r-spatial.github.io/sf/reference/st_transform.html)
+reads a layer in the dimension of its first geometry and misplaces the
+others. A layer in one dimension is transformed with its Z and M, and so
+is a layer whose only geometries of another dimension than the first are
+empty and not points. A row of a transformed layer with a coordinate
+that is not finite or lies beyond 1e150 comes back empty, in its own
+geometry type: it has no location to move, and
+[`sf::st_transform()`](https://r-spatial.github.io/sf/reference/st_transform.html)
+would drop that vertex and return the rest of the feature, or put the
+coordinate at a finite place. So does a row of a projected layer moved
+to a CRS in degrees with a coordinate beyond 1e10 in its CRS's own unit,
+further out than any projected CRS places a point of the Earth. A row
+that has a location and that the target CRS cannot place in full, such
+as a point far outside a UTM zone or a ring with a vertex at a latitude
+beyond 90, comes back empty, or without the vertices the CRS cannot
+place, and a warning of class `"spatialkit_rows_unplaced"` names such
+rows of `a` or `b` (`rows` on the condition). A layer that is not
+transformed is returned as it came.
 
 ## Details
 
@@ -52,7 +72,11 @@ EPSG:4326 and **reprojected** to the other object's CRS (or
 `target_crs`); coordinates that do not are *stamped* with
 [`sf::st_set_crs()`](https://r-spatial.github.io/sf/reference/st_crs.html),
 which relabels without moving them. Either way the assumption is
-announced with a warning.
+announced with a warning. A CRS in longitude and latitude is not stamped
+on coordinates that cannot be in it: a layer with an x outside -180 to
+360 or a y beyond 90 north or south, read on the coordinates that have a
+location, stops the call with an error that names `a` or `b`, its box
+and the target CRS.
 
 ## See also
 

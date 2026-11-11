@@ -1,10 +1,15 @@
 # Prepare and sanitize an sf dataset for spatial modeling
 
 Ensures point geometry, projected CRS, and removes rows with missing or
-non-finite values in modeling columns, *including* rows whose geometry
-is empty or whose coordinates are not finite, which no model backend can
-use. All non-POINT geometries (including MULTIPOINT) are coerced to
-representative points via
+non-finite values in modeling columns, *including* rows without a
+location: an empty geometry, or a coordinate that is not finite or lies
+beyond 1e150, which no model backend can use, and in a layer with a
+geographic CRS a vertex at a latitude beyond 90 degrees, which is no
+place on the Earth. The bound is read on the coordinates as given,
+before the projection, and again after it: a move between CRSs can bring
+a coordinate beyond it back finite, and that point is not a place the
+caller gave. All non-POINT geometries (including MULTIPOINT) are coerced
+to representative points via
 [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md),
 so downstream coordinate extraction always aligns one row per
 observation. Any Z or M coordinate (POINT Z from a GPS, a GeoPackage or
@@ -48,7 +53,9 @@ prep_model_data(
   rows that fall outside it are kept. Subset `data_sf` yourself (for
   example with
   [`sf::st_filter()`](https://r-spatial.github.io/sf/reference/st_join.html))
-  to restrict the rows.
+  to restrict the rows. One that mixes XY and XYZ (or XYM) geometries is
+  read in x and y, since sf reads a layer in the dimension of its first
+  geometry.
 
 - pointize:
 
@@ -56,7 +63,12 @@ prep_model_data(
   [`coerce_to_points`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md).
   One of `"auto"` (default), `"centroid"`, `"point_on_surface"`,
   `"surface"` (an alias for `"point_on_surface"`), `"line_midpoint"` or
-  `"bbox_center"`.
+  `"bbox_center"`. In longitude and latitude with s2 on, a polygon whose
+  centroid s2 cannot take even without its repeated vertices (edges that
+  cross) stops the call with the error of class
+  `"spatialkit_features_degenerate"`, which gives its rows of `data_sf`;
+  see
+  [`coerce_to_points`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md).
 
 - require_response:
 
@@ -67,26 +79,29 @@ prep_model_data(
 ## Value
 
 An sf object with 2-D (XY) POINT geometry, cleaned of rows carrying
-missing or non-finite values in the modelling columns or in the
-coordinates. What was removed is recorded on the attribute `"dropped"`,
-a list with `n` (rows dropped), `n_geometry` (how many of them for an
-empty or non-finite geometry), `which` (their positions in `data_sf`),
-`row_id` (their `..row_id` values when the layer carries that column,
-else `NULL`) and `reason` (one per dropped row: `"geometry"`,
-`"missing"` or `"non_finite"`, in that order of precedence when several
-apply), `by_column` (for each modelling column, and for `"(geometry)"`,
-how many of the dropped rows it is missing or non-finite in; a row can
-count under several), `response_std_diff` (the mean response of the
-dropped rows minus that of the kept rows, in standard deviations of the
-response over both; `NA` when the response is not numeric, or is itself
-missing in every dropped row), plus `n_rows`, the number of rows
-returned, which the record was made for. The same record carries two
-marks on the rows that were kept: `constant_predictors`, the names of
-the predictors that take one value in every returned row (`character(0)`
-when none does), and `n_duplicate_locations`, the number of returned
-rows whose coordinates repeat those of an earlier row. Every fit stores
-`n` as `$info$n_dropped`. The record describes the rows this call
-returned and does not survive subsetting: `clean[i, ]`, like
+missing or non-finite values in the modelling columns and of rows
+without a location. What was removed is recorded on the attribute
+`"dropped"`, a list with `n` (rows dropped), `n_geometry` (how many of
+them for no location: an empty point, a coordinate that is not finite or
+lies beyond 1e150, or a latitude beyond 90 degrees in a geographic CRS),
+`which` (their positions in `data_sf`), `row_id` (their `..row_id`
+values when the layer carries that column, else `NULL`) and `reason`
+(one per dropped row: `"geometry"`, `"missing"` or `"non_finite"`, in
+that order of precedence when several apply), `by_column` (for each
+modelling column, and for `"(geometry)"`, how many of the dropped rows
+it is missing or non-finite in; a row can count under several),
+`response_std_diff` (the mean response of the dropped rows minus that of
+the kept rows, in standard deviations of the response over both; `NA`
+when the response is not numeric, is itself missing in every dropped
+row, or takes one value up to the rounding of its values), plus
+`n_rows`, the number of rows returned, which the record was made for.
+The same record carries two marks on the rows that were kept:
+`constant_predictors`, the names of the predictors that take one value
+in every returned row (`character(0)` when none does), and
+`n_duplicate_locations`, the number of returned rows whose coordinates
+repeat those of an earlier row. Every fit stores `n` as
+`$info$n_dropped`. The record describes the rows this call returned and
+does not survive subsetting: `clean[i, ]`, like
 [`dplyr::filter()`](https://dplyr.tidyverse.org/reference/filter.html),
 `slice()` or `arrange()` of it, is a plain layer with no `"dropped"`
 attribute, and a fit given such a subset with `.already_prepped = TRUE`
@@ -123,9 +138,10 @@ before fitting.
 
 ## Warnings
 
-When preparing data for a fit (`require_response = TRUE`) two conditions
-are raised as R warnings, each with a class so it can be caught by name
-with [`tryCatch()`](https://rdrr.io/r/base/conditions.html) or
+When preparing data for a fit (`require_response = TRUE`) three
+conditions are raised as R warnings, each with a class so it can be
+caught by name with
+[`tryCatch()`](https://rdrr.io/r/base/conditions.html) or
 [`withCallingHandlers()`](https://rdrr.io/r/base/conditions.html):
 
 - `spatialkit_rows_dropped`:
@@ -136,6 +152,16 @@ with [`tryCatch()`](https://rdrr.io/r/base/conditions.html) or
   A fit on the rows that remain describes those rows only; when the
   difference is large the rows are not missing at random and the fit is
   biased towards the complete ones.
+
+- `spatialkit_response_imprecise`:
+
+  The response lies so far from zero that doubles there are spaced more
+  than a millionth of its standard deviation apart (a standard deviation
+  of 1 at about 1e10, \\2^{33}\\, or beyond). Its values are rounded to
+  that spacing, and so is every mean and prediction computed at that
+  size: the fit, its scores and any choice made on them read that
+  rounding. The rows are kept; subtract a constant from the response
+  first.
 
 - `spatialkit_constant_predictor`:
 
@@ -151,15 +177,20 @@ passes these on.
 and
 [`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
 run several cross-validations of one layer, each of which prepares it,
-and raise a warning of either class once per distinct text for the run.
+and raise `spatialkit_rows_dropped` and `spatialkit_constant_predictor`
+once per distinct text for the run and `spatialkit_response_imprecise`
+once per response column;
+[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
+raises the last once as well when its `fit_fn` prepares each fold's rows
+again.
 
 With `require_response = FALSE` (how every
 [`predict()`](https://rdrr.io/r/stats/predict.html) method prepares
-`newdata`) neither is raised: the dropped rows are written to the log
-and to the record, and the prediction for each comes back `NA`, so
-nothing is lost without a trace. Repeated locations are legitimate
-(repeat visits to one site) and are counted in the record and the log,
-never warned about.
+`newdata`) none is raised: the dropped rows are written to the log and
+to the record, and the prediction for each comes back `NA`, so nothing
+is lost without a trace. Repeated locations are legitimate (repeat
+visits to one site) and are counted in the record and the log, never
+warned about.
 
 ## See also
 

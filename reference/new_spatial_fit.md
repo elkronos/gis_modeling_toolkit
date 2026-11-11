@@ -50,25 +50,48 @@ new_spatial_fit(
 
 - formula:
 
-  A formula.
+  A formula: the model, as
+  [`print()`](https://rdrr.io/r/base/print.html) and
+  [`summary()`](https://rdrr.io/r/base/summary.html) show it. Its left
+  side, when it has one, holds `response_var` (`log(price) ~ elev` for
+  `"price"`). Its right side uses the columns `predictor_vars` names and
+  no other attribute column of `data_sf` than these and the response,
+  read by [`all.vars()`](https://rdrr.io/r/base/allnames.html), so
+  `log(elev)` and `elev * slope` count as their columns, and so do the
+  columns of an [`offset()`](https://rdrr.io/r/stats/offset.html) or a
+  grouping term; names that are not columns of `data_sf` and the
+  reserved names `..x` and `..y` are not checked, and a right side with
+  `.` is not read. A column a `fit_fn` derives itself and keeps out of
+  `predictor_vars`, such as coordinates `x` and `y` for a trend surface,
+  needs a name that is not a column of `data_sf`: on a layer that keeps
+  its coordinates as columns `x` and `y`, derive them as `cx` and `cy`,
+  or drop those columns first.
 
 - response_var:
 
-  Character(1).
+  Character(1): the name of the response column of `data_sf`, an
+  attribute column (not the geometry).
 
 - predictor_vars:
 
-  Character vector.
+  Character vector of attribute column names of `data_sf`, not including
+  `response_var`: the columns the right side of `formula` uses.
+  `character(0)` for a model without predictors.
 
 - data_sf:
 
-  An sf object used for fitting.
+  An sf object with its geometry column: the rows the model was fitted
+  on, with their geometry, in the order
+  [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) returns its
+  values.
 
 - info:
 
-  Named list of model-specific extras. Set `fitted_are_oob = TRUE` when
-  your [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) values
-  are held out instead of in-sample, so
+  Named list of model-specific extras
+  ([`list()`](https://rdrr.io/r/base/list.html) for none). Set
+  `fitted_are_oob = TRUE` when your
+  [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) values are
+  held out instead of in-sample, so
   [`summary()`](https://rdrr.io/r/base/summary.html) labels them
   correctly.
 
@@ -93,6 +116,19 @@ so without a matching `predict.<subclass>()` every fold fails. A
 both error, naming the method to define, without one.
 [`residuals()`](https://rdrr.io/r/stats/residuals.html) and
 [`coef()`](https://rdrr.io/r/stats/coef.html) methods are optional.
+
+The constructor checks the fields the package's functions read from a
+fit, and stops with an error that names the argument: `subclass` must be
+one class name, `data_sf` an sf object with its geometry column,
+`formula` a formula whose left side, when it has one, holds the
+response, `response_var` the name of one attribute column of `data_sf`
+(a column other than its geometry), `predictor_vars` a character vector
+of its attribute columns other than the response, the columns the right
+side of `formula` uses, and `info` a list. It does not check the
+response's type (a Bayesian fit can have a factor or ordinal response);
+[`summary()`](https://rdrr.io/r/base/summary.html) and
+[`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
+refuse a response that is not numeric or logical.
 
 ## The coef() contract
 

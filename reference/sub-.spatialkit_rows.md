@@ -76,7 +76,7 @@ dat <- st_as_sf(
   coords = c("x", "y"), crs = 32632
 )
 clean <- prep_model_data(dat, "resp", "pred")   # warns: 2 of 5 rows dropped
-#> Warning: prep_model_data(): dropped 2 of 5 row(s) (40.0%): 1 with a missing value, 1 with a non-finite value, 0 with an empty or non-finite geometry. Rows affected by column: resp 1, pred 1. The response 'resp' averages 5 in the dropped rows that have one and 2.333 in the kept rows, a difference of 1.46 SD. The fit uses the 3 row(s) that remain; attr(, "dropped") lists the rows removed.
+#> Warning: prep_model_data(): dropped 2 of 5 row(s) (40.0%): 1 with a missing value, 1 with a non-finite value and 0 without a location (an empty point, or a coordinate that is not finite or lies beyond 1e150). Rows affected by column: resp 1, pred 1. The response 'resp' averages 5 in the dropped rows that have one and 2.333 in the kept rows, a difference of 1.46 SD. The fit uses the 3 row(s) that remain; attr(, "dropped") lists the rows removed.
 attr(clean, "dropped")$n          # 2
 #> [1] 2
 attr(clean[1:2, ], "dropped")     # NULL -- the record does not follow

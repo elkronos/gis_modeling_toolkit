@@ -25,7 +25,12 @@ residual_morans_i(
 - fit:
 
   A `spatial_fit` object (from `fit_gwr_model`,
-  `fit_bayesian_spatial_model` or `fit_rf_model`).
+  `fit_bayesian_spatial_model` or `fit_rf_model`). The locations are
+  read from its `data_sf`, a feature that is not a point reduced to one
+  as
+  [`coerce_to_points`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)`(, "auto")`
+  does. A layer whose geometries mix XY with XYZ or XYM, or carry M (XYM
+  or XYZM), is read in x and y, with no warning.
 
 - alternative:
 
@@ -40,14 +45,24 @@ residual_morans_i(
   is built from the observation coordinates. Ties at the k-th distance
   (every regular grid, every site with repeat visits) share that slot's
   weight equally, with no tie-break by row order or by which backend
-  found them, so the matrix is a function of the geometry alone; on
-  distinct, untied coordinates it equals `spdep`'s `knearneigh()` +
-  `nb2listw(style = "W")` exactly. If a non-row-standardised matrix is
-  supplied (i.e. rows do not all sum to 1), the Cliff & Ord variance
-  formula is still valid for general W and the computation proceeds; a
-  note is logged (not raised as an R warning) because the magnitude of I
-  is not directly comparable to results obtained with row-standardised
-  weights. A `weights` argument that is not an n x n matrix is an error.
+  found them, so the matrix is a function of the geometry alone. A
+  distance is tied with the k-th when their squares are within one part
+  in ten million of each other, so the matrix is the same in any unit
+  and at any origin where the doubles hold the coordinates to better
+  than about one part in 1e8 of the distances between neighbours.
+  Farther from the origin the doubles round the coordinates more
+  coarsely, and a lattice whose coordinates are not on that rounding can
+  lose its ties. Where a distance lies past a tie by less than that
+  rounding, the call warns, with class `"spatialkit_xy_imprecise"`,
+  naming the rounding and the distance; the matrix is the one the
+  coordinates as stored give. On distinct, untied coordinates it equals
+  `spdep`'s `knearneigh()` + `nb2listw(style = "W")` exactly. If a
+  non-row-standardised matrix is supplied (i.e. rows do not all sum to
+  1), the Cliff & Ord variance formula is still valid for general W and
+  the computation proceeds; a note is logged (not raised as an R
+  warning) because the magnitude of I is not directly comparable to
+  results obtained with row-standardised weights. A `weights` argument
+  that is not an n x n matrix is an error.
 
 - k:
 
@@ -186,8 +201,17 @@ Returns `NULL` with a warning if computation fails, saying why:
 [`residuals()`](https://rdrr.io/r/stats/residuals.html) raised an error
 (its message is quoted), or returned `NULL` and the response minus
 [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) could not be
-formed either (the reason is quoted), fewer than 4 valid residuals, or a
-residual vector whose length does not match the fit's `data_sf`.
+formed either (the reason is quoted), fewer than 4 valid residuals, a
+residual vector whose length does not match the fit's `data_sf`, weights
+that sum to less than `.Machine$double.eps`, or residuals that leave I a
+ratio of rounding: they do not vary, or vary by no more than the
+rounding of the response (a standard deviation of 3 units in the last
+place of its largest value, or a root mean square of \\10\epsilon\\
+times that of the response about its centre), or are the OLS residuals
+of an exact fit of the response on the predictors (a root mean square of
+\\10\epsilon\\ times that of the fit's terms). The test reads the
+residuals against the response, so residuals in any unit are scored or
+refused alike, and I, z and the p-value do not depend on the unit.
 
 ## Details
 
@@ -233,7 +257,22 @@ to machine precision.
 regresses the response on it, and uses the residual moments only when
 the supplied residuals *are* those OLS residuals to numerical tolerance.
 A GWR wide enough to have collapsed to global OLS passes that test; the
-same GWR at a working bandwidth does not.
+same GWR at a working bandwidth does not. The response, and each
+predictor whose centre is more than 1000 times its spread, are taken
+about their centres before the regression, which leaves its residuals as
+they are, so a timestamp or a response at 1e10 gives the null, moments
+and rank \\p\\ of the same columns at 0. The supplied residuals pass
+where none differs from the OLS residuals by more than 1e-7 of the
+response's standard deviation, or where the differences are no more than
+the rounding a regression of the raw columns leaves: a root mean square
+of \\10\epsilon\\ (\\\epsilon\\ = `.Machine$double.eps`) times that of
+the fit's terms, among them the offset the fit regressed the response at
+(for a GWR that took the response about its centre, the offset left
+after that centre). They also pass where none differs by more than 1e-7
+of the response's standard deviation from the residuals
+[`lm()`](https://rdrr.io/r/stats/lm.html) gives on the raw columns,
+where the raw design keeps the rank of the centred one: that rounding
+grows with the number of rows.
 
 **For the flexible backends neither null is exact**, and `"auto"` leaves
 them on `"randomisation"` because forcing the OLS moments on them

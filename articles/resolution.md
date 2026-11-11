@@ -23,7 +23,8 @@ Three functions answer the question, in increasing order of how much
 they tell you.
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
 reads an elbow off the coordinates alone and runs on the hard
-dependencies; it is the quick answer and the one
+dependencies; when the points give it an elbow it is the quick answer,
+and the one
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
 accepts directly.
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
@@ -39,8 +40,8 @@ article says where it falls short. On points spread evenly there is no
 elbow to read, and both functions say so: the profile leaves its `elbow`
 column empty, and
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-warns that the count it still returns was chosen by the ends of its
-ladder, not by the data.
+returns `NA`, since the count it would have returned was chosen by the
+ends of its ladder, not by the data.
 
 Called with the response and nothing else,
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
@@ -92,7 +93,9 @@ pts  <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 ## The short answer
 
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-returns a few candidate cell counts, best first.
+returns a few candidate cell counts, best first, when the WSS curve of a
+k-means clustering of the points has an elbow, and `NA` when it has
+none.
 
 ``` r
 
@@ -100,34 +103,46 @@ lv <- determine_optimal_levels(pts, max_levels = 40)
 lv
 ```
 
-    ## [1] 7 6 8
+    ## [1] NA
+    ## attr(,"structured")
+    ## [1] FALSE
+    ## attr(,"sag")
+    ## [1] 0.001046518
 
 This fixture’s points are uniform, so their within-cluster sum of
 squares falls like `c / k` all the way down and bends nowhere of its
-own. The call warns that it found no elbow and that `max_levels` chose
-`lv`: a larger `max_levels` would give a larger answer. Read an elbow
-only off points that cluster; here the profile below is the better
-guide.
+own. The call finds no elbow and returns `NA`, with `structured = FALSE`
+and the largest sag of the curve as attributes, and a warning of class
+`spatialkit_no_elbow` that says why. `on_no_elbow = "warn"` returns the
+count the rule lands on instead, with the same warning, which says that
+`max_levels` chose it: a larger `max_levels` would give a larger answer.
+Read an elbow only off points that cluster; here the profile below is
+the better guide.
 
-`lv[1]` is what
+When there is an elbow, `lv` is what
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
 takes as `n`, and what
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-takes as `approx_n_cells` for its `"hex"` and `"square"` methods.
-Voronoi has no cell count to set: it grows one cell per point you hand
-it, which is why the count is set when you place the seeds rather than
-when you tessellate them. The last section shows the two calls in order.
+takes as `approx_n_cells` for its `"hex"` and `"square"` methods; both
+use its first element. Given `lv` itself, both stop on the `NA` and say
+where it came from; `lv[1]` drops the attributes that tell them, and
+they then say only that `NA` is not a number of cells. Voronoi has no
+cell count to set: it grows one cell per point you hand it, which is why
+the count is set when you place the seeds rather than when you
+tessellate them. The last section shows the two calls in order.
 
 Two things to know about this function before you rely on it. Its
-`criterion = "morans_i"` and `criterion = "combined"` settings rank the
-counts around the elbow by Moran’s z of the cell means, which is a
-diagnostic and not a count rule; the call returns the ranking with a
-warning of class `spatialkit_diagnostic_ranking` that says so. They need
-a `response_var`; without one the call warns and falls back to
-`"geometric"`. And its ladder runs from 1 to `max_levels` with no lower
-bound from the spatial correlation of the data, so it can prefer cells
-wider than the field’s own correlation range. The profile below reports
-that bound, and
+`criterion = "morans_i"` setting ranks the counts around the elbow by
+Moran’s z of the cell means, which is a diagnostic and not a count rule;
+the call returns the ranking with a warning of class
+`spatialkit_diagnostic_ranking` that says so. `criterion = "combined"`
+keeps the elbow’s ranking of those counts and reports Moran’s I beside
+it in `attr(, "diagnostics")`. Both need a `response_var`; without one
+the call warns and falls back to `"geometric"`, and under `"geometric"`,
+the default, a `response_var` is not read. And its ladder runs from 1 to
+`max_levels` with no lower bound from the spatial correlation of the
+data, so it can prefer cells wider than the field’s own correlation
+range. The profile below reports that bound, and
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
 reads `reliability` from it up, which is why the two can disagree.
 
@@ -148,64 +163,64 @@ prof
 ```
 
     ## Resolution profile: 16 levels on 500 points
-    ##   ladder      : 2 to 55 cells (floor 17 from range 243, not applied, ceiling 55 from min_cell_n = 9)
-    ##   variogram   : nugget 0.702, partial sill 1.42, range 243
+    ##   ladder      : 2 to 55 cells (floor 17 from range 242.9, not applied, ceiling 55 from min_cell_n = 9)
+    ##   variogram   : nugget 0.702, partial sill 1.42, range 242.9
     ##   scored on   : response; 3 density-weighted k-means++ starts (power 1, 8 neighbours) per level; WSS rises at 0 step(s)
     ##   one cell    : rss 1040, cp 2.08 (one mean for the layer; a level has to beat it)
     ##   estimate    : pooled toward the 8 nearest cells; loo on 500 rows of the layer; one cell: loo 2.08
     ##   elbow       : none; the WSS curve falls as it does with no cluster structure
     ## 
     ##  levels      wss wss_spread elbow cell_n_min cell_n_median cell_diam_median
-    ##       2 52800000   0.036100    NA        228         250.0            649.0
-    ##       3 32100000   0.002020    NA        150         164.0            485.0
-    ##       4 21500000   0.000877    NA        110         128.0            410.0
-    ##       5 17900000   0.036300    NA         71         103.0            365.0
-    ##       6 14700000   0.032500    NA         71          82.0            342.0
-    ##       8 10400000   0.005010    NA         54          59.5            289.0
-    ##       9  8820000   0.006290    NA         42          56.0            273.0
-    ##      12  6430000   0.048700    NA         31          40.5            222.0
-    ##      15  5140000   0.113000    NA         24          33.0            194.0
-    ##      17  4750000   0.068800    NA         20          28.0            186.0
-    ##      18  4480000   0.120000    NA         15          28.0            187.0
-    ##      23  3250000   0.018900    NA         15          21.0            158.0
-    ##      28  2590000   0.074300    NA          9          17.0            138.0
-    ##      35  2010000   0.044900    NA          9          14.0            123.0
-    ##      44  1580000   0.042700    NA          4          11.0            108.0
-    ##      55  1210000   0.074100    NA          4           9.0             94.4
-    ##   rss   cp   moran_i moran_z reliability cells_resp cell_resp_mean
-    ##  1020 2.05        NA      NA       0.760          2         250.00
-    ##  1000 2.01        NA      NA       0.800          3         167.00
-    ##  1010 2.03        NA      NA       0.811          4         125.00
-    ##   945 1.90        NA      NA       0.814          5         100.00
-    ##   929 1.88        NA      NA       0.814          6          83.30
-    ##   945 1.91        NA      NA       0.811          8          62.50
-    ##   911 1.85        NA      NA       0.808          9          55.60
-    ##   912 1.86 -0.030200  0.9710       0.799         12          41.70
-    ##   823 1.69 -0.062700  0.1200       0.790         15          33.30
-    ##   824 1.69  0.000359  0.8910       0.783         17          29.40
-    ##   772 1.59 -0.064300 -0.0754       0.780         18          27.80
-    ##   742 1.55 -0.031700  0.1830       0.765         23          21.70
-    ##   773 1.62  0.042400  1.0900       0.750         28          17.90
-    ##   682 1.46  0.088000  1.7200       0.732         35          14.30
-    ##   663 1.45  0.104000  2.0000       0.710         44          11.40
-    ##   655 1.46  0.210000  3.8800       0.686         55           9.09
+    ##       2 52800000   0.000415    NA        228         250.0            649.0
+    ##       3 32100000   0.002270    NA        151         164.0            485.0
+    ##       4 21400000   0.000549    NA        109         128.0            412.0
+    ##       5 17800000   0.043100    NA         93         101.0            375.0
+    ##       6 15300000   0.053200    NA         70          82.5            348.0
+    ##       8 10300000   0.040100    NA         43          65.0            281.0
+    ##       9  8810000   0.085700    NA         42          56.0            264.0
+    ##      12  6510000   0.028400    NA         29          41.5            226.0
+    ##      15  5190000   0.038600    NA         23          32.0            199.0
+    ##      17  4600000   0.116000    NA         17          28.0            184.0
+    ##      18  4350000   0.121000    NA         19          27.5            177.0
+    ##      23  3270000   0.132000    NA         14          21.0            147.0
+    ##      28  2680000   0.011600    NA          8          19.0            142.0
+    ##      35  1940000   0.049200    NA          7          14.0            124.0
+    ##      44  1530000   0.103000    NA          6          11.0            103.0
+    ##      55  1240000   0.106000    NA          3           9.0             93.3
+    ##   rss   cp  moran_i moran_z reliability cells_resp cell_resp_mean
+    ##  1020 2.05       NA      NA       0.760          2         250.00
+    ##  1000 2.02       NA      NA       0.800          3         167.00
+    ##  1010 2.03       NA      NA       0.811          4         125.00
+    ##   915 1.84       NA      NA       0.814          5         100.00
+    ##   909 1.84       NA      NA       0.814          6          83.30
+    ##   958 1.94       NA      NA       0.811          8          62.50
+    ##   919 1.86       NA      NA       0.808          9          55.60
+    ##   932 1.90 -0.09730 -0.1030       0.799         12          41.70
+    ##   864 1.77 -0.00439  0.9290       0.790         15          33.30
+    ##   869 1.79 -0.02560  0.4870       0.783         17          29.40
+    ##   849 1.75  0.00450  0.8920       0.780         18          27.80
+    ##   784 1.63 -0.04780 -0.0311       0.765         23          21.70
+    ##   733 1.54 -0.00928  0.3800       0.750         28          17.90
+    ##   683 1.46  0.03300  0.9050       0.732         35          14.30
+    ##   695 1.51  0.18200  3.2400       0.710         44          11.40
+    ##   649 1.45  0.18900  3.5200       0.686         55           9.09
     ##  scored_per_cell  loo loo_se share_alone own_weight
     ##           250.00 2.07 0.1230           0      0.914
-    ##           167.00 2.03 0.1220           0      0.921
-    ##           125.00 2.05 0.1220           0      0.844
-    ##           100.00 1.93 0.1160           0      0.929
-    ##            83.30 1.90 0.1130           0      0.926
-    ##            62.50 1.95 0.1160           0      0.863
-    ##            55.60 1.89 0.1110           0      0.894
-    ##            41.70 1.91 0.1140           0      0.833
-    ##            33.30 1.74 0.1090           0      0.901
-    ##            29.40 1.76 0.1080           0      0.879
-    ##            27.80 1.65 0.0993           0      0.909
-    ##            21.70 1.62 0.0975           0      0.889
-    ##            17.90 1.72 0.1060           0      0.825
-    ##            14.30 1.56 0.0969           0      0.831
-    ##            11.40 1.57 0.0953           0      0.819
-    ##             9.09 1.60 0.1000           0      0.722
+    ##           167.00 2.03 0.1220           0      0.917
+    ##           125.00 2.05 0.1220           0      0.835
+    ##           100.00 1.87 0.1100           0      0.951
+    ##            83.30 1.86 0.1130           0      0.936
+    ##            62.50 1.98 0.1170           0      0.847
+    ##            55.60 1.90 0.1120           0      0.885
+    ##            41.70 1.95 0.1130           0      0.824
+    ##            33.30 1.83 0.1100           0      0.858
+    ##            29.40 1.85 0.1160           0      0.841
+    ##            27.80 1.82 0.1120           0      0.855
+    ##            21.70 1.71 0.1050           0      0.866
+    ##            17.90 1.63 0.1000           0      0.885
+    ##            14.30 1.56 0.0933           0      0.850
+    ##            11.40 1.63 0.0996           0      0.767
+    ##             9.09 1.59 0.0974           0      0.724
 
 One row per level. `cell_n_median` and `cell_diam_median` are usually
 the first two columns worth reading: how many points a typical cell
@@ -250,15 +265,15 @@ plot(prof)
 
 ![Four stacked panels against the number of cells on a shared axis, from
 2 to 55; there is no elbow panel because these uniform points have no
-elbow. Mallows' Cp falls across the ladder and is lowest at 44 cells.
-Reliability rises to a peak near 5 cells and declines after it. The
-leave-one-out error of the pooled value falls as Cp does and is lowest
-at 35 cells. The absolute Moran's z of the cell means is drawn from 12
-cells on, stays near 1 or below up to 23 cells and climbs past 3 at 55.
-A red dot and dotted line mark the level selected for Cp, at 44 cells,
-for reliability, at 17 cells, and for the leave-one-out error, at 35
-cells, with a shaded band over the levels within tolerance of each; the
-Moran panel has no selected
+elbow. Mallows' Cp falls across the ladder and is lowest at 55 cells,
+the last level. Reliability rises to a peak near 5 cells and declines
+after it. The leave-one-out error of the pooled value falls as Cp does
+and is lowest at 35 cells. The absolute Moran's z of the cell means is
+drawn from 12 cells on, stays near 1 or below up to 35 cells and climbs
+past 3 at 44. A red dot and dotted line mark the level selected for Cp,
+at 55 cells, for reliability, at 17 cells, and for the leave-one-out
+error, at 35 cells, with a shaded band over the levels within tolerance
+of each; the Moran panel has no selected
 level.](resolution_files/figure-html/plot-profile-1.png)
 
 Two behaviours are worth knowing before reading the numbers.
@@ -272,7 +287,9 @@ choosing, and
 flags it.
 
 This fixture has a fitted nugget of 0.7 against a partial sill of 1.42,
-which is why `cp` turns around inside the ladder here.
+and `cp` still falls to the last level of the ladder here: its minimum
+is the support ceiling, as
+[`summary()`](https://rdrr.io/r/base/summary.html) says below.
 
 **`reliability` is highest at a coarse count**, because bigger cells
 hold more points and average away more noise. Its maximum usually lies
@@ -336,27 +353,29 @@ summary(prof)
     ##   cells: density-weighted k-means++ starts (power 1, 8 neighbours)
     ## 
     ##    criterion best flat region levels in band
-    ##           cp   44    35 to 55              3
+    ##           cp   55      35, 55              2
     ##  reliability   17    17 to 18              2
-    ##          loo   35    35 to 44              2
+    ##          loo   35      35, 55              2
     ## 
+    ##   cp: the optimum is the support ceiling (n / min_cell_n).
     ##   reliability: the optimum is the range floor (area / range^2).
     ##   There the bound is choosing, not the criterion.
     ## 
-    ##   picks span 17 to 44 cells (2.6x)
+    ##   picks span 17 to 55 cells (3.2x)
     ##   no level is in every flat region: the criteria disagree over the
     ##   whole ladder. plot() draws the curves they were read from.
 
 A band is a set of levels, not an interval, because the criterion curves
-are not monotone: a band that skips a rung prints as a comma-separated
-list, while a solid run of 3 rungs prints as a range, as `cp` does with
-`35 to 55`. Where the bands overlap you have a defensible set of levels,
-and the last line names it; `attr(summary(prof), "common")` returns the
-same levels for use in code, and `attr(summary(prof), "bands")` each
-criterion’s region in full. Where they do not overlap, the criteria are
-answering different questions and you have to say which one your
-analysis needs. An empty intersection is a result: it says this field
-has no single resolution that satisfies every way of asking.
+are not monotone: the `cp` band above accepts 35 and 55 and rejects the
+44 between them, while a solid run of 2 rungs prints as a range, as
+`reliability` does with `17 to 18`. Where the bands overlap you have a
+defensible set of levels, and the last line names it;
+`attr(summary(prof), "common")` returns the same levels for use in code,
+and `attr(summary(prof), "bands")` each criterion’s region in full.
+Where they do not overlap, the criteria are answering different
+questions and you have to say which one your analysis needs. An empty
+intersection is a result: it says this field has no single resolution
+that satisfies every way of asking.
 
 The table is not a decision procedure, and nothing in the package picks
 among its criteria for you. Cross-validating a model at each suggested
@@ -438,13 +457,13 @@ select_resolution(prof_default)
 ```
 
     ## Resolution by size: 111 cells
-    ##   size        : 4.5 rows per cell asked (obs_per_cell); 500 rows / 111 cells = 4.50
+    ##   size        : 4.5 rows per cell, the default (obs_per_cell); 500 rows / 111 cells = 4.50
     ##   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
     ##   estimate    : pooled toward the 8 nearest cells
-    ##   at this size: 0.4% of the rows are alone in their cell; median own weight 0.54
-    ##   loo         : 1.54 (one cell for the layer: 2.08)
-    ##   note        : the count is set by obs_per_cell = 4.5, the caller's choice;
-    ##                 no criterion chose it.
+    ##   at this size: 0.6% of the rows are alone in their cell; median own weight 0.57
+    ##   loo         : 1.51 (one cell for the layer: 2.08)
+    ##   note        : the count is set by obs_per_cell = 4.5, the default; no
+    ##                 criterion chose it.
 
 `obs_per_cell` puts the profile’s ladder in those terms, one level per
 size, with the centres fitted to every row. `estimate` names the cell
@@ -459,11 +478,11 @@ as.data.frame(prof_size)[, c("levels", "scored_per_cell", "loo",
 ```
 
     ##   levels scored_per_cell      loo share_alone own_weight
-    ## 1     42       11.904762 1.566779       0.000  0.8143550
-    ## 2     56        8.928571 1.525325       0.000  0.7413916
-    ## 3     83        6.024096 1.461817       0.002  0.7197274
-    ## 4    111        4.504505 1.423166       0.010  0.6473814
-    ## 5    167        2.994012 1.429188       0.048  0.5621471
+    ## 1     42       11.904762 1.517749       0.000  0.8344136
+    ## 2     56        8.928571 1.528741       0.000  0.7578461
+    ## 3     83        6.024096 1.513241       0.000  0.6627239
+    ## 4    111        4.504505 1.505141       0.006  0.5746940
+    ## 5    167        2.994012 1.436225       0.060  0.5727510
 
 Three of the columns say what a size leaves a cell value to stand on.
 
@@ -495,13 +514,13 @@ sel_size
 ```
 
     ## Resolution by size: 111 cells
-    ##   size        : 4.5 rows per cell asked (obs_per_cell); 500 rows / 111 cells = 4.50
+    ##   size        : 4.5 rows per cell, the default (obs_per_cell); 500 rows / 111 cells = 4.50
     ##   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
     ##   estimate    : pooled toward the 8 nearest cells
-    ##   at this size: 1.0% of the rows are alone in their cell; median own weight 0.65
-    ##   loo         : 1.42 (one cell for the layer: 2.08)
-    ##   note        : the count is set by obs_per_cell = 4.5, the caller's choice;
-    ##                 no criterion chose it.
+    ##   at this size: 0.6% of the rows are alone in their cell; median own weight 0.57
+    ##   loo         : 1.51 (one cell for the layer: 2.08)
+    ##   note        : the count is set by obs_per_cell = 4.5, the default; no
+    ##                 criterion chose it.
 
 `loo` is in the table to compare sizes by, not to choose one. For pooled
 values it tends to keep falling as the cells shrink, so its minimum
@@ -513,8 +532,8 @@ observations of a field plus noise, profiled at seven sizes from 18 to
 [`?resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
 gives the settings).
 
-In the table above the lowest `loo` is at 111 cells, which is not the
-finest size offered: a tendency, not a rule.
+In the table above the lowest `loo` is at 167 cells, the finest size
+offered.
 
 The size is therefore the caller’s choice, made on other grounds: how
 many observations a cell value should stand on, which `share_alone` and
@@ -526,10 +545,10 @@ summarise.
 A size does not ask whether the response has spatial structure the cells
 can use, so the selection asks it separately. `structured` is `FALSE`
 when one mean for the whole layer predicts a left-out observation as
-well as the cells do. The count stands either way, since the caller set
-it, and the functions that take the selection as a count then warn
-(class `spatialkit_no_structure`) that the cell values will say little
-that one mean does not.
+well as the cells do. The count stands either way, since a size set it
+and no criterion, and the functions that take the selection as a count
+then warn (class `spatialkit_no_structure`) that the cell values will
+say little that one mean does not.
 
 ``` r
 
@@ -538,7 +557,7 @@ data.frame(structured = sel_size$structured, loo = sel_size$loo,
 ```
 
     ##   structured      loo one_mean
-    ## 1       TRUE 1.423166 2.081281
+    ## 1       TRUE 1.505141 2.081281
 
 The selection goes to
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md),
@@ -565,14 +584,14 @@ as.data.frame(prof_loo)[, c("levels", "scored_per_cell", "loo", "loo_se",
                             "share_alone")]
 ```
 
-    ##   levels scored_per_cell      loo    loo_se share_alone
-    ## 1     28       17.857143 1.640425 0.1004998       0.000
-    ## 2     42       11.904762 1.601586 0.1024429       0.000
-    ## 3     56        8.928571 1.632183 0.1013714       0.000
-    ## 4     83        6.024096 1.645847 0.1004743       0.000
-    ## 5    111        4.504505 1.664467 0.1014937       0.004
-    ## 6    167        2.994012 1.600161 0.1032003       0.050
-    ## 7    250        2.000000 2.008358 0.1222162       0.174
+    ##   levels scored_per_cell      loo     loo_se share_alone
+    ## 1     28       17.857143 1.645483 0.10176537       0.000
+    ## 2     42       11.904762 1.544287 0.10013119       0.000
+    ## 3     56        8.928571 1.569432 0.09566006       0.000
+    ## 4     83        6.024096 1.614271 0.09915417       0.000
+    ## 5    111        4.504505 1.767550 0.11377302       0.006
+    ## 6    167        2.994012 1.718299 0.11056863       0.060
+    ## 7    250        2.000000 1.883395 0.12165820       0.180
 
 ``` r
 
@@ -580,14 +599,14 @@ sel_loo <- select_resolution(prof_loo, criterion = "loo")
 sel_loo
 ```
 
-    ## Resolution by loo: 167 cells
-    ##   flat region : 42, 167 (2 of 7 levels)
+    ## Resolution by loo: 42 cells
+    ##   flat region : 42 to 56 (2 of 7 levels)
     ##   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
     ##   estimate    : plain means
-    ##   at this size: 5.0% of the rows are alone in their cell
-    ##   loo         : 1.6 (one cell for the layer: 2.08)
+    ##   at this size: 0.0% of the rows are alone in their cell
+    ##   loo         : 1.54 (one cell for the layer: 2.08)
 
-The lowest error is at 167 cells, inside the sizes offered, so the
+The lowest error is at 42 cells, inside the sizes offered, so the
 criterion chose it.
 
 `sel_loo$flat` is every level whose error is within `tol` of the lowest,
@@ -676,9 +695,13 @@ result itself, it returns the centres of the partition the profile
 scored, and a k-means partition, weighted or not, is the Voronoi
 partition of its centres, so the cells built on those seeds are the
 cells the criteria judged; the bare count `sel$best` would run a new
-k-means, whose cells are not. This selection sits on the range floor, so
-the call warns that a bound chose the count (class
-`spatialkit_bound_chosen`; warnings are not shown in this article).
+k-means, whose cells are not. (A profile without an estimate that fitted
+its centres to a subsample, on a layer larger than `sample_n`, has its
+chosen level refitted to every point first, and those centres are
+returned; their cells are then not the cells the criteria judged.) This
+selection sits on the range floor, so the call warns that a bound chose
+the count (class `spatialkit_bound_chosen`; warnings are not shown in
+this article).
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
 then works on the seeds:
 

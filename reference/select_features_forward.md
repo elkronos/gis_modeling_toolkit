@@ -36,7 +36,9 @@ select_features_forward(
 
 - train_sf:
 
-  Training data (`sf`).
+  Training data (`sf`). With `select_on = "split"` a feature that is not
+  a point is reduced to one, and a layer whose geometries mix XY with
+  XYZ or XYM, or carry M (XYM or XYZM), is read in x and y.
 
 - response_var:
 
@@ -112,14 +114,15 @@ select_features_forward(
   autocorrelation range is estimated from the response (detrended on the
   candidates) and used as the minimum block size of the inner folds,
   exactly as in
-  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md);
-  `block_size` still applies as a floor. Default `FALSE`, which keeps
-  the geometric blocks. Inner blocks smaller than the range let a
-  candidate be selected for spatial proximity to the response rather
-  than for predicting it, which is the same failure the `random_kfold`
-  caution above exists to prevent, so the leakage warning
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md):
+  a `block_size` given takes precedence, and the range is then only
+  compared with it. Default `FALSE`, which keeps the geometric blocks.
+  With inner blocks smaller than the range a candidate can be chosen for
+  tracking nearby values of the response, the case the `random_kfold`
+  caution above is about, so the warning
   [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-  raises applies here with more force than usual.
+  raises on blocks smaller than the range applies to the inner folds
+  too.
 
 - select_on:
 
@@ -212,16 +215,17 @@ completeness filter above dropped are in neither. `params` records
 
 ## Details
 
-**The inner folds must be spatial, and that is the entire point.**
-Nested selection is only worth doing if the inner loop is blocked the
-same way the outer one is. Random inner folds inside blocked outer folds
-select variables that look predictive only because nearby points leak
-between train and test. The outer loop then reports honest-looking
-numbers for a dishonestly chosen feature set, which is worse than not
-selecting at all, because the dishonesty is now hidden behind a
-defensible-looking validation. `method` therefore defaults to
-`"block_kfold"` and logs a loud caution if set to `"random_kfold"` (a
-deliberate choice, so it is not raised as an R warning).
+**The inner folds should hold points out as the outer ones do.** A
+cross-validated score is the error at the distance the folds put between
+the held-out points and their training data, so nested selection chooses
+the variables that predict best at the inner folds' distance. Random
+inner folds inside blocked outer folds choose for predicting among the
+samples, where a variable that only tracks nearby values of the response
+can win, and the outer loop then scores the chosen set at the blocks'
+distance, for which it was not chosen. `method` therefore defaults to
+`"block_kfold"`, as the folds of the `cv_*()` functions do, and logs a
+loud caution if set to `"random_kfold"` (a deliberate choice, so it is
+not raised as an R warning).
 
 Call this *inside* the `fit_fn` you pass to
 [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md).

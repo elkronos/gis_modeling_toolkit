@@ -19,14 +19,15 @@
 - [Spatial
   cross-validation](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md):
 
-  The six fold schemes, sizing blocks from the autocorrelation range,
-  and reading a cross-validation result down to the last row.
+  What a fold’s score estimates, the six fold schemes, block sizes and
+  the autocorrelation range, and reading a cross-validation result down
+  to the last row.
 
 - [Diagnostics](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md):
 
   Residual autocorrelation, aggregation standard errors, kriging
-  adequacy, the area of applicability, two ways a score can leak, and
-  the warnings about pooled cell values.
+  adequacy, the area of applicability, coordinates as predictors and
+  selection inside the folds, and the warnings about pooled cell values.
 
 ### End to end
 

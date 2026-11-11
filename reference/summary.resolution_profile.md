@@ -53,17 +53,23 @@ on, as
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
 reports it; `NA` when interior) and `structured` (as
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-reports it: `FALSE` for a `cp` that one cell matches). Attributes:
-`bands` (a named list holding each criterion's flat region in full,
-since `flat_min` and `flat_max` are only its ends and the region can
-have holes in it), `common` (the levels in every flat region of the
-count criteria, `moran_z` left out; an integer vector that is empty when
-the regions do not overlap), `scored` (the levels each criterion
-returned a finite value at, which is what decides whether a gap in a
-band is a rejection or a level nothing was computed at), `ladder` (every
-level on the profile), `n_levels`, `tol` and `variable` (what the
-criteria were scored on). The print method recomputes the closing
-comparison from `bands`, so a row subset of the result reads honestly.
+reports it: `FALSE` for a `cp` that one cell matches, and where the
+cells beat one cell but the F test does not tell their means from one
+mean or, for `cp`, the profile's variogram found no spatial structure).
+Attributes: `bands` (a named list holding each criterion's flat region
+in full, since `flat_min` and `flat_max` are only its ends and the
+region can have holes in it), `common` (the levels in every flat region
+of the count criteria, `moran_z` left out; an integer vector that is
+empty when the regions do not overlap), `scored` (the levels each
+criterion returned a finite value at, which is what decides whether a
+gap in a band is a rejection or a level nothing was computed at),
+`ladder` (every level on the profile), `n_levels`, `tol` and `variable`
+(what the criteria were scored on), and, only when some row has
+`structured` `FALSE` although its cells beat one cell by more than
+`tol`, `not_identified` (a character vector named by criterion that says
+why: the F test, or for `cp` the profile's variogram). The print method
+recomputes the closing comparison from `bands`, so a row subset of the
+result reads honestly.
 
 ## Details
 
@@ -143,26 +149,25 @@ if (requireNamespace("gstat", quietly = TRUE)) {
 #> 
 #>   cells: density-weighted k-means++ starts (power 1, 8 neighbours)
 #> 
-#>    criterion best flat region levels in band
-#>           cp   44          44              1
-#>  reliability    4      4 to 6              3
-#>          loo   44          44              1
+#>    criterion best  flat region levels in band
+#>           cp   19 19 to 25, 44              3
+#>  reliability    4       4 to 6              3
+#>          loo   19 19 to 25, 44              3
 #> 
-#>   cp, loo: the optimum is the support ceiling (n / min_cell_n).
 #>   reliability: the optimum is the range floor (area / range^2).
 #>   There the bound is choosing, not the criterion.
 #> 
-#>   picks span 4 to 44 cells (11.0x)
+#>   picks span 4 to 19 cells (4.8x)
 #>   no level is in every flat region: the criteria disagree over the
 #>   whole ladder. plot() draws the curves they were read from.
 #> integer(0)
 #> $cp
-#> [1] 44
+#> [1] 19 25 44
 #> 
 #> $reliability
 #> [1] 4 5 6
 #> 
 #> $loo
-#> [1] 44
+#> [1] 19 25 44
 #> 
 ```

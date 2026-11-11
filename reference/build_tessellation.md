@@ -34,7 +34,9 @@ build_tessellation(
 
 - points_sf:
 
-  An sf object with POINT/MULTIPOINT geometry.
+  An sf object with POINT/MULTIPOINT geometry. Points that mix XY and
+  XYZ (or XYM), or that carry M, are read in x and y, since sf reads a
+  layer in the dimension of its first geometry and GEOS refuses M.
 
 - boundary:
 
@@ -64,7 +66,21 @@ build_tessellation(
   taken as EPSG:4326 and projected when the points look like degrees (a
   boundary whose coordinates do not fit the lon/lat envelope is then
   refused with an error), otherwise left in the same unnamed planar
-  space.
+  space. A boundary that mixes XY and XYZ (or XYM) geometries is read
+  without Z and M, since sf reads a layer in the dimension of its first
+  geometry. So is one whose geometries carry M (XYM or XYZM), which GEOS
+  refuses. A row that is empty, or has a coordinate that is not finite
+  or lies beyond 1e150 (read as given, and again after any move into
+  another CRS), covers no ground and is left out; a boundary with no
+  such row left is refused with an error that says so. A boundary in a
+  geographic CRS with a vertex at a latitude beyond 90 degrees, which is
+  no place on the Earth, is refused with an error of class
+  `"spatialkit_cells_degenerate"` that names its rows and says to check
+  its CRS. A row the repair of `boundary` leaves without a polygon (a
+  ring with no height: every vertex on one line, or in degrees on one
+  parallel) is left out as well, and a boundary with no polygon left is
+  refused. A boundary without a CRS that `crs` stamps with a geographic
+  CRS is tested for its latitude in the same way.
 
 - method:
 
@@ -86,7 +102,8 @@ build_tessellation(
   accepts what the level-selection step returned: the integer vector of
   ranked candidates from
   [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-  (its first element is used), a
+  (its first element is used; its `NA` is refused with a note on where
+  it came from), a
   [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
   result (its `$best`), or a
   [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md).
@@ -120,10 +137,11 @@ build_tessellation(
   [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
   result or the profile itself, it returns the centres of the partition
   the profile scored, whose Voronoi cells are the cells the criteria
-  judged. Seeds made that way carry the hull of `sample_points` as their
-  cover, so the cells built on them hold every point; made with neither
-  `sample_points` nor a boundary, they carry the hull of the points the
-  profile was computed on.
+  judged (refitted to every point when the profile, without an estimate,
+  was fitted to a subsample). Seeds made that way carry the hull of
+  `sample_points` as their cover, so the cells built on them hold every
+  point; made with neither `sample_points` nor a boundary, they carry
+  the hull of the points the profile was computed on.
 
 - cellsize:
 
@@ -132,7 +150,17 @@ build_tessellation(
   it was ignored. When both `cellsize` and `approx_n_cells` are given,
   `cellsize` wins and `approx_n_cells` is ignored with a logged warning;
   supply one or the other. With a geographic `crs` it is in that CRS's
-  degrees, and the grid is laid in degrees.
+  degrees, and the grid is laid in degrees, as
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  lays it; where s2 refuses a row of `boundary` or a cell even repaired,
+  the call stops with an error of class `"spatialkit_cells_degenerate"`
+  that says to pass a projected `crs` or to size the grid by
+  `approx_n_cells`. A side of the boundary's bounding box that exceeds a
+  whole number of square cells by no more than a margin of one part in
+  1e10 of the largest coordinate of the boundary, at most a millionth of
+  the diagonal of its bounding box and at least four times the spacing
+  of doubles at that coordinate, gets that number of cells (see
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)).
 
 - expand:
 
@@ -151,10 +179,14 @@ build_tessellation(
 
 - keep_duplicates:
 
-  Logical. Has no effect on the cells or the index: coincident points
-  are merged before a Voronoi diagram or a Delaunay triangulation is
-  built either way, and every one of them is indexed to the cell they
-  share.
+  Logical. With `FALSE` (the default), points are merged before a
+  Voronoi diagram or a Delaunay triangulation is built when they round
+  to one point in coordinates centred on the middle of their bounding
+  box, divided by its diagonal and rounded to 2^-30 of it, so points
+  within about a billionth of the extent of each other count as
+  coincident in any unit or origin. With `TRUE` only points at exactly
+  one location are merged. Every point is indexed to the cell that holds
+  it.
 
 - crs:
 
@@ -193,7 +225,12 @@ build_tessellation(
   projected CRS, named here, are the nearest-seed cells of that CRS, so
   a row near a boundary can fall in the neighbouring cell, and
   [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-  then reports that the cells are not the ones scored.
+  then reports that the cells are not the ones scored. Voronoi cells
+  returned in a geographic `crs` can hold two corners at one point where
+  four seeds stand the same distance from a corner (gridded locations),
+  which sf's spherical engine (s2) refuses;
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
+  says what still stops on them.
 
 - quiet:
 
@@ -223,7 +260,11 @@ build_tessellation(
   `boundary` (and for the other methods) the cover sizes nothing: when
   it is a point layer, the number of its points that fall outside every
   cell is returned as `params$cover_outside`, with a warning of class
-  `"spatialkit_unassigned"` when it is not 0. See
+  `"spatialkit_unassigned"` when it is not 0. A cover, given or
+  attached, that mixes XY and XYZ (or XYM) geometries, or that carries
+  M, is read in x and y. A row of the cover with a coordinate that is
+  not finite or lies beyond 1e150, read as given before any move, is
+  read as an empty row. See
   [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md).
 
 ## Value
@@ -240,14 +281,44 @@ A list with components:
 
   Integer vector of `cell_id` values, one per row of `points_sf`, and
   `NA` for a point that falls inside no cell, that is, one outside the
-  study area. Only a point within a thousandth of the median cell width
-  of a cell is snapped to it. That covers points sitting exactly on a
-  shared edge, and leaves points outside the study area as `NA`. A
-  summary built from `index` therefore counts only the points the
-  tessellation actually covers. When any point is `NA`, a warning of
-  class `"spatialkit_unassigned"` gives the number
+  study area. A point within a margin of one part in 1e10 of the largest
+  coordinate of the cells from a cell's edge, at most a millionth of the
+  diagonal of their bounding box and at least four times the spacing of
+  doubles at that coordinate, is in that cell, and a point in two or
+  more cells (on a shared edge, or within that margin of it) takes the
+  smallest `cell_id` among them, so a lattice point on a cell edge takes
+  the same cell in any unit or origin. A point outside every cell is
+  snapped to the nearest cell only when it is within a thousandth of the
+  median cell width of it, and a point the same distance from two cells,
+  to one part in ten million, takes the smaller `cell_id`. For cells in
+  degrees the distances of the snap are taken on the sphere, in metres,
+  whatever
+  [`sf::sf_use_s2()`](https://r-spatial.github.io/sf/reference/s2.html)
+  says, and the width is taken as an arc of the sphere, as the margin
+  is. That leaves points outside the study area as `NA`. A summary built
+  from `index` therefore counts only the points the tessellation
+  actually covers. When any point is `NA`, a warning of class
+  `"spatialkit_unassigned"` gives the number
   (`tryCatch(spatialkit_unassigned = )` catches it; the condition
-  carries `n` and `total`).
+  carries `n` and `total`). For `"voronoi"` and seeds (a layer a seeding
+  function returned, the seeds of a
+  [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+  result, or points given with a `cover`), `index` holds the cell each
+  seed generates, whether the seed lies inside the boundary or not: a
+  k-means seed outside a boundary that is not convex has its cell, the
+  part of the study area nearer it than any other seed. Only a seed
+  whose cell the clip removed whole, or without a location (an empty
+  geometry, or a coordinate that is not finite or lies beyond 1e150), is
+  `NA`, and the warning then names seeds. See
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md).
+  For `"voronoi"` and `"triangles"`, points so far from the origin of
+  their CRS that doubles there are spaced more than a millionth of their
+  extent apart (0.125 at 1e15, beside a layer a few kilometres across)
+  have the cells' edges and their own cells read at that rounding; the
+  cells are built, and a warning of class `"spatialkit_xy_imprecise"`
+  gives the spacing and the extent. For `"hex"` and `"square"` the
+  grid's warning says the same of the boundary (see
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)).
 
 - `boundary`:
 
@@ -263,14 +334,16 @@ A list with components:
   The parameters the tessellation was built with, plus `snapped`, the
   record of that nearest-cell repair: a list with `n`, `which` (row
   positions in `points_sf`) and `distance` (how far outside every cell
-  each sat, in CRS units); `n_outside`, the number of points of
-  `points_sf` that fall in no cell (the `NA`s of `index`); and
-  `cover_outside`, the number of `cover` points in no cell when a point
-  `cover` was checked against the cells (`NULL` otherwise). For
-  `"voronoi"` also `boundary_source`, where the boundary came from:
-  `"boundary"`, `"cover"`, `"seeds' cover"` or `"points"`, and, when
-  `points_sf` is a layer of seeds that records the kind of partition
-  that placed it (see
+  each sat, in CRS units, and in metres for cells in degrees; a point
+  within the margin of an edge is in that cell and is not listed), which
+  for seeds lists only those whose `index` entry is the cell they were
+  snapped to; `n_outside`, the number of points of `points_sf` that fall
+  in no cell (the `NA`s of `index`); and `cover_outside`, the number of
+  `cover` points in no cell when a point `cover` was checked against the
+  cells (`NULL` otherwise). For `"voronoi"` also `boundary_source`,
+  where the boundary came from: `"boundary"`, `"cover"`,
+  `"seeds' cover"` or `"points"`, and, when `points_sf` is a layer of
+  seeds that records the kind of partition that placed it (see
   [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)),
   `partition`: that record, a list with `kind`, `init`, `density_power`
   and `density_k` and, for seeds a seeding function placed itself,
@@ -288,8 +361,9 @@ A list with components:
   or
   [`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)
   placed from one): the record as the seeds carry it, whose
-  `scored_cells` says whether these are the cells the profile scored.
-  For `"hex"` and `"square"`, when `approx_n_cells` is a selection that
+  `scored_cells` says whether these are the cells the profile scored,
+  and `FALSE` when the seeds are fewer or more than its count. For
+  `"hex"` and `"square"`, when `approx_n_cells` is a selection that
   carries a record, or a profile built with an `estimate`, and no
   `cellsize` is given: that record with `scored_cells` `FALSE`, since a
   lattice at that count is not the partition the profile scored.
@@ -307,9 +381,17 @@ equal-area cells on a fixed grid, so cell size is a decision you make,
 and the data does not make it for you; hexagons avoid the axis-aligned
 artefacts of squares and have uniform neighbour distances. `"triangles"`
 returns the Delaunay triangulation, useful for interpolation and
-adjacency work; it is not meant as an aggregation unit.
+adjacency work; it is not meant as an aggregation unit. Points on one
+circle, such as the four corners of each square of a lattice, have more
+than one Delaunay triangulation; they are triangulated in coordinates
+centred on the middle of their bounding box, divided by its diagonal and
+rounded to 2^-30 of it, so they are split the same way in any unit or
+origin, but for a point that lies within its own rounding noise of the
+middle of such a step.
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-will suggest a cell count from the spatial structure of the data.
+suggests a cell count from the elbow of the WSS curve of the points'
+k-means clustering, and returns `NA`, which `approx_n_cells` refuses,
+when the curve has none.
 
 `"voronoi"` and `"triangles"` are built on the points' vertices: a
 MULTIPOINT feature with several vertices gets one cell (or triangle

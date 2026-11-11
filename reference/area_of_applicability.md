@@ -48,7 +48,8 @@ area_of_applicability(
 
 - train_sf:
 
-  Training data, if not taken from `model`.
+  Training data, if not taken from `model`. When location is measured it
+  is read in x and y, as `newdata` is.
 
 - predictor_vars:
 
@@ -64,15 +65,17 @@ area_of_applicability(
   (see *Weights*). `NULL` is the explicit request for equal weights. For
   a vector of your own, any positive scale works. When `model` was
   fitted with `include_coords = TRUE`, the coordinates `"..x"` and
-  `"..y"` are measured as predictors too (see below), and you are not
-  expected to supply importances for them: any you leave out default to
-  the mean of the weights you did supply, so location counts about as
-  much as a typical predictor. Naming them explicitly overrides that. An
-  unnamed vector may have one value per predictor either with or without
-  the two coordinate columns. Weights must be finite and non-negative,
-  so pass permutation importance as `pmax(importance, 0)`. (A forest
-  with no out-of-bag rows, `replace = FALSE` with `sample_fraction = 1`,
-  has `NaN` importance, which
+  `"..y"` are measured as predictors too, besides the location index,
+  which no weight changes (see *Models whose predictions depend on
+  location*). You are not expected to supply importances for them: any
+  you leave out default to the mean of the weights you did supply, so in
+  the predictor index the coordinates count about as much as a typical
+  predictor. Naming them explicitly overrides that. An unnamed vector
+  may have one value per predictor either with or without the two
+  coordinate columns. Weights must be finite and non-negative, so pass
+  permutation importance as `pmax(importance, 0)`. (A forest with no
+  out-of-bag rows, `replace = FALSE` with `sample_fraction = 1`, has
+  `NaN` importance, which
   [`pmax()`](https://rdrr.io/r/base/Extremes.html) keeps and which is
   refused when passed by hand; `"auto"` uses equal weights for it.)
   `pmax(importance, 0)` is all zero when the model found no predictor
@@ -93,7 +96,7 @@ area_of_applicability(
   neighbour). The folds you passed to `cv_*()`, built on the layer
   `model` was fitted from, may name rows that
   [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
-  removed (a missing or non-finite value, an empty geometry): as in
+  removed (a missing or non-finite value, or no location): as in
   `cv_*()`, they are dropped from the folds, and a label vector with one
   entry per row of that layer loses theirs. Also as in `cv_*()`, a
   [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
@@ -110,7 +113,10 @@ area_of_applicability(
 - normalizer_max_n:
 
   Subsample the training data to this many points when computing the
-  mean pairwise distance, which is quadratic. Default 5000.
+  mean pairwise distance, which is quadratic. Default 5000. The
+  subsample is drawn from the training rows in a fixed order (by the
+  predictors, and for the location index by the coordinates), so it does
+  not depend on the row order of the training data.
 
 - seed:
 
@@ -136,8 +142,9 @@ area_of_applicability(
   model whose predictions depend on it (a `gwr_fit`, a `bayesian_fit`, a
   forest fitted with `include_coords = TRUE`) and not otherwise; `"yes"`
   measures it whatever the model, and with no `model`; `"no"` never
-  does, and logs a caution for a model that depends on it. See *Models
-  whose predictions depend on location*.
+  does, and logs a caution for a model that depends on it (for a forest
+  it also leaves `"..x"` and `"..y"` out of the predictor index). See
+  *Models whose predictions depend on location*.
 
 - categorical:
 
@@ -155,16 +162,17 @@ An object of class `aoa`: a list with
 - `aoa`: `newdata` with a numeric `DI` column and a logical `AOA` column
   added, and between them a numeric `DI_location` column when location
   has an index of its own. For a forest fitted with
-  `include_coords = TRUE` it is the object the computation ran on:
-  `newdata` after pointizing, CRS reconciliation and the addition of the
-  `"..x"` and `"..y"` columns. With a location index it is `newdata` as
-  passed. A row whose predictors are not all finite gets `NA` in `DI`,
-  and a row outside the training range of a predictor in `dropped_vars`,
-  or on a level no training row has, gets `DI = Inf` and `AOA = FALSE`
-  (see *Limitations*). `AOA` is `DI <= threshold`, and with a location
-  index also `DI_location <= location$threshold`: a row outside on
-  either index is `FALSE`, and a row with one index missing and the
-  other inside is `NA`.
+  `include_coords = TRUE`, unless `coords = "no"`, it is the object the
+  computation ran on: `newdata` after pointizing, CRS reconciliation and
+  the addition of the `"..x"` and `"..y"` columns. In every other case
+  it is `newdata` as passed, also when location has an index of its own.
+  A row whose predictors are not all finite gets `NA` in `DI`, and a row
+  outside the training range of a predictor in `dropped_vars`, or on a
+  level no training row has, gets `DI = Inf` and `AOA = FALSE` (see
+  *Limitations*). `AOA` is `DI <= threshold`, and with a location index
+  also `DI_location <= location$threshold`: a row outside on either
+  index is `FALSE`, and a row with one index missing and the other
+  inside is `NA`.
 
 - `threshold`: the DI cut-off used.
 
@@ -220,9 +228,11 @@ An object of class `aoa`: a list with
   `normalizer_n_used`, `normalizer_subsampled`, `weights_supplied` (the
   caller passed a vector), `weights_source` (`"model importance"`,
   `"supplied"` or `"equal"`), `weights_note` (the kind of importance, or
-  why the weights are equal), `coords` (`"location index"`,
-  `"predictors"` or `"none"`), `categorical` and `seed`. `folds_method`
-  is the `method` of a
+  why the weights are equal), `coords` (`"location index"`;
+  `"location index and predictors"` for a forest fitted with
+  `include_coords = TRUE`, whose coordinates are also among the
+  predictors; or `"none"`), `categorical` and `seed`. `folds_method` is
+  the `method` of a
   [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
   result (`"block_kfold"`, `"random_kfold"`, ...), `"labels"` for a
   vector of fold labels, `"splits"` for a bare list of train/test
@@ -367,17 +377,20 @@ warning gives the count. `categorical = "drop"` leaves the categorical
 predictors out and computes the index on the others; a level the
 training data never has then goes unseen.
 
-Predictors whose variance is negligible *relative to their own
-magnitude* (the test is `sd < sqrt(.Machine$double.eps) * max(abs(x))`,
-so the same variable in metres and in gigametres is treated identically)
-are dropped from the distance. A prediction point taking a value there
-outside the training range (with the same relative tolerance) is
-extrapolation along a direction the training data never varied in: its
-scaled distance along it is infinite, so it gets `DI = Inf`, is outside
-the AOA, and a warning gives the count. A point missing that value is
-judged on the other predictors. With equal weights every predictor
-counts the same, which overstates dissimilarity along directions the
-model barely uses; see *Weights*.
+Predictors whose training values do not vary beyond their rounding are
+dropped from the distance. A predictor is kept when
+`sd > sqrt(.Machine$double.eps) * max(abs(x))`, and otherwise when its
+standard deviation is more than 3 units in the last place of
+`max(abs(x))`. The same variable in metres and in gigametres is treated
+identically, and a predictor at an offset (a timestamp in seconds) is
+kept as it is at 0. A prediction point taking a value there outside the
+training range by more than 3 units in the last place of `max(abs(x))`
+(of 1 for a column of zeros) is extrapolation along a direction the
+training data never varied in: its scaled distance along it is infinite,
+so it gets `DI = Inf`, is outside the AOA, and a warning gives the
+count. A point missing that value is judged on the other predictors.
+With equal weights every predictor counts the same, which overstates
+dissimilarity along directions the model barely uses; see *Weights*.
 
 ## Models whose predictions depend on location
 
@@ -391,13 +404,14 @@ catch. `coords = "auto"` (the default) measures location for all three;
 measures it for any model, or for none.
 
 **A geographically weighted regression** (`gwr_fit`) has coefficients
-that vary over the map, and **a Bayesian spatial model**
-(`bayesian_fit`) has a Gaussian-process term in the coordinates. For
-these, and under `coords = "yes"`, location gets an index of its own,
-built like the predictor index but in map space: `DI_location` is the
-distance to the nearest training point over the mean distance between
-training points; the training points' own values use the same folds; and
-the threshold is the same outlier-removed maximum. A prediction point is
+that vary over the map, **a Bayesian spatial model** (`bayesian_fit`)
+has a Gaussian-process term in the coordinates, and **a forest fitted
+with `include_coords = TRUE`** splits on the coordinates. For these, and
+under `coords = "yes"`, location gets an index of its own, built like
+the predictor index but in map space: `DI_location` is the distance to
+the nearest training point over the mean distance between training
+points; the training points' own values use the same folds; and the
+threshold is the same outlier-removed maximum. A prediction point is
 inside the AOA only if it is inside on both indices, and both DI columns
 are returned so the cause can be read off. Location is kept apart from
 the covariates because, as two more equally weighted columns, it is
@@ -428,21 +442,49 @@ than about twice the cut-off; `location$threshold * location$normalizer`
 is the cut-off in map units, and
 [`print()`](https://rdrr.io/r/base/print.html) shows it.
 
-**A forest fitted with `include_coords = TRUE`** splits on the
-coordinates like on any other column, so there they join the predictor
-index as `"..x"` and `"..y"` and are centred, scaled and weighted with
-the rest.
+A forest splits on the coordinates like on any other column, so for a
+forest they also stay in the predictor index as `"..x"` and `"..y"`,
+centred, scaled and weighted with the rest. Under `weights = "auto"`
+that weight is the forest's importance, which is small for a forest that
+barely splits on its coordinates: in a test where half of 50 prediction
+points lay one half to one and a half extents beyond the data, 41 read
+as inside on the predictor index, 16 of them beyond the extent. The
+location index counts location whatever weight the coordinates get, and
+put none of the 25 inside.
 
-Either way geometry is needed on both sides, so `train_sf` and `newdata`
-must both be `sf` objects; a data.frame is refused rather than quietly
-measured without location. Non-`POINT` `newdata` (grid polygons, say) is
-reduced to representative points first, as
+Geometry is needed on both sides, so `train_sf` and `newdata` must both
+be `sf` objects; a data.frame is refused rather than quietly measured
+without location. Non-`POINT` `newdata` (grid polygons, say) is reduced
+to representative points first, as
 [`coerce_to_points`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
 would. If exactly one side carries a CRS the other is brought into it:
 reprojected when its coordinates look like longitude/latitude, stamped
-otherwise, with a warning either way. This is done because degrees fed
-into a metre-space index silently understate the distances. The location
-index is a map distance and refuses training data in a geographic CRS.
+otherwise, with a warning either way; a CRS in longitude and latitude is
+not stamped on coordinates outside longitude -180 to 360 and latitude
+-90 to 90, which is refused. This is done because degrees fed into a
+metre-space index silently understate the distances. The location index
+is a map distance and refuses training data in a geographic CRS. Both
+layers are read in x and y for the location: a layer whose geometries
+mix XY with XYZ or XYM (as
+[`rbind()`](https://rdrr.io/r/base/cbind.html) of an XY and an XYZ layer
+gives), or carry M (XYM or XYZM), is read without its Z and M. Only one
+change reaches the result: for a forest fitted with
+`include_coords = TRUE`, `newdata` that mixes dimensions and is
+reprojected into the training CRS comes back in XY, with a warning of
+class `"spatialkit_zm_dropped"`, as
+[`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+returns such a layer; the points that non-`POINT` `newdata` is reduced
+to are in XY when they would mix dimensions or carry M.
+
+A row without a location (an empty geometry, or a coordinate that is not
+finite or lies beyond 1e150) is read as one both as given and after a
+move into the other layer's CRS, which can bring a coordinate of 1e200
+back finite. Such a row of `newdata` gets `NA` in `DI_location`, and for
+a forest fitted with `include_coords = TRUE` in `"..x"` and `"..y"` and
+so in `DI`; such a training row is left out of the reference distances,
+with a log line. A row of `newdata` without a location as given that is
+reprojected into the training CRS comes back in `aoa` with an empty
+geometry.
 
 ## References
 
@@ -478,7 +520,7 @@ Other prediction:
 
 ``` r
 library(sf)
-#> Linking to GEOS 3.12.1, GDAL 3.8.4, PROJ 9.4.0; sf_use_s2() is TRUE
+#> Linking to GEOS 3.14.1, GDAL 3.12.2, PROJ 9.7.1; sf_use_s2() is TRUE
 set.seed(1)
 n <- 120
 train <- st_as_sf(

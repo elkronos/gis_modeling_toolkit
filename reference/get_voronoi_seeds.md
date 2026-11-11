@@ -27,7 +27,57 @@ get_voronoi_seeds(
 
 - boundary:
 
-  Optional polygonal sf object defining the sampling area.
+  Optional polygonal sf object defining the sampling area. One that
+  mixes XY and XYZ (or XYM) geometries is read without Z and M, since sf
+  reads a layer in the dimension of its first geometry. So is one whose
+  geometries carry M (XYM or XYZM), which GEOS refuses. Where seeds or
+  the k-means cloud are sampled inside it, its rows are repaired with
+  [`sf::st_make_valid()`](https://r-spatial.github.io/sf/reference/valid.html)
+  before they are unioned. In longitude and latitude the union runs with
+  s2, and a row s2 still refuses (crossing edges, a vertex listed twice)
+  is repaired again, with crossing edges split as GEOS splits them in a
+  projected CRS; a row s2 refuses even then stops the call with an error
+  of class `"spatialkit_cells_degenerate"` that names it and says to
+  transform `boundary` to a projected CRS. A row that is empty, or has a
+  coordinate that is not finite or lies beyond 1e150 (read as given, and
+  again after any move into another CRS), covers no ground and is left
+  out; a boundary with no such row left is refused with an error that
+  says so. A boundary in a geographic CRS with a vertex at a latitude
+  beyond 90 degrees, which is no place on the Earth, is refused with an
+  error of class `"spatialkit_cells_degenerate"` that names its rows and
+  says to check its CRS. A row the repair leaves without a polygon (a
+  ring with no height: every vertex on one line, or in degrees on one
+  parallel) is left out as well, and a boundary with no polygon left is
+  refused. In longitude and latitude, a boundary whose bounding box is
+  over 10,000 times its area (small pieces far apart), which sf does not
+  sample whole, is sampled piece by piece, the points shared among the
+  pieces in proportion to their areas; a piece whose own box is over
+  10,000 times its area stops the call with an error that says to
+  transform `boundary` to a projected CRS. A boundary whose bounding box
+  has no height or no width (three vertices on one parallel) is refused.
+  In longitude and latitude s2 reads the edges as great circles, which
+  leave the bounding box read from the coordinates, and sf (without the
+  lwgeom package) draws in that box: a boundary whose box has less than
+  half its area on the sphere (three vertices on or near one parallel)
+  is refused too. That error, and the error for a box with no height
+  whose vertices lie on one parallel other than the equator, say to
+  transform `boundary` to a projected CRS in which a parallel is a
+  curve, such as the one
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  picks for it (a polar one, such as EPSG:3413 or 3031, for a ring
+  around a pole), where the region has an area and lies in its box. sf
+  draws the points in the bounding box and keeps those inside, so it
+  draws the number asked for times the ratio of the box to the area. In
+  any CRS, a boundary that would take more than 10^6 points drawn in its
+  box, or 10 times the points asked for if more (small pieces far apart,
+  a thin strip at a slant), is sampled piece by piece in the same way
+  (or whole, in draws of at most 10^6 points in its box, where that
+  takes less time), and a piece that would still take more is drawn in
+  such draws. Where the points drawn in all would exceed 2e7 (or 10
+  times the points asked for, if more), the call stops before any draw
+  with an error that gives the ratio and says to pass `sample_points`
+  (`method = "kmeans"`, whose cloud is `max(2000, 50 * n)` points) or to
+  ask for fewer seeds.
 
 - method:
 
@@ -52,7 +102,8 @@ get_voronoi_seeds(
   Besides a number, `n` accepts what the level-selection step returned:
   the integer vector of ranked candidates from
   [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-  (its first element is used), a
+  (its first element is used; its `NA` is refused with a note on where
+  it came from), a
   [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
   result (its `$best`), or a
   [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md).
@@ -87,14 +138,19 @@ get_voronoi_seeds(
   centres of the partition the profile scored at that count, and those
   are returned instead of a new k-means: a k-means partition, weighted
   or not, is the Voronoi partition of its centres, so their cells are
-  the cells the criteria judged. `sample_points`, when given, is then
-  only assigned to them (for `attr(, "kmeans")`) and gives the cover,
-  and `boundary` only sets the CRS and the cover (see "Details");
-  `kmeans_nstart`, `kmeans_iter` and `set_seed` are not used, and
-  neither are `partition`, `init` and the density settings: the centres
-  are of the kind the profile was built with, and naming another here is
-  a warning of class `"spatialkit_partition_unused"`. A call names what
-  it supplies: a `partition` or an `init` passed in the call; with
+  the cells the criteria judged. On a profile without an estimate whose
+  centres were fitted to a subsample,
+  [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+  refits them to every point first, and those centres are returned, with
+  `attr(, "refit")`: their cells are near the cells judged but not the
+  same. `sample_points`, when given, is then only assigned to them (for
+  `attr(, "kmeans")`) and gives the cover, and `boundary` only sets the
+  CRS and the cover (see "Details"); `kmeans_nstart`, `kmeans_iter` and
+  `set_seed` are not used, and neither are `partition`, `init` and the
+  density settings: the centres are of the kind the profile was built
+  with, and naming another here is a warning of class
+  `"spatialkit_partition_unused"`. A call names what it supplies: a
+  `partition` or an `init` passed in the call; with
   `partition = "density"` passed, both density settings at their values,
   defaults included; without it, a density setting other than its
   default. A call that supplies none of the four is told nothing,
@@ -103,19 +159,33 @@ get_voronoi_seeds(
 
 - seeds:
 
-  sf POINT object of user-provided seeds (method = "provided").
+  sf POINT object of user-provided seeds (method = "provided"). Methods
+  `"kmeans"` and `"random"` do not read it, and ignore it with a
+  warning; so does a call that passes `seed =`, which R matches to
+  `seeds` (the seed of the random stream is `set_seed`). Seeds in
+  another CRS than `boundary` are returned in the boundary's CRS; seeds
+  that mix XY and XYZ (or XYM) points are then returned in XY, with a
+  warning of class `"spatialkit_zm_dropped"`, since sf reads a layer in
+  the dimension of its first geometry.
 
 - sample_points:
 
-  Optional sf POINT cloud for k-means clustering. Only the first two
-  coordinate columns are clustered, so a Z or M dimension does not join
-  the distance calculation and dominate it; rows with empty or
-  non-finite coordinates are dropped with a warning, so they never reach
+  Optional sf POINT cloud for k-means clustering. Method `"random"`
+  places its seeds in `boundary` and does not read it; it is ignored
+  there with a warning. Only the first two coordinate columns are
+  clustered, so a Z or M dimension does not join the distance
+  calculation and dominate it; rows without a location (an empty point,
+  a coordinate that is not finite or lies beyond 1e150, or in a
+  geographic CRS a latitude beyond 90 degrees, read as given before any
+  move) are dropped with a warning, so they never reach
   [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html), which fails
   on them without naming a cause. A lon/lat cloud, or one with no CRS
   whose coordinates look like lon/lat (the heuristic
   [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
-  applies, with its warning), is projected before clustering.
+  applies, with its warning), is projected before clustering. A cloud
+  that mixes XY and XYZ (or XYM) points is read without Z and M before
+  it is projected or clustered, since sf reads a layer in the dimension
+  of its first geometry.
 
 - kmeans_nstart:
 
@@ -163,13 +233,19 @@ get_voronoi_seeds(
   of a dense place that a cell of a sparse place holds. It is the run of
   earlier versions, whose default it was:
   [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) from 10
-  random starts on the rows as they come. The density kind follows the
-  density of `sample_points`; a cloud this function draws inside
-  `boundary` is uniform and has none to follow. Without the 'FNN'
-  package the density kind finds its weights by comparing every pair of
-  distinct locations, so its time grows with the square of their number;
-  the seeds are the same, and nothing stops the call. See "The
-  partition" in
+  random starts on the rows as they come, with the coordinates centred,
+  divided by the diagonal of their bounding box and rounded to 2^-30 of
+  it, so that the seeds do not move with the unit or the origin; on
+  gridded locations they can differ from those of earlier versions, and
+  where the locations span less than a kilometre a change of unit or
+  origin can still move them (see "The partition" in
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)).
+  The density kind follows the density of `sample_points`; a cloud this
+  function draws inside `boundary` is uniform and has none to follow.
+  Without the 'FNN' package the density kind finds its weights by
+  comparing every pair of distinct locations, so its time grows with the
+  square of their number; the seeds are the same, and nothing stops the
+  call. See "The partition" in
   [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
   for what each kind does and how.
 
@@ -211,12 +287,15 @@ with unusable coordinates are dropped first), `size` (points per seed),
 `iter` and `nstart`. For the scored centres of a selection or profile
 (see `n`) it describes `sample_points` assigned to them, each point to
 its nearest seed, with `iter` `NA` and `nstart` the profile's restarts,
-and is absent when no `sample_points` were given. Under
-`partition = "density"` `withinss` and `tot_withinss` count every point
-once, about its cell's mean. A run this call makes with
-`partition = "density"` or `init = "kmeans++"` also records `converged`,
-whether the kept start stopped before `kmeans_iter`, and under
-`partition = "density"` `objective`, the weighted sum the seeds
+and is absent when no `sample_points` were given. A point the same
+distance from two seeds (squared distances within one part in ten
+million) goes to the lower `seed_id`, the rule the profile scores its
+cells by, so the record is the same in another unit or with another
+origin. Under `partition = "density"` `withinss` and `tot_withinss`
+count every point once, about its cell's mean. A run this call makes
+with `partition = "density"` or `init = "kmeans++"` also records
+`converged`, whether the kept start stopped before `kmeans_iter`, and
+under `partition = "density"` `objective`, the weighted sum the seeds
 minimise; scored centres have neither. Seeds placed with
 `partition = "density"` or `init = "kmeans++"`, and the scored centres
 of a profile of the density kind or from random starts, carry
@@ -234,11 +313,12 @@ hull of the clustered points, in its own CRS.
 
 When `n` is a
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-result that carries `count_rule`, or a profile built with an `estimate`,
-the seeds carry that record as `attr(, "count_rule")`: how the count was
-set, for which cell value, and what the profile scored at it. Its
-`scored_cells` is `TRUE` for the scored centres `method = "kmeans"`
-hands on, and `FALSE` for seeds this call places itself at that count: a
+result that carries `count_rule`, or a profile built with an `estimate`
+or read by `cp`, the seeds carry that record as `attr(, "count_rule")`:
+how the count was set, for which cell value, and what the profile scored
+at it. Its `scored_cells` is `TRUE` for the scored centres
+`method = "kmeans"` hands on, and `FALSE` for centres refitted to every
+point (see `n`) and for seeds this call places itself at that count: a
 k-means of its own when the selection holds no centres at the count, and
 every `method = "random"` seeding. `method = "provided"` does not read
 `n` and writes no record; seeds that already carry one (`sel$seeds`)
@@ -258,7 +338,10 @@ hull of the points they were fitted to, random seeds inside the
 boundary), so Voronoi cells clipped to the seeds' own hull would leave
 its edge uncovered. The result therefore carries that ground as
 `attr(, "cover")`: the `boundary` when one was given, otherwise the
-convex hull of `sample_points`, otherwise (for the scored centres of a
+convex hull of `sample_points` (for lon/lat points, the hull of their
+coordinates in degrees, with the longitudes of points on both sides of
+180 degrees taken from 0 to 360, -170 as 190), otherwise (for the scored
+centres of a
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
 or a
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
@@ -282,12 +365,14 @@ A k-means seed is a mean of the points of its cluster, weighted under
 the density kind, so it can lie outside a `boundary` that is not convex,
 in a bay or a bend of a coast, even when every point lies inside.
 Tessellated within that boundary, its cell is built if any of it lies
-inside, but the seed itself lies in no cell:
+inside: the part of the study area nearer the seed than any other seed.
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-warns that it falls in no cell (class `spatialkit_unassigned`) and gives
-it `NA` in `index`. `seeds` in
-[`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md)
-says how to give such a seed its cell's ID.
+gives the seed that cell in `index`, as it gives every seed the cell it
+generates, so `seeds$cell_id <- tess$index` holds each seed's cell for
+[`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md).
+A seed with every part of the study area nearer another seed has no
+cell, `NA` in `index`, and a warning of class `spatialkit_unassigned`
+gives the number.
 
 ## See also
 

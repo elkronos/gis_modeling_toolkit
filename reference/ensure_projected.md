@@ -32,18 +32,28 @@ ensure_projected(x, target_crs = NULL, purpose = c("distance", "area"))
   going to be computed, so the CRS must be equal-area. For lon/lat input
   the choice is then made among equal-area projections only: a Lambert
   azimuthal centred on the data, or an Albers conic where its parallels
-  do not degenerate, whichever distorts distances less. A UTM zone
-  (conformal, not equal-area) never enters that comparison, and global
-  coverage gets Equal Earth in place of Web Mercator. Already-projected
-  input is still returned untouched, but its area distortion over the
-  extent is measured (the spread of planar-to-geodesic area ratios over
-  probe polygons) and logged as a warning when it exceeds 1 percent.
-  Measured: a zone's own width edge to edge, 0.25 percent; the
-  conterminous United States forced into one zone, 14 percent; Web
-  Mercator over 2.5 degrees of latitude at 48N, 4 percent; an equal-area
-  projection, a few tenths of a percent, which is the sphere the
-  geodesic areas are computed on against the ellipsoid the projection
-  uses.
+  do not degenerate or pass a pole, whichever distorts distances less. A
+  UTM zone (conformal, not equal-area) never enters that comparison, and
+  global coverage gets Equal Earth in place of Web Mercator.
+  Already-projected input is still returned untouched, but its area
+  distortion over the extent is measured (the spread of
+  planar-to-geodesic area ratios over probe polygons) and logged as a
+  warning when it exceeds 1 percent. The probes are the layer's distinct
+  polygons (exact copies of a polygon count once), or a 6 by 6 grid over
+  its bounding box for a layer without polygons, a layer of one distinct
+  polygon, which gives one ratio and no spread, and a layer with a
+  polygon s2 cannot measure in degrees (edges that cross, a spike) or
+  that
+  [`sf::st_is_valid()`](https://r-spatial.github.io/sf/reference/valid.html)
+  rejects in its CRS (a hole outside its shell), whose planar area is
+  not the area it encloses. When the grid gives no figure either (a
+  single point, a line along one axis), a warning says that the
+  distortion could not be measured. Measured: a zone's own width edge to
+  edge, 0.25 percent; the conterminous United States forced into one
+  zone, 14 percent; Web Mercator over 2.5 degrees of latitude at 48N, 4
+  percent; an equal-area projection, a few tenths of a percent, which is
+  the sphere the geodesic areas are computed on against the ellipsoid
+  the projection uses.
   [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
   applies the same measurement before it computes a density. Ignored
   when `target_crs` is given.
@@ -69,7 +79,16 @@ also read on the way IN. An object already carrying `"none"` is returned
 untouched, with the heuristic skipped, which is how a
 [`predict()`](https://rdrr.io/r/stats/predict.html) method replays a
 fit's negative decision so that a subset of the training rows is not
-judged differently from the whole.
+judged differently from the whole. A layer that mixes XY and XYZ (or
+XYM) geometries is returned in XY when it is transformed, with a warning
+of class `"spatialkit_zm_dropped"`:
+[`sf::st_transform()`](https://r-spatial.github.io/sf/reference/st_transform.html)
+reads a layer in the dimension of its first geometry and misplaces the
+others. The projection is then chosen from the layer in XY. A layer in
+one dimension is transformed with its Z and M, and so is a layer whose
+only geometries of another dimension than the first are empty and not
+points. A layer that is not transformed is returned with its own
+geometry.
 
 ## Details
 
@@ -96,13 +115,22 @@ the extent of the data. It is **not** always UTM:
   GWR bandwidths and GP length-scales. Which projection is actually best
   is then **measured, not assumed**: the zone, a Lambert azimuthal
   equal-area centred on the data and (where its standard parallels do
-  not degenerate) an Albers conic are each scored by projecting
-  representative points of the data (a non-POINT layer is reduced to one
-  point per feature, plus the vertices of its outline when it has fewer
-  than 40 features, so a single study-area polygon is scored too) and
-  comparing planar with geodesic pairwise distances, and the one that
-  distorts least is used. The choice, both error figures and this
-  argument are **logged** (see the logging note under
+  not degenerate or pass a pole) an Albers conic are each scored by
+  projecting representative points of the data (a non-POINT layer is
+  reduced to one point per feature, plus the vertices of its outline
+  when fewer than 40 distinct points remain, so a single study-area
+  polygon is scored too, however many rows repeat it; copies of one
+  location count once, and rows without a finite location are left out)
+  and comparing planar with geodesic distances over the pairs at least 1
+  mm apart, and the one that distorts least is used. A candidate must
+  place every location of the layer to be used: one under which a vertex
+  of the layer has no coordinates (a UTM zone about 90 degrees or more
+  from its central meridian) gets `distance_error` `NA` and is not
+  chosen, and the log line names it. A vertex at a latitude beyond 90,
+  which no CRS places, takes no part in this test. When no candidate
+  places every vertex, Web Mercator (Equal Earth for `purpose = "area"`)
+  is used. The choice, both error figures and this argument are
+  **logged** (see the logging note under
   [`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md));
   they are not R warnings, so `tryCatch(warning = )` does not see them.
 
@@ -131,14 +159,59 @@ the extent of the data. It is **not** always UTM:
 
   With no `target_crs`, a bounding box that looks like lon/lat means
   EPSG:4326 is assumed (a real warning) and the rules above then apply;
-  coordinates the heuristic declines are left exactly as they are. With
-  `target_crs` supplied there is no source CRS to reproject from, so the
-  same heuristic decides between two outcomes: lon/lat-looking
-  coordinates are read as EPSG:4326 and reprojected to the target (a
-  real warning), and anything else has the target **stamped on without
-  reprojection**. That is a relabel, logged only, so verify the
-  coordinates really are in that CRS. Set the CRS explicitly to suppress
-  either.
+  coordinates the heuristic declines are left exactly as they are. The
+  box is the one of the coordinates that have a location (see the next
+  item). With `target_crs` supplied there is no source CRS to reproject
+  from, so the same heuristic decides between two outcomes:
+  lon/lat-looking coordinates are read as EPSG:4326 and reprojected to
+  the target (a real warning), and anything else has the target
+  **stamped on without reprojection**. That is a relabel, logged only,
+  so verify the coordinates really are in that CRS. Set the CRS
+  explicitly to suppress either. A `target_crs` in longitude and
+  latitude is not stamped on coordinates that cannot be in it: an x
+  outside -180 to 360 or a y beyond 90 north or south, in the box of the
+  coordinates that have a location, stops the call with an error that
+  gives the box.
+
+- Rows without a location:
+
+  A coordinate that is not finite or lies beyond 1e150 has no location,
+  and nor does a row whose geometry is empty. The lon/lat test of a
+  layer without a CRS reads the coordinates that have a location, vertex
+  by vertex: a polygon with one such vertex is read on its other
+  vertices. The choice of a projection reads the rows that have a
+  location: a row with one such coordinate takes no part in it, as an
+  empty row would, and a layer in which no row has a location gets Web
+  Mercator (Equal Earth for `purpose = "area"`). Moved to another CRS,
+  these rows come back empty, in their own geometry type;
+  [`sf::st_transform()`](https://r-spatial.github.io/sf/reference/st_transform.html)
+  would drop the vertex it cannot move, or put a coordinate beyond 1e150
+  at a finite place, and return the rest of the feature. A row that has
+  a location and that a move to another CRS cannot place in full comes
+  back empty, or without the vertices the CRS cannot place, and a
+  warning of class `spatialkit_rows_unplaced` names such rows (`rows` on
+  the condition), from lon/lat or from a projected CRS. With the
+  projection chosen here that happens only at a coordinate no CRS
+  places, such as a latitude beyond 90; with a `target_crs`, wherever
+  that CRS cannot place the layer. The choice of a projection does not
+  read a row with a vertex at a latitude beyond 90 either: it is made on
+  the other rows, and a layer each row of which is empty, has no
+  location or has such a vertex gets Web Mercator (Equal Earth for
+  `purpose = "area"`). The functions that read a lon/lat data layer row
+  by row
+  ([`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md),
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+  and the fits, the k-means seeders' points, the features of
+  [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md),
+  the pooled readers of
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  and
+  [`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md),
+  and
+  [`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md))
+  read a row with a vertex at a latitude beyond 90 as a row without a
+  location, before anything else reads it, and say so in the words they
+  use for such a row.
 
 `target_crs` overrides all of this. Pass it whenever you need a
 specific, reproducible projection: comparing runs, matching an existing

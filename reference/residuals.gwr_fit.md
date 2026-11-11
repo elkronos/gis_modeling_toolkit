@@ -2,7 +2,14 @@
 
 Observed response minus
 [`fitted.gwr_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/fitted.gwr_fit.md),
-so these are **in-sample** residuals.
+so these are **in-sample** residuals. Where
+[`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+took the response about its centre (a response whose centre is more than
+1000 times its spread, such as 1e8 plus a spread of 1, or whose raw
+values lose their spread, such as 1e15 plus a spread of 1; see **The
+local solve** there), both are taken about that centre, so the residuals
+keep the spread a double rounds away from the response and the fitted
+values at that size.
 
 ## Usage
 

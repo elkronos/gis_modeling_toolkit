@@ -48,7 +48,8 @@ cross-validation package.
 1.  **Choose a resolution.**
     [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
     reads a cell count out of the spatial structure of the observations,
-    so you do not have to guess one.
+    so you do not have to guess one, and returns `NA` when the WSS curve
+    of their k-means clustering has no elbow to read one from.
 
 2.  **Tessellate.**
     [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
@@ -71,8 +72,14 @@ cross-validation package.
 5.  **Fold.**
     [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
     builds spatial cross-validation folds: blocked, buffered,
-    leave-location-out or nearest-neighbour distance-matched. Random
-    folds flatter autocorrelated data; these do not.
+    leave-location-out or nearest-neighbour distance-matched. A
+    cross-validated error is the error at the distance the folds put
+    between the held-out points and their training data: it reads low
+    for predictions made farther from the data and high for predictions
+    made closer, so the folds to use are the ones matched to where the
+    model will predict.
+    [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+    with `prediction_points` compares the two distances.
 
 6.  **Fit.**
     [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
@@ -149,8 +156,25 @@ default criterion, `"auto"`, sets the count. `estimate = "mean"` in the
 summary gives the frame it returned before the argument existed.
 `estimate = NULL, obs_per_cell = NULL` in the profile gives the earlier
 ladder and its columns, and with `partition = "kmeans"` the earlier
-regions as well: the profile it returned before. The seeding functions
-take `partition = "kmeans"` for their earlier seeds.
+regions as well: the profile it returned before, with three exceptions.
+\\C_p\\'s noise variance is no longer a nugget at the variogram fit's
+lower bound, and it is held to the semivariance of nearest-neighbour
+pairs, so `cp` and the count it chooses differ wherever either applies,
+and nothing gives the earlier noise variance back. And on a layer of
+more than `sample_n` points the level
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+chooses off such a profile is refitted to every point before its seeds
+are handed on; the centres the profile scored are
+`attr(profile, "centres")[[as.character(sel$best)]]`. And
+[`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) is handed the
+coordinates centred, divided by their extent and rounded to about a
+billionth of it (see "The partition" in
+[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)),
+so on gridded locations the regions can differ, and elsewhere the
+centres, and the cells numbered by them, can come in another order.
+Given a number of cells, the seeding functions take
+`partition = "kmeans"` for their earlier seeds, with that last
+exception.
 
 Supporting these throughout,
 [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
@@ -158,8 +182,10 @@ and
 [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
 handle coordinate reference systems and geometry coercion, and
 [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-estimates the distance over which observations remain correlated. That
-is the number that should be setting your block size.
+estimates the distance over which observations remain correlated. Sizing
+blocks from it is one way to set how far the held-out points sit from
+their training data, and suits a map that has to reach that far from the
+data.
 
 ## Defaults and their sources
 
@@ -340,7 +366,7 @@ Useful entry points by task:
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
 (aggregate to them),
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-(split them without flattering the model),
+(split the data into cross-validation folds),
 [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
 (score several models at once),
 [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)

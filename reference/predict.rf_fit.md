@@ -32,7 +32,9 @@ predict(object, newdata = NULL, ...)
   otherwise factor-code a character column and apply the numeric split
   thresholds to the codes, predicting confidently from nonsense, so a
   character column is refused instead. (ranger sees a logical as 0/1, so
-  either form is accepted for one.)
+  either form is accepted for one.) A layer whose geometries mix XY with
+  XYZ or XYM (as [`rbind()`](https://rdrr.io/r/base/cbind.html) of an XY
+  and an XYZ layer gives) is read in x and y.
 
 - ...:
 
@@ -43,9 +45,14 @@ predict(object, newdata = NULL, ...)
   `predict(fit$engine, data = ...)` directly for those. So is anything
   `ranger`'s predict method itself refuses, such as `type = "quantiles"`
   on a forest grown without `quantreg = TRUE` or `type = "se"` without
-  `keep.inbag = TRUE`: the error names ranger's reason. `seed` defaults
-  to a constant: an unset `seed` makes `ranger` draw one uniform from
-  the global RNG stream per call, so the number of
+  `keep.inbag = TRUE`: the error names ranger's reason. `fit$engine`
+  predicts `(y - fit$info$response_centre) / fit$info$response_scale`,
+  which is `y` unless the forest was grown on the response taken about a
+  centre or scaled (see the Value section of
+  [`fit_rf_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md));
+  this method puts the centre and scale back. `seed` defaults to a
+  constant: an unset `seed` makes `ranger` draw one uniform from the
+  global RNG stream per call, so the number of
   [`predict()`](https://rdrr.io/r/stats/predict.html) calls a script
   happens to make (via
   [`predict_surface`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)'s

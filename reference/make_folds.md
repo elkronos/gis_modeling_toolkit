@@ -45,7 +45,9 @@ make_folds(
   CRS-less points are aligned to a `boundary` or `prediction_points`
   that carries a CRS. They are reprojected when the coordinates look
   like lon/lat and otherwise stamped without reprojection, with a
-  warning either way.
+  warning either way. A CRS in longitude and latitude is not stamped on
+  coordinates outside longitude -180 to 360 and latitude -90 to 90: that
+  is refused.
 
 - k:
 
@@ -65,9 +67,9 @@ make_folds(
   the returned list, and do not assume the requested value;
   `params$k_requested` keeps the value asked for. Returning fewer folds
   than asked raises a warning of class `"spatialkit_k_reduced"`, whose
-  message gives both counts, the reason and a setting that works; the
-  condition carries them as `k_requested` and `k`, so
-  `tryCatch(spatialkit_k_reduced = )` or
+  message gives both counts, the reason and, where there is one, a
+  setting that works; the condition carries them as `k_requested` and
+  `k`, so `tryCatch(spatialkit_k_reduced = )` or
   [`withCallingHandlers()`](https://rdrr.io/r/base/conditions.html) can
   act on it without reading the text. (Before this version a reduction
   was a log line only.)
@@ -105,9 +107,9 @@ make_folds(
   heavily on which region each fold happened to get; with many, the
   blocks shrink towards single points and the scheme drifts back towards
   random k-fold. 3 is a compromise between those two, not a published
-  constant. The block size that matters for leakage is the
-  autocorrelation range, which is what `block_size` and `auto_range`
-  control.
+  constant. The size of the blocks sets how far the held-out points sit
+  from their training data; `block_size` and `auto_range` set it from a
+  distance, where this sets it from a count.
 
 - block_size:
 
@@ -115,17 +117,20 @@ make_folds(
   the CRS the folds are built in**. Takes precedence over
   `block_nx`/`block_ny` and `block_multiplier`. When supplied, a whole
   number of blocks is fitted across each axis of the extent: as many as
-  leave every block at least this long on that axis. On an axis at least
-  as long as `block_size` the blocks built are therefore from one to
-  just under two times this size. An axis shorter than `block_size`
-  cannot hold a block that long: a single row or column spans it, and
-  its blocks are as long as the extent on that axis, which is less than
-  the size asked (a 39.8 km by 5 km extent with `block_size = 10000`
-  gets three blocks 13.3 km wide and 5 km tall). `params$block_width`
-  and `params$block_height` record what was built. A size that leaves
-  fewer than `k` blocks holding points returns that many folds, with a
-  warning (see `k`); one that leaves a single block is an error. Both
-  name the largest size that still gives `k` folds.
+  leave every block at least this long on that axis, a block shorter by
+  no more than one part in ten million counting as this long, so that a
+  size of exactly the axis over a whole number gives that number of
+  blocks in any unit. On an axis at least as long as `block_size` the
+  blocks built are therefore from one to just under two times this size.
+  An axis shorter than `block_size` cannot hold a block that long: a
+  single row or column spans it, and its blocks are as long as the
+  extent on that axis, which is less than the size asked (a 39.8 km by 5
+  km extent with `block_size = 10000` gets three blocks 13.3 km wide and
+  5 km tall). `params$block_width` and `params$block_height` record what
+  was built. A size that leaves fewer than `k` blocks holding points
+  returns that many folds, with a warning (see `k`); one that leaves a
+  single block is an error. Both name the largest size that still gives
+  `k` folds.
 
   Which CRS that is depends on the input. Projected input is used as it
   stands, so `block_size` is in your own CRS's units. Geographic
@@ -188,8 +193,8 @@ make_folds(
   Character(1) response column name. Required when `auto_range = TRUE`.
   For `"block_kfold"` a name that is not a column of `points_sf` is an
   error, whether or not `auto_range` is set: with it off the response
-  still feeds the leakage warning, which a misspelt name would silently
-  disable.
+  still feeds the warning on blocks smaller than the range, which a
+  misspelt name would silently disable.
 
 - group_var:
 
@@ -211,7 +216,17 @@ make_folds(
   reduced to representative points first, so the target distances are
   point-to-point. A point-to-polygon distance is zero for every cell
   that contains a training point, which pulls the target distribution
-  towards zero and degenerates the CV towards plain leave-one-out.
+  towards zero and degenerates the CV towards plain leave-one-out. A
+  layer that mixes XY and XYZ (or XYM) geometries is read in x and y,
+  before and after it is reduced to points, since sf reads a layer in
+  the dimension of its first geometry. So is a layer whose geometries
+  carry M (XYM or XYZM), which GEOS refuses. The points a layer is
+  reduced to are read in x and y when they mix dimensions, as those of a
+  layer XYZ throughout that holds points and polygons do. A prediction
+  point without a location (an empty point, or a coordinate that is not
+  finite or lies beyond 1e150), as given or once brought into the CRS of
+  the folds, takes no part in the target and is not counted in
+  `params$n_prediction_points`.
 
 - predictor_vars:
 
@@ -223,10 +238,26 @@ make_folds(
 
   Optional polygonal sf/sfc for block_kfold. The grid is clipped to it;
   a cell that the boundary only touches at a corner or along an edge is
-  not a block. A boundary without a CRS is brought into the points' CRS:
-  reprojected from EPSG:4326 when its coordinates look like lon/lat,
-  otherwise stamped, with a warning either way. The same goes for
-  `prediction_points` and `blocks`.
+  not a block. A point on the boundary, to the margin of the edge rule
+  in Details, is inside it. A boundary without a CRS is brought into the
+  points' CRS: reprojected from EPSG:4326 when its coordinates look like
+  lon/lat, otherwise stamped, with a warning either way; a CRS in
+  longitude and latitude is not stamped on coordinates outside longitude
+  -180 to 360 and latitude -90 to 90, which is refused. The same goes
+  for `prediction_points` and `blocks`. A boundary that mixes XY and XYZ
+  (or XYM) geometries is read in x and y, since sf reads a layer in the
+  dimension of its first geometry, and so is one whose polygons carry M
+  (XYM or XYZM), which GEOS refuses. A row that is empty, or has a
+  coordinate that is not finite or lies beyond 1e150 (read as given, and
+  again after any move into another CRS), covers no ground and is left
+  out; a boundary with no such row left is refused with an error that
+  says so. A boundary in a geographic CRS with a vertex at a latitude
+  beyond 90 degrees, which is no place on the Earth, is refused with an
+  error of class `"spatialkit_cells_degenerate"` that names its rows and
+  says to check its CRS. A row the repair of `boundary` leaves without a
+  polygon (a ring with no height: every vertex on one line, or in
+  degrees on one parallel) is left out as well, and a boundary with no
+  polygon left is refused.
 
 - buffer:
 
@@ -236,21 +267,26 @@ make_folds(
   built in (`params$crs`), which for geographic (lon/lat) input is the
   metre CRS
   [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
-  chooses: 0.1 means 0.1 m, not 0.1 degrees. A buffer that excludes no
-  neighbour from any fold makes the scheme plain leave-one-out, and is
-  warned about.
+  chooses: 0.1 means 0.1 m, not 0.1 degrees. A neighbour at the buffer
+  distance is excluded, and so is one over it by rounding: a squared
+  distance within one part in ten million of the buffer's square (a
+  distance about one part in twenty million over the buffer) counts as
+  at it, so a lattice whose spacing divides the buffer gives the same
+  folds in any unit or origin. A buffer that excludes no neighbour from
+  any fold makes the scheme plain leave-one-out, and is warned about.
 
 - min_train:
 
   For `method = "nndm"`: the smallest fraction of the data any fold's
   training set may be reduced to by neighbour exclusion. Default `0.5`,
   as in `CAST::nndm()`. Where it binds, the distance matching stops
-  short and the cross-validation stays optimistic; see **Details**. For
-  `method = "knndm"`: the smallest fraction of the data a fold may leave
-  for training, so a candidate whose largest fold holds more than
-  `1 - min_train` of the rows is set aside (the `maxp = 0.5` of
-  `CAST::knndm()` is `min_train = 0.5`). Equal folds leave `1 - 1/k` of
-  the data, so a value above that is an error.
+  short: the held-out points stay closer to their training data than the
+  prediction points are, and the error reads low for them; see
+  **Details**. For `method = "knndm"`: the smallest fraction of the data
+  a fold may leave for training, so a candidate whose largest fold holds
+  more than `1 - min_train` of the rows is set aside (the `maxp = 0.5`
+  of `CAST::knndm()` is `min_train = 0.5`). Equal folds leave `1 - 1/k`
+  of the data, so a value above that is an error.
 
 - phi:
 
@@ -286,8 +322,11 @@ make_folds(
   `block_size`, `block_nx`/`block_ny`, `block_multiplier` and `boundary`
   have nothing to act on and are ignored (logged); `auto_range` only
   compares the estimated range against the blocks. See **Supplied
-  blocks** below for the CRS, overlap and coverage rules. An error for
-  any other `method`.
+  blocks** below for the CRS, overlap and coverage rules. Blocks that
+  mix XY and XYZ (or XYM) polygons are read in x and y, since sf reads a
+  layer in the dimension of its first geometry, and `params$blocks`
+  holds them in XY. So are blocks whose polygons carry M (XYM or XYZM),
+  which GEOS refuses. An error for any other `method`.
 
 - balance_tol:
 
@@ -402,30 +441,71 @@ CRS
 [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
 chose for you, and not one you passed.
 
-Rows whose geometry is empty or has non-finite coordinates are dropped
-before folding, with a logged warning naming the count; they appear in
-no fold and in no `assignment` row.
+Rows without a location (an empty point, or a coordinate that is not
+finite or lies beyond 1e150) are dropped before folding, with a logged
+warning naming the count; they appear in no fold and in no `assignment`
+row. The bound is read on the coordinates as given, and again after the
+projection for the methods that measure distance.
 
 ## Details
 
-For `block_kfold`, the default grid sizing is purely geometric and
-unrelated to the autocorrelation range of the data. When blocks are
-smaller than the autocorrelation range, spatially correlated
-observations leak across folds and CV metrics become optimistic. Use
-`block_size` to set a minimum block edge length (in CRS units), or set
-`auto_range = TRUE` to estimate the range from an empirical variogram
-and enforce it automatically. When a response is given and the blocks
-come out smaller than the estimated range, the warning says what
-range-sized blocks would yield on this layout before recommending them:
-the setting and the grid it builds when that gives `k` folds, and
-otherwise how many folds it gives (or that it leaves a single block),
-the largest block size that still gives `k` folds, and `method = "nndm"`
-as the design that needs no block size.
+A cross-validated error is the error at the distances the folds put
+between the held-out points and their training data. It reads low for
+predictions made farther from the data than the held-out points sit, and
+high for predictions made closer, so which folds to use depends on where
+the model will predict.
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+with `prediction_points` compares the two distances, and
+`method = "nndm"` and `"knndm"` build folds matched to them.
 
-**Fold methods.** `"random_kfold"` ignores geography entirely and will
-overstate performance on autocorrelated data. `"block_kfold"` separates
-folds geographically. `"buffered_loo"` holds out one point at a time and
-excludes everything within a fixed `buffer`.
+For `block_kfold`, the default grid sizing is purely geometric and
+unrelated to the autocorrelation range of the data. The wider the
+blocks, the farther the held-out points sit from their training data.
+When blocks are smaller than the autocorrelation range, held-out points
+have training data within the range, and the score is the error of
+predicting that close to the data: it reads low for predictions made
+farther from the data, and is the error of a map whose locations sit as
+close. Use `block_size` to set a minimum block edge length (in CRS
+units), or set `auto_range = TRUE` to estimate the range from an
+empirical variogram and use it as that minimum. When a response is given
+and the blocks come out smaller than the estimated range, the warning
+says so and what range-sized blocks would yield on this layout: the
+setting and the grid it builds when that gives `k` folds, and otherwise
+how many folds it gives (or that it leaves a single block), the largest
+block size that still gives `k` folds, and `method = "nndm"` as the
+design that needs no block size.
+
+A point on the edge two grid cells share goes to the lower one, the cell
+with the lower index in the full grid (`params$blocks$source_row`; the
+grid is numbered along each row from the bottom left, so the cell to the
+left or below). A point is on an edge while it lies within one part in
+1e10 of the largest coordinate of the points and the blocks from it
+(0.44 mm at a UTM northing of 4,400 km), at most a millionth of the
+diagonal of their bounding box and at least four times the spacing of
+doubles at that coordinate, so points on the grid lines of a lattice are
+blocked alike in any unit or origin. A point in no cell of a clipped
+grid goes to the cell with the nearest centroid, and to the lower of two
+whose centroids are as near to one part in ten million or that margin.
+
+Points so far from the origin of their coordinates that doubles there
+are spaced more than a millionth of the points' extent apart (0.125 at
+1e15, beside a layer a few kilometres across) are held to that spacing,
+and so are the edges of the blocks laid over them, so a point that lies
+within it of an edge near the origin can fall in the next block. With
+`method = "block_kfold"` or `"buffered_loo"` the folds are made, and a
+warning of class `"spatialkit_xy_imprecise"` gives the spacing and the
+extent.
+
+**Fold methods.** `"random_kfold"` ignores geography: a held-out point
+keeps most of its neighbours in the training data, so the score is the
+error of predicting among the samples. That is the error of a map over
+an area the samples cover evenly, and it reads low for predictions made
+farther from the data, such as a map of a whole region from clustered
+samples. `"block_kfold"` holds out whole blocks, so the held-out points
+sit farther from their training data the wider the blocks are, and the
+score is the error of predicting into unsampled gaps of that size; for a
+map of an area the samples cover, it reads high. `"buffered_loo"` holds
+out one point at a time and excludes everything within a fixed `buffer`.
 
 `"leave_location_out"` groups by `group_var`, so all observations from a
 location share a fold.
@@ -457,10 +537,22 @@ neighbour is removed whenever the realised distribution exceeds the
 target, whereas CAST removes one only while the realised distribution,
 less the point about to move, is still at or above the target. The rule
 here therefore removes up to one point more per distance value (a few
-percent more removals in all on clustered layouts), erring on the
-pessimistic side. And ties in \\G_j^\*\\ are broken by the points'
-coordinates, not by their row index as in CAST, so the folds do not
-depend on the order of the rows.
+percent more removals in all on clustered layouts), erring towards
+held-out distances longer than the target. And ties in \\G_j^\*\\ are
+broken by the points' coordinates, not by their row index as in CAST, so
+the folds do not depend on the order of the rows. On gridded samples
+many distances tie, and the last bits of the coordinates, which move
+with the unit and the origin, would settle those ties. So distances
+within one part in ten million of each other count as equal, when the
+held-out distances are counted, compared with the target and `phi`, and
+put in order; equal ones are taken by the column of the point (first
+coordinates within that part of the extent of the points count as one),
+then its second coordinate, counted the same way, then its row. Each
+point's neighbours are put in order by the same rule, the package's tie
+rule, so of neighbours that are equally far away the same one is
+excluded first. The folds are then the same in another unit or with
+another origin as long as no coordinate moves by more than about a
+two-hundred-millionth of the distance between neighbouring locations.
 
 Where neither limit binds, the realised distribution of
 *nearest-neighbour distances* is then never shorter than the target:
@@ -470,18 +562,18 @@ statement about the distance to the one nearest training point. A
 learner that draws on several neighbours (a forest, a
 k-nearest-neighbour mean, a kriging neighbourhood) also depends on how
 far the second and later neighbours are, which NNDM does not match, so
-on clustered samples its cross-validated error can still read low with
-the nearest-neighbour distances matched exactly. Beyond `phi` no
-matching is attempted, by design. `min_train` is different: when the
-prediction locations lie further from the samples than a fold can be
-made to hold out (clustered samples and a prediction domain well beyond
-them, the layout NNDM is meant for), it stops the matching early and the
-realised distances stay too short. `params$n_at_min_train` counts the
-folds that were held at the floor while still closer than the target
-allows, and `make_folds()` warns when that leaves more than one point's
-worth of excess at or below `phi`. Lower `min_train` to match further,
-or read the cross-validated score as an upper bound on performance at
-the prediction locations.
+on clustered samples its cross-validated error can still read low for
+the prediction points with the nearest-neighbour distances matched
+exactly. Beyond `phi` no matching is attempted, by design. `min_train`
+is different: when the prediction locations lie further from the samples
+than a fold can be made to hold out (clustered samples and a prediction
+domain well beyond them, the layout NNDM is meant for), it stops the
+matching early and the realised distances stay too short.
+`params$n_at_min_train` counts the folds that were held at the floor
+while still closer than the target allows, and `make_folds()` warns when
+that leaves more than one point's worth of excess at or below `phi`.
+Lower `min_train` to match further, or read the cross-validated score as
+an upper bound on performance at the prediction locations.
 
 The match has a second side. `params$max_ecdf_deficit` is the largest
 amount by which the target distribution runs above the realised one, the
@@ -513,10 +605,11 @@ more whenever \\nm/(n+m) \le 9\\: for nine folds or fewer whatever the
 number of prediction points, and for up to eighteen folds with as many
 prediction points. There the same warning is raised in one case only,
 complete separation: every prediction point nearer to the data than any
-sample is to its nearest other sample (a deficit of exactly 1), provided
-the two sets are large enough for that ordering to mean something, which
-is taken as `choose(n + m, n) >= 1000` ways of interleaving them (17
-prediction points for 3 folds, 7 for 6 folds, 4 for 12 folds).
+sample is to its nearest other sample, by more than one part in ten
+million (a deficit of exactly 1), provided the two sets are large enough
+for that ordering to mean something, which is taken as
+`choose(n + m, n) >= 1000` ways of interleaving them (17 prediction
+points for 3 folds, 7 for 6 folds, 4 for 12 folds).
 `params$target_separated` records the ordering whether or not it was
 enough to warn, and the warning's condition carries it as `separated`.
 With very few samples it can hold for a grid over the samples' own
@@ -552,20 +645,37 @@ where the n by n distance matrix it needs is no longer affordable,
 k-means first reduces the samples to 4,000 groups (Lloyd's algorithm
 from random sample locations, at most ten passes) and Ward's method is
 continued from those groups; a count above 4,000 is a k-means run of its
-own. `params$clustering` says which (`"ward"` or `"kmeans+ward"`).
-Clusters are merged by the packing `"block_kfold"` uses for its blocks,
-largest first and each to the fold with the fewest points so far (see
-**Fold balance**). `CAST::knndm()` merges clusters by a rule of its own,
-which this was *not* checked against, so the folds are not expected to
-equal CAST's.
+own. `params$clustering` says which (`"ward"` or `"kmeans+ward"`). Both
+read the coordinates centred on the middle of their bounding box,
+divided by its diagonal and rounded to \\2^{-30}\\ of it (about a
+billionth), as the `"kmeans"` partition hands them to
+[`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html): on a lattice
+many merges and many assignments tie exactly, and the last bits of the
+coordinates, which move with the unit and the origin, would settle them.
+A point as near two k-means centres to one part in ten million goes to
+the lower-numbered one: a squared distance ties with the least when it
+is no more than the square of the least distance lengthened by a margin,
+plus one part in ten million of the least squared distance, the margin
+one part in 1e10 of the largest coordinate of the centres in that frame,
+at most a millionth of the diagonal of their bounding box and at least
+four times the spacing of doubles at that coordinate. The clusters are
+then the same in another unit or with another origin, but for a location
+within its own rounding noise of the middle of a step. Clusters are
+merged by the packing `"block_kfold"` uses for its blocks, largest first
+and each to the fold with the fewest points so far (see **Fold
+balance**). `CAST::knndm()` merges clusters by a rule of its own, which
+this was *not* checked against, so the folds are not expected to equal
+CAST's.
 
 Each candidate is scored by the Wasserstein distance \\W\\ between its
 held-out distances (each point's distance to the nearest point of
-another fold) and the target distances, and the smallest \\W\\ is
-returned. A candidate is set aside without being scored when its largest
-fold leaves less than `min_train` of the rows for training or holds more
-than `balance_tol` times the points of its smallest; the random
-partition is always kept. So `params$wasserstein` is never above
+another fold) and the target distances, in the unit of the layer, and
+the smallest \\W\\ is returned; of the candidates within one part in ten
+million of the smallest, the earliest in `params$candidates`. A
+candidate is set aside without being scored when its largest fold leaves
+less than `min_train` of the rows for training or holds more than
+`balance_tol` times the points of its smallest; the random partition is
+always kept. So `params$wasserstein` is never above
 `params$wasserstein_random`, the \\W\\ of that random partition, and
 `params$candidates` lists every candidate with its cluster count, fold
 sizes and \\W\\. `params$chosen` is `"random"` when no clustering came
@@ -610,9 +720,9 @@ of it and by at least half of \\W\\ (the test
 [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
 words as `"closer"`), `make_folds()` raises a warning of class
 `"spatialkit_knndm_short_of_target"` and sets `params$short_of_target`:
-the cross-validated error then tends to read low for those locations.
-Fewer folds hold out larger regions. Short of either warning the folds
-can still differ from the target at some distances;
+the cross-validated error then tends to read low for the prediction
+points. Fewer folds hold out larger regions. Short of either warning the
+folds can still differ from the target at some distances;
 `params$max_ecdf_excess` and `params$max_ecdf_deficit` give the largest
 difference each way, and
 [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
@@ -632,26 +742,32 @@ largest remaining excess; compare `params$target_median` with
 A polygon layer passed as `blocks` is aligned to the points the way
 `boundary` is: CRS-less points are aligned to blocks that carry a CRS
 (reprojected if they look like lon/lat, otherwise stamped, warning
-either way), and the blocks are then brought into the CRS the folds are
-built in. A point inside more than one block is given the first (lowest
-row) that contains it, as for a point on the shared edge of two grid
-cells. When the blocks that caught such a point share area instead of an
-edge, the layer overlaps and is not a partition, and this is warned
-about. A point inside no block is assigned to the nearest one, by
-distance to the polygon itself, and the count of such points is warned
-about, unless they sit within a millionth of the extent of a block,
-which is an edge that reprojection or clipping moved by a rounding
-error. Blocks that hold no point are dropped when
-`drop_empty_blocks = TRUE`, and `k` is lowered to the number of blocks
-that hold points when that is smaller. `params$n_blocks` is the number
-of blocks before empties were dropped, `params$blocks_used` the number
-after (so with `drop_empty_blocks = FALSE` the two are equal, and
+either way, and refused when the blocks are in longitude and latitude
+and the points lie outside longitude -180 to 360 and latitude -90 to
+90), and the blocks are then brought into the CRS the folds are built
+in. A point inside more than one block is given the first (lowest row)
+that contains it, as for a point on the shared edge of two grid cells,
+and a point within the same margin of a block's edge (one part in 1e10
+of the largest coordinate of the points and the blocks, within the
+bounds above) counts as inside it. When the blocks that caught such a
+point share area instead of an edge, the layer overlaps and is not a
+partition, and this is warned about. A point inside no block is assigned
+to the nearest one, by distance to the polygon itself; a point the same
+distance from two blocks, to one part in ten million or that margin,
+goes to the lower row. The count of such points is warned about, unless
+they sit within a millionth of the extent of a block, which is an edge
+that reprojection or clipping moved by a rounding error. Blocks that
+hold no point are dropped when `drop_empty_blocks = TRUE`, and `k` is
+lowered to the number of blocks that hold points when that is smaller.
+`params$n_blocks` is the number of blocks before empties were dropped,
+`params$blocks_used` the number after (so with
+`drop_empty_blocks = FALSE` the two are equal, and
 `sum(params$block_sizes > 0)` is how many of them hold points),
 `params$grid_nx` and `params$grid_ny` are `NA`, and `params$block_scale`
 is the median over blocks that hold points of the side of the square
 with the block's area. That is the length compared against the
-autocorrelation range for the leakage warning, since a polygon has no
-single edge length.
+autocorrelation range for the warning on blocks smaller than the range,
+since a polygon has no single edge length.
 
 The connection to the rest of the package is
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md):

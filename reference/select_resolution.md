@@ -100,46 +100,73 @@ own end, the finest or the coarsest size offered on a ladder
 the criterion is computable at; `NA` for an interior optimum and under
 `"size"`), `n_levels`, `values` (the criterion at every level, `NA`
 where it could not be computed), `structured` (for `cp`: `FALSE` when
-`cp` at one cell is within `tol` of the optimum, when the cell means at
-the optimum differ from one mean by no more than chance allows, or when
-the variogram found no spatial structure; `TRUE` when the optimum beats
-one cell on both counts; see "What each criterion returns". For `loo`
-and `size` on a profile built with `estimate`: `FALSE` when the
-leave-one-out error of one mean for all scored rows is within `tol` of
-the error at `best`, or below it, or when the cell means at `best`
-differ from one mean by no more than chance allows; `TRUE` when the
-cells beat one mean on both counts. `TRUE` for an `elbow`; `NA` for
-`reliability` and `moran_z`, and for a profile that carries no one-cell
-value), `one_cell` (`cp` at one cell under `cp`; the leave-one-out error
-of one mean for all scored rows under `loo` and `size`; `NA` otherwise),
-`structure_p` (the p-value of the F test of the cells at `best` against
-one mean, multiplied by the number of levels searched and capped at 1; a
-size searches one level; `NA` where `structured` is not read off `cp` or
-the leave-one-out error), `range_floor` (the floor `reliability` was
-held to, or `NA`), `note` (what the flags mean, in words: a character
-vector, one note an element; `NULL` when there is nothing to say. The
-notes written under `"loo"` and `"size"`, and for a profile built with
-`estimate` or with one size, carry names: `size` (the size that set the
-count), `held` (a size the profile held to the most cells k-means can
-place), `structure` (why the count is not identified), `finest` (the
-lowest error of pooled values is at the finest level scored), `estimate`
-(`cp` scores plain means, on a profile of pooled values) and `ladder`
-(the ladder is one size). A note of `cp` or `moran_z` about the
-criterion itself has no name. The warning of class
-`spatialkit_no_structure` that the functions taking the selection as a
-count raise carries every note but those named `size`, `held`, `finest`,
-`estimate` and `ladder`) and `seeds` (an sf POINT layer, with `seed_id`,
-of the centres of the partition the profile scored at `best`, in the CRS
-it was computed in; `NULL` for a profile that does not carry them).
-Their Voronoi cells are the cells that were scored;
+`cp` at one cell is not above the optimum by more than `tol` (below it
+included), when the cell means at the optimum differ from one mean by no
+more than chance allows, or when the variogram found no spatial
+structure; `TRUE` when the optimum beats one cell on both counts; see
+"What each criterion returns". For `loo` and `size` on a profile built
+with `estimate`: `FALSE` when the leave-one-out error of one mean for
+all scored rows is within `tol` of the error at `best`, or below it, or
+when the cell means at `best` differ from one mean by no more than
+chance allows; `TRUE` when the cells beat one mean on both counts.
+`TRUE` for an `elbow`; `NA` for `reliability` and `moran_z`, and for a
+profile that carries no one-cell value), `one_cell` (`cp` at one cell
+under `cp`; the leave-one-out error of one mean for all scored rows
+under `loo` and `size`; `NA` otherwise), `structure_p` (the p-value of
+the F test of the cells at `best` against one mean, multiplied by the
+number of levels searched and capped at 1; a size searches one level;
+`NA` where `structured` is not read off `cp` or the leave-one-out
+error), `range_floor` (the floor `reliability` was held to, or `NA`),
+`note` (what the flags mean, in words: a character vector, one note an
+element; `NULL` when there is nothing to say. The notes written under
+`"loo"` and `"size"`, and for a profile built with `estimate` or with
+one size, carry names: `size` (the size that set the count), `held` (a
+size the profile held to the most cells k-means can place), `structure`
+(why the count is not identified), `finest` (the lowest error of pooled
+values is at the finest level scored), `estimate` (`cp` scores plain
+means, on a profile of pooled values) and `ladder` (the ladder is one
+size). A note of `cp` or `moran_z` about the criterion itself has no
+name. The warning of class `spatialkit_no_structure` that the functions
+taking the selection as a count raise carries every note but those named
+`size`, `held`, `finest`, `estimate` and `ladder`) and `seeds` (an sf
+POINT layer, with `seed_id`, of the centres of the partition the profile
+scored at `best`, in the CRS it was computed in; `NULL` for a profile
+that does not carry them). Their Voronoi cells are the cells that were
+scored;
 [`get_voronoi_seeds`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)`(method = "kmeans", n = <this>)`
 and
 [`voronoi_seeds_kmeans`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)`(k = <this>)`
-return them. For a profile built with `partition = "density"` or
-`init = "random"` the list also has `partition` (`kind`, `init`,
-`density_power`, `density_k`), and the seeds carry it as
-`attr(, "partition")`; the regions are those the profile built, whatever
-kind built them.
+return them. On a profile without an estimate whose centres were fitted
+to a subsample (`n_sample` below `n` in `attr(profile, "bounds")`) the
+seeds are those centres refitted to every point: the kind's own
+iteration (Hartigan and Wong's for `"kmeans"`, Lloyd's on every point's
+density weights for `"density"`) run from the centres scored, with the
+profile's iteration limit and no random draw. Where Hartigan and Wong's
+algorithm refuses the centres, Lloyd's iteration with every weight one
+runs in its place, and a log line says so. They carry `attr(, "refit")`:
+`rows` (the points), `subsample` (the points the profile fitted to),
+`kind`, `iter`, `iter_max`, `converged`, `wss_scored` (the within-cell
+sum of squares of every point in the cells of the centres scored, each
+cell about its own mean) and `wss` (the same of the refitted cells).
+Their cells are then not the cells scored, and the count is still the
+one the subsample gave; the centres scored are
+`attr(profile, "centres")[[as.character(best)]]`. The refit reads every
+point's coordinates from `attr(profile, "refit_rows")`, which every such
+profile this version builds carries; on one built before it the centres
+scored are the seeds, and a log line says so. The refit is not run
+either, and the centres scored are the seeds, when it would pass the
+work limits of a profile's own fits (see "Conditions" in
+[`resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md));
+a log line says so. A profile with an estimate scores it on every row of
+the layer in the cells of the centres fitted to the subsample, so its
+seeds are those centres, whose cells are the cells scored.
+[`summary()`](https://rdrr.io/r/base/summary.html) and
+[`plot()`](https://rdrr.io/r/graphics/plot.default.html) of a profile
+read no seeds and refit nothing. For a profile built with
+`partition = "density"` or `init = "random"` the list also has
+`partition` (`kind`, `init`, `density_power`, `density_k`), and the
+seeds carry it as `attr(, "partition")`; the regions are those the
+profile built, whatever kind built them.
 
 For `"loo"` and `"size"`, and for any criterion on a profile built with
 `estimate`, the list has these elements after `seeds` (`partition`, when
@@ -167,8 +194,13 @@ matrix of the centres the rows were scored in, in `crs` and in the
 profile's order; `NULL` without an estimate), `partition`, `crs` and
 `scored_cells` (`NA`: the record stands for a count). `seeds` carries
 the same record as `attr(, "count_rule")` with `scored_cells = TRUE`,
-since they are the centres that were scored. The record travels on with
-the seeds, the cells and the assigned layer to
+since they are the centres that were scored, or `FALSE` when they were
+refitted to every point, since they are then other cells built from the
+count. A `"cp"` selection off a profile without an estimate has
+`count_rule` as well, after `seeds`, and nothing else of this list: its
+`estimate` is `"mean"`, since \\C_p\\ scores plain means, and `scored`
+is `NULL`. The record travels on with the seeds, the cells and the
+assigned layer to
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
 which warns when it reports another cell value than the count was chosen
 for (class `spatialkit_estimate_mismatch`) and when the cells or rows it
@@ -299,7 +331,7 @@ the leave-one-out error of one mean and `range_floor` is `NA`.
   `FALSE` when the leave-one-out error of one mean for all scored rows
   is within `tol` of the error at the level, or below it, or when the F
   test of the cells at the level against one mean has \\p \ge 0.05\\.
-  The count stands either way, since the caller set it:
+  The count stands either way, since a size set it and no criterion:
   `structured = FALSE` says that the cell values will say little that
   one mean for the layer does not. The functions that take the selection
   as a count then raise `spatialkit_no_structure`. On a profile without
@@ -351,9 +383,13 @@ For a ladder of one size,
 each criterion that is finite at the level and says that the size set
 the count, and [`plot()`](https://rdrr.io/r/graphics/plot.default.html)
 draws each as one point, with no selected level and no band. When none
-is finite, as on a constant response, where `loo` is `NA` too,
+is finite, as on a constant response, where `loo` is `NA` too, or when
+no row of the selection half has a response (`select_on = "split"`),
 [`summary()`](https://rdrr.io/r/base/summary.html) stops with an error
-that says so.
+that says so. In that last case `"cp"` and `"moran_z"`, and `"loo"` with
+an `estimate`, are errors that give the same reason, except `"cp"` on a
+size ladder that fitted no variogram, which gives the size ladder's
+reason, as above.
 
 ## See also
 
@@ -398,16 +434,13 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   # default criterion, "auto", reads it by that size.
   select_resolution(resolution_profile(pts, response_var = "z"))
 }
-#> Resolution by cp: 44 cells
-#>   flat region : 44 (1 of 12 levels)
+#> Resolution by cp: 19 cells
+#>   flat region : 19 to 25, 44 (3 of 12 levels)
 #>   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
-#>   note        : the optimum is the support ceiling (n / min_cell_n); the
-#>                 bound is choosing, not the criterion. Lower min_cell_n to see
-#>                 whether the criterion keeps going.
 #>   note        : cp scores plain means, and this profile's estimate is the
 #>                 pooled value; criterion = "size" is the rule for it.
-#> [1] 44
-#> [1] "the support ceiling (n / min_cell_n)"
+#> [1] 19 25 44
+#> [1] NA
 #> [1] TRUE
 #> Resolution by reliability: 4 cells
 #>   flat region : 4 to 6 (3 of 12 levels)
@@ -418,11 +451,11 @@ if (requireNamespace("gstat", quietly = TRUE)) {
 #>                           at_floor                               edge 
 #>                             "TRUE" "the range floor (area / range^2)" 
 #> Resolution by size: 89 cells
-#>   size        : 4.5 rows per cell asked (obs_per_cell); 400 rows / 89 cells = 4.49
+#>   size        : 4.5 rows per cell, the default (obs_per_cell); 400 rows / 89 cells = 4.49
 #>   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
 #>   estimate    : pooled toward the 8 nearest cells
-#>   at this size: 0.5% of the rows are alone in their cell; median own weight 0.45
-#>   loo         : 0.896 (one cell for the layer: 1.23)
-#>   note        : the count is set by obs_per_cell = 4.5, the caller's choice;
-#>                 no criterion chose it.
+#>   at this size: 1.0% of the rows are alone in their cell; median own weight 0.40
+#>   loo         : 0.903 (one cell for the layer: 1.23)
+#>   note        : the count is set by obs_per_cell = 4.5, the default; no
+#>                 criterion chose it.
 ```

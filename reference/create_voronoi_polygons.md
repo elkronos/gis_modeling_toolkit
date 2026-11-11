@@ -33,7 +33,10 @@ create_voronoi_polygons(
   whose coordinates look like lon/lat (the heuristic
   [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
   applies, with its warning) are taken as EPSG:4326 and projected, as
-  lon/lat points are.
+  lon/lat points are. Points that mix XY and XYZ (or XYM), or that carry
+  M, are read in x and y, since sf reads a layer in the dimension of its
+  first geometry and GEOS refuses M; the attributes the seeding
+  functions set on them are kept.
 
 - boundary:
 
@@ -47,7 +50,21 @@ create_voronoi_polygons(
   cannot take a geographic boundary's CRS, and are refused with an
   error. A CRS-less boundary given with lon/lat points (or with CRS-less
   points taken as lon/lat) is read as lon/lat when its coordinates fit
-  the lon/lat envelope, and refused with an error otherwise.
+  the lon/lat envelope, and refused with an error otherwise. A boundary
+  that mixes XY and XYZ (or XYM) geometries is read without Z and M,
+  since sf reads a layer in the dimension of its first geometry. So is
+  one whose geometries carry M (XYM or XYZM), which GEOS refuses. A row
+  that is empty, or has a coordinate that is not finite or lies beyond
+  1e150 (read as given, and again after any move into another CRS),
+  covers no ground and is left out; a boundary with no such row left is
+  refused with an error that says so. A boundary in a geographic CRS
+  with a vertex at a latitude beyond 90 degrees, which is no place on
+  the Earth, is refused with an error of class
+  `"spatialkit_cells_degenerate"` that names its rows and says to check
+  its CRS. A row the repair of `boundary` leaves without a polygon (a
+  ring with no height: every vertex on one line, or in degrees on one
+  parallel) is left out as well, and a boundary with no polygon left is
+  refused.
 
 - expand:
 
@@ -64,9 +81,13 @@ create_voronoi_polygons(
 
 - keep_duplicates:
 
-  Logical. Has no effect on the result: coincident points are merged
-  before the diagram is built either way, so they share one cell and all
-  of them are indexed to it.
+  Logical. With `FALSE` (the default), points are merged before the
+  diagram is built when they round to one point in coordinates centred
+  on the middle of their bounding box, divided by its diagonal and
+  rounded to 2^-30 of it, so points within about a billionth of the
+  extent of each other count as coincident in any unit or origin and
+  share one cell. With `TRUE` only points at exactly one location are
+  merged. Every point is indexed to the cell that holds it.
 
 - crs:
 
@@ -80,7 +101,31 @@ create_voronoi_polygons(
   picks for the points, so they are nearest-point cells on the ground,
   and are then transformed, with long edges densified. Seeds that are
   the centres a profile scored are built in the CRS the profile worked
-  in instead (see "Seeds a profile scored").
+  in instead (see "Seeds a profile scored"). Where four seeds stand the
+  same distance from one point, as on gridded locations, two cells can
+  meet there at two corners that differ only by rounding, which the
+  transform to degrees can put at one point, and sf's spherical engine
+  (s2) refuses such a cell.
+  [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
+  joins the cells of the centres a profile scored in the CRS they were
+  built in, while they carry the record that says so
+  (`scored_cells = TRUE`).
+  [`sf::st_area()`](https://r-spatial.github.io/sf/reference/geos_measures.html),
+  [`sf::st_union()`](https://r-spatial.github.io/sf/reference/geos_combine.html),
+  and a join of rows in degrees to other cells (cells without the
+  record, such as those of a count given as a number or those a verb
+  that drops attributes has stripped of it, and cells whose record says
+  `scored_cells = FALSE`, such as those of centres refitted to every
+  point) go to s2 and stop on such a cell: transform the cells to a
+  projected CRS first.
+  [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
+  then stops with an error of class `"spatialkit_cells_degenerate"` that
+  names the cells s2 refuses, the cause and that transform; its
+  largest-overlap join of polygon features repairs such cells instead,
+  with a warning.
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  with `area = TRUE`, which takes the areas of such cells, stops with
+  the same error before any summary.
 
 - quiet:
 
@@ -112,25 +157,42 @@ create_voronoi_polygons(
   number of its points that fall outside every cell is returned as
   `params$cover_outside`, with a warning of class
   `"spatialkit_unassigned"` when it is not 0 (a polygon cover is not
-  checked).
+  checked). A cover, given or attached, that mixes XY and XYZ (or XYM)
+  geometries, or that carries M, is read in x and y. A row of the cover
+  with a coordinate that is not finite or lies beyond 1e150, read as
+  given before any move, is read as an empty row.
 
 ## Value
 
 A list with `cells`, `index`, `boundary`, `method` and `params`. `index`
 holds one `cell_id` per row of `points_sf`, and `NA` for a point that
 falls outside every cell, which means outside the study area (grown by
-`expand` when it is positive), so a summary built from it counts only
-the points the tessellation actually covers. Such points are counted in
-`params$n_outside`, and a warning of class `"spatialkit_unassigned"`
-gives their number. `boundary` is the boundary the cells were built in:
-the one supplied or derived, grown by `expand`. `params$boundary_source`
-says where it came from: `"boundary"` (the argument), `"cover"` (the
-`cover` argument), `"seeds' cover"` (the cover attached to `points_sf`)
-or `"points"` (the hull of `points_sf` itself). `params$cover_outside`
-is the number of `cover` points outside every cell when a point `cover`
-was given with a `boundary`, and `NULL` otherwise. `params$partition` is
-present when `points_sf` is a layer of seeds that records the kind of
-partition that placed it (`attr(points_sf, "partition")`, see
+`expand` when it is positive), and farther than a thousandth of the
+median cell width from the nearest cell, so a summary built from it
+counts only the points the tessellation actually covers. Such points are
+counted in `params$n_outside`, and a warning of class
+`"spatialkit_unassigned"` gives their number. Points so far from the
+origin of their CRS that doubles there are spaced more than a millionth
+of their extent apart (0.125 at 1e15, beside a layer a few kilometres
+across) have the cells' edges and their own cells read at that rounding,
+so two points that close can fall in one cell; the cells are built, and
+a warning of class `"spatialkit_xy_imprecise"` gives the spacing and the
+extent. For seeds (see "Details") `index` holds the cell each seed
+generates, whether the seed lies inside the boundary or not, and `NA`
+only for a seed whose cell the clip removed whole or without a location
+(an empty geometry, or a coordinate that is not finite or lies beyond
+1e150); `params$n_outside` counts those, the warning names them as
+seeds, and `params$snapped` lists only the seeds whose entry is the cell
+they were snapped to. `boundary` is the boundary the cells were built
+in: the one supplied or derived, grown by `expand`.
+`params$boundary_source` says where it came from: `"boundary"` (the
+argument), `"cover"` (the `cover` argument), `"seeds' cover"` (the cover
+attached to `points_sf`) or `"points"` (the hull of `points_sf` itself).
+`params$cover_outside` is the number of `cover` points outside every
+cell when a point `cover` was given with a `boundary`, and `NULL`
+otherwise. `params$partition` is present when `points_sf` is a layer of
+seeds that records the kind of partition that placed it
+(`attr(points_sf, "partition")`, see
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)):
 the same list, so the cells say what built them. Seeds of plain k-means
 record nothing, and `params` then has no such element; neither has it
@@ -139,7 +201,8 @@ for points that are not seeds. `params$count_rule` is present when
 (`attr(points_sf, "count_rule")`: the seeds of a
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
 result, or seeds a seeding function placed from one): the same list,
-which the cells carry too as `attr(cells, "count_rule")`.
+with `scored_cells = FALSE` when the seeds are fewer or more than its
+count, which the cells carry too as `attr(cells, "count_rule")`.
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
 copies it to the rows it assigns, and
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
@@ -179,6 +242,38 @@ and has neither a boundary nor a cover (seeds bound with
 attribute, or built by hand) gets the seeds' own hull and a warning of
 class `"spatialkit_no_cover"`.
 
+A seed stands for its cell, so `index` gives each seed the cell it
+generates. A k-means seed is a mean of observations and can lie outside
+a `boundary` that is not convex, in a bay or a bend of a coast (see
+[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)).
+Its cell, the part of the study area nearer it than any other seed, is
+built, and its `index` entry is that cell's `cell_id`, although the seed
+lies in no cell. A seed is `NA` only when every part of the study area
+is nearer another seed, so the clip removed its cell whole, or when it
+has no location (its geometry is empty, or a coordinate is not finite or
+lies beyond 1e150). The points are seeds when a seeding function
+returned them
+([`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md),
+[`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md),
+[`voronoi_seeds_random()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_random.md),
+[`rbind()`](https://rdrr.io/r/base/cbind.html) of such layers included),
+when they are the seeds of a
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+result, and when a `cover` is passed with them. A selection's seeds are
+seeds by the attributes they carry, which
+[`rbind()`](https://rdrr.io/r/base/cbind.html) and a write to a file
+drop. Any other points are indexed by the cell that holds them, so a
+point outside the study area is `NA`, unless it lies within a thousandth
+of the median cell width of a cell, whose ID it then takes (see `index`
+in
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md));
+that includes observations that carry a selection's record of the count,
+as
+[`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
+returns them. Seeds placed by hand, and a selection's seeds that lost
+their attributes, are seeds once they pass through
+`get_voronoi_seeds(method = "provided", seeds = )`.
+
 ## Seeds a profile scored
 
 The seeds of a
@@ -191,14 +286,23 @@ return for one, are the centres
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
 scored, and their record of the count (`attr(, "count_rule")`) says so
 (`scored_cells = TRUE`) and holds the centres in the CRS the profile
-worked in. Unless a projected `crs` is given, their cells are built in
-that CRS, whatever CRS the seeds arrive in (degrees, or the CRS of a
-boundary they were placed in), and returned in it, or in a geographic
-`crs` when one is given. When the seeds are those centres (as many, each
-at a different centre, within a thousandth of its distance from the next
-nearest), each is first put at its centre as the record holds it, so
-rounding the seeds took on in another CRS does not move an edge. The
-cells are then the cells each row was scored in, and
+worked in. (On a profile without an estimate fitted to a subsample the
+seeds are those centres refitted to every point, which carry
+`attr(, "refit")`; their record says `scored_cells = FALSE`, and their
+cells are built as other seeds' are. So are seeds fewer or more than the
+record's count, such as a selection's seeds cut down to some of its
+rows: they are not the centres the profile scored, and their record is
+handed on with `scored_cells = FALSE`, as
+[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
+(`method = "provided"`) marks such seeds.) Unless a projected `crs` is
+given, their cells are built in that CRS, whatever CRS the seeds arrive
+in (degrees, or the CRS of a boundary they were placed in), and returned
+in it, or in a geographic `crs` when one is given. When the seeds are
+those centres (as many, each at a different centre, within a thousandth
+of its distance from the next nearest), each is first put at its centre
+as the record holds it, so rounding the seeds took on in another CRS
+does not move an edge. The cells are then the cells each row was scored
+in, and
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
 gives a point on an edge between two of them the cell the profile scored
 it in.

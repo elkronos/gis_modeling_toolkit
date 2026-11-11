@@ -1,7 +1,9 @@
 # In-sample fitted values from a Bayesian spatial GP fit
 
 Posterior expectation at the training locations: the column means of
-[`brms::posterior_epred()`](https://mc-stan.org/rstantools/reference/posterior_epred.html).
+[`brms::posterior_epred()`](https://mc-stan.org/rstantools/reference/posterior_epred.html),
+in the units of the response (see "The response's centre and scale" in
+[`fit_bayesian_spatial_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)).
 These are **in-sample** values.
 
 ## Usage
