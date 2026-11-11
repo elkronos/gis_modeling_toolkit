@@ -202,6 +202,9 @@
 #'   polygon, and the warning says how many of them there are. With
 #'   `keep_unassigned = TRUE` they are kept with an
 #'   `NA` ID and no warning is raised, unless every feature is unassigned.
+#'   A polygon of `polygons_sf` with a coordinate that is not finite or lies
+#'   beyond 1e150 (read as given) has no location either: it takes no
+#'   feature, and the features inside the rest of its ring are unassigned.
 #'
 #'   The
 #'   attribute `"ties"` records how many features matched more than one
@@ -360,7 +363,13 @@ assign_features_to_polygons <- function(
   # empty features: moved into the polygons' CRS, a northing of 1e200 in
   # EPSG:32616 came back finite in EPSG:32617 and was joined there.
   unlocated_f <- .unlocated_features(sf::st_geometry(features_xy))
-  polygons_xy <- .xy_if_mixed_or_m(polygons_sf)
+  # A polygon with a vertex that is not finite or lies beyond 1e150, read as
+  # given, has no location either, and its copy is emptied before the join:
+  # read as it was, one with an NA or Inf vertex caught the points inside the
+  # rest of its ring (and some of its neighbours'), and one at 1e200 stopped
+  # GEOS ("orientationIndex encountered NaN/Inf numbers").  It takes no
+  # point, and the points in it are counted with the other unassigned ones.
+  polygons_xy <- .empty_unlocated(.xy_if_mixed_or_m(polygons_sf))
   # A row with a location that the move cannot place in full comes back
   # empty, or without the vertices it cannot place, and is said in this
   # function's words, naming `features_sf` or `polygons_sf`, in place of
@@ -4561,8 +4570,13 @@ summarize_by_cell <- function(assigned_points_sf,
 #' \code{.POOL_XY_MAX} is not a location.  A feature with one such vertex has
 #' no location as a whole, since no centre, area or transform of it can be
 #' taken.  Empty features are not counted: they are empty already.  The
-#' vertices are read only when the layer's bounding box is not finite or
-#' reaches beyond the bound; otherwise no feature can have such a vertex.
+#' features are read one by one only when some coordinate of the layer is
+#' \code{NA}, not finite or beyond the bound; otherwise no feature can have
+#' such a vertex.  That test reads the coordinates themselves, not
+#' \code{sf::st_bbox()}: the box skips \code{NA}, so a ring with a vertex at
+#' \code{(NA, y)} passed as located, and sf keeps the box it stored on the
+#' column when a row is replaced with \code{[[<-}, so a row edited to
+#' \code{Inf} or \code{1e200} passed too.
 #'
 #' @param g An sfc.
 #' @return A logical vector, one element per feature.
@@ -4572,11 +4586,16 @@ summarize_by_cell <- function(assigned_points_sf,
   n   <- length(g)
   out <- logical(n)
   if (!n) return(out)
-  bb <- sf::st_bbox(g)
-  if (all(is.finite(bb)) && all(abs(bb) <= .POOL_XY_MAX)) return(out)
+  # Empty polygons and lines hold no coordinate at all: v is then NULL.
+  v <- unlist(unclass(g), use.names = FALSE)
+  if (!length(v) || (!anyNA(v) && all(abs(v) <= .POOL_XY_MAX))) return(out)
   off <- function(v) any(!is.finite(v) | abs(v) > .POOL_XY_MAX)
   if (inherits(g, "sfc_POINT")) {
-    xy <- sf::st_coordinates(g)[, 1:2, drop = FALSE]
+    # x and y of each point, read point by point: sf::st_coordinates() of a
+    # layer of XY and XYZ points stops ("length of 'dimnames' [2] not equal
+    # to array extent").
+    xy <- matrix(unlist(lapply(unclass(g), `[`, 1:2), use.names = FALSE),
+                 ncol = 2L, byrow = TRUE)
     empty <- is.na(xy[, 1L]) & is.na(xy[, 2L])
     return(!empty & (!is.finite(xy[, 1L]) | !is.finite(xy[, 2L]) |
                      abs(xy[, 1L]) > .POOL_XY_MAX | abs(xy[, 2L]) > .POOL_XY_MAX))
@@ -4642,9 +4661,11 @@ summarize_by_cell <- function(assigned_points_sf,
 #' EPSG:32616 lands at a finite point in EPSG:32617), and a transform of it
 #' is not a place the caller gave.  The rows beyond it as given are emptied
 #' before the projection, so they take no part in choosing it: the layer is
-#' read as it is read with those rows empty.  The warning sf raises when it takes a
-#' point on the surface of a lon/lat polygon is not passed on: the point is
-#' one of the polygon's, and it is projected before any distance is taken.
+#' read as it is read with those rows empty.  The points on the surface of
+#' lon/lat polygons are \code{coerce_to_points()}'s, read as every other
+#' caller reads them: sf's warning about them is not passed on, and a
+#' polygon written across longitude 180 gets a point on it (or the warning
+#' of class \code{spatialkit_surface_point_off}).
 #' A layer that mixes XY and XYZ (or XYM) geometries is read in XY, since sf
 #' reads a layer in the dimension of its first geometry, and so is a layer
 #' whose geometries carry M, which GEOS does not read
@@ -4680,13 +4701,9 @@ summarize_by_cell <- function(assigned_points_sf,
   # class.
   layer <- .xy_if_mixed_or_m(.typed_points(layer))
   if (!all(sf::st_geometry_type(layer, by_geometry = TRUE) == "POINT"))
-    layer <- .xy_if_mixed(withCallingHandlers(
+    layer <- .xy_if_mixed(
       if (is.null(caller)) coerce_to_points(layer, "auto")
-      else .pointize_auto(layer, caller, arg),
-      warning = function(w)
-        if (grepl("st_point_on_surface may not give correct results",
-                  conditionMessage(w), fixed = TRUE))
-          invokeRestart("muffleWarning")))
+      else .pointize_auto(layer, caller, arg))
   given <- unname(sf::st_coordinates(layer)[, 1:2, drop = FALSE])
   far_given <- abs(given[, 1L]) > .POOL_XY_MAX | abs(given[, 2L]) > .POOL_XY_MAX
   # Those rows are emptied before the projection: the bounding box it is

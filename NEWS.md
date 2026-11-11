@@ -2269,6 +2269,63 @@ old behaviour where there is a way.
   a geographic CRS, is now refused with an error that says so; it was given
   the points' CRS and refused later as "not polygonal".
 
+* **A polygon or line with a vertex at `NA`, and a row edited in place to a
+  coordinate beyond 1e150, were read as located.**  The test of a row's
+  location read the layer's bounding box first and read no vertex when the
+  box was finite. `sf::st_bbox()` skips `NA`, so a ring with one vertex at
+  (`NA`, y), which a file can carry as `nan`, passed: `prep_model_data()`
+  kept it, the fits and `predict_surface()` gave it a value, `make_folds()`
+  and `fold_separation()` read it as a point, `harmonize_crs()` moved it to
+  a finite shape, and the readers of `boundary` and `cover` used the rest
+  of its ring, where the same row with a vertex at `Inf` is left out. sf
+  also keeps the box it stored on a geometry column when a row is replaced
+  with `[[<-`, so a point edited to (1e200, y) or (`Inf`, y) passed:
+  `make_folds()` put it in a fold with nothing said, where the same layer
+  built whole leaves it out. The test now reads the coordinates
+  themselves. `kriging_adequacy()` now reads `cells_sf` by the same rule: a
+  cell with a vertex at `NA`, `Inf` or beyond 1e150 is left out (`kr_`
+  columns `NA`) with a warning that says why, as an empty cell is. It was
+  repaired into the rest of its ring and kriged, and at 1e200 the call
+  stopped with sp's "invalid Polygon object". `print()` of the result
+  counts empty cells apart from thin ones.
+
+* **`coerce_to_points()` gave a polygon with a vertex that is not finite or
+  lies beyond 1e150 a point, and `assign_features_to_polygons()` joined
+  such a polygon of `polygons_sf`.**  A line with such a vertex got an
+  EMPTY POINT, but a polygon got a ring vertex under `"auto"` and
+  `"point_on_surface"`, (`Inf`, y) or (5e199, y) under `"bbox_center"`, and
+  (`Inf`, y) under `"centroid"` at 1e200. A geometry of any type with such
+  a vertex now gets an EMPTY POINT in every mode. In
+  `assign_features_to_polygons()` a polygon with a vertex at `NA` or `Inf`
+  caught the points inside the rest of its ring, and with a vertex at `Inf`
+  some of its neighbours' too (15 points in a square that holds 5), and one
+  at 1e200
+  stopped the call with GEOS's "orientationIndex encountered NaN/Inf
+  numbers". Such a polygon now takes no point, and the points in it are
+  unassigned, with the warning about unassigned features.
+
+* **`coerce_to_points()` passed on sf's warning "st_point_on_surface may
+  not give correct results for longitude/latitude data", and the
+  summaries muffled it also where it was true.**  Every function that
+  reduces a polygon layer in longitude and latitude to points
+  (`prep_model_data()` and the fits, the `cv_*()` functions,
+  `make_folds()`, `fold_separation()`, `estimate_sac_range()`,
+  `resolution_profile()`, `determine_optimal_levels()` and others) raised
+  it in sf's words, while `summarize_by_cell()` and `cell_values_at()`
+  muffled it. The point lies on the polygon read on the plane in degrees,
+  the reading `?coerce_to_points` states, and the warning is no longer
+  raised; the points do not move. A polygon written across longitude 180
+  (from 179.5 to -179.5) GEOS reads the long way round the globe, and its
+  point lay about 12,000 km from it: the summaries read it there with
+  nothing said. Such a polygon now gets a point on it, taken with its
+  longitudes read from 0 to 360; one whose point lies on it neither way, or
+  that s2 cannot read, keeps GEOS's point with a warning of class
+  `spatialkit_surface_point_off`. A layer without a CRS whose coordinates
+  look like longitude and latitude, which the functions that project it
+  read as EPSG:4326, is read the same way, and `coerce_to_points()` says
+  which rows that reading moves. The labels of `plot_tessellation_map()`
+  on such cells are placed on them too.
+
 * **`prep_model_data()` kept a row with a coordinate beyond 1e150 as a
   located row.**  It dropped a row whose geometry was empty or whose
   coordinates were not finite, but a point at (5e5, 1e200) in EPSG:32617
@@ -7699,6 +7756,41 @@ old behaviour where there is a way.
   `select_features_forward()` raise it once for the run, and
   `cv_spatial()` once for its folds when its `fit_fn` prepares each
   fold's rows again.
+
+* **`resolution_profile()` and `select_resolution()` gave a false reason
+  for `cp` being `NA` where the level its noise variance comes from has a
+  residual mean square of 0.**  Without a nugget `cp` takes as its noise
+  variance the residual mean square of the finest level whose cells hold at
+  least two scored rows on average, and is `NA` at every level when that
+  mean square is 0, as it is when each cell of that level holds one
+  location whose rows carry one value.  With the nugget at the fit's lower
+  bound, the `spatialkit_cp_noise` warning and the print said that no
+  level's cells hold two scored rows on average, and
+  `select_resolution(criterion = "cp")` named needs the layer met; on 40
+  locations of three rows each, at 5 and 40 cells, the 40-cell level holds
+  three a cell.  With no usable variogram nothing said that `cp` is `NA`,
+  and the warning or log line on the variogram said it takes its noise
+  variance from that level.  The warning, now raised in both cases, the print and
+  `select_resolution()` name that level, its scored rows a cell and its
+  mean square of 0; the warning's `level` is that level, and
+  `attr(, "cp_noise")`, `NULL` there before, records it with `source` and
+  `value` `NA`, `level`, `rows_per_cell`, `rms` and `reason`.  With
+  `predictor_vars` the residuals of such rows differ in their last bits,
+  and `cp` took that rounding (a mean square of 2.4e-31 on values of 1) as
+  its noise variance, so it had no penalty and `select_resolution()` picked
+  the finest level.  A mean square within the rounding of the values scored
+  now counts as 0 there, and `cp` is `NA` at every level, as it is without
+  predictors.
+
+* **The warnings and log lines of `resolution_profile()` on a variogram it
+  cannot use said `cp` "takes its noise variance from the finest level"
+  where no level's cells hold two scored rows on average and `cp` is `NA`
+  at every level.**  A range below the shortest lag, a variogram with no
+  spatial structure, a refused range with the nugget at its bound, a pure
+  nugget and a `sac` with no model now give the condition, as the warning
+  for a fit that did not converge did: `cp` takes its noise variance "from
+  the finest level whose cells hold at least two scored rows on average,
+  and is NA at every level when none does".
 
 ## Documentation
 

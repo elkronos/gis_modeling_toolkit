@@ -47,6 +47,28 @@ parts give; GEOS's interior point, used by \code{"point_on_surface"} and by
 the temporary projection's choice of CRS, segfaulted on an empty line
 part too.
 
+A geometry of any type with a coordinate that is not finite (\code{NA},
+\code{NaN}, \code{Inf}) or lies beyond 1e150 has no location (see
+\code{\link[=ensure_projected]{ensure_projected()}}, "Rows without a location"), and gets an EMPTY
+POINT in every mode, as an empty geometry does.
+
+Modes \code{"auto"} (for polygons) and \code{"point_on_surface"} take the point
+with GEOS, which reads a layer in longitude and latitude on the plane in
+degrees, under either \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} setting. sf's warning that such a
+point "may not give correct results for longitude/latitude data" is not
+passed on. A polygon that spans more than 180 degrees of longitude (one
+written across longitude 180, from 179.5 to -179.5) GEOS reads the long
+way round the globe, so its point is tested on the polygon read on the
+sphere with s2; when it does not lie on it, the point is taken again
+with the longitudes below 0 read from 180 to 360, and brought back into
+-180 to 180. A polygon whose point lies on it neither way, or that s2
+cannot read, keeps GEOS's point, and a warning of class
+\code{spatialkit_surface_point_off} gives its rows of \code{x} (\code{rows}). When \code{x}
+has no CRS and the lon/lat heuristic of \code{\link[=ensure_projected]{ensure_projected()}} takes its
+coordinates for degrees, its polygons that span more than 180 units are
+read so too, as EPSG:4326, and a warning names the rows whose point that
+reading moves; the points keep the missing CRS.
+
 In mode \code{"auto"} a MULTILINESTRING gets the midpoint of its longest part.
 When several parts share the greatest length (to one part in ten
 million, measured in the projection used), their midpoints are taken
@@ -111,9 +133,7 @@ the R session on an empty line: the call stops with an error of the
 same class, \code{spatialkit_features_degenerate}, that gives its rows of \code{x}
 (\code{rows}), carries \code{site = "projection"}, and says to pass
 \code{mode = "centroid"} or \code{tmp_project = FALSE}, which take the point in
-longitude and latitude, without the projection.  A line with a
-coordinate that is not finite or lies beyond 1e150 has no location, and
-gets an EMPTY POINT under these modes, as an empty line does.
+longitude and latitude, without the projection.
 
 The functions that reduce a layer they are given to points this way
 (\code{\link[=prep_model_data]{prep_model_data()}}, \code{\link[=make_folds]{make_folds()}}, \code{\link[=fold_separation]{fold_separation()}},

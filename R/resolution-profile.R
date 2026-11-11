@@ -1106,8 +1106,11 @@
 #'     least two scored rows on average.  It counts the structure within
 #'     those cells as noise too, so on average it is no smaller than the
 #'     nugget and errs towards fewer cells.  When no level's cells hold that
-#'     many, \code{cp} is \code{NA} at every level, as it is for a constant
-#'     response, which the profile warns about.  Whatever its source,
+#'     many, or the finest that does has a residual mean square of 0 to
+#'     within the rounding of the values scored (as when each of its cells
+#'     holds one location whose rows carry one value), \code{cp} is
+#'     \code{NA} at every level, as it is for a
+#'     constant response, which the profile warns about.  Whatever its source,
 #'     \eqn{\tau^2} is held to the semivariance of nearest-neighbour pairs the
 #'     variogram carries (\code{attr(sac, "short_lag_semivariance")}, see
 #'     \code{\link{sac_nugget}}): a semivariance does not fall as the lag
@@ -1391,12 +1394,19 @@
 #'     (the variogram gives no nugget, or its nugget is at the fit's lower
 #'     bound), or the semivariance of nearest-neighbour pairs, which holds
 #'     the nugget or that residual mean square where they are larger; or
-#'     there is none and \code{cp} is \code{NA} at every level.  The
+#'     there is none and \code{cp} is \code{NA} at every level: the finest
+#'     level whose cells hold two scored rows on average has a residual mean
+#'     square of 0 to within rounding, or, with the nugget at its bound, no
+#'     level's cells hold that many.  The
 #'     condition carries \code{source}, \code{value} and \code{level} (as
-#'     \code{attr(, "cp_noise")} holds them), \code{cap} (the semivariance,
-#'     \code{NA} when the variogram carries none), \code{uncapped_source}
-#'     and \code{uncapped_value} (what \code{cp} would take without the
-#'     hold).}
+#'     \code{attr(, "cp_noise")} holds them; with no noise variance
+#'     \code{source} and \code{value} are \code{NA}, and \code{level} is the
+#'     level whose residual mean square is 0 to within rounding, or
+#'     \code{NA}), \code{cap} (the
+#'     semivariance, \code{NA} when the variogram carries none),
+#'     \code{uncapped_source} and \code{uncapped_value} (what \code{cp}
+#'     would take without the hold, and with no noise variance what it
+#'     refused: the nugget at its bound, or that residual mean square).}
 #' }
 #' Two refusals are errors with a class: \code{spatialkit_diagnostic_criterion}
 #' (\code{select_resolution(criterion = "moran_z")} without
@@ -1559,7 +1569,8 @@
 #'   the units of the CRS the profile is computed in (metres for lon/lat
 #'   input): it gives the range floor, \code{reliability}, which needs a
 #'   fitted model, is \code{NA}, and \code{cp} takes its noise variance from
-#'   the finest level.  A sac refused because the response shows no spatial
+#'   the finest level whose cells hold at least two scored rows on average
+#'   (see \code{cp} above).  A sac refused because the response shows no spatial
 #'   structure (either of the two \code{rejected_reason} values of
 #'   \code{\link{estimate_sac_range}()} that say so; the model it attaches
 #'   is a pure nugget) gives \code{cp} no
@@ -1740,8 +1751,15 @@
 #'   semivariance"}, \code{value}, the \eqn{\tau^2} used, and \code{level},
 #'   the level it was read at or \code{NA}; under the short-lag semivariance
 #'   also \code{cap}, that semivariance, and \code{uncapped}, a list of the
-#'   \code{source}, \code{value} and \code{level} it held; \code{NULL}
-#'   when \code{cp} has none; see \code{cp} above), \code{one_cell}
+#'   \code{source}, \code{value} and \code{level} it held; when the
+#'   finest level whose cells hold two scored rows on average has a
+#'   residual mean square of 0 to within rounding, \code{source} and
+#'   \code{value} \code{NA}, \code{level}, that level, \code{rows_per_cell},
+#'   its scored rows a cell, \code{rms}, its residual mean square (0, or the
+#'   rounding it was read as), and \code{reason}, which
+#'   \code{select_resolution()} gives;
+#'   \code{NULL} when \code{cp} has none for another reason; see \code{cp}
+#'   above), \code{one_cell}
 #'   (what one cell for the whole layer scores, the reference a level has to
 #'   beat: a list with \code{n}, the scored rows, \code{rss}, their total
 #'   sum of squares, \code{cp}, the same formula at one cell or \code{NA}
@@ -2404,6 +2422,14 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
         # (.rounding_design()).
         rd <- .rounding_design(X_fit, fit$coefficients, centres)
         resid_fit <- list(yd = resp[use] - y_centre, X = rd$X, b = rd$b)
+        # The size of each row's terms in the fit as taken, which bounds the
+        # rounding of its residual: rows of one location and one value have
+        # residuals that differ by that rounding alone, and the fallback for
+        # Cp's noise variance reads their sum of squares as 0.
+        b_fit <- as.numeric(fit$coefficients)
+        b_fit[!is.finite(b_fit)] <- 0
+        resid_fit$size <- rep(NA_real_, n)
+        resid_fit$size[use] <- abs(resid_fit$yd) + drop(abs(X_fit) %*% abs(b_fit))
         variable <- "residuals"
       } else {
         .log_warn(paste0("resolution_profile(): the OLS fit on `predictor_vars` failed ",
@@ -2622,6 +2648,15 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     held <- if (is.finite(cp_cap))
       sprintf(", held to the semivariance of nearest-neighbour pairs (%.3g)", cp_cap)
     else ""
+    # What `cp` is left with when the variogram gives it no nugget, one clause
+    # for every refusal and log line below: the fallback reads the finest
+    # level whose cells hold at least two scored rows on average, and with
+    # none (only finer `levels` were asked for, or the response is missing on
+    # most rows) `cp` is NA at every level.  "From the finest level" alone
+    # was untrue there.
+    cp_finest <- sprintf(paste0("`cp` takes its noise variance from the finest level whose ",
+                                "cells hold at least two scored rows on average%s, and is NA ",
+                                "at every level when none does"), held)
     if (!is.null(vg) && !is.null(rejected)) {
       # Classed, so a script can tell this outcome from the others without
       # reading the text: the variogram gives no usable range, and `reason`
@@ -2646,21 +2681,18 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                         "its nugget and sill are where the fit stopped without ",
                         "reaching a minimum, not ",
                         "fitted values, so neither is used: `reliability` is NA and ",
-                        "`cp` takes its noise variance from the finest level whose ",
-                        "cells hold at least two scored rows on average%s, and is NA ",
-                        "at every level when none does."),
+                        "%s."),
                  sac_what, rejected,
                  if (grepl("converge", rejected, fixed = TRUE)) ""
                  else ", and its variogram model did not converge",
-                 held, nugget_used = FALSE)
+                 cp_finest, nugget_used = FALSE)
         vg <- NULL
       } else if (grepl("shortest lag", rejected, fixed = TRUE)) {
         unusable(paste0("resolution_profile(): %s reports no usable range (%s): ",
                         "a structure that dies out before the closest pairs of ",
                         "points cannot be told from a nugget, so its nugget (%.3g) ",
-                        "is not identified either: `reliability` is NA and `cp` ",
-                        "takes its noise variance from the finest level%s."),
-                 sac_what, rejected, vg$nugget, held, nugget_used = FALSE)
+                        "is not identified either: `reliability` is NA and %s."),
+                 sac_what, rejected, vg$nugget, cp_finest, nugget_used = FALSE)
         vg <- NULL
       } else if (.sac_no_structure(sac)) {
         # A variogram refused because the response shows no spatial structure
@@ -2677,9 +2709,8 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
         # shortest lag.
         unusable(paste0("resolution_profile(): %s reports no usable range (%s), ",
                         "so its nugget (%.3g) is not a fitted value either: ",
-                        "`reliability` is NA and `cp` takes its noise variance ",
-                        "from the finest level%s."),
-                 sac_what, rejected, vg$nugget, held, nugget_used = FALSE)
+                        "`reliability` is NA and %s."),
+                 sac_what, rejected, vg$nugget, cp_finest, nugget_used = FALSE)
         vg <- NULL
       } else if (nugget_bound) {
         # The range is refused and the nugget is the fit's bound: Cp takes
@@ -2687,9 +2718,8 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
         # follows the sweep.
         unusable(paste0("resolution_profile(): %s reports no usable range (%s), and ",
                         "its nugget (%.3g) is at the fit's lower bound, which is not an ",
-                        "estimate: `reliability` needs the range and is NA, and `cp` ",
-                        "takes its noise variance from the finest level%s."),
-                 sac_what, rejected, vg$nugget, held, nugget_used = FALSE)
+                        "estimate: `reliability` needs the range and is NA, and %s."),
+                 sac_what, rejected, vg$nugget, cp_finest, nugget_used = FALSE)
         vg$cor_fn <- NULL
       } else {
         unusable(paste0("resolution_profile(): %s reports no usable range (%s). ",
@@ -2705,13 +2735,11 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     } else if (is.null(vg)) {
       if (.sac_no_structure(sac))
         .log_info(paste0("resolution_profile(): %s found no spatial structure (%s), ",
-                         "and its model is a pure nugget; `reliability` is NA and ",
-                         "`cp` takes its noise variance from the finest level%s."),
-                  sac_what, rejected %||% "no reason recorded", held)
+                         "and its model is a pure nugget; `reliability` is NA and %s."),
+                  sac_what, rejected %||% "no reason recorded", cp_finest)
       else
         .log_info(paste0("resolution_profile(): the variogram carries no usable model; ",
-                         "`reliability` is NA and `cp` takes its noise variance from the ",
-                         "finest level%s."), held)
+                         "`reliability` is NA and %s."), cp_finest)
     }
     # The variogram has to describe the variable the profile scores.  A
     # residual variogram's nugget put into Cp for the raw response (or the
@@ -3344,34 +3372,71 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     cp_noise <- list(source = "none", value = NA_real_, level = NA_integer_,
                      reason = paste0("no variogram: a size ladder fits one only when ",
                                      "`sac` is given"))
-  # Why the variogram gave Cp no nugget, when the fallback stands in.
+  # Why the variogram gave Cp no nugget, when the fallback stands in.  A
+  # variogram that found no spatial structure does carry a model, the pure
+  # nugget summarize_by_cell() and kriging_adequacy() use, so "no usable
+  # variogram model" was untrue of it and contradicted the line logged
+  # above.  What it lacks is a nugget apart from the sill.
+  why_none <- function()
+    if (is.null(sac))
+      "no variogram was fitted (gstat is not installed, or estimate_sac_range() failed; see the log)"
+    else if (!is.data.frame(attr(sac, "variogram_model")))
+      sprintf("%s carries no variogram model and so no nugget", sac_what)
+    else if (.sac_no_structure(sac))
+      sprintf("%s found no spatial structure and gives no nugget that can be told from the sill",
+              sac_what)
+    else sprintf("%s gives no usable variogram model", sac_what)
   why <- NULL
+  # The level the fallback reads when its residual mean square is 0, as it is
+  # when each cell of that level holds one location whose rows carry one
+  # value.  A noise variance of 0 is no penalty, so Cp is NA at every level,
+  # as with no level to read; this keeps which level it was, for the
+  # warning, the print and select_resolution().
+  zero_rms <- NULL
   if (is.null(cp_noise) && !is.null(y) && !is_const && !no_vg) {
     dfree <- m_ok_v - L_ok_v
     cand  <- which(is.finite(out$rss) & is.finite(dfree) & dfree >= L_ok_v)
     if (length(cand)) {
       j  <- cand[which.max(levels[cand])]
       s2 <- out$rss[j] / dfree[j]
-      if (is.finite(s2) && s2 > 0) {
+      # A residual sum of squares within the rounding of the values scored is
+      # 0: residuals of an OLS fit on rows of one location and one value
+      # differ in their last bits (a mean square of 2.4e-31 on values of 1),
+      # and as a noise variance that rounding left Cp no penalty.  The bound
+      # is the constant-response test's, 100 eps^2 times the values' sum of
+      # squares, and for residuals also the rounding of the fit's terms
+      # (.residuals_rounding()), .FIT_EPS eps times the size of each row's.
+      # Both sides are taken in units of the power of two at or below the
+      # largest of those sizes, so that squares beyond the largest double do
+      # not make the bound infinite.
+      ok_y <- is.finite(y)
+      size <- abs(y[ok_y])
+      if (!is.null(resid_fit$size)) size <- pmax(size, resid_fit$size[ok_y])
+      a <- suppressWarnings(max(size[is.finite(size)]))
+      a <- if (is.finite(a) && a > 0) 2^floor(log2(a)) else 1
+      tiny <- max(100 * .Machine$double.eps^2 * sum((y[ok_y] / a)^2),
+                  if (!is.null(resid_fit$size))
+                    (.FIT_EPS * .Machine$double.eps)^2 * sum((resid_fit$size[ok_y] / a)^2)
+                  else 0)
+      rounding <- is.finite(s2) && s2 > 0 && isTRUE(out$rss[j] / a / a <= tiny)
+      if (is.finite(s2) && s2 > 0 && !rounding) {
         cp_noise <- list(source = "finest-level residual mean square", value = s2,
                          level = as.integer(levels[j]))
-        # A variogram that found no spatial structure does carry a model, the
-        # pure nugget summarize_by_cell() and kriging_adequacy() use, so "no
-        # usable variogram model" was untrue of it and contradicted the line
-        # logged above.  What it lacks is a nugget apart from the sill.
         why <- if (!is.null(vg))
           sprintf(paste0("the variogram's nugget (%.2g against a sill of %.3g) is at the ",
                          "fit's lower bound, which is not an estimate and as a noise ",
                          "variance would leave Cp no penalty"),
                   vg$nugget, vg$nugget + vg$psill)
-        else if (is.null(sac))
-          "no variogram was fitted (gstat is not installed, or estimate_sac_range() failed; see the log)"
-        else if (!is.data.frame(attr(sac, "variogram_model")))
-          sprintf("%s carries no variogram model and so no nugget", sac_what)
-        else if (.sac_no_structure(sac))
-          sprintf("%s found no spatial structure and gives no nugget that can be told from the sill",
-                  sac_what)
-        else sprintf("%s gives no usable variogram model", sac_what)
+        else why_none()
+      } else if (isTRUE(out$rss[j] == 0) || rounding) {
+        zero_rms <- list(level = as.integer(levels[j]), rows_per_cell = m_ok_v[j] / L_ok_v[j],
+                         rms = if (rounding) s2 else 0)
+        zero_rms$text <- sprintf(paste0("the finest level whose cells hold at least two scored ",
+                                        "rows on average (%d cells, %.3g scored rows a cell) has ",
+                                        "a residual mean square of 0%s, which as a noise variance ",
+                                        "would leave `cp` no penalty"),
+                                 zero_rms$level, zero_rms$rows_per_cell,
+                                 if (rounding) sprintf(" to within rounding (%.3g)", s2) else "")
       }
     }
   }
@@ -3424,6 +3489,24 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                   data = list(source = cp_noise$source, value = cp_noise$value,
                               level = cp_noise$level, cap = cp_cap,
                               uncapped_source = rms$source, uncapped_value = rms$value))
+  } else if (!is.null(zero_rms)) {
+    # The fallback found its level and that level's residual mean square is
+    # 0.  "No level's cells hold two scored rows" was said here, and nothing
+    # at all when the variogram gave no nugget, after a warning that `cp`
+    # takes its noise variance from that level.
+    zero_rms$why <- if (!is.null(vg))
+      sprintf(paste0("the variogram's nugget (%.2g against a sill of %.3g) is at the fit's ",
+                     "lower bound, which is not an estimate"), vg$nugget, vg$nugget + vg$psill)
+    else why_none()
+    .warn_classed("spatialkit_cp_noise",
+                  "resolution_profile(): %s, and %s, so `cp` is NA at every level.%s",
+                  zero_rms$why, zero_rms$text,
+                  if (is.null(vg$cor_fn)) " `reliability` needs the variogram's range and is NA."
+                  else "",
+                  data = list(source = NA_character_, value = NA_real_, level = zero_rms$level,
+                              cap = cp_cap,
+                              uncapped_source = "finest-level residual mean square",
+                              uncapped_value = zero_rms$rms))
   } else if (nugget_bound && !is.null(vg) && !is.null(y) && !is_const && is.null(cp_noise))
     .warn_classed("spatialkit_cp_noise",
                   paste0("resolution_profile(): the variogram's nugget (%.2g against a sill ",
@@ -3434,6 +3517,12 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                   data = list(source = NA_character_, value = NA_real_, level = NA_integer_,
                               cap = cp_cap, uncapped_source = "variogram nugget",
                               uncapped_value = vg$nugget))
+  # The record of that level, set after the warnings, which read
+  # `cp_noise` NULL.  Its `value` is NA, so `cp` and Cp at one cell stay NA.
+  if (!is.null(zero_rms))
+    cp_noise <- list(source = NA_character_, value = NA_real_, level = zero_rms$level,
+                     rows_per_cell = zero_rms$rows_per_cell, rms = zero_rms$rms,
+                     reason = paste0(zero_rms$why, ", and ", zero_rms$text))
   # Cp for the cells of the whole layer, estimated from the subsample.  RSS /
   # m + tau^2 L_ok / m estimates the approximation error plus tau^2 (it adds
   # back the optimism of the subsample's own cell means, tau^2 per cell);
@@ -3781,8 +3870,17 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
   # variance at all (`cp_noise` NULL) the nugget is marked by the rule the
   # profile applied (.nugget_at_bound()), and on a profile of a response
   # that is not constant the line says that `cp` is NA for want of a level
-  # to fall back on, as the warning did.
-  no_noise <- is.null(cn) && .nugget_at_bound(vg, attr(x, "sac", exact = TRUE))
+  # to fall back on, as the warning did.  A record with no source is the
+  # level the fallback read and found a residual mean square of 0 at, and
+  # the line names it.
+  zero <- is.list(cn) && identical(cn$source, NA_character_) &&
+    isTRUE(is.finite(cn$level)) && isTRUE(is.finite(cn$rows_per_cell))
+  zero_text <- if (zero)
+    sprintf(paste0("cp is NA at every level: the residual mean square at %d cells (%.3g scored ",
+                   "rows a cell), the finest level whose cells hold two on average, is 0%s"),
+            as.integer(cn$level), cn$rows_per_cell,
+            if (isTRUE(cn$rms > 0)) sprintf(" to within rounding (%.3g)", cn$rms) else "")
+  no_noise <- (is.null(cn) || zero) && .nugget_at_bound(vg, attr(x, "sac", exact = TRUE))
   bound <- (!is.null(vg) && !is.null(noise) &&
               !identical(cn$uncapped$source, "variogram nugget")) || no_noise
   one_c <- attr(x, "one_cell", exact = TRUE)
@@ -3792,6 +3890,8 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
               if (is.null(vg))
                 (if (!is.null(noise))
                    sprintf("none usable (reliability is NA; %s)", noise)
+                 else if (zero)
+                   sprintf("none usable (reliability is NA; %s)", zero_text)
                  # A ladder of sizes that was given no `sac` fits none.
                  else if (identical(cn$source, "none"))
                    paste0("none fitted: a size ladder fits one only when `sac` is given ",
@@ -3803,6 +3903,7 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
                                if (is.finite(vg$range)) sprintf("%.0f", vg$range)
                                else "unidentified"),
                        if (!is.null(noise)) paste0("; ", noise)
+                       else if (cp_none && zero) paste0("; ", zero_text)
                        else if (cp_none)
                          paste0("; cp is NA at every level: no level's cells hold two ",
                                 "scored rows on average")
@@ -4506,6 +4607,14 @@ select_resolution <- function(profile,
                  criterion,
                  if (isTRUE(attr(profile, "bounds", exact = TRUE)$predictors))
                    " and every predictor" else ""),
+         call. = FALSE)
+  # The finest level whose cells hold two scored rows on average has a
+  # residual mean square of 0, so `cp` has no noise variance though the
+  # layer meets every need the general message names.
+  cn0 <- attr(profile, "cp_noise", exact = TRUE)
+  if (!any(ok) && criterion == "cp" && is.list(cn0) && identical(cn0$source, NA_character_) &&
+      is.character(cn0$reason) && length(cn0$reason) == 1L)
+    stop(sprintf("select_resolution(): `cp` is NA at every level: %s.", cn0$reason),
          call. = FALSE)
   if (!any(ok))
     stop(sprintf(paste0("select_resolution(): `%s` is NA at every level%s."),

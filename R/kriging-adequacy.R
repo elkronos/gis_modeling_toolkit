@@ -220,7 +220,11 @@
 #' \code{max_box_ratio} times (a sliver, parts far apart, a cell that is
 #' mostly hole) is left out the same way.  \code{attr(, "cells_left_out")}
 #' counts both kinds, and \code{print()} says how many cells have no
-#' estimate and why.
+#' estimate and why.  An empty cell, or one with a coordinate that is not
+#' finite or lies beyond 1e150 (read as given), has no location and is left
+#' out as well, with a warning of its own, and comes back with an empty
+#' geometry; it is counted with the cells of the second kind
+#' (\code{shape}).
 #'
 #' @section Repeat measurements at one location:
 #' Two observations at the same coordinates (visits to a station, records
@@ -476,7 +480,12 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # at Inf stopped gstat::krige(), and a northing of 1e200, as given or
   # moved to a finite place, was kriged from and fed the folds.
   pts <- .empty_unlocated(pts)
-  cells_in <- .xy_if_mixed_or_m(cells_sf)
+  # A cell with a vertex that is not finite or lies beyond 1e150, read as
+  # given, has no location either, and is emptied, so it is left out as an
+  # empty cell is (kr_ columns NA, with a warning).  Kept, a cell with a
+  # vertex at NA or Inf was repaired into the rest of its ring and kriged,
+  # and one at 1e200 stopped sp with "invalid Polygon object".
+  cells_in <- .empty_unlocated(.xy_if_mixed_or_m(cells_sf))
   pts_na   <- is.na(sf::st_crs(pts))
   cells_na <- is.na(sf::st_crs(cells_in))
   if (cells_na && !pts_na)
@@ -804,15 +813,24 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # that box to the cell's area: +54 MB for a diagonal strip at 708, +592 MB
   # at 7,072, and gigabytes beyond.  A sliver, a multi-part cell with parts
   # far apart or a cell that is mostly hole is left out instead, and counted.
+  # An empty cell (one without a location included, emptied above) has no
+  # area and is left out the same way, but said apart: the reason given for
+  # it was a bounding box "up to Inf" times its area.
   box_ratio <- .cell_box_ratio(cells)
   sliver <- !(is.finite(box_ratio) & box_ratio <= max_box_ratio)
-  if (any(sliver))
+  nowhere <- sliver & sf::st_is_empty(cells)
+  if (any(sliver & !nowhere))
     .warn_and_log(paste0("kriging_adequacy(): %d cell(s) left out (kr_ columns NA): ",
                          "the bounding box of each is more than max_box_ratio = %s ",
                          "times its area (up to %s), and gstat discretises a block ",
                          "over its whole bounding box, at a memory cost in proportion."),
-                  sum(sliver), format(max_box_ratio),
-                  format(signif(max(box_ratio[sliver]), 3)))
+                  sum(sliver & !nowhere), format(max_box_ratio),
+                  format(signif(max(box_ratio[sliver & !nowhere]), 3)))
+  if (any(nowhere))
+    .warn_and_log(paste0("kriging_adequacy(): %d cell(s) of `cells_sf` left out (kr_ ",
+                         "columns NA): each is empty or has a coordinate that is not ",
+                         "finite or lies beyond 1e150, so it has no location to krige."),
+                  sum(nowhere))
 
   # --- each cell's kriging neighbourhood ---
   # gstat takes the nmax locations nearest a block's centre, so a cell holding
@@ -1430,7 +1448,13 @@ print.kriging_adequacy <- function(x, ...) {
     n_shape <- if (length(lo) && !is.na(lo["shape"])) lo[["shape"]] else 0L
     n_size  <- if (length(lo) && !is.na(lo["size"])) lo[["size"]] else 0L
     n_unsolved <- sum(!kr_ok) - n_shape - n_size
-    why <- c(if (n_shape) sprintf("%d left out as too thin or scattered for their bounding box", n_shape),
+    # An empty cell, or one without a location, is counted with `shape`;
+    # it is named apart, since it has no bounding box to be thin for.
+    n_nowhere <- if (inherits(x, "sf")) sum(sf::st_is_empty(x)) else 0L
+    n_nowhere <- min(n_nowhere, n_shape)
+    n_thin <- n_shape - n_nowhere
+    why <- c(if (n_thin) sprintf("%d left out as too thin or scattered for their bounding box", n_thin),
+             if (n_nowhere) sprintf("%d left out as empty or without a location", n_nowhere),
              if (n_size) sprintf("%d left out as holding more locations than max_neighbours", n_size),
              if (n_unsolved > 0L) {
                if (n_shape + n_size) sprintf("%d whose kriging system gstat could not solve",

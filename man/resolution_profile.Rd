@@ -156,7 +156,8 @@ call with the same \code{seed}, which makes the same split.  When
 the units of the CRS the profile is computed in (metres for lon/lat
 input): it gives the range floor, \code{reliability}, which needs a
 fitted model, is \code{NA}, and \code{cp} takes its noise variance from
-the finest level.  A sac refused because the response shows no spatial
+the finest level whose cells hold at least two scored rows on average
+(see \code{cp} above).  A sac refused because the response shows no spatial
 structure (either of the two \code{rejected_reason} values of
 \code{\link{estimate_sac_range}()} that say so; the model it attaches
 is a pure nugget) gives \code{cp} no
@@ -348,8 +349,15 @@ list with \code{source}, \code{"variogram nugget"},
   semivariance"}, \code{value}, the \eqn{\tau^2} used, and \code{level},
 the level it was read at or \code{NA}; under the short-lag semivariance
 also \code{cap}, that semivariance, and \code{uncapped}, a list of the
-\code{source}, \code{value} and \code{level} it held; \code{NULL}
-when \code{cp} has none; see \code{cp} above), \code{one_cell}
+\code{source}, \code{value} and \code{level} it held; when the
+finest level whose cells hold two scored rows on average has a
+residual mean square of 0 to within rounding, \code{source} and
+\code{value} \code{NA}, \code{level}, that level, \code{rows_per_cell},
+its scored rows a cell, \code{rms}, its residual mean square (0, or the
+rounding it was read as), and \code{reason}, which
+\code{select_resolution()} gives;
+\code{NULL} when \code{cp} has none for another reason; see \code{cp}
+above), \code{one_cell}
 (what one cell for the whole layer scores, the reference a level has to
 beat: a list with \code{n}, the scored rows, \code{rss}, their total
 sum of squares, \code{cp}, the same formula at one cell or \code{NA}
@@ -931,8 +939,11 @@ square \eqn{RSS / (m - L_m)} of the finest level whose cells hold at
 least two scored rows on average.  It counts the structure within
 those cells as noise too, so on average it is no smaller than the
 nugget and errs towards fewer cells.  When no level's cells hold that
-many, \code{cp} is \code{NA} at every level, as it is for a constant
-response, which the profile warns about.  Whatever its source,
+many, or the finest that does has a residual mean square of 0 to
+within the rounding of the values scored (as when each of its cells
+holds one location whose rows carry one value), \code{cp} is
+\code{NA} at every level, as it is for a
+constant response, which the profile warns about.  Whatever its source,
 \eqn{\tau^2} is held to the semivariance of nearest-neighbour pairs the
 variogram carries (\code{attr(sac, "short_lag_semivariance")}, see
 \code{\link{sac_nugget}}): a semivariance does not fall as the lag
@@ -1218,12 +1229,19 @@ noise variance is the residual mean square of the finest level
 (the variogram gives no nugget, or its nugget is at the fit's lower
 bound), or the semivariance of nearest-neighbour pairs, which holds
 the nugget or that residual mean square where they are larger; or
-there is none and \code{cp} is \code{NA} at every level.  The
+there is none and \code{cp} is \code{NA} at every level: the finest
+level whose cells hold two scored rows on average has a residual mean
+square of 0 to within rounding, or, with the nugget at its bound, no
+level's cells hold that many.  The
 condition carries \code{source}, \code{value} and \code{level} (as
-\code{attr(, "cp_noise")} holds them), \code{cap} (the semivariance,
-\code{NA} when the variogram carries none), \code{uncapped_source}
-and \code{uncapped_value} (what \code{cp} would take without the
-hold).}
+\code{attr(, "cp_noise")} holds them; with no noise variance
+\code{source} and \code{value} are \code{NA}, and \code{level} is the
+level whose residual mean square is 0 to within rounding, or
+\code{NA}), \code{cap} (the
+semivariance, \code{NA} when the variogram carries none),
+\code{uncapped_source} and \code{uncapped_value} (what \code{cp}
+would take without the hold, and with no noise variance what it
+refused: the nugget at its bound, or that residual mean square).}
 }
 Two refusals are errors with a class: \code{spatialkit_diagnostic_criterion}
 (\code{select_resolution(criterion = "moran_z")} without

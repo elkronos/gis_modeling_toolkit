@@ -339,7 +339,11 @@ memory a cell takes grows with the ratio of that box to its area: about
 \code{max_box_ratio} times (a sliver, parts far apart, a cell that is
 mostly hole) is left out the same way.  \code{attr(, "cells_left_out")}
 counts both kinds, and \code{print()} says how many cells have no
-estimate and why.
+estimate and why.  An empty cell, or one with a coordinate that is not
+finite or lies beyond 1e150 (read as given), has no location and is left
+out as well, with a warning of its own, and comes back with an empty
+geometry; it is counted with the cells of the second kind
+(\code{shape}).
 }
 
 \section{Repeat measurements at one location}{

@@ -265,9 +265,15 @@ plot_tessellation_map <- function(tessellation_sf,
                 label_col)
     } else if (nrow(tess) > 0L && !all(sf::st_is_empty(tess))) {
       # GEOS does not read M, and stopped on cells that carry it; the label
-      # points are this function's own and are taken in x and y.
-      centers <- suppressWarnings(sf::st_point_on_surface(
-        .drop_empty_parts(.xy_if_mixed_or_m(tess))))
+      # points are this function's own and are taken in x and y.  Cells in
+      # longitude and latitude written across longitude 180 get a point on
+      # them (.surface_points()): GEOS read them the long way round the
+      # globe, and their labels were drawn on the far side of the map.  sf's
+      # own warnings about the label points (a latitude beyond 90, for one)
+      # are not passed on, as before: the points only place the labels.
+      centers <- .xy_if_mixed_or_m(tess)
+      centers <- sf::st_set_geometry(
+        centers, suppressWarnings(.surface_points(sf::st_geometry(centers)))$points)
       # An st_area() label column (class units) failed at print with "units
       # package is not attached", as a units fill column once did; drawn as
       # text, a units or difftime value keeps its unit.

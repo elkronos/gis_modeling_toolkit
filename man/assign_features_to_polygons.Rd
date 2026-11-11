@@ -152,6 +152,9 @@ move into the polygons' CRS), has no location to assign: it matches no
 polygon, and the warning says how many of them there are. With
 \code{keep_unassigned = TRUE} they are kept with an
 \code{NA} ID and no warning is raised, unless every feature is unassigned.
+A polygon of \code{polygons_sf} with a coordinate that is not finite or lies
+beyond 1e150 (read as given) has no location either: it takes no
+feature, and the features inside the rest of its ring are unassigned.
 
 The
 attribute \code{"ties"} records how many features matched more than one

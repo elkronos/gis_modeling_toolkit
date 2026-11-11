@@ -2880,6 +2880,95 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   x
 }
 
+#' Points on the surface of geometries, read the same way by every caller
+#'
+#' GEOS's interior point of each geometry, after \code{.drop_empty_parts()}.
+#' GEOS reads a geometry in longitude and latitude on the plane in degrees,
+#' under either s2 setting, and sf warns "st_point_on_surface may not give
+#' correct results for longitude/latitude data" for every such layer.  That
+#' warning is not passed on: the point lies on the geometry read on the
+#' plane in degrees, the reading \code{coerce_to_points()} states (on the
+#' sphere too when its edges are short).  A geometry that spans more than
+#' 180 degrees of longitude (a polygon written across longitude 180, from
+#' 179.5 to -179.5) GEOS reads the long way round the globe, and its point
+#' lay about 12,000 km from it.  For those rows the point is tested on the
+#' geometry read on the sphere with s2.  A point that does not lie on it is
+#' taken again with the longitudes below 0 read from 180 to 360, and brought
+#' back into -180 to 180; a row whose point lies on it neither way, or that
+#' s2 cannot read, keeps GEOS's point and is listed in \code{off}.  Every
+#' other row gets GEOS's point, to the bit.
+#'
+#' A layer without a CRS is read so only when \code{assume_ll()} says its
+#' coordinates are taken for degrees (\code{coerce_to_points()} passes the
+#' test \code{ensure_projected()} applies, \code{.looks_like_lonlat()}); the
+#' test is called only when some row spans more than 180 units.  The rows
+#' are then read as EPSG:4326, and the points keep the layer's missing CRS.
+#'
+#' @param g An sfc.
+#' @param assume_ll \code{NULL}, or a function of no argument that returns
+#'   \code{TRUE} when \code{g} has no CRS and is to be read as EPSG:4326.
+#' @return A list: \code{points}, an sfc of POINTs row for row with
+#'   \code{g}; \code{off}, the rows whose point is not known to lie on
+#'   their geometry; \code{moved}, the rows whose point was taken again with
+#'   the longitudes read from 0 to 360.
+#' @keywords internal
+#' @noRd
+.surface_points <- function(g, assume_ll = NULL) {
+  g   <- .drop_empty_parts(g)
+  pos <- withCallingHandlers(
+    sf::st_point_on_surface(g),
+    warning = function(w)
+      if (grepl("st_point_on_surface may not give correct results",
+                conditionMessage(w), fixed = TRUE))
+        invokeRestart("muffleWarning"))
+  off <- integer(0)
+  none <- list(points = pos, off = off, moved = integer(0))
+  crs_given <- !is.na(sf::st_crs(g))
+  # .is_longlat() reads the CRS alone: sf::st_is_longlat() of the geometries
+  # warns "bounding box has potentially an invalid value range for longlat
+  # data" in sf's words when a latitude lies beyond 90.
+  if (!length(g) || (crs_given && !.is_longlat(g)) ||
+      (!crs_given && is.null(assume_ll)))
+    return(none)
+  xs <- function(s)
+    if (is.list(s)) unlist(lapply(s, xs), use.names = FALSE)
+    else if (is.matrix(s)) s[, 1L] else s[1L]
+  span <- vapply(unclass(g), function(s) {
+    x <- xs(s)
+    x <- x[is.finite(x)]
+    if (length(x)) max(x) - min(x) else 0
+  }, numeric(1))
+  wide <- which(span > 180)
+  if (!length(wide)) return(none)
+  if (!crs_given && !isTRUE(assume_ll())) return(none)
+  # Whether point i of `p` lies on geometry i of `s`, read on the sphere;
+  # NA where s2 cannot read the geometry.  A layer without a CRS is read in
+  # EPSG:4326 (see assume_ll).
+  ll <- function(s) if (crs_given) s else sf::st_set_crs(s, 4326)
+  on_own <- function(p, s) {
+    p <- ll(p); s <- ll(s)
+    vapply(seq_along(s), function(i) tryCatch(
+      .with_s2(suppressMessages(lengths(sf::st_intersects(p[i], s[i])) > 0L)),
+      error = function(e) NA), logical(1))
+  }
+  redo <- wide[!on_own(pos[wide], g[wide]) %in% TRUE]
+  if (!length(redo)) return(none)
+  unwrap <- function(s) {
+    if (is.list(s)) return(structure(lapply(unclass(s), unwrap), class = class(s)))
+    if (is.matrix(s)) { s[, 1L] <- ifelse(s[, 1L] < 0, s[, 1L] + 360, s[, 1L]); return(s) }
+    if (length(s) && isTRUE(s[1L] < 0)) s[1L] <- s[1L] + 360
+    s
+  }
+  alt <- sf::st_point_on_surface(sf::st_sfc(lapply(unclass(g[redo]), unwrap)))
+  alt <- sf::st_sfc(lapply(unclass(alt), function(p) {
+    if (isTRUE(p[1L] > 180)) p[1L] <- p[1L] - 360
+    p
+  }), crs = sf::st_crs(g))
+  took <- on_own(alt, g[redo]) %in% TRUE
+  if (any(took)) pos[redo[took]] <- alt[took]
+  list(points = pos, off = redo[!took], moved = redo[took])
+}
+
 #' Planar lengths and midpoints of lines, in the unit of their CRS
 #'
 #' \code{sf::st_length()} gives a projected line's length in its CRS's unit
@@ -2932,6 +3021,28 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' parts give; GEOS's interior point, used by `"point_on_surface"` and by
 #' the temporary projection's choice of CRS, segfaulted on an empty line
 #' part too.
+#'
+#' A geometry of any type with a coordinate that is not finite (`NA`,
+#' `NaN`, `Inf`) or lies beyond 1e150 has no location (see
+#' [ensure_projected()], "Rows without a location"), and gets an EMPTY
+#' POINT in every mode, as an empty geometry does.
+#'
+#' Modes `"auto"` (for polygons) and `"point_on_surface"` take the point
+#' with GEOS, which reads a layer in longitude and latitude on the plane in
+#' degrees, under either [sf::sf_use_s2()] setting. sf's warning that such a
+#' point "may not give correct results for longitude/latitude data" is not
+#' passed on. A polygon that spans more than 180 degrees of longitude (one
+#' written across longitude 180, from 179.5 to -179.5) GEOS reads the long
+#' way round the globe, so its point is tested on the polygon read on the
+#' sphere with s2; when it does not lie on it, the point is taken again
+#' with the longitudes below 0 read from 180 to 360, and brought back into
+#' -180 to 180. A polygon whose point lies on it neither way, or that s2
+#' cannot read, keeps GEOS's point, and a warning of class
+#' `spatialkit_surface_point_off` gives its rows of `x` (`rows`). When `x`
+#' has no CRS and the lon/lat heuristic of [ensure_projected()] takes its
+#' coordinates for degrees, its polygons that span more than 180 units are
+#' read so too, as EPSG:4326, and a warning names the rows whose point that
+#' reading moves; the points keep the missing CRS.
 #'
 #' In mode `"auto"` a MULTILINESTRING gets the midpoint of its longest part.
 #' When several parts share the greatest length (to one part in ten
@@ -2997,9 +3108,7 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' same class, `spatialkit_features_degenerate`, that gives its rows of `x`
 #' (`rows`), carries `site = "projection"`, and says to pass
 #' `mode = "centroid"` or `tmp_project = FALSE`, which take the point in
-#' longitude and latitude, without the projection.  A line with a
-#' coordinate that is not finite or lies beyond 1e150 has no location, and
-#' gets an EMPTY POINT under these modes, as an empty line does.
+#' longitude and latitude, without the projection.
 #'
 #' The functions that reduce a layer they are given to points this way
 #' ([prep_model_data()], [make_folds()], [fold_separation()],
@@ -3046,6 +3155,14 @@ coerce_to_points <- function(
   if (nrow(x) == 0L) return(x)
 
   crs <- sf::st_crs(x)
+
+  # A geometry of any type with a coordinate that is not finite (NA, NaN,
+  # Inf) or lies beyond .POOL_XY_MAX has no location, and is emptied before
+  # the mode reads it, so it gets an EMPTY POINT in every mode.  Only lines
+  # were read so: a polygon with such a vertex got a ring vertex under
+  # "auto" and "point_on_surface", (Inf, y) or (5e199, y) under
+  # "bbox_center", and (Inf, y) under "centroid" at 1e200.
+  x <- .empty_unlocated(x)
 
   # -- bbox_center ---
   # Read geometry by geometry, so a layer that mixes dimensions gives the
@@ -3134,19 +3251,66 @@ coerce_to_points <- function(
     sc$points
   }
 
+  # Points on the surface of the rows `rows` (positions in g; sub is
+  # g[rows]), with GEOS, planar in degrees on lon/lat input under either s2
+  # setting.  sf's warning that such a point "may not give correct results
+  # for longitude/latitude data" is not passed on: it reached the caller in
+  # sf's words from every function but the summaries, which muffled it.  A
+  # row that spans more than 180 degrees of longitude, whose point GEOS
+  # took on the far side of the globe, gets the point of its ring with the
+  # longitudes read from 0 to 360 (.surface_points()); one whose point lies
+  # on it neither way is said, naming its rows of `x`.  A layer without a
+  # CRS whose coordinates ensure_projected() takes for degrees is read the
+  # same way, as EPSG:4326, and the rows that reading moves are said: the
+  # callers that project such a layer read it as EPSG:4326, and a polygon
+  # across 180 kept GEOS's point on the far side of the globe.
+  surface_of <- function(sub, rows) {
+    no_crs <- is.na(crs)
+    sp <- .surface_points(
+      sub, assume_ll = if (no_crs) function() isTRUE(.looks_like_lonlat(x)$lonlat))
+    if (no_crs && length(sp$moved)) {
+      one <- length(sp$moved) == 1L
+      .warn_and_log(
+        paste0("coerce_to_points(): `x` has no CRS and its coordinates look ",
+               "like lon/lat, so %s of `x`, which %s more than 180 degrees ",
+               "of longitude, %s read as EPSG:4326 and given a point on %s ",
+               "read on the sphere. Set the CRS of `x` explicitly to say how ",
+               "to read it."),
+        .rows_text(rows[sp$moved]), if (one) "spans" else "span",
+        if (one) "is" else "are", if (one) "it" else "them")
+    }
+    if (length(sp$off)) {
+      one <- length(sp$off) == 1L
+      .warn_classed(
+        "spatialkit_surface_point_off",
+        paste0("coerce_to_points(): %s of `x` %s more than 180 degrees of ",
+               "longitude, and the point GEOS takes on %s surface in degrees ",
+               "does not lie on %s read on the sphere, or s2 cannot read %s to ",
+               "tell. %s a projected CRS that holds %s and call ",
+               "coerce_to_points() again."),
+        .rows_text(rows[sp$off]), if (one) "spans" else "span",
+        if (one) "its" else "their", if (one) "it" else "them",
+        if (one) "it" else "them",
+        if (no_crs) "Set the CRS of `x`, transform it to" else "Transform `x` to",
+        if (one) "it" else "them",
+        data = list(rows = rows[sp$off]))
+    }
+    sp$points
+  }
+
   # -- direct ops ---
   # Not spherical-safe, whatever this heading used to say.  On lon/lat input
   # st_centroid() is spherical only while sf_use_s2() is TRUE: with it FALSE
   # it is planar in degrees (a box -120..-60 x 50..75 got a centre 155 km
   # from the s2 one) and its warning is suppressed here.  st_point_on_surface()
-  # is GEOS, planar in degrees under either setting.
+  # is GEOS, planar in degrees under either setting (see surface_of()).
   if (mode == "centroid") {
     return(sf::st_set_geometry(x, centroids_of(g, seq_along(g))))
   }
   if (mode == "point_on_surface") {
     # Empty parts dropped first: GEOS segfaults on an empty line inside a
     # non-empty feature (see .drop_empty_parts()).
-    return(sf::st_set_geometry(x, sf::st_point_on_surface(.drop_empty_parts(g))))
+    return(sf::st_set_geometry(x, surface_of(g, seq_along(g))))
   }
 
   is_ll <- .is_longlat(x)
@@ -3254,7 +3418,7 @@ coerce_to_points <- function(
   # --- POLYGON / MULTIPOLYGON: vectorized point_on_surface ---
   idx_poly <- which(gtypes %in% c("POLYGON", "MULTIPOLYGON"))
   if (length(idx_poly)) {
-    pos <- sf::st_point_on_surface(.drop_empty_parts(g[idx_poly]))
+    pos <- surface_of(g[idx_poly], idx_poly)
     out[idx_poly] <- as.list(pos)
   }
 
