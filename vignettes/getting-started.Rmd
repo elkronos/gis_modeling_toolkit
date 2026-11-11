@@ -154,8 +154,12 @@ st_crs(counties)$units_gdal
 
 `nc.shp` arrives in NAD27, a geographic CRS in degrees.
 `ensure_projected()` chose a local Albers equal-area projection and logged why:
-across this extent the UTM zone distorts distances by 0.20 percent at worst and
-the Albers projection by 0.01 percent. Pass `target_crs` to override the choice.
+across this extent the UTM zone distorts distances by
+`r with(attr(counties, "crs_choice"), sprintf("%.2f", 100 * distance_error[startsWith(name, "UTM zone")]))`
+percent at worst and the Albers projection by
+`r with(attr(counties, "crs_choice"), sprintf("%.2f", 100 * distance_error[chosen]))`
+percent. `attr(counties, "crs_choice")` holds the figures the log gives.
+Pass `target_crs` to override the choice.
 
 A layer with no CRS at all is decided by a documented heuristic. If the bounding
 box fits the lon/lat envelope and the coordinates look like degrees, the layer
@@ -191,10 +195,12 @@ Four more things about the data, each handled without stopping you:
 - Two observations at the same coordinates are fine for models and folds;
   a Voronoi tessellation keeps one seed per location, and every point at
   that location is indexed to its cell.
-- A point outside the boundary you tessellate gets no cell: `tess$index`
-  is `NA` for it and `assign_features_to_polygons()` leaves it out, with a
-  warning that gives the count, unless you ask for it back with
-  `keep_unassigned = TRUE`.
+- An observation outside the boundary you tessellate gets no cell:
+  `tess$index` is `NA` for it and `assign_features_to_polygons()` leaves it
+  out, with a warning that gives the count, unless you ask for it back with
+  `keep_unassigned = TRUE`. A seed from a seeding function outside the
+  boundary whose cell reaches into it keeps that cell
+  (`?create_voronoi_polygons`).
 - A variogram, which is what sizes blocks from the data, needs about thirty
   points; below that `estimate_sac_range()` returns `NA` and says so.
 
@@ -219,8 +225,11 @@ functions gives k-means cells.
 
 ```{r pipeline}
 # 1. How many cells can these data support?  The answer is a ranked vector,
-#    best first, and the next call takes it as it is.
-lv <- determine_optimal_levels(obs, max_levels = 40)
+#    best first, and the next call takes it as it is.  These points have no
+#    elbow: by default the call returns NA there, with a warning, and
+#    on_no_elbow = "warn" returns the count the ladder lands on, with the
+#    same warning.
+lv <- determine_optimal_levels(obs, max_levels = 40, on_no_elbow = "warn")
 lv
 
 # 2. Draw them.  A hex grid clipped to an irregular outline returns a few
@@ -277,11 +286,13 @@ and fall back through both when neither is named.
 
 Eight cells, four of them slivers at the state's edge with no county inside,
 is coarse. A hundred county centroids spread fairly evenly have no elbow to
-find, and the call warns that `max_levels` chose this count rather than the
-data. `vignette("resolution")` is where to argue with it:
-`resolution_profile()` sets the count from a number of observations per
-cell, or scores every count on a ladder on four count criteria and a
-diagnostic at once.
+find. At its default the call then returns `NA`, with a warning that
+`max_levels` and not the data would have chosen the count, and the `NA` stops
+the next call; with `on_no_elbow = "warn"` it returns that count with the same
+warning. `vignette("resolution")` is where to argue with it:
+`resolution_profile()` sets the count from a number of observations per cell,
+or scores every count on a ladder on four count criteria and a diagnostic at
+once.
 
 ```{r map, eval=has_ggplot, fig.height=4.5, fig.alt="North Carolina covered by four large hexagonal cells shaded by their mean SIDS rate, plus four unshaded slivers at the edges that hold no county. The western cell has the lowest mean, about 1.5 per thousand, and the small southern cell the highest, about 2.8."}
 plot_tessellation_map(cells, boundary = boundary, fill_col = "resp_mean_rate",
@@ -303,16 +314,17 @@ the model should see; the reporting vignette does exactly that. Either way
 the folds come from the points' locations, and the cells can serve as the
 blocks that define them (`make_folds(blocks = tess$cells)`).
 
-### A model, scored honestly
+### A model, scored on held-out regions
 
 ```{r folds}
 # 5. Build folds that hold out whole regions.  block_size is a distance in
-#    the CRS's units, here metres.  Blocks have to be at least as wide as the
-#    autocorrelation range for the folds to be honest; on these data no range
-#    could be identified for what the predictor leaves unexplained, so 100 km
-#    is set by hand.  vignette("spatial-cross-validation") is about that
-#    choice, and make_folds(auto_range = TRUE) makes it from the data when
-#    gstat is installed.
+#    the CRS's units, here metres.  The wider the blocks, the farther the
+#    held-out points sit from their training data, and the score is the
+#    error at that distance; on these data no range could be identified for
+#    what the predictor leaves unexplained, so 100 km is set by hand.
+#    vignette("spatial-cross-validation") is about that choice, and
+#    make_folds(auto_range = TRUE) makes it from the data when gstat is
+#    installed.
 random  <- make_folds(obs, k = 4, method = "random_kfold", seed = 1)
 blocked <- make_folds(obs, k = 4, method = "block_kfold", block_size = 100e3,
                       seed = 1)
@@ -351,8 +363,8 @@ if (ratio > 1.15) {
     "folds' RMSE runs from %.2f to %.2f and the blocked folds' from %.2f to",
     "%.2f, and each pooled value sits inside the other scheme's range. On a",
     "hundred observations that is all a fold scheme can say, and it is the",
-    "reason to read the per-fold range before the pooled number. The gap that",
-    "blocked folds exist to expose opens when a model can borrow from its",
+    "reason to read the per-fold range before the pooled number. The gap",
+    "between the schemes opens when a model can borrow from its",
     "neighbours, through the coordinates or a spatially smooth predictor; the",
     "README's quick start shows one of about 1.6 on a larger simulated field.\n"),
     rr[1], rr[2], rb[1], rb[2]))

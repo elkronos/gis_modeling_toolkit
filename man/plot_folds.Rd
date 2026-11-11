@@ -9,7 +9,15 @@ plot_folds(folds, points_sf, boundary = NULL, blocks = TRUE)
 \arguments{
 \item{folds}{A list returned by \code{make_folds()}.}
 
-\item{points_sf}{The \code{sf} layer the folds were built from.}
+\item{points_sf}{The \code{sf} layer the folds were built from.  Drawn in
+x and y: a layer whose geometries mix XY with XYZ or XYM (as
+\code{rbind()} of an XY and an XYZ layer gives) is drawn without its Z
+and M, and so are \code{boundary} and the blocks.  A row without a
+location (a coordinate that is not finite or lies beyond 1e150, or a
+point that \code{make_folds()} left out of every fold because it is
+empty or the CRS the folds were built in cannot place it) is not
+drawn, and neither is a row of \code{boundary} with such a coordinate;
+one warning says how many.}
 
 \item{boundary}{Optional polygonal \code{sf}/\code{sfc} to draw underneath.}
 
@@ -21,12 +29,13 @@ A \code{ggplot} object.
 }
 \description{
 Shows which fold each observation belongs to.  This is the fastest way to
-see whether spatial blocks are actually separating the data, or whether the
-blocks are smaller than the autocorrelation range and therefore leaking.
+see whether spatial blocks are actually separating the data, and how wide
+they are beside the autocorrelation range.
 For \code{"block_kfold"} folds the block outlines are drawn too, from
 \code{folds$params$blocks}, so a fold can be seen to be one region or
 several and an empty block can be seen to be empty.  The subtitle states
-the parameter that decides whether the scheme leaks, read from
+the parameter that sets how far the held-out points sit from their
+training data, read from
 \code{folds$params}: the block size (and the estimated range when
 \code{auto_range} found one), the buffer, the number of location groups,
 the median NNDM exclusion, or, for kNNDM folds, that they are matched to

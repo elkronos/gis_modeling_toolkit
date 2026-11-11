@@ -19,7 +19,10 @@ create_voronoi_polygons(
 \item{points_sf}{An sf object with POINT/MULTIPOINT geometries. Points with
 no CRS whose coordinates look like lon/lat (the heuristic
 \code{\link[=ensure_projected]{ensure_projected()}} applies, with its warning) are taken as EPSG:4326
-and projected, as lon/lat points are.}
+and projected, as lon/lat points are. Points that mix XY and XYZ (or
+XYM), or that carry M, are read in x and y, since sf reads a layer in the
+dimension of its first geometry and GEOS refuses M; the attributes the
+seeding functions set on them are kept.}
 
 \item{boundary}{Optional polygonal sf object. When exactly one of
 \code{points_sf} and \code{boundary} has a CRS, the other is interpreted in it, with
@@ -30,7 +33,21 @@ do not look like lon/lat cannot take a geographic boundary's CRS, and are
 refused with an error. A CRS-less boundary given with lon/lat points (or
 with CRS-less points taken as lon/lat) is read as lon/lat when its
 coordinates fit the lon/lat envelope, and refused with an error
-otherwise.}
+otherwise. A boundary that mixes XY and XYZ (or XYM) geometries is read
+without Z and M, since sf reads a layer in the dimension of its first
+geometry. So is one whose
+geometries carry M (XYM or XYZM), which GEOS refuses.
+A row that is empty, or has a coordinate that is not finite or lies
+beyond 1e150 (read as given, and again after any move into another
+CRS), covers no ground and is left out; a boundary with no such row
+left is refused with an error that says so. A boundary in a geographic
+CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+the Earth, is refused with an error of class
+\code{"spatialkit_cells_degenerate"} that names its rows and says to check
+its CRS.
+A row the repair of \code{boundary} leaves without a polygon (a ring with no
+height: every vertex on one line, or in degrees on one parallel) is
+left out as well, and a boundary with no polygon left is refused.}
 
 \item{expand}{Numeric; absolute distance, in the working CRS's units, by
 which the boundary (or the hull derived from the points) is grown before
@@ -41,9 +58,13 @@ boundary is the one returned as \code{boundary}.}
 
 \item{clip}{Logical; intersect cells with boundary.}
 
-\item{keep_duplicates}{Logical. Has no effect on the result: coincident
-points are merged before the diagram is built either way, so they share
-one cell and all of them are indexed to it.}
+\item{keep_duplicates}{Logical. With \code{FALSE} (the default), points
+are merged before the diagram is built when they round to one point in
+coordinates centred on the middle of their bounding box, divided by its
+diagonal and rounded to 2^-30 of it, so points within about a billionth
+of the extent of each other count as coincident in any unit or origin
+and share one cell. With \code{TRUE} only points at exactly one
+location are merged. Every point is indexed to the cell that holds it.}
 
 \item{crs}{Optional target CRS: anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, including
 an sf or sfc layer, whose CRS is used. A projected CRS is the working
@@ -52,7 +73,24 @@ in: the cells are built in the local projected CRS \code{\link[=ensure_projected
 picks for the points, so they are nearest-point cells on the ground, and
 are then transformed, with long edges densified. Seeds that are the
 centres a profile scored are built in the CRS the profile worked in
-instead (see "Seeds a profile scored").}
+instead (see "Seeds a profile scored"). Where four seeds stand the same
+distance from one point, as on gridded locations, two cells can meet
+there at two corners that differ only by rounding, which the transform
+to degrees can put at one point, and sf's spherical engine (s2) refuses
+such a cell. \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} joins the cells of the
+centres a profile scored in the CRS they were built in, while they
+carry the record that says so (\code{scored_cells = TRUE}). \code{sf::st_area()},
+\code{sf::st_union()}, and a join of rows in degrees to other cells (cells
+without the record, such as those of a count given as a number or those
+a verb that drops attributes has stripped of it, and cells whose record
+says \code{scored_cells = FALSE}, such as those of centres refitted to every
+point) go to s2 and stop on such a cell: transform the cells to a
+projected CRS first. \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} then stops with an
+error of class \code{"spatialkit_cells_degenerate"} that names the cells s2
+refuses, the cause and that transform; its largest-overlap join of
+polygon features repairs such cells instead, with a warning.
+\code{\link[=summarize_by_cell]{summarize_by_cell()}} with \code{area = TRUE}, which takes the areas of such
+cells, stops with the same error before any summary.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
@@ -74,17 +112,34 @@ set aside with a warning. With a \code{boundary}, the boundary sets the cells
 and \code{cover} is only checked against them: the number of its points that
 fall outside every cell is returned as \code{params$cover_outside}, with a
 warning of class \code{"spatialkit_unassigned"} when it is not 0 (a polygon
-cover is not checked).}
+cover is not checked). A cover, given or attached, that mixes XY and XYZ
+(or XYM) geometries, or that carries M, is read in x and y. A row of the
+cover with a coordinate that is not finite or lies beyond 1e150, read
+as given before any move, is read as an empty row.}
 }
 \value{
 A list with \code{cells}, \code{index}, \code{boundary},
 \code{method} and \code{params}.  \code{index} holds one \code{cell_id}
 per row of \code{points_sf}, and \code{NA} for a point that falls outside
 every cell, which means outside the study area (grown by \code{expand}
-when it is positive), so a summary built from it counts only the points
+when it is positive), and farther than a thousandth of the median cell
+width from the nearest cell, so a summary built from it counts only the points
 the tessellation actually covers.  Such points are counted in
 \code{params$n_outside}, and a warning of class
-\code{"spatialkit_unassigned"} gives their number.  \code{boundary} is
+\code{"spatialkit_unassigned"} gives their number.  Points so far from
+the origin of their CRS that doubles there are spaced more than a
+millionth of their extent apart (0.125 at 1e15, beside a layer a few
+kilometres across) have the cells' edges and their own cells read at
+that rounding, so two points that close can fall in one cell; the cells
+are built, and a warning of class \code{"spatialkit_xy_imprecise"}
+gives the spacing and the extent.  For seeds (see
+"Details") \code{index} holds the cell each seed generates, whether the
+seed lies inside the boundary or not, and \code{NA} only for a seed whose
+cell the clip removed whole or without a location (an empty geometry,
+or a coordinate that is not finite or lies beyond 1e150);
+\code{params$n_outside} counts those, the warning names them as seeds,
+and \code{params$snapped} lists only the seeds whose entry is the cell
+they were snapped to.  \code{boundary} is
 the boundary the cells were built in: the one supplied or derived, grown
 by \code{expand}.  \code{params$boundary_source} says where it came
 from: \code{"boundary"} (the argument), \code{"cover"} (the
@@ -101,8 +156,9 @@ then has no such element; neither has it for points that are not seeds.
 \code{params$count_rule} is present when \code{points_sf} carries the
 record of how its count was set (\code{attr(points_sf, "count_rule")}:
 the seeds of a \code{\link{select_resolution}()} result, or seeds a
-seeding function placed from one): the same list, which the cells carry
-too as \code{attr(cells, "count_rule")}.
+seeding function placed from one): the same list, with
+\code{scored_cells = FALSE} when the seeds are fewer or more than its
+count, which the cells carry too as \code{attr(cells, "count_rule")}.
 \code{\link{assign_features_to_polygons}()} copies it to the rows it
 assigns, and \code{\link{summarize_by_cell}()} checks its result
 against it.
@@ -145,6 +201,29 @@ their result. A layer that looks like seeds and has neither a boundary nor
 a cover (seeds bound with \code{rbind()}, which drops the attribute, or built
 by hand) gets the seeds' own hull and a warning of class
 \code{"spatialkit_no_cover"}.
+
+A seed stands for its cell, so \code{index} gives each seed the cell it
+generates. A k-means seed is a mean of observations and can lie outside a
+\code{boundary} that is not convex, in a bay or a bend of a coast (see
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}). Its cell, the part of the study area nearer it
+than any other seed, is built, and its \code{index} entry is that cell's
+\code{cell_id}, although the seed lies in no cell. A seed is \code{NA} only when
+every part of the study area is nearer another seed, so the clip removed
+its cell whole, or when it has no location (its geometry is empty, or a
+coordinate is not finite or lies beyond 1e150). The points are seeds when
+a seeding function returned them (\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}}, \code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}, \code{rbind()} of such
+layers included), when they are the seeds of a \code{\link[=select_resolution]{select_resolution()}}
+result, and when a \code{cover} is passed with them. A selection's seeds are
+seeds by the attributes they carry, which \code{rbind()} and a write to a file
+drop. Any other points are indexed by the cell that holds them, so a
+point outside the study area is \code{NA}, unless it lies within a thousandth
+of the median cell width of a cell, whose ID it then takes (see \code{index}
+in \code{\link[=build_tessellation]{build_tessellation()}}); that includes observations that
+carry a selection's record of the count, as
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} returns them. Seeds placed by hand, and
+a selection's seeds that lost their attributes, are seeds once they pass
+through \code{get_voronoi_seeds(method = "provided", seeds = )}.
 }
 \section{Seeds a profile scored}{
 
@@ -152,7 +231,16 @@ The seeds of a \code{\link[=select_resolution]{select_resolution()}} result, and
 \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} or \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}} return for one, are the
 centres \code{\link[=resolution_profile]{resolution_profile()}} scored, and their record of the count
 (\code{attr(, "count_rule")}) says so (\code{scored_cells = TRUE}) and holds the
-centres in the CRS the profile worked in. Unless a projected \code{crs} is
+centres in the CRS the profile worked in. (On a profile without an
+estimate fitted to a subsample the seeds are those centres refitted to
+every point, which carry \code{attr(, "refit")}; their record says
+\code{scored_cells = FALSE}, and their cells are built as other seeds' are.
+So are seeds fewer or more than the record's count, such as a
+selection's seeds cut down to some of its rows: they are not the centres
+the profile scored, and their record is handed on with
+\code{scored_cells = FALSE}, as \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} (\code{method = "provided"})
+marks such seeds.)
+Unless a projected \code{crs} is
 given, their cells are built in that CRS, whatever CRS the seeds arrive
 in (degrees, or the CRS of a boundary they were placed in), and returned
 in it, or in a geographic \code{crs} when one is given. When the seeds are

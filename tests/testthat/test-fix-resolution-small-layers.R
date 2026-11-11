@@ -86,14 +86,22 @@ test_that("determine_optimal_levels() does not hand back 1 for a layer with no l
   pts <- fsl_pts(40L)
   # No rows: an error.  It returned 1.
   expect_error(determine_optimal_levels(pts[0, ]), "has no rows")
-  # One or two points: 1, said with the class every count that is not a
-  # finding carries, or NA, or an error, as asked.
+  # One or two points: NA by default, with structured = FALSE; under "warn"
+  # 1; either way said with the class every count that is not a finding
+  # carries; or an error, as asked.
   for (n in 1:2) {
     out <- fsl_catch(determine_optimal_levels(pts[seq_len(n), ]))
+    expect_true(is.na(out$value))
+    expect_identical(attr(out$value, "structured"), FALSE)
+    expect_identical(out$classes[out$classes == "spatialkit_no_elbow"], "spatialkit_no_elbow")
+    expect_match(out$text[1L], "too few for a ladder of cell counts.*Returning NA")
+    out <- fsl_catch(determine_optimal_levels(pts[seq_len(n), ], on_no_elbow = "warn"))
     expect_identical(as.integer(out$value), 1L)
     expect_true("spatialkit_no_elbow" %in% out$classes)
     expect_match(out$text[1L], "too few for a ladder of cell counts")
-    expect_true(is.na(determine_optimal_levels(pts[seq_len(n), ], on_no_elbow = "na")))
+    expect_warning(na <- determine_optimal_levels(pts[seq_len(n), ], on_no_elbow = "na"),
+                   class = "spatialkit_no_elbow")
+    expect_true(is.na(na))
     expect_error(determine_optimal_levels(pts[seq_len(n), ], on_no_elbow = "error"),
                  class = "spatialkit_no_elbow")
   }
@@ -101,6 +109,11 @@ test_that("determine_optimal_levels() does not hand back 1 for a layer with no l
   one <- sf::st_as_sf(data.frame(x = rep(500, 12), y = rep(500, 12)),
                       coords = c("x", "y"), crs = 32632)
   out <- fsl_catch(determine_optimal_levels(one))
+  expect_true(is.na(out$value))
+  expect_identical(attr(out$value, "structured"), FALSE)
+  expect_identical(out$classes[out$classes == "spatialkit_no_elbow"], "spatialkit_no_elbow")
+  expect_match(out$text[1L], "sit on 1 distinct location.*Returning NA")
+  out <- fsl_catch(determine_optimal_levels(one, on_no_elbow = "warn"))
   expect_identical(as.integer(out$value), 1L)
   expect_true("spatialkit_no_elbow" %in% out$classes)
   expect_match(out$text[1L], "sit on 1 distinct location")

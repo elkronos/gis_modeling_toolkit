@@ -60,13 +60,24 @@ test_that("determine_optimal_levels() puts the elbow first on the geometric path
     data.frame(x = c(runif(25, 0, 10), runif(25, 90, 100)),
                y = c(runif(25, 0, 10), runif(25, 90, 100))),
     coords = c("x", "y"), crs = 32632)
-  k <- determine_optimal_levels(pts, max_levels = 6)
+  # At the default, on_no_elbow = "na", the counts carry the elbow's flag and
+  # sag and nothing else.
+  dol <- function(...) {
+    k <- determine_optimal_levels(pts, ...)
+    expect_named(attributes(k), c("structured", "sag"))
+    expect_identical(attr(k, "structured"), TRUE)
+    as.vector(k)
+  }
+  k <- dol(max_levels = 6)
   expect_equal(k, c(2L, 1L, 3L))
-  expect_equal(determine_optimal_levels(pts, max_levels = 6, top_n = 1), 2L)
+  expect_equal(dol(max_levels = 6, top_n = 1), 2L)
   expect_equal(k[1L], 2L)
   # ... whatever the window, and top_n truncates the ranked vector.
-  expect_equal(determine_optimal_levels(pts, max_levels = 3), c(2L, 1L, 3L))
-  expect_equal(determine_optimal_levels(pts, max_levels = 6, top_n = 2), c(2L, 1L))
+  expect_equal(dol(max_levels = 3), c(2L, 1L, 3L))
+  expect_equal(dol(max_levels = 6, top_n = 2), c(2L, 1L))
+  # Under "warn" the same counts, with no attribute.
+  expect_equal(determine_optimal_levels(pts, max_levels = 6, on_no_elbow = "warn"),
+               c(2L, 1L, 3L))
 })
 
 test_that(".elbow_from_wss is invariant to an affine rescaling of WSS", {

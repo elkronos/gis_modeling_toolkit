@@ -15,7 +15,11 @@ residual_morans_i(
 }
 \arguments{
 \item{fit}{A \code{spatial_fit} object (from \code{fit_gwr_model},
-\code{fit_bayesian_spatial_model} or \code{fit_rf_model}).}
+\code{fit_bayesian_spatial_model} or \code{fit_rf_model}).  The
+locations are read from its \code{data_sf}, a feature that is not a
+point reduced to one as \code{\link{coerce_to_points}(, "auto")}
+does.  A layer whose geometries mix XY with XYZ or XYM, or carry M
+(XYM or XYZM), is read in x and y, with no warning.}
 
 \item{alternative}{Character: \code{"two.sided"} (default),
 \code{"greater"} (positive autocorrelation), or \code{"less"}.}
@@ -27,7 +31,18 @@ weight matrix (k = 8) is built from the observation coordinates.  Ties
 at the k-th distance (every regular grid, every site with repeat
 visits) share that slot's weight equally, with no tie-break by
 row order or by which backend found them, so the matrix is a function
-of the geometry alone; on distinct, untied coordinates it equals
+of the geometry alone.  A distance is tied with the k-th when their
+squares are within one part in ten million of each other, so the
+matrix is the same in any unit and at any origin where the doubles
+hold the coordinates to better than about one part in 1e8 of the
+distances between neighbours.  Farther from the origin the doubles
+round the coordinates more coarsely, and a lattice whose coordinates
+are not on that rounding can lose its ties.  Where a distance lies
+past a tie by less than that rounding, the call warns, with class
+\code{"spatialkit_xy_imprecise"}, naming the rounding and the
+distance; the matrix is the one the coordinates as stored give.  On
+distinct, untied
+coordinates it equals
 \code{spdep}'s \code{knearneigh()} + \code{nb2listw(style = "W")}
 exactly.
 If a non-row-standardised matrix is supplied (i.e. rows do not all sum
@@ -127,8 +142,18 @@ Returns \code{NULL} with a warning if computation fails, saying why:
 \code{residuals()} raised an error (its message is quoted), or returned
 \code{NULL} and the response minus \code{fitted()} could not be
 formed either (the reason is quoted), fewer than 4 valid
-residuals, or a residual vector whose length does not match the fit's
-\code{data_sf}.
+residuals, a residual vector whose length does not match the fit's
+\code{data_sf}, weights that sum to less than
+\code{.Machine$double.eps}, or residuals that leave I a ratio of
+rounding: they do not vary, or vary by no more than the rounding of the
+response (a standard deviation of 3 units in the last place of its
+largest value, or a root mean square of \eqn{10\epsilon} times that of
+the response about its centre), or are the OLS residuals of an exact fit
+of the response on the predictors (a root mean square of
+\eqn{10\epsilon} times that of the fit's terms).
+The test reads the residuals against the response, so residuals in
+any unit are scored or refused alike, and I, z and the p-value do not
+depend on the unit.
 }
 \description{
 Given a \code{spatial_fit} object, extracts the residuals and the
@@ -181,7 +206,22 @@ precision.
 \code{X}, regresses the response on it, and uses the residual moments only
 when the supplied residuals \emph{are} those OLS residuals to numerical
 tolerance.  A GWR wide enough to have collapsed to global OLS passes that
-test; the same GWR at a working bandwidth does not.
+test; the same GWR at a working bandwidth does not.  The response, and
+each predictor whose centre is more than 1000 times its spread, are taken
+about their centres before the regression, which leaves its residuals as
+they are, so a timestamp or a response at 1e10 gives the null, moments and
+rank \eqn{p} of the same columns at 0.  The supplied residuals pass where
+none differs from the OLS residuals by more than 1e-7 of the response's
+standard deviation, or where the differences are no more than the
+rounding a regression of the raw columns leaves: a root mean square of
+\eqn{10\epsilon} (\eqn{\epsilon} = \code{.Machine$double.eps}) times
+that of the fit's terms, among them the offset the fit regressed the
+response at (for a GWR that took the response about its centre, the
+offset left after that centre).  They also
+pass where none differs by more than 1e-7 of the response's standard
+deviation from the residuals \code{lm()} gives on the raw columns, where
+the raw design keeps the rank of the centred one: that rounding grows
+with the number of rows.
 
 \strong{For the flexible backends neither null is exact}, and \code{"auto"}
 leaves them on \code{"randomisation"} because forcing the OLS moments on

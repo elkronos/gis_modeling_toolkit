@@ -21,8 +21,10 @@ pts$junk3 <- stats::rnorm(nrow(pts))
 cands <- c("elev", "slope", "noise", "junk1", "junk2", "junk3")
 # Block size: a little UNDER the range script 02 estimates on z (about 357),
 # because the 1000-unit square holds only four blocks of 360, fewer than the
-# five folds, and the half-layer of 08.5 only two. Blocks this size still leak
-# a little across their edges, so the scores below are somewhat optimistic.
+# five folds, and the half-layer of 08.5 only two. Blocks this size leave some
+# held-out points within the range of training data across their edges, so the
+# scores below are the error of predicting a little closer to the data than
+# range-sized blocks would hold them.
 BS <- 300
 
 xy <- sf::st_coordinates(pts)

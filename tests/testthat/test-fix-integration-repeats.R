@@ -486,9 +486,14 @@ test_that("resolution_profile() says what a no-structure variogram lacks", {
   for (sac in list(no, NULL)) {
     lines <- capture_spatialkit_log(
       r <- fir_conditions(resolution_profile(pts, "noise", sac = sac, n_levels = 4, nstart = 2)))
-    expect_identical(attr(r$value, "cp_noise")$source, "finest-level residual mean square")
-    hit <- grepl("so `cp` takes its noise variance from the residual mean square", r$messages,
-                 fixed = TRUE)
+    # The residual mean square of the finest level, or the semivariance of
+    # nearest-neighbour pairs that holds it (BUG-02), and one warning that
+    # names both.
+    cn <- attr(r$value, "cp_noise")
+    expect_identical(if (identical(cn$source, "short-lag semivariance")) cn$uncapped$source
+                     else cn$source, "finest-level residual mean square")
+    hit <- grepl("so `cp` takes its noise variance from", r$messages, fixed = TRUE) &
+      grepl("residual mean square of the finest level", r$messages, fixed = TRUE)
     expect_identical(sum(hit), 1L)
     expect_match(r$messages[hit],
                  "found no spatial structure and gives no nugget that can be told from the sill, so `cp`",

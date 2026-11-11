@@ -35,7 +35,10 @@ not comparable across rows, which is why the print method leaves it out),
 edge optimum sits on, as \code{\link{select_resolution}()} reports it;
 \code{NA} when interior) and \code{structured} (as
 \code{select_resolution()} reports it: \code{FALSE} for a \code{cp}
-that one cell matches).  Attributes: \code{bands} (a named list holding each
+that one cell matches, and where the cells beat one cell but the F test
+does not tell their means from one mean or, for \code{cp}, the
+profile's variogram found no spatial structure).  Attributes:
+\code{bands} (a named list holding each
 criterion's flat region in full, since \code{flat_min} and
 \code{flat_max} are only its ends and the region can have holes in it),
 \code{common} (the levels in every flat region of the count criteria,
@@ -44,7 +47,11 @@ empty when the regions do not overlap), \code{scored} (the levels each
 criterion returned a finite value at, which is what decides whether a gap
 in a band is a rejection or a level nothing was computed at),
 \code{ladder} (every level on the profile), \code{n_levels}, \code{tol}
-and \code{variable} (what the criteria were scored on).  The print method recomputes the closing
+and \code{variable} (what the criteria were scored on), and, only when
+some row has \code{structured} \code{FALSE} although its cells beat one
+cell by more than \code{tol}, \code{not_identified} (a character vector
+named by criterion that says why: the F test, or for \code{cp} the
+profile's variogram).  The print method recomputes the closing
 comparison from \code{bands}, so a row subset of the result reads
 honestly.
 }

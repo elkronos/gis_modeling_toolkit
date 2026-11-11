@@ -28,17 +28,38 @@ dispatch on it, so a custom \code{subclass} \strong{requires} a matching
 a \code{ranger} object, a \code{brmsfit}, ...).  Nothing inspects it
 except your own methods.}
 
-\item{formula}{A formula.}
+\item{formula}{A formula: the model, as \code{print()} and
+\code{summary()} show it.  Its left side, when it has one, holds
+\code{response_var} (\code{log(price) ~ elev} for \code{"price"}).  Its
+right side uses the columns \code{predictor_vars} names and no other
+attribute column of \code{data_sf} than these and the response, read
+by \code{all.vars()}, so \code{log(elev)} and \code{elev * slope}
+count as their columns, and so do the columns of an \code{offset()} or
+a grouping term; names that are not columns of \code{data_sf} and the
+reserved names \code{..x} and \code{..y} are not checked, and a right
+side with \code{.} is not read.  A column a \code{fit_fn} derives
+itself and keeps out of \code{predictor_vars}, such as coordinates
+\code{x} and \code{y} for a trend surface, needs a name that is not a
+column of \code{data_sf}: on a layer that keeps its coordinates as
+columns \code{x} and \code{y}, derive them as \code{cx} and
+\code{cy}, or drop those columns first.}
 
-\item{response_var}{Character(1).}
+\item{response_var}{Character(1): the name of the response column of
+\code{data_sf}, an attribute column (not the geometry).}
 
-\item{predictor_vars}{Character vector.}
+\item{predictor_vars}{Character vector of attribute column names of
+\code{data_sf}, not including \code{response_var}: the columns the right
+side of \code{formula} uses.  \code{character(0)} for a model without
+predictors.}
 
-\item{data_sf}{An sf object used for fitting.}
+\item{data_sf}{An sf object with its geometry column: the rows the model
+was fitted on, with their geometry, in the order \code{fitted()}
+returns its values.}
 
-\item{info}{Named list of model-specific extras.  Set
-\code{fitted_are_oob = TRUE} when your \code{fitted()} values are held
-out instead of in-sample, so \code{summary()} labels them correctly.}
+\item{info}{Named list of model-specific extras (\code{list()} for
+none).  Set \code{fitted_are_oob = TRUE} when your \code{fitted()} values
+are held out instead of in-sample, so \code{summary()} labels them
+correctly.}
 }
 \value{
 An object of class \code{c(subclass, "spatial_fit")}.
@@ -64,6 +85,19 @@ you chose.  \code{\link{cv_spatial}()} scores folds by calling the
 \code{\link{summary}()} and \code{\link{model_metrics}()}: both error,
 naming the method to define, without one.  \code{\link{residuals}()} and
 \code{\link{coef}()} methods are optional.
+
+The constructor checks the fields the package's functions read from a fit,
+and stops with an error that names the argument: \code{subclass} must be
+one class name, \code{data_sf} an sf object with its geometry column,
+\code{formula} a formula whose left side, when it has one, holds the
+response, \code{response_var} the name of one attribute column of
+\code{data_sf} (a column other than its geometry),
+\code{predictor_vars} a character vector of its attribute columns other
+than the response, the columns the right side of \code{formula} uses, and
+\code{info} a list.  It does not check the
+response's type (a Bayesian fit can have a factor or ordinal response);
+\code{summary()} and \code{model_metrics()} refuse a response
+that is not numeric or logical.
 }
 \section{The coef() contract}{
 

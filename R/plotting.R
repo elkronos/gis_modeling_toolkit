@@ -3,6 +3,18 @@
 #' Builds a layered ggplot2 map of polygon tessellations and optional
 #' overlays for a study boundary, seed points, and additional features.
 #'
+#' Every layer is drawn in x and y: a layer whose geometries mix XY with XYZ
+#' or XYM (as \code{rbind()} of an XY and an XYZ layer gives) is drawn
+#' without its Z and M.  The labels are placed in x and y, also on cells
+#' whose geometries carry M (XYM or XYZM).
+#'
+#' A row of any layer with a coordinate that is not finite or lies beyond
+#' 1e150 has no location: it is left out of the map, with one warning that
+#' says how many rows of which argument were not drawn.  A row the plot's
+#' CRS cannot place in full is drawn as the move leaves it (empty, or
+#' without the vertices it cannot place), with a warning of class
+#' \code{spatialkit_rows_unplaced} that names it.
+#'
 #' @param tessellation_sf An sf POLYGON/MULTIPOLYGON layer. Required.
 #' @param boundary Optional sf/sfc polygon outline layer.
 #' @param seeds_sf Optional sf/sfc point layer of seed locations.
@@ -25,7 +37,9 @@
 #' @param seeds_col,seeds_size Colour and point size of the seed overlay.
 #' @param boundary_col,boundary_size Colour and line width of the boundary
 #'   outline.
-#' @param labels Logical; draw per-cell labels. Default FALSE.
+#' @param labels Logical; draw per-cell labels. Default FALSE.  A cell is
+#'   labelled when its label is not NA and it has a location; when no cell
+#'   has both, the labels are skipped with a log line.
 #' @param label_col Name of the COLUMN holding the label text.  Default
 #'   \code{NULL}: the first of \code{"grid_id"}, \code{"cell_id"},
 #'   \code{"poly_id"}, \code{"polygon_id"} and \code{"id"} the layer has, so
@@ -47,6 +61,10 @@
 #'   a CRS is brought into the plot's CRS instead of being dropped: reprojected
 #'   when its coordinates look like longitude/latitude, otherwise stamped with a
 #'   warning, since a stamp assumes the coordinates were already in that CRS.
+#'   A plot CRS in longitude and latitude is not stamped on coordinates that
+#'   cannot be in it (an x outside -180 to 360, or a y beyond 90 north or
+#'   south): the call stops and asks for the layer's CRS or a projected
+#'   \code{target_crs}.
 #' @param title,subtitle,caption Plot annotations.
 #' @param xlim,ylim Optional numeric vectors of length 2 for coordinate limits
 #'   (in the plot CRS). Default NULL (auto).
@@ -156,30 +174,68 @@ plot_tessellation_map <- function(tessellation_sf,
   if (is.na(plot_crs))
     .log_warn("plot_tessellation_map(): no layer carries a CRS; drawing layers as-is.")
 
-  # --- coerce & transform helper ---
-  maybe_transform <- function(x, what) {
+  # --- coerce, leave out rows without a location, transform ---
+  as_layer <- function(x) {
     if (is.null(x)) return(NULL)
     if (inherits(x, "sfc")) x <- sf::st_as_sf(x)
     if (!inherits(x, c("sf", "sfc")))
       stop("plot_tessellation_map(): all layers must be sf/sfc when provided.")
+    x
+  }
+  # A row with a coordinate that is not finite or lies beyond 1e150
+  # (.unlocated_features()) has no location, and is left out of its layer,
+  # read as given before any move and left out after it, with one warning
+  # for the call.  (The move, the lon/lat test and the count of rows a move
+  # cannot place skip such a row already.)  Drawn,
+  # a vertex at Inf gave the map an infinite x range in silence, and one at
+  # 1e200 a map 1e200 wide where the other cells shrank to a point, with
+  # ggplot2's bare "Position guide is perpendicular to the intended axis";
+  # a move into another CRS emptied the same row, so the map depended on
+  # whether one happened.
+  lay <- .plot_drop_unlocated(
+    list(tessellation_sf = as_layer(tessellation_sf), boundary = as_layer(boundary),
+         seeds_sf = as_layer(seeds_sf), features_sf = as_layer(features_sf)),
+    caller = "plot_tessellation_map")
+
+  maybe_transform <- function(x, what) {
+    if (is.null(x)) return(NULL)
+    # A layer that mixes XY and XYZ (or XYM) geometries is drawn in x and y:
+    # sf reads a layer in the dimension of its first geometry, so its move
+    # into the plot's CRS stopped with "OGR error" (an XYZ first row) or drew
+    # an XYZ ring among XY rows far from its place, and GEOS stopped on the
+    # labels' points.  The plot returns no geometry, so nothing is said.
+    # Points in an sfc_GEOMETRY column are drawn as the same points in
+    # sfc_POINT, or sfc_MULTIPOINT (.typed_points()): on the column
+    # sf::st_cast() returns, the move into the plot's CRS, here or in
+    # coord_sf() when the plot was built, stopped with "Not compatible with
+    # STRSXP".
+    x <- .xy_if_mixed(.typed_points(x))
     if (is.na(plot_crs)) return(x)
     x_crs <- sf::st_crs(x)
-    # Returning a CRS-less overlay untouched was dead code, not a pass-through:
-    # coord_sf(crs = plot_crs) then aborted inside ggplot_build() -- at PRINT
-    # time, with sf's bare "cannot transform sfc object with missing crs",
-    # naming no layer and no spatialkit function -- while this function had
-    # just logged "drawing layers as-is" as though the case were supported.
-    if (is.na(x_crs))
-      return(.transform_or_stamp(x, plot_crs, what = what,
-                                 caller = "plot_tessellation_map"))
-    if (x_crs == plot_crs) return(x)
-    sf::st_transform(x, plot_crs)
+    # A CRS-less layer is brought into the plot's CRS (.transform_or_stamp()).
+    # Returned untouched, coord_sf(crs = plot_crs) aborted inside
+    # ggplot_build() -- at PRINT time, with sf's bare "cannot transform sfc
+    # object with missing crs", naming no layer and no spatialkit function --
+    # while this function had just logged "drawing layers as-is" as though
+    # the case were supported.
+    # A layer with a CRS is moved the same way:
+    # a row the plot CRS cannot place in full comes back empty or without
+    # the vertices it cannot place, and a warning of class
+    # "spatialkit_rows_unplaced" names it.  Moved with sf::st_transform(),
+    # such a row was drawn emptied or short of a vertex in silence, where
+    # the same row in a layer without a CRS was reported.
+    if (!is.na(x_crs) && x_crs == plot_crs) return(x)
+    .transform_or_stamp(x, plot_crs, what = what, caller = "plot_tessellation_map",
+                        geo_remedy = "or pass a projected `target_crs`")
   }
 
-  tess <- maybe_transform(tessellation_sf, "tessellation_sf")
-  bnd  <- maybe_transform(boundary, "boundary")
-  sds  <- maybe_transform(seeds_sf, "seeds_sf")
-  fea  <- maybe_transform(features_sf, "features_sf")
+  off  <- attr(lay, "drop")
+  tess <- .plot_keep_located(maybe_transform(lay$tessellation_sf, "tessellation_sf"),
+                             off$tessellation_sf)
+  bnd  <- .plot_keep_located(maybe_transform(lay$boundary, "boundary"), off$boundary)
+  sds  <- .plot_keep_located(maybe_transform(lay$seeds_sf, "seeds_sf"), off$seeds_sf)
+  fea  <- .plot_keep_located(maybe_transform(lay$features_sf, "features_sf"),
+                             off$features_sf)
 
   # --- build ggplot ---
   p <- ggplot2::ggplot()
@@ -247,21 +303,48 @@ plot_tessellation_map <- function(tessellation_sf,
     } else if (!label_col %in% names(tess)) {
       .log_warn("plot_tessellation_map(): label_col '%s' not found; skipping labels.",
                 label_col)
-    } else if (nrow(tess) > 0L && !all(sf::st_is_empty(tess))) {
-      centers <- suppressWarnings(sf::st_point_on_surface(.drop_empty_parts(tess)))
-      # An st_area() label column (class units) failed at print with "units
-      # package is not attached", as a units fill column once did; drawn as
-      # text, a units or difftime value keeps its unit.
+    } else if (nrow(tess) > 0L) {
+      # A cell is labelled when it has a label and a location.  A cell with
+      # an NA label, or an empty one (whose label point is empty), reached
+      # geom_sf_text(), and ggplot2 dropped it at print with its bare
+      # "Removed 1 row containing missing values or values outside the scale
+      # range".  Such a cell has nothing to show: it is left out here.
       lab <- tess[[label_col]]
-      if (inherits(lab, c("units", "difftime"))) lab <- format(lab, trim = TRUE)
-      centers$`..__lab__` <- lab
-      # The label points are computed above; geom_sf_text()'s default
-      # fun.geometry ran st_point_on_surface() on them again at print, which
-      # warned on every lon/lat layer.
-      p <- p + ggplot2::geom_sf_text(
-        data = centers, ggplot2::aes(label = .data[["..__lab__"]]), size = label_size,
-        fun.geometry = sf::st_geometry
-      )
+      has_lab <- !is.na(lab)
+      centers <- NULL
+      if (any(has_lab)) {
+        # GEOS does not read M, and stopped on cells that carry it; the
+        # label points are this function's own and are taken in x and y.
+        # Cells in longitude and latitude written across longitude 180 get
+        # a point on them (.surface_points()): GEOS read them the long way
+        # round the globe, and their labels were drawn on the far side of
+        # the map.  sf's own warnings about the label points (a latitude
+        # beyond 90, for one) are not passed on, as before: the points only
+        # place the labels.
+        centers <- .xy_if_mixed_or_m(if (all(has_lab)) tess else tess[has_lab, ])
+        centers <- sf::st_set_geometry(
+          centers, suppressWarnings(.surface_points(sf::st_geometry(centers)))$points)
+        # An st_area() label column (class units) failed at print with
+        # "units package is not attached", as a units fill column once did;
+        # drawn as text, a units or difftime value keeps its unit.
+        lab <- lab[has_lab]
+        if (inherits(lab, c("units", "difftime"))) lab <- format(lab, trim = TRUE)
+        centers$`..__lab__` <- lab
+        no_point <- sf::st_is_empty(centers)
+        if (any(no_point)) centers <- centers[!no_point, ]
+      }
+      if (is.null(centers) || nrow(centers) == 0L) {
+        .log_warn("plot_tessellation_map(): no cell has both a label in '%s' and a location; skipping labels.",
+                  label_col)
+      } else {
+        # The label points are computed above; geom_sf_text()'s default
+        # fun.geometry ran st_point_on_surface() on them again at print,
+        # which warned on every lon/lat layer.
+        p <- p + ggplot2::geom_sf_text(
+          data = centers, ggplot2::aes(label = .data[["..__lab__"]]), size = label_size,
+          fun.geometry = sf::st_geometry
+        )
+      }
     }
   }
 
@@ -305,4 +388,65 @@ plot_tessellation_map <- function(tessellation_sf,
     ggplot2::labs(title = title, subtitle = subtitle, caption = caption)
 
   p
+}
+
+
+#' Leave out the rows of a map's layers that have no location
+#'
+#' A row whose geometry has a coordinate that is not finite or lies beyond
+#' \code{.POOL_XY_MAX} (\code{.unlocated_features()}) has no location, and
+#' a map that draws it runs to that coordinate: an infinite range, or one
+#' 1e200 wide where every other row shrinks to a point.  Each layer is read
+#' as given, before any move into the plot's CRS, and
+#' \code{.plot_keep_located()} leaves the rows out after the move, so a
+#' warning about a row the move cannot place counts the rows of the
+#' caller's layer.  The move (\code{.transform_keep_unlocated()}), the
+#' lon/lat test and \code{.rows_unplaced()} skip such rows already.  One
+#' warning for the call says how many rows of which argument are not drawn.
+#'
+#' @param layers A named list of sf or sfc layers (or NULL), named by the
+#'   argument each came from.
+#' @param caller The function called, for the warning.
+#' @param also A named list of logical vectors: rows of that layer to leave
+#'   out too (\code{plot_folds()}'s points that \code{make_folds()} left
+#'   out of every fold as without a location).
+#' @param what The words that say what a row without a location is.
+#' @return \code{layers} as given, with an attribute \code{"drop"}: a named
+#'   list of logical vectors, the rows to leave out of each layer after the
+#'   move.
+#' @keywords internal
+#' @noRd
+.plot_drop_unlocated <- function(layers, caller, also = list(),
+                                 what = "a coordinate that is not finite or lies beyond 1e150") {
+  n <- integer(0)
+  drop <- list()
+  for (nm in names(layers)) {
+    x <- layers[[nm]]
+    if (!inherits(x, c("sf", "sfc")) || !length(sf::st_geometry(x))) next
+    off <- .unlocated_features(sf::st_geometry(x))
+    if (!is.null(also[[nm]])) off <- off | also[[nm]]
+    if (!any(off)) next
+    drop[[nm]] <- off
+    n[nm] <- sum(off)
+  }
+  if (length(n)) {
+    parts <- sprintf("%d row(s) of `%s`", n, names(n))
+    if (length(parts) > 1L)
+      parts <- paste(paste(parts[-length(parts)], collapse = ", "), "and", parts[length(parts)])
+    .warn_and_log("%s(): not drawing %s without a location (%s).", caller, parts, what)
+  }
+  attr(layers, "drop") <- drop
+  layers
+}
+
+#' The rows of a layer that .plot_drop_unlocated() did not mark
+#'
+#' @param x An sf or sfc layer, row for row the one marked, or NULL.
+#' @param off Its rows to leave out, or NULL for none.
+#' @return \code{x} without those rows.
+#' @keywords internal
+#' @noRd
+.plot_keep_located <- function(x, off) {
+  if (is.null(x) || is.null(off) || !any(off)) return(x)
+  if (inherits(x, "sf")) x[!off, , drop = FALSE] else x[!off]
 }

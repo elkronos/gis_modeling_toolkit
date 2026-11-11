@@ -113,7 +113,9 @@ dist_to_city <- pmin(
 pop_density <- pmax(exp(-dist_to_city / 400000) * 5000 + rnorm(n_points, 200, 100), 10)
 
 # Response: predictor effects PLUS a spatial field neither predictor explains.
-# That last term is what makes random cross-validation optimistic in section 6.
+# That last term is the unmodelled structure nearby observations carry, so a
+# model's error depends on how far from the data it predicts; section 6
+# measures it.
 spatial_field <- 20 * sin(x_coords / 250000) * cos(y_coords / 250000)
 
 y_response <- 50 +
@@ -146,9 +148,9 @@ cat("\n--- Building tessellations ---\n")
 # observation is a nearest-neighbour interpolation rather than an
 # aggregation, and leaves no within-cell variation to compute a standard
 # error from.  A density-weighted centre can lie just outside the state
-# outline, over a sound that coastal observations surround; build_tessellation()
-# then warns that one seed falls in no cell.  Its cell is still built inside
-# the outline, and every observation falls in a cell.
+# outline, over a sound that coastal observations surround.  Its cell is
+# built inside the outline, and `index` gives the seed that cell, as it
+# gives every seed the cell it generates.
 seeds <- get_voronoi_seeds(
   boundary      = nc_boundary,
   sample_points = points_sf,
@@ -160,12 +162,11 @@ tess_voronoi <- build_tessellation(
   method = "voronoi", clip = TRUE, quiet = TRUE
 )
 cat(sprintf("  Voronoi: %d cells\n", nrow(tess_voronoi$cells)))
-n_out <- sum(is.na(tess_voronoi$index))
+n_out <- sum(lengths(st_intersects(seeds, nc_boundary)) == 0)
 if (n_out > 0)
-  cat(sprintf(paste0("  %d of %d seeds lie just outside the state outline, so the ",
-                     "warning above says\n  they fall in no cell; their cells are ",
-                     "built inside the outline, and every\n  observation falls in ",
-                     "a cell.\n"), n_out, nrow(seeds)))
+  cat(sprintf(paste0("  %d of %d seeds lie just outside the state outline; their ",
+                     "cells are built\n  inside the outline, and `index` gives ",
+                     "each of them its cell.\n"), n_out, nrow(seeds)))
 
 # 3b / 3c. Hex and square grids (~50 cells).  Both keep `cell_id`.
 tess_hex <- build_tessellation(
@@ -324,8 +325,9 @@ if (requireNamespace("patchwork", quietly = TRUE)) {
 
 if (has_ranger) {
   # include_coords = TRUE hands the forest the coordinates, so it can fit the
-  # training surface by location.  A random hold-out then overstates its
-  # accuracy, which random folds cannot show.
+  # training surface by location, and its error grows quickly with the
+  # distance from the data.  Random folds score it among the points; blocks
+  # score it on whole blocks of the state.
   rf_args <- list(include_coords = TRUE, num_trees = 300, seed = 1)
   cv_random  <- do.call(cv_rf, c(list(points_sf, response_var, predictor_vars,
                                       folds = folds_random),  rf_args))
@@ -333,8 +335,19 @@ if (has_ranger) {
                                       folds = folds_blocked), rf_args))
   cat(sprintf("  random_kfold : R2 = %.3f  RMSE = %.3f\n",
               cv_random$overall$R2, cv_random$overall$RMSE))
-  cat(sprintf("  block_kfold  : R2 = %.3f  RMSE = %.3f   <- the one to report\n",
+  cat(sprintf("  block_kfold  : R2 = %.3f  RMSE = %.3f\n",
               cv_blocked$overall$R2, cv_blocked$overall$RMSE))
+  # Which of the two to report depends on where the map will predict: here,
+  # over the state the points were sampled across.  fold_separation() sets the
+  # distances from such a map's locations to the data beside the held-out
+  # distances of each scheme.
+  cells <- st_sample(nc_boundary, size = 2000, type = "regular")
+  reading <- function(f)
+    attr(fold_separation(f, points_sf, prediction_points = cells), "target")$reading
+  cat(sprintf("  against a map of the state: random folds read \"%s\", blocks \"%s\"\n",
+              reading(folds_random), reading(folds_blocked)))
+  cat("  (\"matched\": the error of that map; \"farther\": tends to read high for it;\n",
+      "  \"closer\": tends to read low)\n", sep = "")
 } else {
   cat("  Skipping the CV contrast: install.packages(\"ranger\")\n")
 }

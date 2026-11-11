@@ -469,6 +469,8 @@ test_that("area_of_applicability agrees between the FNN and dense paths", {
 
 test_that("area_of_applicability takes training data from a fitted model", {
   tr <- mk_aoa_pts(60)
+  # new_spatial_fit() refuses a response that is not a column of `data_sf`.
+  tr$z <- tr$a + tr$b
   nd <- mk_aoa_new(a = c(0, 15), b = c(0, 15))
   fit <- new_spatial_fit(subclass = "stub_fit", engine = NULL,
                          formula = stats::as.formula("z ~ a + b"),
@@ -662,9 +664,12 @@ test_that("a coordinate-using model reprojects newdata before measuring it", {
   nd_ll <- sf::st_transform(nd_proj, 4326)
 
   # Degrees compared against metres would put both points absurdly far out.
-  expect_equal(area_of_applicability(nd_ll, model = fit)$aoa$DI,
-               area_of_applicability(nd_proj, model = fit)$aoa$DI,
-               tolerance = 1e-6)
+  a_ll   <- area_of_applicability(nd_ll, model = fit)
+  a_proj <- area_of_applicability(nd_proj, model = fit)
+  expect_equal(a_ll$aoa$DI, a_proj$aoa$DI, tolerance = 1e-6)
+  # The location index reads the reprojected points too.
+  expect_false(is.null(a_proj$aoa$DI_location))
+  expect_equal(a_ll$aoa$DI_location, a_proj$aoa$DI_location, tolerance = 1e-6)
 })
 
 

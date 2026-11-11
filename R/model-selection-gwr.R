@@ -281,15 +281,52 @@
 
   n_obs   <- nrow(dat)
   n_cand  <- length(candidate_vars)
+  # Before the rows are converted, for any bandwidth: on no rows the
+  # conversion stops with sp's own message, and on too few a sweep at a
+  # fixed bandwidth ends in "no model produced a finite criterion".
+  if (n_cand + 2L > n_obs)
+    stop(sprintf(paste0("gwr_model_selection(): %d observations cannot ",
+                        "support a local fit of %d candidate predictors ",
+                        "plus an intercept."), n_obs, n_cand), call. = FALSE)
+  # A response of one value has nothing to regress, and every model of the
+  # sweep fits it exactly; fit_gwr_model() refuses it in the same words.
+  y_all <- sf::st_drop_geometry(dat)[[response_var]]
+  y_fin <- unique(y_all[is.finite(y_all)])
+  if (is.numeric(y_all) && length(y_fin) == 1L)
+    stop(sprintf(paste0("gwr_model_selection(): response '%s' is constant ",
+                        "(a single distinct finite value, %s). There is ",
+                        "nothing to regress."),
+                 response_var, format(y_fin[[1L]])), call. = FALSE)
   sp_dat  <- .to_sp(dat, unique(c(response_var, candidate_vars)))
   df      <- sp_dat@data
   coords  <- sp::coordinates(sp_dat)
   y       <- as.numeric(df[[response_var]])
+  # A candidate or the response at a large offset is taken about its centre,
+  # as fit_gwr_model() takes it (.gwr_centre()), on the model with every
+  # candidate: each candidate's centre is its own, and every model is
+  # scored on the one response.  Every other column is used as it is.
+  # A response whose squares overflow or lose their bits is divided by a
+  # power of two (.gwr_centre()); the criteria are put back in its units
+  # below.
+  cen <- .gwr_centre(cbind(Intercept = 1,
+                           as.matrix(df[, candidate_vars, drop = FALSE])), y)
+  y   <- cen$y
+  xc  <- cen$x_centres
+  if (!is.null(xc))
+    for (j in which(xc[-1L] != 0))
+      df[[candidate_vars[j]]] <- df[[candidate_vars[j]]] - xc[j + 1L]
   # The design of one model: the intercept and its predictors' columns.  The
   # candidates are numeric (gwr_model_selection() refuses anything else), so
-  # this is the model matrix.
-  design <- function(vars)
-    cbind(Intercept = 1, as.matrix(df[, vars, drop = FALSE]))
+  # this is the model matrix.  Where candidates were taken about centres,
+  # the design carries them, as fit_gwr_model()'s does, so the local solve
+  # is the same; the scores read only fitted values, which the intercept's
+  # origin does not change.
+  design <- function(vars) {
+    X <- cbind(Intercept = 1, as.matrix(df[, vars, drop = FALSE]))
+    if (!is.null(xc))
+      attr(X, "centres") <- c(0, xc[-1L][match(vars, candidate_vars)])
+    X
+  }
 
   # --- Bandwidth ------------------------------------------------------------
   # One bandwidth is used for every candidate model: that is what makes the
@@ -297,6 +334,7 @@
   # limitation (see the function's documentation).
   bandwidth_source <- "supplied"
   bw_search <- NULL
+  bw_search_fit <- NULL
   if (is.null(bandwidth)) {
     # The grid-then-refine search fit_gwr_model() uses, on the model with
     # every candidate; see .gwr_bw_search().
@@ -309,14 +347,19 @@
         NULL
       }
     )
+    # What the search scored, put back in the response's units where the
+    # response was divided by a power of two (.gwr_centre()).
+    bw_search_fit <- bw_search
+    bw_search <- .gwr_bw_search_unscaled(bw_search, cen$y_scale, length(y))
     bw <- if (is.null(bw_search)) NA_real_ else bw_search$bandwidth
     if (!isTRUE(is.finite(bw)) || bw <= 0) {
       bw <- .fallback_bandwidth(sp_dat, adaptive)
       bandwidth_source <- "fallback"
       warning(sprintf(paste0("gwr_model_selection(): automatic bandwidth ",
                              "selection failed; using arbitrary fallback ",
-                             "bandwidth = %.4f. Supply `bandwidth` explicitly ",
-                             "for a defensible comparison."), bw),
+                             "bandwidth = %s. Supply `bandwidth` explicitly ",
+                             "for a defensible comparison."),
+                      .fmt_bw(bw, adaptive)),
               call. = FALSE)
     } else if (isTRUE(bw_search$none_defined)) {
       bandwidth_source <- "widest (no bandwidth has a defined criterion)"
@@ -361,15 +404,12 @@
   # the full model underdetermined.
   if (isTRUE(adaptive)) {
     bw      <- as.integer(round(bw))
-    if (n_cand + 2L > n_obs)
-      stop(sprintf(paste0("gwr_model_selection(): %d observations cannot ",
-                          "support a local fit of %d candidate predictors ",
-                          "plus an intercept."), n_obs, n_cand), call. = FALSE)
     # The full model has n_cand + 1 parameters.  n_cand + 2 left bisquare and
     # tricube windows with n_cand + 1 points (their bw-th neighbour has weight
     # 0), an exact interpolator whose AICc of about -n^2/2 put it first; see
-    # .gwr_min_adaptive_bw().  Capped at n_obs, as the stop above allows, and
-    # the AICc guard in gwr_model_selection() deals with what is left.
+    # .gwr_min_adaptive_bw().  Capped at n_obs, as the check of the rows at
+    # the top allows, and the AICc guard in gwr_model_selection() deals with
+    # what is left.
     min_bw  <- min(.gwr_min_adaptive_bw(n_cand + 1L, kernel), n_obs)
     if (bw < min_bw) {
       # A warning: every model in the sweep is fitted at a bandwidth the
@@ -466,6 +506,30 @@
                      "a model returns NA for the coefficients they cannot."),
               sum(n_def > 0L, na.rm = TRUE), n_sweep, format(bw),
               max(n_def, na.rm = TRUE), n_obs)
+
+  # The criteria of the response as fitted, put back in its units: AIC and
+  # AICc gain 2 n log(scale), the residual sum of squares is multiplied by
+  # the scale squared, and is NA where a double cannot hold that.
+  ys <- cen$y_scale
+  if (ys != 1) {
+    shift <- 2 * n_obs * log(ys)
+    rss_fit <- c(gwr_df[, "RSS"], null$row[4L])
+    gwr_df[, c("AIC", "AICc")] <- gwr_df[, c("AIC", "AICc")] + shift
+    gwr_df[, "RSS"] <- .gwr_unscale_ss(gwr_df[, "RSS"], ys)
+    null$row[2:3] <- null$row[2:3] + shift
+    null$row[4L]  <- .gwr_unscale_ss(null$row[4L], ys)
+    lost <- c(
+      `the residual sums of squares of the models (the RSS column of $raw[[2]])` =
+        any(is.na(c(gwr_df[, "RSS"], null$row[4L])) & !is.na(rss_fit)),
+      `the cross-validation scores of the bandwidth search ($bandwidth_search)` =
+        .gwr_bw_search_lost(bw_search_fit, bw_search))
+    if (any(lost))
+      .warn_and_log("%s", .gwr_ss_range_msg(
+        "gwr_model_selection", ys,
+        sprintf("So %s, in the response's units squared, are",
+                paste(names(lost)[lost], collapse = " and ")),
+        kept = "The bandwidth search and every model's AIC and AICc are"))
+  }
 
   raw <- list(model_list, gwr_df)
   list(model_list = model_list, gwr_df = gwr_df,
@@ -699,6 +763,10 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
                                 dmat_max_n = 2000L,
                                 quiet = TRUE,
                                 .engine = .gwr_ms_engine) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("gwr_model_selection", "data_sf")
+  on.exit(tie_end(returnValue(tie_end), data_sf), add = TRUE)
   if (!inherits(data_sf, "sf"))
     stop("gwr_model_selection(): `data_sf` must be an sf object.", call. = FALSE)
   if (!is.character(response_var) || length(response_var) != 1L)
@@ -926,9 +994,24 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
   if (n_failed > 0L)
     .log_warn("gwr_model_selection(): %d of %d models produced a non-finite criterion and were ranked last.",
               n_failed, nrow(tab))
-  if (n_failed == nrow(tab))
-    stop("gwr_model_selection(): no model produced a finite criterion; ",
-         "nothing can be selected.", call. = FALSE)
+  if (n_failed == nrow(tab)) {
+    # Why, from the reasons the engine gives for each model, where it gives
+    # them (an injected engine need not).
+    causes <- if (is.character(why) && length(why) == nrow(tab)) {
+      u <- unique(why[nzchar(why)])
+      if (length(u))
+        .gwr_bw_undefined_text(list(undefined = stats::setNames(
+          rep(1L, length(u)), u)), nrow(dat))
+    }
+    stop(sprintf(paste0("gwr_model_selection(): no model produced a finite ",
+                        "criterion at bandwidth %s; nothing can be ",
+                        "selected.%s"),
+                 format(eng$bandwidth),
+                 if (length(causes))
+                   sprintf(paste0(" For the %d observations of `data_sf`, ",
+                                  "in each model %s."), nrow(dat), causes)
+                 else ""), call. = FALSE)
+  }
 
   structure(
     list(

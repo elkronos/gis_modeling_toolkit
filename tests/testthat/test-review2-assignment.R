@@ -125,6 +125,14 @@ test_that("a variogram fallback with no fit reports why, as an R warning", {
   expect_true(any(hit))
   expect_match(res$warnings[hit][1], "requires a fitted variogram model")
   expect_false(any(res$value$deff_applied))
+  # The 25 points are one cell, so Kish's ICC cannot be estimated either: the
+  # standard error is NA, not the uncorrected one, and a second warning says
+  # why.  This call also takes the NA ICC through the pooled path's label.
+  na_icc <- vapply(res$classes, function(k) "spatialkit_icc_unavailable" %in% k, logical(1))
+  expect_identical(sum(na_icc), 1L)
+  expect_match(res$warnings[na_icc], "its values fall in one cell", fixed = TRUE)
+  expect_true(all(is.na(res$value[["..se_resp_z"]])))
+  expect_identical(attr(res$value, "icc")$reason, c(z = "its values fall in one cell"))
 })
 
 test_that("each cell's correlation matrix is built once, not once per column statistic", {
@@ -161,7 +169,7 @@ test_that("an empty point no longer stops deff = 'variogram'", {
   sf::st_geometry(empty) <- g
   res <- .r2_warnings(summarize_by_cell(empty, "z", deff = "variogram",
                                         sac = .r2_sac(), estimate = "mean"))
-  expect_true(any(grepl("1 point\\(s\\) have empty or non-finite coordinates",
+  expect_true(any(grepl("1 point\\(s\\) have no location \\(an empty point",
                         res$warnings)))
   out <- res$value
   expect_true(all(out$deff_applied))

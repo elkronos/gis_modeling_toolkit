@@ -24,14 +24,19 @@
   .log_warn_once("rf_include_coords",
                  paste0("fit_rf_model(): include_coords = TRUE. The forest ",
                         "splits on location and can fit the training surface ",
-                        "by memorising location, so the out-of-bag error and ",
-                        "random cross-validation overstate its accuracy. How ",
+                        "by memorising location, so its error grows quickly ",
+                        "with the distance from the data. The out-of-bag ",
+                        "error and random cross-validation measure it among ",
+                        "the samples: the error of a map over an area the ",
+                        "samples cover evenly, which reads low for ",
+                        "predictions made farther from the data. How ",
                         "much the coordinates help depends on ",
                         "how far from the training data the predictions are: ",
                         "the gain is largest between sampled points, fades ",
                         "with distance, and can reverse in a region the data ",
                         "never visited (Meyer et al. 2019). Score the forest ",
-                        "with cv_rf() and blocked or distance-matched folds ",
+                        "with cv_rf() on blocked or distance-matched folds ",
+                        "at the distances the map will predict at ",
                         "(make_folds(method = \"block_kfold\") or \"nndm\"), ",
                         "and compare it on the same folds with the forest ",
                         "fitted without coordinates: build the folds once ",
@@ -86,6 +91,78 @@
   v <- suppressWarnings(as.numeric(x))
   if (length(v) != 1L || !is.finite(v)) return(NA_real_)
   v
+}
+
+
+# Bounds of a response the forest is grown on as it is given.  ranger scores
+# a split by sum_left^2 / n_left + sum_right^2 / n_right, the square of a sum
+# of up to n values: values up to 1e100 square below the largest double on
+# any number of rows a forest can be grown on, and a spread down to 1e-100
+# squares well above the smallest normal double.  Beyond them the squares
+# overflow or lose their bits, and the response is divided by a power of two.
+.RF_Y_MAX <- 1e100
+.RF_Y_MIN <- 1e-100
+
+
+#' The response a forest is grown on, taken about its centre and scaled
+#'
+#' ranger scores a split by a sum of squares it forms from sums of the
+#' response and their squares.  At an offset of 1e8 (1e8 plus a spread of
+#' 1) those squares are near 1e17 and their differences read the rounding,
+#' so the trees split elsewhere than on the response less the offset; at
+#' 1e160 the squares overflow and at 1e-160 they lose their bits.  The
+#' forest's splits do not change under a shift or a scale of the response,
+#' so the response is taken less the centre of \code{.spread_scaled()}
+#' where that centre is more than \code{.PRED_CENTRE_RATIO} times its
+#' spread (the predictors' gate in \code{.centre_columns()}), and divided
+#' by the power of two \code{.spread_scaled()} gives where its spread is
+#' below \code{.RF_Y_MIN} or its largest absolute value, after the centre,
+#' above \code{.RF_Y_MAX}.  Every other response, a constant one among
+#' them, is returned as it is, so its forest is the one it was to the last
+#' bit.  Not under \code{splitrule = "beta"}, which needs the response as
+#' given in (0, 1).
+#'
+#' @param y The response.
+#' @param splitrule The \code{splitrule} passed to ranger, or \code{NULL}.
+#' @return A list: \code{y}, the response the forest is grown on, which is
+#'   \code{(y - centre) / scale}; \code{centre} (0 where none is taken) and
+#'   \code{scale} (1 where none is applied).
+#' @keywords internal
+#' @noRd
+.rf_response <- function(y, splitrule = NULL) {
+  out <- list(y = y, centre = 0, scale = 1)
+  if (identical(splitrule, "beta")) return(out)
+  f <- y[is.finite(y)]
+  if (length(f) < 2L || !(max(abs(f)) > 0)) return(out)
+  sc <- .spread_scaled(f)
+  if (!(sc$spread > 0)) return(out)
+  centre <- if (abs(sc$centre) > .PRED_CENTRE_RATIO * sc$spread) sc$centre else 0
+  yc <- if (centre != 0) y - centre else y
+  a  <- max(abs(yc[is.finite(yc)]))
+  scale <- if (sc$spread < .RF_Y_MIN || a > .RF_Y_MAX) sc$scale else 1
+  if (scale != 1) yc <- yc / scale
+  list(y = yc, centre = centre, scale = scale)
+}
+
+
+#' Values of the forest's response put back in the response's units
+#'
+#' The forest in \code{$engine} is grown on \code{(y - centre) / scale}
+#' (\code{.rf_response()}); its predictions are \code{centre + scale * p}.
+#' A fit with no centre or scale recorded (one saved before they were) is
+#' returned as it is.
+#'
+#' @param p Predictions of the forest.
+#' @param info The fit's \code{$info}.
+#' @return \code{p} in the response's units.
+#' @keywords internal
+#' @noRd
+.rf_unscale <- function(p, info) {
+  centre <- info$response_centre %||% 0
+  scale  <- info$response_scale %||% 1
+  if (scale != 1) p <- p * scale
+  if (centre != 0) p <- p + centre
+  p
 }
 
 
@@ -187,12 +264,16 @@
 #' the coordinates.
 #'
 #' What does not change is how such a forest has to be scored. It fits
-#' location closely, nearby points leak between random folds, and the
-#' out-of-bag error is a random hold-out too, so both overstate its
-#' accuracy. Score it with \code{\link{cv_rf}} and
-#' blocked folds (\code{make_folds(method = "block_kfold")}) or folds
-#' matched to the prediction distance (\code{method = "nndm"}), at the
-#' distances the map will be used at, never with the out-of-bag error, and
+#' location closely, so its error grows quickly with the distance from the
+#' data, and a cross-validated score is the error at the distance its folds
+#' put between the held-out points and their training data. Random folds,
+#' and the out-of-bag error, a random hold-out too, measure it among the
+#' samples: the error of a map over an area the samples cover evenly, which
+#' reads low for predictions made farther from the data. Score it with
+#' \code{\link{cv_rf}} on folds at the distances the map will be used at
+#' (folds matched to the prediction distance, \code{make_folds(method =
+#' "nndm")} or \code{"knndm"}, or blocks, \code{method = "block_kfold"},
+#' for predictions into unsampled gaps), not with the out-of-bag error, and
 #' compare the two forests on the same folds. That comparison is two calls:
 #' build the folds once and hand them to \code{cv_rf()} with and without
 #' the coordinates.
@@ -228,10 +309,13 @@
 #'
 #' @section The out-of-bag error is a random hold-out:
 #' \code{ranger}'s OOB error holds each observation out of the trees that did
-#' not sample it. That is a random hold-out, so under spatial autocorrelation
-#' it is optimistic for exactly the reason random k-fold is: the trees that
-#' "did not see" a point almost certainly saw its neighbours. It is reported
-#' as \code{$info$oob_rmse} and \code{$info$oob_r_squared} and labelled as OOB
+#' not sample it. That is a random hold-out: the trees that "did not see" a
+#' point almost certainly saw its neighbours, so under spatial
+#' autocorrelation it is the error of predicting among the samples, as random
+#' k-fold is, and reads low for predictions made farther from the data than
+#' the samples sit from each other (see \code{\link{make_folds}()}). It is
+#' reported as \code{$info$oob_rmse} and \code{$info$oob_r_squared} and
+#' labelled as OOB
 #' everywhere it appears. Use \code{\link{cv_rf}} for a spatial estimate.
 #'
 #' @section What fitted() returns:
@@ -323,8 +407,30 @@
 #'   \code{TRUE}; \code{summary()} reads it to label its metrics),
 #'   \code{seed} and \code{n_dropped} (the rows \code{prep_model_data()}
 #'   removed for missing or non-finite values or a bad geometry, so \code{$n}
-#'   can be read against \code{nrow(data_sf)}). The raw forest is in
+#'   can be read against \code{nrow(data_sf)}), and \code{response_centre}
+#'   and \code{response_scale} (below). The raw forest is in
 #'   \code{$engine}.
+#'
+#'   The forest is grown on the response taken about its centre where that
+#'   centre is more than 1000 times the response's spread (as at 1e8 plus
+#'   a spread of 1), and divided by a power of two where the response is so
+#'   large or its spread so small that its squares overflow or lose their
+#'   bits (beyond about 1e100 or 1e-100).  The splits of a forest do not
+#'   change under a shift or a scale of the response, and ranger's split
+#'   scores, formed from squares of the response, read the rounding of the
+#'   offset otherwise.  \code{$info$response_centre} (0 where none is taken)
+#'   and \code{$info$response_scale} (1 where none is applied) record them,
+#'   and they are put back on \code{fitted()}, \code{predict()},
+#'   \code{residuals()}, \code{oob_rmse} and \code{importance} (squared
+#'   units, so multiplied by the scale twice; beyond the range of doubles it
+#'   is \code{Inf} or loses its bits, and a WARN line says so).  The
+#'   permutation importance under \code{scale.permutation.importance = TRUE}
+#'   and the impurity importance under \code{splitrule = "maxstat"} have no
+#'   units and are left as ranger reports them.  The forest
+#'   in \code{$engine} predicts \code{(y - response_centre) /
+#'   response_scale}, and its own \code{predictions} and
+#'   \code{prediction.error} are in those units.  Every other response is
+#'   passed to ranger as it is.
 #'
 #' @references
 #' Meyer, H., Reudenbach, C., Wöllauer, S. and Nauss, T. (2019). Importance of
@@ -342,7 +448,8 @@
 #'   finite and the forest has out-of-bag skill (it is \code{NaN} when no row
 #'   is out of bag; see "What fitted() returns"), and which needs
 #'   \code{categorical = "indicator"} or \code{"drop"} for a forest with a
-#'   factor predictor.
+#'   factor predictor. For a forest fitted with \code{include_coords = TRUE}
+#'   it also measures location on an index of its own.
 #' @family model fitting
 #' @examples
 #' if (requireNamespace("ranger", quietly = TRUE)) {
@@ -485,6 +592,15 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
   } else if (length(cat_pred) == 0L) NA_character_
   else if (extratrees) "partition" else "order"
 
+  # The forest is grown on the response taken about its centre where it
+  # lies far from zero, and divided by a power of two where its squares
+  # would overflow or lose their bits; see .rf_response().  The centre and
+  # scale are put back on everything the fit returns.  `y` keeps its name,
+  # which ranger records in its call.
+  splitrule <- if ("splitrule" %in% dot_names) list(...)[["splitrule"]]
+  ry <- .rf_response(y, splitrule)
+  y <- ry$y
+
   # .call_capturing_stderr(): ranger diagnoses a bad argument on stderr from
   # C++ and then throws "User interrupt or internal error.", so the message
   # this reported named nothing a caller could act on while the real reason
@@ -514,6 +630,40 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
   # .num1() collapses an unset ranger field to NA_real_ rather than the
   # numeric(0) that as.numeric(NULL) produces -- see ?.num1.
   oob_mse <- .num1(fit$prediction.error)
+  oob_rmse <- if (is.finite(oob_mse)) sqrt(oob_mse) else NA_real_
+  # The importance is in squared units of the response, and so is the OOB
+  # error: they are multiplied by the scale twice (scale^2 itself can pass
+  # the largest double), and the OOB RMSE by the scale once.  A shift
+  # changes neither.  Two importances ranger reports without units are left
+  # as they are: permutation importance under scale.permutation.importance
+  # = TRUE (divided by its standard error) and impurity importance under
+  # splitrule = "maxstat" (a rank statistic).
+  imp_unitless <-
+    (identical(importance, "permutation") &&
+       isTRUE(list(...)[["scale.permutation.importance"]])) ||
+    (identical(importance, "impurity") &&
+       identical(splitrule, "maxstat"))
+  if (ry$scale != 1) {
+    oob_rmse <- oob_rmse * ry$scale
+    if (!is.null(imp) && !imp_unitless) {
+      imp_fit <- imp
+      imp <- imp * ry$scale * ry$scale
+      lost <- is.finite(imp_fit) & imp_fit != 0 &
+        (!is.finite(imp) | abs(imp) < .Machine$double.xmin)
+      # Not for a cv_rf() fold forest, whose importance the run never reads
+      # (as for the out-of-bag warning below).
+      if (any(lost) && !isTRUE(.already_prepped))
+        .log_warn(paste0("fit_rf_model(): the %s importance of %s is in ",
+                         "squared units of the response and lies %s, so it ",
+                         "is reported as %s. Rescale the response to compare ",
+                         "the importances."),
+                  importance, paste(sQuote(names(imp)[which(lost)]), collapse = ", "),
+                  if (ry$scale > 1) "above the largest double"
+                  else "below the smallest normal double",
+                  if (ry$scale > 1) "Inf"
+                  else "a number with few or none of its bits")
+    }
+  }
 
   # A row every tree sampled has no out-of-bag prediction, and ranger returns
   # NaN for it: every row under replace = FALSE with sample_fraction = 1
@@ -594,9 +744,13 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
       respect_unordered_factors = ruf,
       replace          = isTRUE(replace),
       sample_fraction  = sample_fraction,
-      oob_rmse         = if (is.finite(oob_mse)) sqrt(oob_mse) else NA_real_,
+      oob_rmse         = oob_rmse,
       oob_r_squared    = .num1(fit$r.squared),
       fitted_are_oob   = TRUE,
+      # The forest in `engine` is grown on (y - response_centre) /
+      # response_scale; see .rf_response().
+      response_centre  = ry$centre,
+      response_scale   = ry$scale,
       seed             = seed,
       n_dropped        = n_dropped
     )
@@ -688,8 +842,8 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #'
 #' Thin wrapper over \code{\link{cv_spatial}} that refits a \code{ranger}
 #' forest on each training fold. Unlike the out-of-bag error, this holds out
-#' whole spatial blocks, so neighbours of a held-out point are not sitting in
-#' the training set.
+#' whole spatial blocks by default, so most neighbours of a held-out point are
+#' not in the training set; \code{folds} says what that score estimates.
 #'
 #' @section Comparing the forest with and without coordinates:
 #' Whether \code{include_coords = TRUE} lowers the error depends on how far
@@ -720,7 +874,19 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #'   returns a label vector as \code{$folds_ids}.  Train and test must be
 #'   disjoint: a fold that trains on its own test rows is not a
 #'   cross-validation split and is refused with an error.  IDs naming no row in
-#'   the prepared data are dropped with a logged count.
+#'   the prepared data are dropped with a logged count.  Built via
+#'   \code{block_kfold} when \code{NULL}, as in \code{\link{cv_spatial}()}.
+#'   With \code{folds = NULL} the score estimates the error at the distance
+#'   the block grid built here puts between the held-out points and their
+#'   training data, which overstates the error of a map where the samples
+#'   cover the area it predicts over.  The excess is how much the model's
+#'   error grows from the map's distances to the data to the block grid's,
+#'   and is small for a model whose error changes little with the distance
+#'   from the data.  \code{\link{fold_separation}()}
+#'   with \code{prediction_points} compares the held-out distances with those
+#'   of the locations the model will predict at, and
+#'   \code{make_folds(method = "knndm", prediction_points = )} builds folds
+#'   matched to them.
 #' @param k Number of folds when \code{folds} is \code{NULL}. Default 5.
 #' @param seed RNG seed. Default 123.  It seeds fold construction \strong{and},
 #'   through a per-fold draw, each fold's forest, so two different seeds give
@@ -854,7 +1020,9 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
 #'   or logical: ranger would otherwise factor-code a character column and apply
 #'   the numeric split thresholds to the codes, predicting confidently from
 #'   nonsense, so a character column is refused instead.  (ranger sees a logical
-#'   as 0/1, so either form is accepted for one.)
+#'   as 0/1, so either form is accepted for one.)  A layer whose geometries
+#'   mix XY with XYZ or XYM (as \code{rbind()} of an XY and an XYZ layer
+#'   gives) is read in x and y.
 #' @param ... Passed to \code{ranger}'s predict method. Arguments that make
 #'   \code{ranger} return a matrix (\code{predict.all = TRUE},
 #'   \code{type = "quantiles"}, \code{type = "se"} with \code{predict.all})
@@ -864,6 +1032,10 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
 #'   such as \code{type = "quantiles"} on a forest grown without
 #'   \code{quantreg = TRUE} or \code{type = "se"} without
 #'   \code{keep.inbag = TRUE}: the error names ranger's reason.
+#'   \code{fit$engine} predicts \code{(y - fit$info$response_centre) /
+#'   fit$info$response_scale}, which is \code{y} unless the forest was grown
+#'   on the response taken about a centre or scaled (see the Value section of
+#'   \code{\link{fit_rf_model}}); this method puts the centre and scale back.
 #'   \code{seed} defaults to a constant: an unset \code{seed} makes
 #'   \code{ranger} draw one uniform from the global RNG stream per call, so the
 #'   number of \code{predict()} calls a script happens to make (via
@@ -889,6 +1061,17 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
   .check_predict_newdata(newdata, object, "predict.rf_fit")
 
   n_orig  <- nrow(newdata)
+  # newdata is read in x and y when it mixes XY and XYZ (or XYM) geometries:
+  # sf::st_transform() reads such a layer in the dimension of its first
+  # geometry, so an XYZ first row stopped the move into the fit's CRS with
+  # "OGR error".  Only predictions are returned, so nothing is said.
+  newdata <- .xy_if_mixed(newdata)
+  # A row with a coordinate that is not finite or lies beyond .POOL_XY_MAX
+  # has no location, and is emptied here, as given: the move into the fit's
+  # CRS below can bring it back finite (a northing of 1e200 in EPSG:32616
+  # lands at a finite point in EPSG:32617), and it was then predicted there.
+  # prep_model_data() drops it, so it comes back NA as the same row emptied.
+  newdata <- .empty_unlocated(newdata)
   newdata <- .replay_crs_assumption(newdata, object$data_sf, "predict.rf_fit")
   newdata <- ensure_projected(newdata, target_crs = .crs_or_null(object$data_sf))
   newdata$..orig_row_id.. <- seq_len(n_orig)
@@ -964,7 +1147,8 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
                         "one prediction per row of newdata. Call ",
                         "predict(<fit>$engine, data = ...) directly instead."),
                  paste(dim(p), collapse = " x ")), call. = FALSE)
-  preds <- if (is.null(p)) rep(NA_real_, n_new) else as.numeric(p)
+  preds <- if (is.null(p)) rep(NA_real_, n_new)
+           else .rf_unscale(as.numeric(p), object$info)
   .expand_predictions(preds, clean_idx, n_orig)
 }
 
@@ -986,7 +1170,7 @@ fitted.rf_fit <- function(object, ...) {
     .log_warn("fitted.rf_fit(): no usable out-of-bag predictions; returning NA.")
     return(rep(NA_real_, object$n))
   }
-  as.numeric(p)
+  .rf_unscale(as.numeric(p), object$info)
 }
 
 
@@ -998,8 +1182,9 @@ fitted.rf_fit <- function(object, ...) {
 #' unlike \code{residuals.gwr_fit()} and \code{residuals.bayesian_fit()},
 #' which are in-sample.  Feed them to \code{\link{residual_morans_i}()} to test
 #' whether spatial structure the forest failed to capture is still sitting in
-#' the residuals.  Out-of-bag is not a substitute for spatial CV: use
-#' \code{\link{cv_rf}()} for an honest map-accuracy figure.
+#' the residuals.  Out-of-bag is a random hold-out, not a substitute for
+#' spatial CV: use \code{\link{cv_rf}()} on folds at the distances the map
+#' will be used at for its accuracy.
 #'
 #' @param object An \code{rf_fit}.
 #' @param ... Ignored.
@@ -1038,9 +1223,10 @@ coef.rf_fit <- function(object, ...) {
 #' coordinates were used as predictors.  That line is the one to check.  A
 #' forest fitted without them prints "no spatial information used": it sees
 #' the covariates alone.  One fitted with \code{include_coords = TRUE} fits
-#' location closely, so its out-of-bag error overstates its accuracy and it
-#' has to be scored with blocked or distance-matched folds; see
-#' \emph{Coordinates as predictors} in \code{\link{fit_rf_model}}.  When a
+#' location closely, so its out-of-bag error, a random hold-out, is its error
+#' among the samples and reads low for predictions made farther from the
+#' data; score it on folds at the distances the map will be used at (see
+#' \emph{Coordinates as predictors} in \code{\link{fit_rf_model}}).  When a
 #' predictor is an unordered factor or a character column, a line says how
 #' ranger was told to split it.
 #'
@@ -1105,16 +1291,34 @@ print.rf_fit <- function(x, ...) {
   }
   imp <- x$info$importance
   if (!is.null(imp) && length(imp) > 0L) {
-    imp_ok <- imp[is.finite(imp)]
+    # NaN is undefined; Inf is an importance whose squared units lie above
+    # the largest double (fit_rf_model() says so in a WARN line) and is
+    # printed as such.
+    imp_ok <- imp[!is.na(imp)]
     cat(sprintf("  Importance (%s): %s\n", x$info$importance_type,
                 if (!length(imp_ok)) {
                   if (no_oob) "undefined (no row is out of bag)" else "undefined"
                 } else {
                   top <- utils::head(sort(imp_ok, decreasing = TRUE), 5L)
-                  paste(sprintf("%s=%.4g", names(top), top), collapse = ", ")
+                  paste0(paste(sprintf("%s=%.4g", names(top), top), collapse = ", "),
+                         if (any(is.infinite(top)))
+                           " (Inf: above the largest double in squared units of the response)"
+                         else "")
                 }))
   }
-  cat("\n  OOB is a random hold-out and is optimistic under spatial\n")
-  cat("  autocorrelation; use cv_rf() for a spatial estimate.\n")
+  # What the out-of-bag error is the error of, and for which map it reads
+  # low, as ?fit_rf_model says it: a direction with no target named reads as
+  # true of every map.  A forest with no row out of bag has no such error, so
+  # its print says only how to score it.
+  if (no_oob) {
+    cat("\n  With no out-of-bag error to read, score the forest with cv_rf() on\n")
+    cat("  folds at the distances the map will predict at (?fold_separation).\n")
+  } else {
+    cat("\n  OOB is a random hold-out: under spatial autocorrelation it is the error\n")
+    cat("  of predicting among the samples, and reads low for predictions made\n")
+    cat("  farther from the data than the samples sit from each other. Score a map\n")
+    cat("  that predicts farther with cv_rf() on folds at its distances\n")
+    cat("  (?fold_separation).\n")
+  }
   invisible(x)
 }

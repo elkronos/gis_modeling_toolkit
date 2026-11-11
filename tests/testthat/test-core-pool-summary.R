@@ -372,8 +372,9 @@ test_that("a valued row without a location is left out of the pooled mean, with 
   expect_identical(.ps_fields(w), list(n = 1L, cells = 1L, columns = "z"))
   expect_identical(
     conditionMessage(w),
-    paste0("summarize_by_cell(): 1 row(s) in 1 cell(s) have empty or non-finite coordinates. ",
-           "They count in `n` and the plain columns and take no part in the pooled columns."))
+    paste0("summarize_by_cell(): 1 row(s) in 1 cell(s) have no location (an empty point, ",
+           "or a coordinate that is not finite or lies beyond 1e150). They count in `n` and ",
+           "the plain columns and take no part in the pooled columns."))
   out <- r$value
   rec <- attr(out, "pooled")$columns$resp_z
   expect_identical(rec$skipped, 1L)
@@ -641,10 +642,12 @@ test_that("three structureless columns raise one spatialkit_no_structure that na
     paste(paste0("summarize_by_cell(): the pooled values of 'b', 'c' and 'a' predict a left-out ",
                  "observation no better than one mean for all rows, so they show no spatial ",
                  "structure these cells can use. The values are returned. A map of them looks ",
-                 "smooth because each is mostly its neighbours' mean, not because the response ",
-                 "varies smoothly."),
+                 "smooth because each is mostly its neighbours' mean, not because the columns ",
+                 "vary smoothly."),
           piece("resp_b"), piece("pred_c"), piece("pred_a")))
   expect_null(conditionCall(w))
+  # 'c' and 'a' are predictors, so the closing sentence speaks of the
+  # columns, not of the response (BUG-07).
   # One column alone: the singular, and no name before its numbers.
   one <- .ps_catch(summarize_by_cell(A$asg, "a", id_col = "cell_id", estimate = "pooled"))
   expect_identical(.ps_classes(one), "spatialkit_no_structure")
@@ -697,7 +700,8 @@ test_that("a warning that lists many columns says what it has to say before thei
   msg <- conditionMessage(w[[1L]])
   # The whole text passes what R prints; the closing sentence does not.
   expect_gt(nchar(msg), 1000L)
-  closing <- "not because the response varies smoothly."
+  # The response and its predictors: "the columns", not "the response" (BUG-07).
+  closing <- "not because the columns vary smoothly."
   ends <- regexpr(closing, msg, fixed = TRUE) + nchar(closing) - 1L
   expect_gt(ends, 0L)
   expect_lt(ends, 600L)
@@ -757,8 +761,9 @@ test_that("ten constant predictors raise one spatialkit_pool_degenerate, six of 
   expect_identical(
     conditionMessage(w),
     paste0("summarize_by_cell(): the values of 'k01', 'k02', 'k03', 'k04', 'k05', 'k06' and 4 ",
-           "more do not vary inside any cell, so every own weight is 1 and the pooled value is ",
-           "the plain mean. attr(, \"pooled\") says which columns are constant."))
+           "more do not vary inside any cell, to the precision of the values, so every own ",
+           "weight is 1 and the pooled value is the plain mean. attr(, \"pooled\") says which ",
+           "columns are constant."))
   for (nm in names(consts)) {
     expect_identical(r$value[[paste0("..pooled_w_pred_", nm)]], rep(1, nrow(r$value)), info = nm)
     expect_equal(r$value[[paste0("..pooled_pred_", nm)]], rep(consts[[nm]], nrow(r$value)),
@@ -999,9 +1004,10 @@ test_that("above the limit of an exact search the pooled columns are NA and noth
   expect_identical(
     conditionMessage(w),
     paste0("summarize_by_cell(): the pooled columns of 'z' and 'p' are NA: finding each cell's ",
-           "neighbours among 40 cells without the FNN package would compare 1.6e+03 pairs, ",
-           "above the limit of 1e+02 (options(spatialkit.exact_pairs_max = )). Install FNN: ",
-           "the result is the same. The plain columns are unaffected."))
+           "neighbours among 40 cells without the FNN package would compare 1,600 pairs, ",
+           "above the limit of 100 (options(spatialkit.exact_pairs_max = )). FNN, which ",
+           "installs with spatialkit, could not be loaded: reinstall it; the result is the ",
+           "same. The plain columns are unaffected."))
   out <- r$value
   new <- .ps_pooled_names(out)
   expect_length(new, 10L)
@@ -1017,7 +1023,7 @@ test_that("above the limit of an exact search the pooled columns are NA and noth
   expect_identical(.ps_fields(flipped$warnings[[1L]])[c("work", "cells")],
                    list(work = 1600, cells = c(p = 39L, z = 40L)))
   expect_match(conditionMessage(flipped$warnings[[1L]]),
-               "neighbours among 40 cells without the FNN package would compare 1.6e+03 pairs",
+               "neighbours among 40 cells without the FNN package would compare 1,600 pairs",
                fixed = TRUE)
   expect_identical(rec$resp_z$offsets, c(NA_real_, NA_real_))
   # Every column the call shares with the call of plain means is that call's.
@@ -1188,7 +1194,11 @@ test_that("what the t interval covers follows the design effect", {
   expect_identical(k0$..ci_lo_resp_u, ci("u", deff = 1)$..ci_lo_resp_u)
   expect_identical(unlist(attr(k0, "intervals")[c("covers", "method")]),
                    c(covers = own, method = "t, deff = 1"))
-  expect_match(utils::capture.output(print(attr(k0, "pooled")))[4L],
+  # `u` has tau2 = 0, so its block is printed in full (ten lines) before the
+  # interval it does not show.
+  shown <- utils::capture.output(print(attr(k0, "pooled")))
+  expect_identical(shown[11L], "Also in the frame")
+  expect_match(shown[12L],
                "95% for THE CELL'S MEAN (t, deff = 1), centred on the plain mean;", fixed = TRUE)
   # Beside columns Kish does correct, the row is Kish's and says which column
   # it left as it was.
@@ -1375,6 +1385,48 @@ test_that("the print says when cells do no better, when all the others are the t
   expect_identical(utils::capture.output(print(attr(r$value, "pooled"))),
                    c("Cell values: income, 1 row in 1 cell", "  status      : one cell",
                      "Away from the observations no interval here is calibrated."))
+})
+
+test_that("with tau2 = 0 on a structured response the print shows the fit and says each value is its neighbours' mean", {
+  # A trend across the layer under noise, on a 10 x 10 grid of squares: the
+  # cells predict a left-out row better than one mean, and no cell mean is
+  # further from its neighbours' than the noise inside the cells explains.
+  d <- local({
+    .ps_seed(3003)
+    x <- stats::runif(900, 0, 1e5); y <- stats::runif(900, 0, 1e5)
+    data.frame(x = x, y = y, z = x / 5e4 + stats::rnorm(900))
+  })
+  d$cell_id <- as.integer(10 * floor(d$x / 1e4) + floor(d$y / 1e4) + 1)
+  trend <- .ps_points(d$x, d$y, d[c("z", "cell_id")])
+  r <- .ps_catch(summarize_by_cell(trend, "z", id_col = "cell_id", estimate = "pooled",
+                                   obs_level = 0.9))
+  expect_identical(.ps_classes(r), "spatialkit_pool_degenerate")
+  rec <- attr(r$value, "pooled")$columns$resp_z
+  expect_identical(rec$status, "no signal between cells")
+  expect_identical(rec$tau2, 0)
+  expect_true(rec$structured)
+  expect_lt(rec$loo, rec$loo_one_cell / 1.2)
+  expect_lt(rec$structure_p, 1e-10)
+  out <- r$value
+  expect_identical(out$..pooled_resp_z, out$..pooled_target_resp_z)
+  txt <- utils::capture.output(print(attr(r$value, "pooled")))
+  expect_identical(txt, c(
+    "Cell values: z, 900 rows in 100 cells",
+    "  value       : ..pooled_resp_z, pooled toward the 8 nearest cells (centroids of the rows)",
+    sprintf("  variances   : inside cells %.2e (from 800 values beyond one per cell);", rec$sigma2),
+    "                between a cell and its target 0.00e+00",
+    "  own weight  : median 0.00 (..pooled_w_resp_z)",
+    "  note        : tau2 is 0: every own weight is 0, and each value is its",
+    "                neighbours' mean, with none of the cell's own rows in it",
+    sprintf("  alone       : %.1f%% of the rows are the only one in their cell",
+            100 * rec$share_alone),
+    sprintf("  loo         : %.2e (leave-one-out mean squared error of the pooled value);", rec$loo),
+    sprintf("                one mean for all rows: %.2e", rec$loo_one_cell),
+    "  interval    : 90% for ONE OBSERVATION (..obs_lo_resp_z, ..obs_hi_resp_z):",
+    sprintf("                value - %s to value + %s, quantiles of 900 leave-one-out residuals",
+            format(signif(-rec$offsets[1L], 3)), format(signif(rec$offsets[2L], 3))),
+    "Away from the observations no interval here is calibrated."))
+  expect_false(any(grepl("status|no signal|Also in the frame", txt)))
 })
 
 

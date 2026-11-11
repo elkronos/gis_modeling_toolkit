@@ -63,13 +63,15 @@
                "partition", "crs", "scored_cells")
 
 # 600 rows (seed 5101).  Its pooled profile at 4.5 rows a cell has 133
-# cells; its profile of plain means on the seven sizes has its lowest
-# leave-one-out error at 50 cells, a level inside the ladder.  Neither path
-# raises a warning from the profile to the summary.
+# cells; its profile of plain means on the seven sizes, under seed 11, has
+# its lowest leave-one-out error at 50 cells, a level inside the ladder (under
+# most seeds the lowest is at 33, the coarsest size).  Neither path raises a
+# warning from the profile to the summary.
 .cr_600    <- function() .cr_keep("l600", .cr_layer(600, 5101))
 .cr_pooled <- function() .cr_keep("pooled", .cr_profile(.cr_600()))
 .cr_mean7  <- function()
-  .cr_keep("mean7", .cr_profile(.cr_600(), estimate = "mean", obs_per_cell = .cr_sizes))
+  .cr_keep("mean7", .cr_profile(.cr_600(), estimate = "mean", obs_per_cell = .cr_sizes,
+                                seed = 11))
 .cr_size <- function() .cr_keep("size", select_resolution(.cr_pooled(), criterion = "size"))
 .cr_loo  <- function() .cr_keep("loo", select_resolution(.cr_mean7(), criterion = "loo"))
 
@@ -102,7 +104,7 @@
 
 # ---- Where no record is written ------------------------------------------------
 
-test_that("a count given as a number, or read by a present criterion off a profile without an estimate, carries no record", {
+test_that("a count given as a number, or read by a diagnostic off a profile without an estimate, carries no record; one read by cp carries cp's", {
   pts <- .cr_600()
   bare <- function(x) is.null(attr(x, "count_rule"))
   none <- function(P) {
@@ -125,20 +127,50 @@ test_that("a count given as a number, or read by a present criterion off a profi
                             quiet = TRUE)
   expect_false("count_rule" %in% names(hex$params))
   expect_true(bare(hex$cells))
-  # A profile as it is built without the new arguments, read by cp: as a
-  # selection, and as the count itself.
+  # A profile as it is built without the new arguments.
   plain <- suppressWarnings(
     .cr_profile(pts, n_levels = 6L, partition = "kmeans", nstart = 5, sac = 3e4,
                 estimate = NULL, obs_per_cell = NULL))
-  sel <- select_resolution(plain, criterion = "cp")
-  expect_null(sel$count_rule)
-  none(suppressWarnings(.cr_cells(pts, sel)))
-  none(suppressWarnings(.cr_cells(pts, plain)))
-  expect_true(bare(suppressWarnings(voronoi_seeds_kmeans(pts, sel))))
+  # Read by the diagnostic moran_z, which writes no record: as a selection.
+  z <- suppressWarnings(select_resolution(plain, criterion = "moran_z", diagnostic = TRUE))
+  expect_null(z$count_rule)
+  none(suppressWarnings(.cr_cells(pts, z)))
+  expect_true(bare(suppressWarnings(voronoi_seeds_kmeans(pts, z))))
   hex <- suppressWarnings(build_tessellation(pts, boundary = .cr_bnd(pts), method = "hex",
-                                             approx_n_cells = sel, quiet = TRUE))
+                                             approx_n_cells = z, quiet = TRUE))
   expect_false("count_rule" %in% names(hex$params))
   expect_true(bare(hex$cells))
+  # Read by cp, as a selection and as the count itself, the count carries a
+  # record: cp scores plain means, so a summary of pooled values on its cells
+  # says the count was chosen for others.  It used to carry none, and pooled
+  # values went unremarked (BUG-02).
+  sel <- select_resolution(plain, criterion = "cp")
+  rec <- sel$count_rule
+  expect_identical(rec$rule, "cp")
+  expect_identical(rec$estimate, "mean")
+  expect_null(rec$scored)
+  on_seeds <- rec; on_seeds$scored_cells <- TRUE
+  cp_record <- function(P) {
+    expect_identical(attr(P$seeds, "count_rule"), on_seeds)
+    expect_identical(P$tess$params$count_rule, on_seeds)
+    expect_identical(attr(P$tess$cells, "count_rule"), on_seeds)
+    expect_identical(attr(P$asg, "count_rule"), on_seeds)
+    r <- suppressWarnings(.cr_sum(P$asg, P$tess$cells, "mean"))
+    expect_identical(.cr_check(r), list(estimate = "match",
+                                        cells = "not checked: the profile scored no estimate"))
+    r <- .cr_sum(P$asg, P$tess$cells, "pooled")
+    expect_identical(.cr_check(r)$estimate, "mismatch")
+    expect_length(.cr_of(r, "spatialkit_estimate_mismatch"), 1L)
+    expect_length(.cr_of(r, "spatialkit_cells_differ"), 0L)
+  }
+  cp_record(suppressWarnings(.cr_cells(pts, sel)))
+  cp_record(suppressWarnings(.cr_cells(pts, plain)))
+  expect_identical(attr(suppressWarnings(voronoi_seeds_kmeans(pts, sel)), "count_rule"), on_seeds)
+  hex <- suppressWarnings(build_tessellation(pts, boundary = .cr_bnd(pts), method = "hex",
+                                             approx_n_cells = sel, quiet = TRUE))
+  off_seeds <- rec; off_seeds$scored_cells <- FALSE
+  expect_identical(hex$params$count_rule, off_seeds)
+  expect_identical(attr(hex$cells, "count_rule"), off_seeds)
 })
 
 test_that("cells the caller brings have no record and are not checked", {
@@ -326,15 +358,16 @@ test_that("the selection's seeds, tessellated as they are, lead to a summary tha
   r <- .cr_sum(asg, tess$cells, "pooled")
   expect_identical(.cr_check(r), list(estimate = "match", cells = "match"))
   expect_identical(.cr_classes(r), character(0))
-  # Twenty of them are other cells, and the check says so.
+  # Twenty of them are other cells, and the check says so: their record says
+  # they are not the cells the profile scored, as get_voronoi_seeds(method =
+  # "provided") marks the same seeds, so no warning names rows dropped or
+  # moved, which none were.
   tess <- build_tessellation(sel$seeds[1:20, ], method = "voronoi", quiet = TRUE)
+  expect_identical(attr(tess$cells, "count_rule")$scored_cells, FALSE)
   asg <- assign_features_to_polygons(pts, tess$cells, polygon_id_col = "cell_id", quiet = TRUE)
   r <- .cr_sum(asg, tess$cells, "pooled")
-  expect_identical(.cr_check(r)$cells, "differ")
-  w <- .cr_of(r, "spatialkit_cells_differ")
-  expect_length(w, 1L)
-  expect_identical(w[[1L]]$what, "cells")
-  expect_identical(w[[1L]]$found$cells, 20L)
+  expect_identical(.cr_check(r)$cells, "not checked: other cells were built from this count")
+  expect_length(.cr_of(r, "spatialkit_cells_differ"), 0L)
 })
 
 
@@ -429,7 +462,7 @@ test_that("where centres hold no scored row the count is the centres, and the re
   # So does the print, with the cells that hold a scored row on their line.
   out <- .cr_print(attr(r$value, "count_rule"))
   expect_identical(out[1L],
-    "Count: 66 cells, set by size (4.5 rows per cell asked; 299 rows / 66 cells = 4.53)")
+    "Count: 66 cells, set by size (4.5 rows per cell, the default; 299 rows / 66 cells = 4.53)")
   expect_match(out[6L], sprintf("on 299 rows in %d cells (one cell: ", occupied), fixed = TRUE)
   # Rows removed are reported against the occupied cells and the rows scored.
   r <- .cr_sum(G$asg[!is.na(G$asg$z), ][-(1:20), ], G$tess$cells, "pooled")
@@ -574,16 +607,44 @@ test_that("two rows exchanged between neighbouring cells are told from rows drop
   expect_match(text, "(the leave-one-out error differs)", fixed = TRUE)
   expect_match(text, paste0(
     "The same number of rows and cells was found, so rows sit in other cells than the ",
-    "profile put them in, or values changed: rows exactly on a boundary between two cells ",
-    "(gridded locations) can be assigned to the other cell, and coordinates that reached ",
-    "this CRS by another transformation can settle a tie between neighbouring cells the ",
-    "other way."), fixed = TRUE)
+    "profile put them in, or values changed. A row on or near a boundary can sit in the ",
+    "neighbouring cell when the polygons alone placed it (as for rows without a CRS beside ",
+    "a count record that names one or the reverse, rows assigned to cells without their ",
+    "count record, such as cells read back from a file, ",
+    "and rows given their cells by another join than assign_features_to_polygons()), ",
+    "when the cells were built in, or transformed to, another CRS than the one the ",
+    "profile measured the rows in (crs in the count record), or when they are not the ",
+    "Voronoi cells of the centres the profile scored (seeds moved, cells edited); and ",
+    "coordinates that reached that CRS by another transformation can settle a tie ",
+    "between neighbouring cells the other way."), fixed = TRUE)
+  # assign_features_to_polygons(), on the cells of the scored centres in the
+  # profile's CRS that carry the record, gives a row on a boundary the cell
+  # the profile scored it in (test-core-gridded-ties.R), so the text names
+  # only the ways a row reaches another cell.
+  expect_false(grepl("rows exactly on a boundary between two cells", text, fixed = TRUE))
   expect_false(grepl("Rows were dropped or moved between cells", text, fixed = TRUE))
   expect_identical(.cr_check(r)$cells, "differ")
   # Values changed on the same rows and cells are the same finding.
   asg <- A$asg; asg$z[1L] <- asg$z[1L] + 1
   expect_identical(.cr_of(.cr_sum(asg, cells, "pooled"), "spatialkit_cells_differ")[[1L]]$what,
                    "loo")
+  # Every row of one cell moved to its neighbour: the same rows in one cell
+  # fewer.  Those are rows moved between cells, and the text names that, not
+  # the causes of rows on a boundary.
+  asg <- A$asg
+  asg$cell_id[asg$cell_id == cells$cell_id[1L]] <- cells$cell_id[nb[[1L]][1L]]
+  w <- .cr_of(.cr_sum(asg, cells, "pooled"), "spatialkit_cells_differ")
+  expect_length(w, 1L)
+  expect_identical(w[[1L]]$what, "cells")
+  expect_identical(w[[1L]]$found$n, w[[1L]]$scored$n)
+  expect_identical(w[[1L]]$found$cells, w[[1L]]$scored$cells - 1L)
+  text <- conditionMessage(w[[1L]])
+  expect_match(text, "(the number of cells differs)", fixed = TRUE)
+  expect_match(text, paste0(
+    "Rows were dropped or moved between cells: points outside every cell, a boundary that ",
+    "clips the cells, a subset of the rows, or another layer."), fixed = TRUE)
+  expect_false(grepl("The same number of rows and cells was found", text, fixed = TRUE))
+  expect_false(grepl("the polygons alone placed it", text, fixed = TRUE))
 })
 
 test_that("cells of another selection than the assigned layer's are named by the field that differs", {
@@ -1063,7 +1124,7 @@ test_that(".count_rule_check() compares the rows, then the cells, then the error
   expect_identical(cells_of(check(list(loo = NA_real_), record = na)), "match")
   expect_identical(what_of(check(record = na)), "loo")
   expect_match(conditionMessage(check(record = na)$warnings[[1L]]),
-               "with a leave-one-out error of NA; here 600 rows in 133 cells give 2.2", fixed = TRUE)
+               "with a leave-one-out error of NA; here 600 rows in 133 cells give 2.194", fixed = TRUE)
 
   # The estimate asked for is the one scored, whatever the summary reports.
   mean_rec <- rec; mean_rec$scored$estimate <- "mean"
@@ -1137,7 +1198,7 @@ test_that("a record prints the count, the estimate, the cells and what the profi
   # The errors are written as the record of the pooled columns writes them.
   expect_match(scored_line, "loo [0-9]\\.[0-9]{2}e[+-][0-9]{2} on 600 rows in 133 cells \\(one cell: [0-9]\\.[0-9]{2}e[+-][0-9]{2}\\)")
   head <- c(
-    "Count: 133 cells, set by size (4.5 rows per cell asked; 600 rows / 133 cells = 4.51)",
+    "Count: 133 cells, set by size (4.5 rows per cell, the default; 600 rows / 133 cells = 4.51)",
     "  chosen for  : the pooled value",
     "  cells       : density, 3 density-weighted k-means++ starts (power 1, 8",
     "                neighbours; seed 123), fitted to every row;")
@@ -1168,7 +1229,7 @@ test_that("a record prints the count, the estimate, the cells and what the profi
   single$scored$cells <- 1L
   out1 <- .cr_print(single)
   expect_identical(out1[1L],
-    "Count: 1 cell, set by size (4.5 rows per cell asked; 1 row / 1 cell = 1.00)")
+    "Count: 1 cell, set by size (4.5 rows per cell, the default; 1 row / 1 cell = 1.00)")
   expect_match(out1[6L], " on 1 row in 1 cell (one cell: ", fixed = TRUE)
 
   # A mismatch, rows that differ, a check that was skipped.
@@ -1210,7 +1271,7 @@ test_that("the print names the rule, the kind, the seed and the rows the centres
   r <- rec_km; r$n_fit <- NA_integer_
   expect_identical(.cr_print(r)[3L], "  cells       : k-means, 25 k-means++ starts (seed 123);")
   r <- rec_km; r$n <- NA_integer_; r$obs_per_cell <- NA_real_
-  expect_identical(.cr_print(r)[1L], "Count: 133 cells, set by size (4.5 rows per cell asked)")
+  expect_identical(.cr_print(r)[1L], "Count: 133 cells, set by size (4.5 rows per cell, the default)")
   r$rule <- "loo"
   expect_identical(.cr_print(r)[1L], "Count: 133 cells, set by loo")
 
@@ -1254,4 +1315,36 @@ test_that("the print names the rule, the kind, the seed and the rows the centres
   r$scored$share_alone <- NA_real_
   expect_identical(.cr_print(r)[5L],
                    "  scored      : loo NA on 600 rows in 133 cells (one cell: NA)")
+})
+
+
+# ---- Where the size came from ---------------------------------------------------
+
+test_that("the record's print names the size as the selection's print does", {
+  # The default size is the default whoever named it, and any other size is
+  # one the caller asked for: the record's print said "4.5 rows per cell
+  # asked" on a call that named no size, beside the selection's "the default".
+  dflt <- "Count: 133 cells, set by size (4.5 rows per cell, the default; 600 rows / 133 cells = 4.51)"
+  for (sel in list(.cr_size(), select_resolution(.cr_pooled()))) {
+    expect_identical(.cr_print(sel)[2L], paste0(
+      "  size        : 4.5 rows per cell, the default (obs_per_cell); ",
+      "600 rows / 133 cells = 4.51"))
+    expect_identical(.cr_print(sel$count_rule)[1L], dflt)
+    expect_identical(.cr_print(attr(sel$seeds, "count_rule"))[1L], dflt)
+  }
+  # A size of the caller's is one asked for, in both prints.
+  six <- select_resolution(suppressWarnings(.cr_profile(.cr_600(), obs_per_cell = 6)),
+                           criterion = "size")
+  expect_identical(.cr_print(six)[2L],
+    "  size        : 6 rows per cell asked (obs_per_cell); 600 rows / 100 cells = 6.00")
+  asked6 <- "Count: 100 cells, set by size (6 rows per cell asked; 600 rows / 100 cells = 6.00)"
+  expect_identical(.cr_print(six$count_rule)[1L], asked6)
+  expect_identical(.cr_print(attr(six$seeds, "count_rule"))[1L], asked6)
+  # One row a cell keeps its singular; a record with no size prints none.
+  rec <- .cr_size()$count_rule
+  one <- rec; one$obs_per_cell_asked <- 1
+  expect_match(.cr_print(one)[1L], "set by size (1 row per cell asked; 600 rows", fixed = TRUE)
+  none <- rec; none$obs_per_cell_asked <- NA_real_
+  expect_identical(.cr_print(none)[1L],
+                   "Count: 133 cells, set by size (600 rows / 133 cells = 4.51)")
 })

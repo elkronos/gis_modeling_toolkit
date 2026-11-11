@@ -18,7 +18,15 @@ whose recorded rows sit at other locations here (folds built on another
 layer, such as the points before
 \code{\link{assign_features_to_polygons}()} dropped some) is refused;
 the location check is skipped when one of the two layers is POINT and
-the other is not.}
+the other is not.  A layer that mixes XY and XYZ (or XYM) geometries is
+read in x and y, for the distances and for that check, since sf reads
+a layer in the dimension of its first geometry.  So is a layer whose
+geometries carry M (XYM or XYZM), which GEOS refuses.  The points a
+layer is reduced to are read in x and y when they mix dimensions, as
+those of a layer XYZ throughout that holds points and polygons do.  A
+row without a location (an empty point, or a coordinate that is not
+finite or lies beyond 1e150, read as given and again in the CRS the
+distances are measured in) is left out of the distances.}
 
 \item{sac}{Optional: an \code{\link{estimate_sac_range}()} result or a
 single number.  Defaults to the range the folds carry, if any.  Supplying
@@ -40,15 +48,22 @@ locations the model will predict at: the grid from
 is reduced to one representative point per feature, as in
 \code{make_folds(method = "nndm")}, so pass grid cells or points, not
 one polygon of the region.  It is brought into the CRS the distances are
-measured in.  Default \code{NULL}: no target and no reading, except for
-NNDM and kNNDM folds (\code{method = "nndm"} and \code{"knndm"}), which
-carry the distances from the prediction points they were built for and
-are compared against those, measured to all sites.  The carried
-distances are lengths in the CRS the folds were built in
+measured in; one that mixes XY and XYZ (or XYM) geometries is read in x
+and y first.  So is one whose geometries carry M (XYM or XYZM), and so
+are the points it is reduced to when they mix dimensions.  Default
+\code{NULL}: no target and no reading, except for NNDM and kNNDM folds
+(\code{method = "nndm"} and \code{"knndm"}), which carry the distances
+from the prediction points they were built for and are compared
+against those, measured to all sites.  The carried distances are
+lengths in the CRS the folds were built in
 (\code{folds$params$crs}).  When the distances here are measured in
 another CRS (\code{data_sf} is in another projected CRS, or \code{sac}
 records another), the two are not compared, \code{print()} says so, and
-passing \code{prediction_points} has the target measured here.}
+passing \code{prediction_points} has the target measured here.  A
+prediction point without a location (an empty point, or a coordinate
+that is not finite or lies beyond 1e150) as given or in the CRS the
+distances are measured in takes no part in the target and is not
+counted.}
 }
 \value{
 A data.frame of class \code{fold_separation}, one row per fold:
@@ -169,7 +184,7 @@ training data than the prediction points do, and the cross-validated
 error tends to read low for that target.}
 \item{\code{"farther"}}{The gap is above the tolerance and at least
 half of \eqn{W_1}: the held-out points sit farther, and the error
-tends to read high.}
+tends to read high for that target.}
 \item{\code{"matched"}}{The gap is within the tolerance and
 \eqn{W_1} within twice the tolerance.}
 \item{\code{"mixed"}}{The two distributions cross, closer at some
@@ -209,7 +224,9 @@ print(fold_separation(blocked, pts, sac = 200, prediction_points = cells))
 \seealso{
 \code{\link{make_folds}()} for the fold schemes and the block
 sizing this measures the outcome of; \code{\link{cv_block_size_sweep}()}
-for choosing a block size by cross-validated error instead.
+for the cross-validated error at each block size.  The sweep does not
+say which size matches a map; this function does, read on the folds of
+each size with the map's locations as \code{prediction_points}.
 
 Other cross-validation:
 \code{\link[=area_of_applicability]{area_of_applicability()}},

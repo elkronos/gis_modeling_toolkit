@@ -3,9 +3,10 @@
 # select_features_forward().
 #
 # The statistical point is the inner loop being spatially blocked.  Random
-# inner folds inside blocked outer folds select variables that look predictive
-# only because nearby points leak between train and test; the outer loop then
-# reports honest-looking numbers for a dishonestly chosen feature set.
+# inner folds inside blocked outer folds choose the variables that predict
+# best among the samples, where one that only tracks nearby values of the
+# response can win; the outer loop then scores the chosen set at the blocks'
+# distance, for which it was not chosen.
 # ---------------------------------------------------------------------------
 
 # Two of five candidates carry real signal; three are noise.
@@ -81,14 +82,20 @@ test_that("inner folds are spatially blocked by default", {
 })
 
 test_that("random inner folds are permitted but warned about", {
-  # Loudly, because the failure mode is silent: an outer blocked loop will
-  # report clean numbers for a feature set chosen through leakage.
+  # Loudly, because nothing else shows it: an outer blocked loop scores a
+  # set chosen for predicting among the samples.
   dat <- fs_data()
   lines <- capture_spatialkit_log(
     select_features_forward(dat, "z", c("a", "b"), fs_fit, k = 4,
                             method = "random_kfold", seed = 1, quiet = TRUE)
   )
-  expect_true(log_has(lines, "leak spatial autocorrelation"))
+  # It said random inner folds "leak spatial autocorrelation" and an outer
+  # loop reports "honest-looking numbers"; it now says what each loop
+  # scores (?select_features_forward).
+  expect_false(log_has(lines, "leak"))
+  expect_false(log_has(lines, "honest"))
+  expect_true(log_has(lines, "random_kfold inner folds score each candidate set by its error among the samples"))
+  expect_true(log_has(lines, "scores the chosen set at the blocks' distance, for which it was not chosen"))
 })
 
 test_that("the fit budget stops a runaway sweep", {

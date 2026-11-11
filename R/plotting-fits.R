@@ -44,7 +44,8 @@
 #'   \code{residuals(x)}; for a custom subclass with no \code{residuals()}
 #'   method (optional, see \code{\link{new_spatial_fit}()}) they are the
 #'   response minus \code{fitted(x)}, which is what the built-in backends'
-#'   methods return.
+#'   methods return.  The maps are drawn in x and y: a \code{data_sf} whose
+#'   geometries mix XY with XYZ or XYM is drawn without its Z and M.
 #' @param type One of:
 #'   \describe{
 #'     \item{\code{"residuals"}}{Residuals mapped at the training locations.
@@ -165,6 +166,16 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
   if (!inherits(dat, "sf"))
     stop("plot.spatial_fit(): the fit carries no training geometry.",
          call. = FALSE)
+  # Drawn in x and y: a layer that mixes XY and XYZ (or XYM) geometries (a
+  # custom fit's own layer; the package's fitters keep the points
+  # prep_model_data() read in x and y) is read in XY, since sf reads a layer
+  # in the dimension of its first geometry and coord_sf() moved it when the
+  # plot was built ("OGR error" with a Z or M row first, an XYZ ring among
+  # XY rows drawn far from its place).  Points in an sfc_GEOMETRY column (a
+  # custom fit's own layer) are drawn as the same points in sfc_POINT
+  # (.typed_points()): on the column sf::st_cast() returns, coord_sf()
+  # stopped with "Not compatible with STRSXP" when the plot was built.
+  dat <- .xy_if_mixed(.typed_points(dat))
   if (length(res) != nrow(dat))
     stop("plot.spatial_fit(): residual length (", length(res),
          ") does not match the training data (", nrow(dat), ").", call. = FALSE)
@@ -258,6 +269,8 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
   dat <- x$data_sf
   if (!inherits(dat, "sf"))
     stop("plot.spatial_fit(): the fit carries no training geometry.", call. = FALSE)
+  # Read as plot.spatial_fit()'s residual map reads it.
+  dat <- .xy_if_mixed(.typed_points(dat))
   cf <- stats::coef(x)
   if (!is.data.frame(cf) || !nrow(cf))
     stop("plot.spatial_fit(type = \"coefficients\"): coef() returned no local ",
@@ -545,8 +558,8 @@ plot.sac_range <- function(x, ...) {
       sprintf("Hollow points, dashed line: %s. Filled points, solid line: %s.",
               overlay_label, tolower(what)),
       if (both_ok)
-        sprintf("Residual sill is %.0f%% of the response sill; effective ranges %.0f (residuals) and %.0f (response).",
-                100 * s_res / s_resp, as.numeric(sac), as.numeric(overlay))
+        sprintf("Residual sill is %.0f%% of the response sill; effective ranges %s (residuals) and %s (response).",
+                100 * s_res / s_resp, .fmt_len(sac), .fmt_len(overlay))
       else sprintf("Sills not compared: %s.",
                    if (!same_pairs)
                      sprintf(paste0("the two variograms are not over the same ",
@@ -569,8 +582,8 @@ plot.sac_range <- function(x, ...) {
   if (is.finite(sac)) {
     p <- p + ggplot2::geom_vline(xintercept = as.numeric(sac),
                                  linetype = "dotted", colour = "#B2182B") +
-      ggplot2::labs(subtitle = sprintf("Effective range = %.1f %s",
-                                       as.numeric(sac), vg_units))
+      ggplot2::labs(subtitle = sprintf("Effective range = %s %s",
+                                       .fmt_len(sac), vg_units))
   } else if (!is.null(attr(sac, "rejected_range"))) {
     # A variogram that never reaches a sill is the single most useful thing to
     # SEE, so draw it and label why no range is marked, rather than refusing.
@@ -584,9 +597,9 @@ plot.sac_range <- function(x, ...) {
           # Not produced any more: a result stored by a version that fitted
           # the model with gstat's iterative fit can carry it.
           sprintf(paste0("No effective range: the fit stopped at gstat's ",
-                         "iteration limit, so the range it reports (%.0f) is ",
+                         "iteration limit, so the range it reports (%s) is ",
                          "where the optimiser halted, not a fitted parameter."),
-                  attr(sac, "rejected_range"))
+                  .fmt_len(attr(sac, "rejected_range")))
         else if (isTRUE(grepl("^no variogram model", reason)))
           # Fewer than three lag bins hold point pairs, so nothing was
           # fitted and there is no model line to draw.  (A flat variogram
@@ -599,9 +612,9 @@ plot.sac_range <- function(x, ...) {
           # without a sill.
           sprintf(paste0("No effective range: the semivariance falls with ",
                          "distance over the shorter lags, so the fitted range ",
-                         "(%.0f) is not identified (periodic structure, or a ",
+                         "(%s) is not identified (periodic structure, or a ",
                          "variance that differs across the layer)."),
-                  attr(sac, "rejected_range"))
+                  .fmt_len(attr(sac, "rejected_range")))
         else if (identical(reason, "fitted range exceeds the largest lag fitted") &&
                  isTRUE(attr(sac, "rejected_range") <= attr(sac, "cutoff_dist")))
           # The bound is range_frac x the largest lag, and the estimate does
@@ -609,17 +622,17 @@ plot.sac_range <- function(x, ...) {
           # lag can only have been refused by a range_frac below 1, and
           # "exceeds the largest lag fitted (651) ... never reached a sill"
           # was then false on both counts for a range of 646.
-          sprintf(paste0("No effective range: the fitted range (%.0f) is ",
-                         "within the largest lag fitted (%.0f) but above the ",
+          sprintf(paste0("No effective range: the fitted range (%s) is ",
+                         "within the largest lag fitted (%s) but above the ",
                          "share of it that `range_frac` accepts."),
-                  attr(sac, "rejected_range"),
-                  attr(sac, "cutoff_dist"))
+                  .fmt_len(attr(sac, "rejected_range")),
+                  .fmt_len(attr(sac, "cutoff_dist")))
         else if (identical(reason, "fitted range exceeds the largest lag fitted"))
-          sprintf(paste0("No effective range: the fitted range (%.0f) ",
-                         "exceeds the largest lag fitted (%.0f), so the ",
+          sprintf(paste0("No effective range: the fitted range (%s) ",
+                         "exceeds the largest lag fitted (%s), so the ",
                          "variogram never reached a sill."),
-                  attr(sac, "rejected_range"),
-                  attr(sac, "cutoff_dist"))
+                  .fmt_len(attr(sac, "rejected_range")),
+                  .fmt_len(attr(sac, "cutoff_dist")))
         else if (identical(reason, "fitted range is below the shortest lag fitted") &&
                  is.numeric(attr(sac, "rejected_range"))) {
           # The distance the range fell short of is recorded on the refusal:
@@ -654,19 +667,28 @@ plot.sac_range <- function(x, ...) {
 #' Map a cross-validation fold scheme
 #'
 #' Shows which fold each observation belongs to.  This is the fastest way to
-#' see whether spatial blocks are actually separating the data, or whether the
-#' blocks are smaller than the autocorrelation range and therefore leaking.
+#' see whether spatial blocks are actually separating the data, and how wide
+#' they are beside the autocorrelation range.
 #' For \code{"block_kfold"} folds the block outlines are drawn too, from
 #' \code{folds$params$blocks}, so a fold can be seen to be one region or
 #' several and an empty block can be seen to be empty.  The subtitle states
-#' the parameter that decides whether the scheme leaks, read from
+#' the parameter that sets how far the held-out points sit from their
+#' training data, read from
 #' \code{folds$params}: the block size (and the estimated range when
 #' \code{auto_range} found one), the buffer, the number of location groups,
 #' the median NNDM exclusion, or, for kNNDM folds, that they are matched to
 #' the prediction distances.
 #'
 #' @param folds A list returned by \code{make_folds()}.
-#' @param points_sf The \code{sf} layer the folds were built from.
+#' @param points_sf The \code{sf} layer the folds were built from.  Drawn in
+#'   x and y: a layer whose geometries mix XY with XYZ or XYM (as
+#'   \code{rbind()} of an XY and an XYZ layer gives) is drawn without its Z
+#'   and M, and so are \code{boundary} and the blocks.  A row without a
+#'   location (a coordinate that is not finite or lies beyond 1e150, or a
+#'   point that \code{make_folds()} left out of every fold because it is
+#'   empty or the CRS the folds were built in cannot place it) is not
+#'   drawn, and neither is a row of \code{boundary} with such a coordinate;
+#'   one warning says how many.
 #' @param boundary Optional polygonal \code{sf}/\code{sfc} to draw underneath.
 #' @param blocks Logical; draw the block polygons when \code{folds} carries
 #'   them.  Default \code{TRUE}.
@@ -702,7 +724,16 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
     stop("plot_folds(): the fold assignment table lacks `row_id`/`fold`.",
          call. = FALSE)
 
-  dat <- points_sf
+  # Drawn in x and y: a layer that mixes XY and XYZ (or XYM) geometries is
+  # read in XY, since sf reads a layer in the dimension of its first
+  # geometry, and coord_sf() moved it into the plot's CRS when the plot was
+  # built (an XYZ first row stopped with "OGR error"; an XYZ ring among XY
+  # rows was drawn far from its place).  The plot returns no geometry, so
+  # nothing is said.  Points in an sfc_GEOMETRY column are drawn as the same
+  # points in sfc_POINT (.typed_points()): on the column sf::st_cast()
+  # returns, coord_sf() stopped with "Not compatible with STRSXP" when the
+  # plot was built.  So is a boundary given as such points.
+  dat <- .xy_if_mixed(.typed_points(points_sf))
   if (!("..row_id" %in% names(dat))) dat$..row_id <- seq_len(nrow(dat))
   dat$.fold <- factor(asg$fold[match(dat$..row_id, asg$row_id)])
 
@@ -710,6 +741,44 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
   if (n_assigned == 0L)
     stop("plot_folds(): no points matched the fold assignment; were `folds` ",
          "built from a different layer?", call. = FALSE)
+
+  # A row without a location (.unlocated_features(): a coordinate that is
+  # not finite or lies beyond 1e150) is left out of `points_sf` and of
+  # `boundary`, read as given before any move and left out after it.  So is
+  # a point with no fold that make_folds() left out by its own rule: an
+  # empty point, or one the CRS the folds were built in cannot place (a
+  # latitude beyond 90, which make_folds() drops "once projected").  One
+  # warning says how many rows are not drawn.  Drawn in the fold colour for
+  # NA, a point at 1e200 made the map 1e200 wide, every other point at one
+  # spot, with ggplot2's bare "Position guide is perpendicular to the
+  # intended axis", one at Inf gave it an infinite x range in silence, and
+  # one at latitude 95 ran the map past the pole.  .typed_points() and
+  # .xy_if_mixed() keep every row and its x and y, so `dat` is read row by
+  # row as `points_sf` was given.
+  geom <- sf::st_geometry(dat)
+  no_fold <- is.na(dat$.fold) & !.unlocated_features(geom)
+  left_out <- no_fold & sf::st_is_empty(geom)
+  fold_crs <- folds$params$crs
+  fold_crs <- if (is.character(fold_crs) && length(fold_crs) == 1L && !is.na(fold_crs))
+    tryCatch(sf::st_crs(fold_crs), error = function(e) sf::NA_crs_) else sf::NA_crs_
+  cand <- which(no_fold & !left_out)
+  if (length(cand) && !is.na(fold_crs) && !is.na(sf::st_crs(dat)) &&
+      !isTRUE(sf::st_crs(dat) == fold_crs)) {
+    moved <- tryCatch(.transform_keep_unlocated(geom[cand], fold_crs),
+                      error = function(e) NULL)
+    if (!is.null(moved)) left_out[cand] <- !.located_rows(moved)
+  }
+  lay <- .plot_drop_unlocated(
+    list(points_sf = dat,
+         boundary = if (inherits(boundary, c("sf", "sfc"))) boundary),
+    caller = "plot_folds",
+    also = list(points_sf = left_out),
+    what = paste0("a coordinate that is not finite or lies beyond 1e150",
+                  if (any(left_out))
+                    ", or a point make_folds() left out of every fold as empty or not placed in the CRS of the folds"))
+  off <- attr(lay, "drop")
+  dat <- lay$points_sf
+  if (inherits(boundary, c("sf", "sfc"))) boundary <- lay$boundary
 
   # coord_sf() brings layers that carry a CRS into one, but a CRS-less layer
   # beside one that has a CRS aborts at PRINT time with sf's bare "cannot
@@ -723,6 +792,9 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
   # make_folds() did.
   blk <- folds$params$blocks
   if (!(isTRUE(blocks) && inherits(blk, "sf") && nrow(blk) > 0L)) blk <- NULL
+  if (!is.null(blk)) blk <- .xy_if_mixed(blk)
+  if (inherits(boundary, c("sf", "sfc")))
+    boundary <- .xy_if_mixed(.typed_points(boundary))
   plot_crs <- sf::st_crs(dat)
   if (is.na(plot_crs) && is.character(folds$params$crs) &&
       length(folds$params$crs) == 1L && !is.na(folds$params$crs))
@@ -737,9 +809,10 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
     if (is.null(x) || is.na(plot_crs) || !is.na(sf::st_crs(x))) return(x)
     .transform_or_stamp(x, plot_crs, what = what, caller = "plot_folds")
   }
-  dat <- align(dat, "points_sf")
+  dat <- .plot_keep_located(align(dat, "points_sf"), off$points_sf)
   blk <- align(blk, "folds$params$blocks")
-  if (!is.null(boundary)) boundary <- align(boundary, "boundary")
+  if (!is.null(boundary))
+    boundary <- .plot_keep_located(align(boundary, "boundary"), off$boundary)
 
   p <- ggplot2::ggplot()
   if (!is.null(boundary))
@@ -792,13 +865,13 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
       # Two lines: one long one is clipped at the width a help page or a
       # vignette draws these at.
       range <- if (!fin(prm$sac_range))
-        "Blocks smaller than the autocorrelation range leak"
+        "Wider blocks hold points out farther from the data"
       else if (fin(prm$block_size) &&
                isTRUE(all.equal(as.numeric(prm$block_size),
                                 as.numeric(prm$sac_range))))
         "Sized from the estimated autocorrelation range"
       else
-        sprintf("Estimated range %s; blocks below it leak", num(prm$sac_range))
+        sprintf("Estimated autocorrelation range %s", num(prm$sac_range))
       paste(size, range, sep = "\n")
     },
     buffered_loo = if (fin(prm$buffer))

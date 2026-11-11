@@ -670,8 +670,11 @@ test_that("residual_morans_i() returns its weights, the kurtosis, the design ran
   expect_lt(as.numeric(object.size(lite)), as.numeric(object.size(mi)) / 4)
   expect_identical(lite$weights_summary[c("n", "storage", "neighbours")],
                    mi$weights_summary[c("n", "storage", "neighbours")])
-  expect_true(all(abs(Matrix::rowSums(mi$weights) - 1) < 1e-8) ||
-              all(abs(rowSums(as.matrix(mi$weights)) - 1) < 1e-8))
+  # The weights are a sparse Matrix where Matrix is installed and a base
+  # matrix where it is not (Matrix is in Suggests).
+  rs <- if (inherits(mi$weights, "Matrix")) Matrix::rowSums(mi$weights) else
+    rowSums(mi$weights)
+  expect_true(all(abs(rs - 1) < 1e-8))
   e <- stats::residuals(fit); ec <- e - mean(e)
   expect_equal(mi$kurtosis, mean(ec^4) / mean(ec^2)^2)
   # OLS residuals on the rebuilt design: the residual null, exact, rank 2.
@@ -717,8 +720,9 @@ test_that("determine_optimal_levels() reports the elbow and the failed k in its 
   pts <- sf::st_as_sf(data.frame(x = xy[, 1], y = xy[, 2], w = rnorm(640)),
                       coords = c("x", "y"), crs = 32632)
   pts$z <- pts$w + rnorm(640)
-  # Moran's z takes part in this ranking, and the call says so with a class.
-  expect_warning(
+  # Moran's z does not take part in the ranking of "combined" (the sag
+  # orders it), so the call raises no warning that it did.
+  expect_no_warning(
     out <- determine_optimal_levels(pts, max_levels = 30, response_var = "z",
                                     predictor_vars = "w", criterion = "combined"),
     class = "spatialkit_diagnostic_ranking")
@@ -728,8 +732,12 @@ test_that("determine_optimal_levels() reports the elbow and the failed k in its 
   expect_true(d$knee_k %in% seq_along(d$wss))
   expect_true(all(d$eval_ks >= d$knee_k - max(4L, 3L) & d$eval_ks <= d$knee_k + max(4L, 3L)))
   expect_identical(d$failed_k, integer(0))
-  # The geometric path stays a plain integer vector, as 5.1 settled.
-  expect_null(attributes(determine_optimal_levels(pts, max_levels = 30)))
+  # The geometric path is an integer vector with the elbow's flag and sag at
+  # the default, on_no_elbow = "na", and a plain one under "warn", as 5.1
+  # settled.
+  expect_named(attributes(determine_optimal_levels(pts, max_levels = 30)),
+               c("structured", "sag"))
+  expect_null(attributes(determine_optimal_levels(pts, max_levels = 30, on_no_elbow = "warn")))
 })
 
 test_that("build_tessellation() records the points it snapped to a nearest cell", {

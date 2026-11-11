@@ -9,10 +9,11 @@
 #
 # R-hat has two tiers.  One cut at 1.01 over every parameter fails fits that
 # have converged: this model has about 540 parameters, and a default fit of
-# four chains and 2,000 iterations whose smallest effective sample size was
-# 1,278 (400 required) had one basis weight at 1.011.  So above 1.05 fails,
-# above 1.01 fails beside too few effective draws for that parameter, and
-# above 1.01 with enough is a caution.
+# four chains and 2,000 iterations (at the then default adapt_delta of 0.9)
+# whose smallest effective sample size was 1,278 (400 required) had one
+# basis weight at 1.011.  So above 1.05 fails, above 1.01 fails beside too
+# few effective draws for that parameter, and above 1.01 with enough is a
+# caution.
 #
 # No Stan: brms::brm() returns a stand-in and the brms accessors the check
 # reads are replaced, so the rules run on vectors chosen for each case.
@@ -122,7 +123,7 @@ test_that(".bayes_convergence_advice() gives the remedy for the checks that fail
   adv <- spatialkit:::.bayes_convergence_advice
   # Divergences alone: adapt_delta, and no advice to run longer.
   d <- adv("divergent", iter = 2000, chains = 4, adapt_delta = 0.9)
-  expect_match(d, "raise adapt_delta in `control` (now 0.90)", fixed = TRUE)
+  expect_match(d, "raise adapt_delta in `control` (now 0.9)", fixed = TRUE)
   expect_match(d, "more iterations do not remove them", fixed = TRUE)
   expect_false(grepl("Run more iterations", d, fixed = TRUE))
   # R-hat and effective sample size: more iterations, and nothing on
@@ -311,7 +312,7 @@ test_that("divergences and low E-BFMI fail; tree-depth saturation is recorded on
   # The remedy is adapt_delta.  The warning used to close with "Run more
   # iterations" whatever had failed, and more iterations do not remove
   # divergent transitions.
-  expect_match(msg, "raise adapt_delta in `control` (now 0.90); more iterations do not remove them",
+  expect_match(msg, "raise adapt_delta in `control` (now 0.99); more iterations do not remove them",
                fixed = TRUE)
   expect_false(grepl("Run more iterations", msg, fixed = TRUE))
   # A user's adapt_delta is the one reported.
@@ -362,7 +363,7 @@ test_that("several failures arrive as one warning", {
   expect_identical(names(r$fit$info$convergence_diagnostics$rhat_caution), "b_a")
   expect_match(msg, "effective sample size under 400", fixed = TRUE)
   # Each failed check gets its own remedy, once.
-  expect_match(msg, "raise adapt_delta in `control` (now 0.90)", fixed = TRUE)
+  expect_match(msg, "raise adapt_delta in `control` (now 0.99)", fixed = TRUE)
   expect_match(msg, "Run more iterations (iter = 2000, chains = 4 now) to bring R-hat down and raise the effective sample size.",
                fixed = TRUE)
   # It can be caught by class.
@@ -383,4 +384,113 @@ test_that("several failures arrive as one warning", {
     },
     spatialkit_convergence = function(c) "caught")
   expect_identical(caught, "caught")
+})
+
+test_that("the sampler runs at adapt_delta 0.99 and max_treedepth 12 unless the call says otherwise", {
+  skip_if_not_installed("brms")
+  # At 0.9, four default-length fits of 250 points over a field with a 60 km
+  # range had 2, 4, 4 and 12 divergent transitions, so convergence_ok was
+  # FALSE on ordinary data; at 0.99 they had none.
+  seen <- list()
+  ctl_of <- function(...) {
+    d <- .fbc_pts()
+    local_mocked_bindings(
+      brm = function(...) {
+        seen[[length(seen) + 1L]] <<- list(...)$control
+        structure(list(), class = "brmsfit")
+      },
+      nuts_params = function(...) .fbc_np(),
+      rhat = function(...) .fbc_vec(1.002),
+      neff_ratio = function(...) .fbc_vec(0.7),
+      .package = "brms")
+    local_mocked_bindings(estimate_sac_range = function(...) 5000,
+                          .package = "spatialkit")
+    suppressWarnings(suppressMessages(
+      fit_bayesian_spatial_model(d, "z", "a", gp_k = 5, compute_loo = FALSE, ...)))
+    seen[[length(seen)]]
+  }
+  expect_identical(ctl_of(), list(adapt_delta = 0.99, max_treedepth = 12))
+  # Merged, not replaced: a call that sets one entry keeps the other default.
+  expect_identical(ctl_of(control = list(max_treedepth = 15)),
+                   list(adapt_delta = 0.99, max_treedepth = 15))
+  # The previous default is one argument away.
+  expect_identical(ctl_of(control = list(adapt_delta = 0.9)),
+                   list(adapt_delta = 0.9, max_treedepth = 12))
+})
+
+test_that("the divergence advice prints adapt_delta as it was set", {
+  adv <- spatialkit:::.bayes_convergence_advice
+  # %.2f printed 0.975 as 0.97, 0.995 as 0.99 and 0.999 as 1.00, so a fit at
+  # 0.995 was told it ran at 0.99, the default it had already raised.
+  expect_match(adv("divergent", 2000, 4, 0.99),  "(now 0.99)",  fixed = TRUE)
+  expect_match(adv("divergent", 2000, 4, 0.975), "(now 0.975)", fixed = TRUE)
+  expect_match(adv("divergent", 2000, 4, 0.995), "(now 0.995)", fixed = TRUE)
+  expect_match(adv("divergent", 2000, 4, 0.999), "(now 0.999)", fixed = TRUE)
+})
+
+test_that("the divergence advice prints adapt_delta as set whatever options(digits) and OutDec say", {
+  adv <- spatialkit:::.bayes_convergence_advice
+  # format() followed both options: under digits = 2 it printed 0.995 and
+  # 0.999 as 1 and 0.975 as 0.97, and under OutDec = "," it printed 0,995
+  # in a sentence that names an R argument (as.character() does that too).
+  withr::with_options(list(digits = 2), {
+    expect_match(adv("divergent", 2000, 4, 0.975), "(now 0.975)", fixed = TRUE)
+    expect_match(adv("divergent", 2000, 4, 0.995), "(now 0.995)", fixed = TRUE)
+    expect_match(adv("divergent", 2000, 4, 0.999), "(now 0.999)", fixed = TRUE)
+  })
+  withr::with_options(list(OutDec = ","), {
+    expect_match(adv("divergent", 2000, 4, 0.995), "(now 0.995)", fixed = TRUE)
+    expect_match(adv("divergent", 2000, 4, 0.99),  "(now 0.99)",  fixed = TRUE)
+  })
+  # The same through the fit's warning.
+  skip_if_not_installed("brms")
+  withr::local_options(digits = 2)
+  r <- .fbc_fit(rhat = .fbc_vec(1.002), neff = .fbc_vec(0.7),
+                np = .fbc_np(n_div = 2), control = list(adapt_delta = 0.995))
+  expect_match(conditionMessage(r$conv[[1]]),
+               "raise adapt_delta in `control` (now 0.995)", fixed = TRUE)
+})
+
+test_that("the help and NEWS state the default control as it was measured", {
+  root <- testthat::test_path("..", "..")
+  flat <- function(x)
+    paste(unlist(lapply(x, function(el) if (is.character(el)) el else flat(el))), collapse = "")
+  file <- file.path(root, "man", "fit_bayesian_spatial_model.Rd")
+  db <- if (file.exists(file)) tools::parse_Rd(file)
+        else tools::Rd_db("spatialkit")[["fit_bayesian_spatial_model.Rd"]]
+  rd <- gsub("[[:space:]]+", " ", flat(db))
+  says <- function(text, x) expect_true(grepl(x, text, fixed = TRUE), info = x)
+  # At 0.9 three of the seven fits whose divergent draws were located had
+  # them in the middle of the GP's standard deviation and length-scales, so
+  # the help does not say they sit in the upper tail.
+  says(rd, paste0("at 0.95 and 0.975 some fits still had one or more. The smaller step ",
+                  "costs time: sampling took about twice as long as at 0.9 (1.3 to 2.7 times)."))
+  expect_false(grepl("upper tail", rd, fixed = TRUE))
+  says(rd, paste0("Some can remain at 0.99 too, for example on a layer whose spatial field ",
+                  "is weak against the noise; then raise it to 0.995 or 0.999, which took ",
+                  "three to four and a half times the sampling time of 0.9 on the four layers."))
+  # The R-hat figures of check_convergence come from fits at the earlier
+  # settings, and the help says so.
+  says(rd, paste0("four fits at the default four chains of 2,000 iterations, with ",
+                  "adapt_delta at 0.9 or 0.95, had largest values of 1.005, 1.009, 1.009 ",
+                  "and 1.011"))
+
+  news_file <- file.path(root, "NEWS.md")
+  if (!file.exists(news_file)) news_file <- system.file("NEWS.md", package = "spatialkit")
+  if (!nzchar(news_file) || !file.exists(news_file)) skip("NEWS.md is not there to read")
+  lines <- readLines(news_file, warn = FALSE, encoding = "UTF-8")
+  top <- grep("^# ", lines)
+  dev <- lines[seq.int(top[1L], top[2L] - 1L)]
+  brk <- dev[seq.int(grep("^## Breaking changes", dev), grep("^## New features", dev) - 1L)]
+  starts <- grep("^\\* ", brk)
+  at <- grep("samples at `adapt_delta = 0.99` by default", brk, fixed = TRUE)
+  expect_length(at, 1L)
+  i <- max(starts[starts <= at])
+  j <- min(c(starts[starts > i], length(brk) + 1L)) - 1L
+  entry <- gsub("[[:space:]]+", " ", paste(brk[i:j], collapse = " "))
+  # Sampling at 0.99 took 1.3 to 2.7 times as long on the four layers the
+  # default was chosen on, and 2.3 to 3.1 times on others.
+  says(entry, "Sampling takes about two to three times as long")
+  expect_false(grepl("about twice", entry, fixed = TRUE))
+  says(entry, "`control = list(adapt_delta = 0.9)` restores the previous setting.")
 })

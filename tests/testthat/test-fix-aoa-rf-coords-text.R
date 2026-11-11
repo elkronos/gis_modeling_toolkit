@@ -6,10 +6,12 @@
 # "fail wherever it has not been".  Across 21 datasets the forest with
 # coordinates had the lower RMSE in 601 of 630 block-fold comparisons and
 # was never judged worse, so that is not a general statement.  What holds is
-# that the out-of-bag error and random folds overstate such a forest's
-# accuracy and that the gain fades with distance, so the advice to validate
-# with blocked or distance-matched folds stays.  A fit without coordinates
-# prints that it uses no spatial information.
+# that such a forest's error grows quickly with the distance from the data,
+# that the out-of-bag error and random folds measure it among the samples,
+# which reads low for predictions made farther from the data, and that the
+# gain fades with distance, so the advice to validate with blocked or
+# distance-matched folds at the map's distances stays.  A fit without
+# coordinates prints that it uses no spatial information.
 # ---------------------------------------------------------------------------
 
 txt_pts <- function(n = 120, seed = 1) {
@@ -31,8 +33,14 @@ test_that("the include_coords caution advises blocked folds without predicting f
   # The general claim is gone.
   expect_no_match(logged, "fail wherever it has not")
   expect_no_match(logged, "fail badly")
-  # What it does say: why the easy scores are optimistic, and what to do.
-  expect_match(logged, "out-of-bag error and random cross-validation overstate")
+  # What it does say: what the easy scores are the error of, and what to
+  # do.  It said they "overstate its accuracy", with no word on where the
+  # forest will predict (?fold_separation).
+  expect_no_match(logged, "overstate")
+  expect_match(logged, paste("The out-of-bag error and random cross-validation measure it",
+                             "among the samples: the error of a map over an area the samples",
+                             "cover evenly, which reads low for predictions made farther from",
+                             "the data."), fixed = TRUE)
   expect_match(logged, "blocked or distance-matched folds")
   expect_match(logged, "block_kfold")
   expect_match(logged, "nndm")

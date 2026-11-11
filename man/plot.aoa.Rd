@@ -41,11 +41,13 @@ inside nor outside; it is left out of the curve and the caption counts it.
 }
 \details{
 When location has an index of its own (a \code{gwr_fit}, a
-\code{bayesian_fit}, or \code{coords = "yes"}; see
-\code{\link{area_of_applicability}()}), the curves and the dashed line are
-the predictor index alone.  The subtitle then counts three things: the
-locations beyond the predictor threshold, those beyond the location
-threshold, and those outside the area of applicability, which is either.
+\code{bayesian_fit}, a forest fitted with \code{include_coords = TRUE},
+or \code{coords = "yes"}; see \code{\link{area_of_applicability}()}), the
+curves and the dashed line are the predictor index alone (for the forest,
+its \code{..x} and \code{..y} columns included).  The subtitle then counts
+three things: the locations beyond the predictor threshold, those beyond
+the location threshold, and those outside the area of applicability, which
+is either.
 }
 \examples{
 if (requireNamespace("ggplot2", quietly = TRUE)) {

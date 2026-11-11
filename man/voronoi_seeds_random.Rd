@@ -7,7 +7,51 @@
 voronoi_seeds_random(boundary, k, set_seed = NULL)
 }
 \arguments{
-\item{boundary}{An sf or sfc polygonal object.}
+\item{boundary}{An sf or sfc polygonal object. One that mixes XY and XYZ
+(or XYM) geometries is read without Z and M, since sf reads a layer in
+the dimension of its first geometry. So is one whose
+geometries carry M (XYM or XYZM), which GEOS refuses. Rows that GEOS
+(in a projected CRS) or s2 (in longitude and latitude) refuses are
+repaired before the rows are unioned, as in \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}};
+valid rows are used as they are.
+A row that is empty, or has a coordinate that is not finite or lies
+beyond 1e150 (read as given, and again after any move into another
+CRS), covers no ground and is left out; a boundary with no such row
+left is refused with an error that says so. A boundary in a geographic
+CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+the Earth, is refused with an error of class
+\code{"spatialkit_cells_degenerate"} that names its rows and says to check
+its CRS.
+A row the repair leaves without a polygon (a ring with no height:
+every vertex on one line, or in degrees on one parallel) is left out
+as well, and a boundary with no polygon left is refused. In
+longitude and latitude, a boundary whose bounding box is over 10,000
+times its area (small pieces far apart), which sf does not sample whole,
+is sampled piece by piece, the points shared among the pieces in
+proportion to their areas; a piece whose own box is over 10,000 times
+its area stops the call with an error that says to transform
+\code{boundary} to a projected CRS. A boundary whose bounding box has no
+height or no width (three vertices on one parallel) is refused. In
+longitude and latitude s2 reads the edges as great circles, which
+leave the bounding box read from the coordinates, and sf (without the
+lwgeom package) draws in that box: a boundary whose box has less than
+half its area on the sphere (three vertices on or near one parallel)
+is refused too. That error, and the error for a box with no height
+whose vertices lie on one parallel other than the equator, say to
+transform \code{boundary} to a projected CRS in which a parallel is a
+curve, such as the one \code{\link[=ensure_projected]{ensure_projected()}} picks for it (a polar one,
+such as EPSG:3413 or 3031, for a ring around a pole), where the
+region has an area and lies in its box.
+sf draws the points in the bounding box and keeps those inside, so it
+draws \code{k} times the ratio of the box to the area. In any CRS, a
+boundary that would take more than 10^6 points drawn in its box, or
+10 \code{k} if more (small pieces far apart, a thin strip at a slant), is
+sampled piece by piece in the same way (or whole, in draws of at most
+10^6 points in its box, where that takes less time), and a piece that
+would still take more is drawn in such draws. Where the points drawn
+in all would exceed 2e7 (or 10 \code{k}, if more), the call stops before
+any draw with an error that gives the ratio and says to ask for fewer
+seeds.}
 
 \item{k}{Integer; number of random seeds.}
 

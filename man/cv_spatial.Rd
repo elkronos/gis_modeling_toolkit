@@ -37,7 +37,10 @@ cv_spatial(
 training rows only, so anything done inside it (scaling, tuning, an inner
 variable sweep) is already nested and leak-free.  The \code{subclass} it
 stamps must have a \code{predict.<subclass>()} method registered, because
-that is how each fold is scored.}
+that is how each fold is scored.  The fit models \code{response_var}
+(its \code{response_var} is the call's): a fold whose fit models
+another column fails, with the two names in \code{fold_status}, since
+its predictions are scored against \code{response_var}.}
 
 \item{folds}{Optional fold definitions, in any of three shapes: a
 \code{\link{make_folds}()} return value; a bare list of
@@ -50,7 +53,18 @@ refused by name.  Train and test must be disjoint: a fold that trains on
 its own test rows is not a cross-validation split and is refused with an
 error.  IDs naming no row in the prepared data are dropped with
 a logged count.
-Built via \code{block_kfold} when \code{NULL}.}
+Built via \code{block_kfold} when \code{NULL}.
+With \code{folds = NULL} the score estimates the error at the distance
+the block grid built here puts between the held-out points and their
+training data, which overstates the error of a map where the samples
+cover the area it predicts over.  The excess is how much the model's
+error grows from the map's distances to the data to the block grid's,
+and is small for a model whose error changes little with the distance
+from the data.  \code{\link{fold_separation}()}
+with \code{prediction_points} compares the held-out distances with those
+of the locations the model will predict at, and
+\code{make_folds(method = "knndm", prediction_points = )} builds folds
+matched to them.}
 
 \item{k}{Number of folds to build when \code{folds} is \code{NULL}; not
 read when \code{folds} is supplied.}
@@ -171,7 +185,10 @@ below 0 when the model predicts worse than the training mean.
 pooled out-of-sample predictions come from \code{k} separately fitted
 models and have no single parameter count to adjust for.  The per-fold
 \code{fold_metrics$Adj_R2} carries the adjusted value when \code{p} is
-supplied, and is \code{NA} otherwise.
+supplied, and is \code{NA} otherwise.  A \code{fit_fn} that returns a
+\code{gwr_fit} of a response at a large offset gives \code{predictions}
+the columns \code{y_centre}, \code{yhat_centred} and
+\code{y_train_mean_centred} (see \code{\link{cv_gwr}()}).
 }
 \description{
 Run K-fold CV for any model that returns a \code{spatial_fit} object.

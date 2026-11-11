@@ -16,10 +16,12 @@
 
 # Two single starts on 1,200 uniform points that take more than 40 steps to
 # stop moving and fewer than 100 (measured: 59 and 48), one from a random
-# start and one from a k-means++ start.
+# start and one from a k-means++ start.  A profile runs each level on a
+# stream of its own (helper-level-streams.R), so its cases are other seeds
+# whose level stream draws such a start (measured: 45 and 46 steps).
 .pv_cases <- list(
-  random   = list(k = 20L, seed = 3L,  init = "random"),
-  kmeanspp = list(k = 10L, seed = 20L, init = "kmeans++"))
+  random   = list(k = 20L, seed = 3L,  init = "random",   profile_seed = 7L),
+  kmeanspp = list(k = 10L, seed = 20L, init = "kmeans++", profile_seed = 29L))
 
 
 test_that("the engine says whether the start it kept stopped before the limit", {
@@ -149,9 +151,12 @@ test_that("resolution_profile() runs a density start for up to 100 steps, or ite
   for (nm in names(.pv_cases)) {
     cs <- .pv_cases[[nm]]
     key <- as.character(cs$k)
-    call <- function(...) resolution_profile(pts, levels = cs$k, nstart = 1, seed = cs$seed,
+    call <- function(...) resolution_profile(pts, levels = cs$k, nstart = 1,
+                                             seed = cs$profile_seed,
                                              partition = "density", init = cs$init, ...)
-    full <- .pv_engine(xy, cs$k, cs$seed, 100L, cs$init)
+    level_seed <- profile_level_seed(cs$profile_seed, nrow(xy), cs$k)
+    full <- .pv_engine(xy, cs$k, level_seed, 100L, cs$init)
+    expect_true(full$converged && full$iter > 40L, label = nm)
     r <- partition_warnings(call())
     expect_length(partition_of_class(r, "spatialkit_not_converged"), 0L)
     expect_identical(attr(r$value, "centres")[[key]], full$centers, label = nm)
@@ -159,7 +164,7 @@ test_that("resolution_profile() runs a density start for up to 100 steps, or ite
     expect_identical(rec$iter_max, 100L)
     expect_identical(rec$iter, stats::setNames(full$iter, key))
     expect_identical(rec$converged, stats::setNames(TRUE, key))
-    cut <- .pv_engine(xy, cs$k, cs$seed, 40L, cs$init)
+    cut <- .pv_engine(xy, cs$k, level_seed, 40L, cs$init)
     r <- partition_warnings(call(iter_max = 40))
     expect_identical(attr(r$value, "centres")[[key]], cut$centers, label = nm)
     w <- partition_of_class(r, "spatialkit_not_converged")
@@ -180,11 +185,13 @@ test_that("a profile names the levels that were cut off, in one warning", {
   xy  <- partition_clustered_xy(n_bg = 150L, n_cl = 350L, seed = 7L)
   pts <- partition_points_sf(xy)
   lv  <- c(2L, 9L, 30L, 60L)
-  # The sweep, level after level in one stream, as the profile runs it.
+  # The sweep, each level on a stream of its own, as the profile runs it.
   sweep <- function(limit) {
-    set.seed(11)
-    lapply(lv, function(L) spatialkit:::.partition_centres(xy, L, partition = "density",
-                                                           nstart = 2L, iter.max = limit))
+    lapply(lv, function(L) {
+      set.seed(profile_level_seed(11, nrow(xy), L))
+      spatialkit:::.partition_centres(xy, L, partition = "density", nstart = 2L,
+                                      iter.max = limit)
+    })
   }
   limit <- 9L
   eng <- sweep(limit)

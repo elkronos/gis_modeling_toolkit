@@ -37,7 +37,19 @@ since \code{blockCV::cv_spatial()}'s \code{$folds_list} holds two
 returns a label vector as \code{$folds_ids}.  Train and test must be
 disjoint: a fold that trains on its own test rows is not a
 cross-validation split and is refused with an error.  IDs naming no row in
-the prepared data are dropped with a logged count.}
+the prepared data are dropped with a logged count.  Built via
+\code{block_kfold} when \code{NULL}, as in \code{\link{cv_spatial}()}.
+With \code{folds = NULL} the score estimates the error at the distance
+the block grid built here puts between the held-out points and their
+training data, which overstates the error of a map where the samples
+cover the area it predicts over.  The excess is how much the model's
+error grows from the map's distances to the data to the block grid's,
+and is small for a model whose error changes little with the distance
+from the data.  \code{\link{fold_separation}()}
+with \code{prediction_points} compares the held-out distances with those
+of the locations the model will predict at, and
+\code{make_folds(method = "knndm", prediction_points = )} builds folds
+matched to them.}
 
 \item{k}{Number of folds when \code{folds} is \code{NULL}. Default 5.}
 
@@ -80,8 +92,8 @@ The \code{\link{cv_spatial}} result.
 \description{
 Thin wrapper over \code{\link{cv_spatial}} that refits a \code{ranger}
 forest on each training fold. Unlike the out-of-bag error, this holds out
-whole spatial blocks, so neighbours of a held-out point are not sitting in
-the training set.
+whole spatial blocks by default, so most neighbours of a held-out point are
+not in the training set; \code{folds} says what that score estimates.
 }
 \section{Comparing the forest with and without coordinates}{
 

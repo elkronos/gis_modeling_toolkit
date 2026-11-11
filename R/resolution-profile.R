@@ -33,6 +33,79 @@
 }
 
 
+#' Rectangle of least area around a polygon
+#'
+#' Over the directions of the edges of the polygon's convex hull, the
+#' rectangle with one side along an edge that holds the hull and has the
+#' least area, which is the rectangle of least area around the polygon.
+#' Rotating calipers over the hull's vertices in R, so a hull of many
+#' vertices (points along a transect) costs time in proportion to their
+#' number.  The vertices are taken about the centre of their bounding box,
+#' so the projections keep their digits at a large offset.
+#'
+#' @param domain A polygon (sfc).
+#' @return A list: \code{L} and \code{W}, the long and short side
+#'   (\code{L >= W}); \code{a} and \code{b}, unit vectors along them; \code{u0} and
+#'   \code{v0}, the rectangle's least coordinates along \code{a} and
+#'   \code{b}; and \code{centre}, the origin of those coordinates.  The
+#'   sides are \code{NA} when the hull is not a polygon (points on a line).
+#' @keywords internal
+#' @noRd
+.least_area_rect <- function(domain) {
+  none <- list(L = NA_real_, W = NA_real_)
+  hull <- sf::st_convex_hull(sf::st_union(sf::st_geometry(domain)))
+  if (length(hull) != 1L || !inherits(hull[[1L]], "POLYGON")) return(none)
+  xy <- hull[[1L]][[1L]][, 1:2, drop = FALSE]        # exterior ring, closed
+  if (!all(is.finite(xy))) return(none)
+  centre <- c((min(xy[, 1]) + max(xy[, 1])) / 2, (min(xy[, 2]) + max(xy[, 2])) / 2)
+  p <- cbind(xy[, 1] - centre[1], xy[, 2] - centre[2])
+  p <- p[-nrow(p), , drop = FALSE]
+  # Drop repeated vertices, then turn the ring anticlockwise.
+  nxt <- c(seq_len(nrow(p))[-1L], 1L)
+  p <- p[p[, 1] != p[nxt, 1] | p[, 2] != p[nxt, 2], , drop = FALSE]
+  n <- nrow(p)
+  if (n < 3L) return(none)
+  nx <- c(2:n, 1L)
+  if (sum(p[, 1] * p[nx, 2] - p[nx, 1] * p[, 2]) < 0) p <- p[n:1, , drop = FALSE]
+  if (sum(p[, 1] * p[nx, 2] - p[nx, 1] * p[, 2]) <= 0) return(none)
+  d <- p[nx, , drop = FALSE] - p
+  e <- d / sqrt(d[, 1]^2 + d[, 2]^2)                  # unit edge directions
+  at <- function(k) (k - 1L) %% n + 1L
+  # For each edge i: the vertex farthest along it (ia), the vertex least
+  # along it (ib) and the vertex farthest across it (ic, on the inner side
+  # of an anticlockwise ring).  Each moves forward round the ring as the
+  # edge does, so each is advanced while that improves it.
+  along  <- function(k, i) p[k, 1] * e[i, 1] + p[k, 2] * e[i, 2]
+  across <- function(k, i) (p[k, 1] - p[i, 1]) * -e[i, 2] + (p[k, 2] - p[i, 2]) * e[i, 1]
+  pa <- p %*% e[1L, ]
+  ia <- which.max(pa); ib <- which.min(pa)
+  ic <- which.max((p[, 1] - p[1L, 1]) * -e[1L, 2] + (p[, 2] - p[1L, 2]) * e[1L, 1])
+  best <- Inf; out <- none
+  for (i in seq_len(n)) {
+    s <- 0L
+    while (s < n && along(at(ia + 1L), i) >= along(ia, i)) { ia <- at(ia + 1L); s <- s + 1L }
+    s <- 0L
+    while (s < n && along(at(ib + 1L), i) <= along(ib, i)) { ib <- at(ib + 1L); s <- s + 1L }
+    s <- 0L
+    while (s < n && across(at(ic + 1L), i) >= across(ic, i)) { ic <- at(ic + 1L); s <- s + 1L }
+    su <- along(ia, i) - along(ib, i)
+    sv <- across(ic, i)
+    if (su * sv < best) {
+      best <- su * sv
+      ei <- e[i, ]; ni <- c(-ei[2], ei[1])
+      v0 <- p[i, 1] * ni[1] + p[i, 2] * ni[2]
+      u0 <- along(ib, i)
+      out <- if (su >= sv) {
+        list(L = su, W = sv, a = ei, b = ni, u0 = u0, v0 = v0, centre = centre)
+      } else {
+        list(L = sv, W = su, a = ni, b = ei, u0 = v0, v0 = u0, centre = centre)
+      }
+    }
+  }
+  out
+}
+
+
 #' Mean correlation between two random points in a polygon
 #'
 #' The domain term of Krige's relation, \eqn{\bar r(V)}, over the study area
@@ -48,6 +121,22 @@
 #' (10 on the square).  The grid is isotropic, where \code{.rbar_rect()}'s
 #' \eqn{q \times q} grid on a thin rectangle is 25 times coarser along it
 #' than across.
+#'
+#' The grid is laid over the bounding box, at a spacing \eqn{s} that follows
+#' the domain's area, where the domain's width (the short side of its
+#' rectangle of least area) is at least \eqn{2s}: two or more rows of nodes
+#' cross it.  A thinner domain (a transect, a road corridor) is laid out in
+#' the frame of that rectangle instead, with long side \eqn{L} and short side
+#' \eqn{W}: a spacing \eqn{t = \sqrt{L W} / q}, \eqn{k = \max(1, \lfloor W /
+#' t \rfloor)} equal bands along it, and about \eqn{q^2 / k} nodes in each,
+#' a rank-1 lattice over a quarter of the band mirrored in its two
+#' midlines, so the nodes spread over the band's width and do not depend on
+#' which way the frame's axes point.  A strip narrower than \eqn{t} is one
+#' band.  Nodes on the bands' centre lines would read a hull that tapers (a
+#' wedge, a lens) along those lines only.  On the box, the rows of a strip
+#' at a slant crossed part of its length, or fewer than 10 nodes fell inside
+#' and the box's value was used, and a strip along an axis narrower than
+#' \eqn{s / 2} stopped \code{seq()}.
 #'
 #' @param cor_fn Correlation function of distance.
 #' @param domain A polygon (sfc) in the coordinate units of \code{cor_fn}.
@@ -66,9 +155,46 @@
   # q^2 grid nodes over the box, so a sliver of a hull costs no more than a
   # point-in-polygon test on 16,000 points.
   s  <- max(sqrt(area) / q, sqrt(w * h / (40 * q^2)))
-  gx <- seq(bb[["xmin"]] + s / 2, bb[["xmax"]], by = s)
-  gy <- seq(bb[["ymin"]] + s / 2, bb[["ymax"]], by = s)
-  g  <- as.matrix(expand.grid(x = gx, y = gy))
+  # The box grid where two or more of its rows cross the domain: its width,
+  # the short side of its rectangle of least area, at least 2 s.  A convex
+  # domain's area is at most its diameter (at most the box's diagonal) times
+  # its width, so a large enough area settles that without the rectangle.
+  fits <- w >= s / 2 && h >= s / 2
+  rect <- NULL
+  if (fits && area / sqrt(w^2 + h^2) < 2 * s) {
+    rect <- .least_area_rect(domain)
+    fits <- is.finite(rect$W) && rect$W >= 2 * s
+  }
+  if (fits) {
+    gx <- seq(bb[["xmin"]] + s / 2, bb[["xmax"]], by = s)
+    gy <- seq(bb[["ymin"]] + s / 2, bb[["ymax"]], by = s)
+    g  <- as.matrix(expand.grid(x = gx, y = gy))
+  } else {
+    # A domain narrower than two steps of the box grid: bands along its
+    # rectangle of least area, rotated back to the CRS frame.
+    if (is.null(rect)) rect <- .least_area_rect(domain)
+    if (!is.finite(rect$W) || !is.finite(rect$L) || rect$W <= 0)
+      return(.rbar_rect(cor_fn, w, h, q))
+    sp <- sqrt(rect$L * rect$W) / q
+    k  <- max(1L, as.integer(floor(rect$W / sp)))
+    nq <- max(1L, as.integer(round(q^2 / (4 * k))))
+    # In each of k equal bands across: nq nodes of a rank-1 lattice over a
+    # quarter of the band (node j at the centre of step j along it, and at
+    # frac((j - 0.5) * phi) / 2 of the band across, phi the golden ratio's
+    # conjugate) and their mirror images in the band's two midlines.  The
+    # nodes spread over the band's width, so a hull that tapers (a wedge, a
+    # lens) is read over its area and not along a centre line, and the
+    # mirrors make them the same nodes whichever way the frame's axes point.
+    j  <- seq_len(nq)
+    u1 <- (j - 0.5) * rect$L / (2 * nq)
+    v1 <- (((j - 0.5) * ((sqrt(5) - 1) / 2)) %% 1) / 2
+    uq <- c(u1, rect$L - u1, u1, rect$L - u1)
+    vq <- c(v1, v1, 1 - v1, 1 - v1)
+    f  <- cbind(rect$u0 + rep(uq, times = k),
+                rect$v0 + rect$W * (rep(seq_len(k) - 1L, each = 4L * nq) + rep(vq, times = k)) / k)
+    g  <- cbind(x = rect$centre[1] + f[, 1] * rect$a[1] + f[, 2] * rect$b[1],
+                y = rect$centre[2] + f[, 1] * rect$a[2] + f[, 2] * rect$b[2])
+  }
   inside <- lengths(sf::st_intersects(
     sf::st_as_sf(as.data.frame(g), coords = c("x", "y"), crs = sf::st_crs(domain)),
     domain)) > 0L
@@ -200,6 +326,38 @@
 }
 
 
+#' Whether a size is the default, by its value
+#'
+#' The prints, the notes and the plot of a profile name where a size came
+#' from by its value: 4.5 rows per cell, or the seven sizes of the plain
+#' mean's ladder, is the default whoever named it, and any other size is one
+#' the caller asked for.  The record of a count keeps the value and not who
+#' gave it, so the value is all there is to go by.
+#'
+#' @param x A size, or every size of a ladder (never one size of a longer
+#'   ladder).
+#' @return \code{TRUE} or \code{FALSE}; \code{FALSE} for \code{NA},
+#'   \code{NULL} or anything not numeric.
+#' @keywords internal
+#' @noRd
+.size_is_default <- function(x) {
+  if (!is.numeric(x) || !length(x) || anyNA(x)) return(FALSE)
+  x <- sort(as.numeric(x), decreasing = TRUE)
+  if (length(x) == 1L) x == .OBS_PER_CELL_DEFAULT
+  else length(x) == length(.OBS_PER_CELL_LADDER) && all(x == .OBS_PER_CELL_LADDER)
+}
+
+
+#' Where a size came from, in the words of a print
+#'
+#' @param x A size.
+#' @return \code{", the default"} or \code{" asked"}, to follow the size in
+#'   a line (\code{.size_is_default()}).
+#' @keywords internal
+#' @noRd
+.size_source_text <- function(x) if (.size_is_default(x)) ", the default" else " asked"
+
+
 #' The finest level of a ladder of sizes
 #'
 #' The count the finest size gives, held to the most centres k-means can
@@ -222,7 +380,8 @@
 #' The level of a size \code{s} is the count \code{.count_at()} gives for it,
 #' held to the most centres k-means can place.  The finest size takes the
 #' part \code{min_cell_n} has on the automatic ladder: it sets the ceiling,
-#' \code{supported} and the warning.  One event raises one warning.
+#' \code{supported} and the warning.  One event raises one warning, and
+#' the sizes held for the same reason raise one between them.
 #' \describe{
 #'   \item{Fewer than two cells of the finest size, or one distinct
 #'     location}{\code{spatialkit_not_supported}; the ladder is the one level
@@ -303,38 +462,80 @@
                   data = list(reason = ceiling_from, n = n, min_cell_n = NA_integer_,
                               obs_per_cell = s_min))
   } else {
-    for (j in seq_along(sizes)) {
-      if (wanted[j] < 2 && !isTRUE(sizes_auto))
-        .warn_classed("spatialkit_size_not_reached",
-                      paste0("resolution_profile(): obs_per_cell = %s on %d rows is fewer ",
-                             "than two cells; two cells are used (%s)."),
-                      size_text(sizes[j]), n, .per_cell_text(n / 2),
-                      data = list(obs_per_cell = sizes[j], wanted = as.integer(wanted[j]),
-                                  used = 2L, reason = "fewer than two cells"))
-      else if (wanted[j] > cap)
-        .warn_classed("spatialkit_size_not_reached",
-                      paste0("resolution_profile(): obs_per_cell = %s asks for %d cells, more ",
-                             "than k-means can place on %s; %d cells are used (%s)."),
-                      size_text(sizes[j]), as.integer(wanted[j]),
-                      # With no location repeated the bound is one short of
-                      # the points, which stats::kmeans() needs.
-                      if (n_distinct < n_points)
-                        sprintf("the layer's %d distinct locations", n_distinct)
-                      else sprintf("%d points", n_points),
-                      cap, .per_cell_text(n / cap),
-                      data = list(obs_per_cell = sizes[j], wanted = as.integer(wanted[j]),
-                                  used = cap, reason = "more cells than can be placed"))
+    # One warning for each reason, naming every size it holds: the sizes
+    # held to the same count differ in one number, and seven warnings that
+    # say so one size at a time said nothing the one does not.  One size
+    # keeps the words it had.  The fields `obs_per_cell` and `wanted` are
+    # vectors, one element a size, in the order of the ladder.
+    sizes_text <- function(j) .and_text(vapply(sizes[j], size_text, character(1)))
+    asks_text  <- function(j) {
+      w <- as.integer(wanted[j])
+      if (min(w) == max(w)) sprintf("%d cells each", min(w))
+      else sprintf("%d to %d cells", min(w), max(w))
     }
+    few <- which(wanted < 2 & !isTRUE(sizes_auto))
+    many <- which(!(wanted < 2 & !isTRUE(sizes_auto)) & wanted > cap)
+    if (length(few) == 1L)
+      .warn_classed("spatialkit_size_not_reached",
+                    paste0("resolution_profile(): obs_per_cell = %s on %d rows is fewer ",
+                           "than two cells; two cells are used (%s)."),
+                    size_text(sizes[few]), n, .per_cell_text(n / 2),
+                    data = list(obs_per_cell = sizes[few], wanted = as.integer(wanted[few]),
+                                used = 2L, reason = "fewer than two cells"))
+    else if (length(few) > 1L)
+      .warn_classed("spatialkit_size_not_reached",
+                    paste0("resolution_profile(): obs_per_cell = %s on %d rows are each fewer ",
+                           "than two cells; two cells are used for each (%s)."),
+                    sizes_text(few), n, .per_cell_text(n / 2),
+                    data = list(obs_per_cell = sizes[few], wanted = as.integer(wanted[few]),
+                                used = 2L, reason = "fewer than two cells"))
+    # With no location repeated the bound is one short of the points, which
+    # stats::kmeans() needs.
+    place_on <- if (n_distinct < n_points)
+      sprintf("the layer's %d distinct locations", n_distinct)
+    else sprintf("%d points", n_points)
+    if (length(many) == 1L)
+      .warn_classed("spatialkit_size_not_reached",
+                    paste0("resolution_profile(): obs_per_cell = %s asks for %d cells, more ",
+                           "than k-means can place on %s; %d cells are used (%s)."),
+                    size_text(sizes[many]), as.integer(wanted[many]), place_on,
+                    cap, .per_cell_text(n / cap),
+                    data = list(obs_per_cell = sizes[many], wanted = as.integer(wanted[many]),
+                                used = cap, reason = "more cells than can be placed"))
+    else if (length(many) > 1L)
+      .warn_classed("spatialkit_size_not_reached",
+                    paste0("resolution_profile(): obs_per_cell = %s ask for %s, more than ",
+                           "k-means can place on %s; %d cells are used for each (%s)."),
+                    sizes_text(many), asks_text(many), place_on,
+                    cap, .per_cell_text(n / cap),
+                    data = list(obs_per_cell = sizes[many], wanted = as.integer(wanted[many]),
+                                used = cap, reason = "more cells than can be placed"))
+    # Where the finest size asks for more cells than k-means can place, the
+    # finest level is the most it can, and the warning names that bound: it
+    # said "60 points at obs_per_cell = 3 support at most 5 ... the 5 cells
+    # that size gives" of a size that asks for 20 on 5 distinct locations.
+    held <- want > cap
+    held_by <- if (n_distinct < n_points) "the distinct locations allow"
+               else "k-means can fit to the points"
     if (!supported)
       .warn_classed("spatialkit_not_supported",
                     paste0("resolution_profile(): cells no wider than the autocorrelation ",
-                           "range (%.0f) would need at least %.0f of them, but %d %s ",
-                           "at obs_per_cell = %s support at most %d. The data cannot ",
-                           "support a tessellation that respects their own ",
+                           "range (%s) would need at least %.0f of them, but %s. The data ",
+                           "cannot support a tessellation that respects their own ",
                            "correlation structure; the profile scores %s so ",
                            "the cost of each level is still visible."),
-                    range_eff, floor_raw, n, support_what, size_text(s_min), finest,
-                    if (length(levels) == 1L) sprintf("the %d cells that size gives", levels)
+                    .fmt_len(range_eff), floor_raw,
+                    if (held)
+                      sprintf(paste0("obs_per_cell = %s asks for %d cells of the %d %s, and ",
+                                     "k-means can place at most %d on %s"),
+                              size_text(s_min), as.integer(want), n, support_what, cap, place_on)
+                    else sprintf("%d %s at obs_per_cell = %s support at most %d",
+                                 n, support_what, size_text(s_min), finest),
+                    if (length(levels) == 1L && held) sprintf("the %d cells %s", levels, held_by)
+                    else if (length(levels) == 1L) sprintf("the %d cells that size gives", levels)
+                    else if (held)
+                      sprintf("the %d to %d cells the sizes give, the finest held to the %d %s",
+                              min(levels), max(levels), finest, held_by)
                     else sprintf("the %d to %d cells the sizes give", min(levels), max(levels)),
                     data = list(reason = "floor above ceiling", n = n,
                                 min_cell_n = NA_integer_, obs_per_cell = s_min))
@@ -415,15 +616,20 @@
   else sprintf("%d %s%s start%s", as.integer(nstart), if (density) "density-weighted " else "",
                if (identical(part$init, "random")) "random" else "k-means++",
                if (one) "" else "s")
-  msg <- sprintf(paste0("resolution_profile(): fitting %d cells to %d rows with %s is %.2g ",
-                        "point-to-centre comparisons, above the limit of %.2g ",
+  # The random starts of the density kind have no such step only with FNN,
+  # which installs with spatialkit: where it could not be loaded the way on
+  # says to reinstall it first.
+  nums <- .count_text(c(work, limit))
+  msg <- sprintf(paste0("resolution_profile(): fitting %d cells to %d rows with %s is %s ",
+                        "point-to-centre comparisons, above the limit of %s ",
                         "(options(spatialkit.fit_work_max = )). Ways on: fewer starts ",
                         "(`nstart`), which keep the best of fewer; a coarser `obs_per_cell`; ",
-                        "partition = \"density\" with init = \"random\" and the FNN package ",
-                        "installed, which has no step that compares every point with every ",
-                        "centre and leaves a cell without a point more often; or a higher ",
-                        "limit."),
-                 as.integer(cells), as.integer(n_points), with, work, limit)
+                        "partition = \"density\" with init = \"random\", which has no step ",
+                        "that compares every point with every centre and leaves a cell without ",
+                        "a point more often%s; or a higher limit."),
+                 as.integer(cells), as.integer(n_points), with, nums[1L], nums[2L],
+                 if (fnn) "" else paste0(" (it needs FNN, which installs with spatialkit and ",
+                                         "could not be loaded: reinstall it)"))
   stop(errorCondition(msg, class = "spatialkit_work_limit", call = NULL,
                       work = work, limit = limit, what = "partition fit",
                       kind = part$kind, init = part$init, nstart = as.integer(nstart),
@@ -508,7 +714,9 @@
 #' ladder of counts described below, scored for pooled values as well.
 #' \code{estimate = NULL, obs_per_cell = NULL, sac = NULL, partition =
 #' "kmeans"} gives the profile of earlier versions: the ladder, its columns
-#' and its k-means regions from 25 starts.
+#' and its k-means regions from 25 starts, but for the rounding of the
+#' coordinates described in "The partition", which can give other regions on
+#' gridded locations.
 #'
 #' @section The partition:
 #' The regions at every level are the Voronoi cells of a set of centres: a
@@ -559,7 +767,9 @@
 #' \code{levels}, large sizes, or the low levels of the automatic ladder)
 #' may not, and at those levels the density kind does not even the counts.
 #' \code{partition = "kmeans"} gives the k-means regions, with 25
-#' k-means++ starts, as earlier versions built them.
+#' k-means++ starts, as earlier versions built them, but for the rounding of
+#' the coordinates described below, which can give other regions on gridded
+#' locations.
 #'
 #' \code{init} says how each of the \code{nstart} starts is drawn before it
 #' is refined; the best start is kept.  \code{"kmeans++"} draws the centres
@@ -576,25 +786,84 @@
 #' steps: each point goes to its nearest centre, each centre moves to the
 #' weighted mean of its points, and a centre left without a point stays
 #' where it is.  \code{iter_max} sets another limit.  The start with the
-#' lowest sum is kept, and a kept start that was cut off at the limit is
-#' reported (see "Conditions"): its centres are those of the last step.
+#' lowest sum is kept (under the density kind a later start replaces an
+#' earlier one only when its sum is lower by more than one part in ten
+#' million, so of starts whose sums agree to rounding the first is kept), and
+#' a kept start that was cut off at the limit is reported (see
+#' "Conditions"): its centres are those of the last step.
 #' Large layers can need more than 100 steps: on a simulated layer of 30,000
 #' points no start of six at 100 and 300 cells took more than 68, and on one
 #' of 60,000 points three of six took 102 to 152.
 #'
 #' The density kind depends on the points alone.  It works on the distinct
-#' locations in coordinate order, so the order of the rows does not matter.
-#' Its two tolerances are fractions of the extent of the points (the diagonal
-#' of their bounding box), so the unit of the coordinates does not matter:
-#' the neighbour distance is not taken below a millionth of the extent, and
-#' the iteration stops when no centre moves by \eqn{10^{-12}} of it.  Points
+#' locations in coordinate order (see below for first coordinates equal but
+#' for their last bits), so the order of the rows does not matter.  Its
+#' tolerances do not depend on the unit of the coordinates: the neighbour
+#' distance is not taken below a millionth of the extent of the points (the
+#' diagonal of their bounding box), the iteration stops when no centre moves
+#' by \eqn{10^{-12}} of it, and the tie rules below are fractions of the
+#' extent or of the quantities they compare.  On gridded locations many
+#' points are equally near two neighbours or two centres, and the last bits
+#' of the coordinates, which move with the unit and the origin, would settle
+#' those ties.  So squared distances within one part in ten million of each
+#' other count as equal, a tie between neighbours goes to the lower first
+#' coordinate and then the lower second, a tie between centres goes to the
+#' lower-numbered one (between centres a squared distance ties with the least
+#' when it is no more than the square of the least distance lengthened by a
+#' margin, plus one part in ten million of the least squared distance; the
+#' margin is one part in 1e10 of the largest coordinate of the centres, at
+#' most a millionth of the diagonal of their bounding box and at least four
+#' times the spacing of doubles at that coordinate), first coordinates within that part of the extent count
+#' as equal when the rows and the locations are put in order, and so do
+#' weights within that part of each other when the first k-means++ centre is
+#' drawn.  The cells are then the same in another unit or with another origin
+#' as long as no coordinate moves by more than about a two-hundred-millionth
+#' of the distance between neighbouring locations, but for one case: the
+#' margin of the centres grows with their largest coordinate (about 0.46 mm
+#' at a UTM northing near 4,550 km, about half a micrometre once the origin
+#' lies next to data 5 km across), and the rows are given to the centres in
+#' the layer's own coordinates, so a row whose distances to two centres
+#' differ by less than the margin with one origin and by more with another
+#' goes to the lower-numbered centre with the first and to the nearer with
+#' the second.  The rounding PROJ leaves
+#' when it changes the unit or the false origin, about \eqn{10^{-9}} m, is
+#' below that for locations more than about a quarter of a metre apart.
+#' Coordinates rounded more coarsely can give other cells: a lattice at
+#' 250 m with its coordinates stored in feet to four decimals does.  Points
 #' at one location count as that many points at it and share a cell; the
-#' neighbour distance is measured to the \code{density_k}-th nearest
-#' \emph{other} location, so it is not zero where locations repeat.  The
-#' neighbour searches use \pkg{FNN} when it is installed.  The result is the
-#' same without it; the search then takes time that grows with the square of
-#' the number of points, about thirty times as long for 10,000 points and
-#' 2,000 centres.
+#' neighbour distance is
+#' measured to the \code{density_k}-th nearest \emph{other} location, so it
+#' is not zero where locations repeat.  The neighbour searches use \pkg{FNN}
+#' when it is installed.  The result is the same without it; the search then
+#' takes time that grows with the square of the number of points, about
+#' thirty times as long for 10,000 points and 2,000 centres.
+#'
+#' The kind \code{"kmeans"} meets the same ties inside
+#' \code{\link[stats]{kmeans}()}, which settles them by the last bits of the
+#' coordinates and takes no tolerance.  So it is handed the coordinates
+#' centred on the middle of their bounding box, divided by its diagonal and
+#' rounded to \eqn{2^{-30}} of it (about a billionth); the starts are drawn
+#' from those coordinates and ranked by their sums, and the cells it returns
+#' are read back in the layer's own coordinates, so the centres, \code{wss}
+#' and every column are in its unit.  The rows are put in order as for the
+#' density kind.  The cells are then the same in another unit or with
+#' another origin unless the change moves a coordinate across the middle of
+#' a rounding step, which the rounding PROJ leaves (about \eqn{10^{-9}} m)
+#' does more often the smaller the extent.  Over 60 lattices with 5 m to
+#' 1 km between neighbouring locations, each in US feet, in feet, in
+#' kilometres and with two other false origins, at 5, 25 and 60 cells from
+#' two seeds and both starting rules, the cells were the same in all 2,040
+#' partitions of the 34 lattices that span a kilometre or more, and other
+#' cells came back in 205 of the 1,560 partitions of the 26 lattices that
+#' span less (78 to 719 m).  Distinct locations that would round to one
+#' point keep their coordinates unrounded, so they stay distinct.
+#' \code{stats::kmeans()} also settles such ties by the last bits of its own
+#' compiled arithmetic, which differ between platforms, so on a layer where
+#' ties decide cells the kind \code{"kmeans"} can return other regions on
+#' another platform from the same coordinates and \code{seed}, and with them
+#' every column read off the cells: the 40 by 30 lattice at 250 m of the
+#' package's NEWS gets other regions on Linux on x86-64 than on macOS on
+#' arm64, the same in all of its units and origins on each.
 #'
 #' The columns keep their meaning under \code{"density"}, because each is
 #' read off the cells and not off the way they were drawn.  \code{wss} is the
@@ -694,7 +963,8 @@
 #' that respects their own correlation structure; that is reported as a
 #' finding (a warning of class \code{spatialkit_not_supported}, and
 #' \code{attr(x, "bounds")$supported} is \code{FALSE}) and the ladder runs
-#' from 2 to the ceiling, so the profile still shows what each level costs.
+#' from 2 to the ceiling (or the \code{levels} asked for are scored, as
+#' given), so the profile still shows what each level costs.
 #' A floor equal to the ceiling would leave one level and nothing to compare
 #' it with, so that ladder starts at 2 as well.  On a layer larger than
 #' \code{sample_n} the ceiling is also held to half the subsample's scored
@@ -799,9 +1069,11 @@
 #' kind without \pkg{FNN}) is above
 #' \code{getOption("spatialkit.fit_work_max", 1e10)}.  The message names the
 #' ways on: fewer starts, which keep the best of fewer; a coarser size;
-#' \code{partition = "density"} with \code{init = "random"} and \pkg{FNN}
-#' installed, which leaves a cell without a point more often (see
-#' \code{spatialkit_empty_cells} under "Conditions"); or a higher limit.
+#' \code{partition = "density"} with \code{init = "random"}, which leaves a
+#' cell without a point more often (see \code{spatialkit_empty_cells} under
+#' "Conditions") and, where \pkg{FNN} could not be loaded, needs it
+#' reinstalled first; or a higher limit.  The work and the limit are written
+#' in full, so that a work just above the limit does not print as the limit.
 #' The limit counts the finest level, and a ladder of several sizes fits
 #' every one of its levels.  At the default size the work grows with the
 #' square of the rows, and the limit is set where the default call's fit
@@ -881,20 +1153,34 @@
 #'     small to stop it, so \eqn{C_p} says "as fine as the support allows"
 #'     and \code{min_cell_n} is what is choosing; \code{select_resolution()}
 #'     says so when that happens.  It becomes a genuine interior criterion
-#'     only when the nugget is a large share of the sill.  With a nugget of 0
-#'     (under \eqn{10^{-4}} of the sill; usually a fit clipped at its lower
-#'     bound) the penalty is 0 and \eqn{C_p} descends to the ceiling whatever
-#'     the field; the profile warns.  When the variogram gives no nugget (none
-#'     was fitted, its fit has no minimum inside the ranges searched, its
-#'     range is below the shortest lag, it found no spatial structure, or
-#'     \code{sac} is a range alone), \eqn{\tau^2} is Mallows' own
-#'     choice instead: the residual mean square \eqn{RSS / (m - L_m)} of the
-#'     finest level whose cells hold at least two scored rows on average.  It
-#'     counts the structure within those cells as noise too, so on average it
-#'     is no smaller than the nugget and errs towards fewer cells; the profile warns,
-#'     and \code{attr(, "cp_noise")} records which was used.  When no level's
-#'     cells hold that many, \code{cp} is \code{NA} at every level, as it is
-#'     for a constant response, which the profile warns about.
+#'     only when the nugget is a large share of the sill.  A nugget of 0, or
+#'     of at most \eqn{10^{-4}} of the sill, which
+#'     \code{\link{estimate_sac_range}()} marks as \code{nugget_at_bound}, is
+#'     the fit's lower bound and not an estimate, and as \eqn{\tau^2} it would
+#'     leave no penalty, with which \eqn{C_p} descended to the ceiling
+#'     whatever the field: \eqn{C_p} does not take it.  When the variogram
+#'     gives no nugget (none was fitted, its nugget is at that bound, its fit
+#'     has no minimum inside the ranges searched, its range is below the
+#'     shortest lag, it found no spatial structure, or \code{sac} is a range
+#'     alone), \eqn{\tau^2} is Mallows' own choice instead: the residual mean
+#'     square \eqn{RSS / (m - L_m)} of the finest level whose cells hold at
+#'     least two scored rows on average.  It counts the structure within
+#'     those cells as noise too, so on average it is no smaller than the
+#'     nugget and errs towards fewer cells.  When no level's cells hold that
+#'     many, or the finest that does has a residual mean square of 0 to
+#'     within the rounding of the values scored (as when each of its cells
+#'     holds one location whose rows carry one value), \code{cp} is
+#'     \code{NA} at every level, as it is for a
+#'     constant response, which the profile warns about.  Whatever its source,
+#'     \eqn{\tau^2} is held to the semivariance of nearest-neighbour pairs the
+#'     variogram carries (\code{attr(sac, "short_lag_semivariance")}, see
+#'     \code{\link{sac_nugget}}): a semivariance does not fall as the lag
+#'     shrinks, so it bounds the nugget from above, and a larger
+#'     \eqn{\tau^2} is contradicted by the closest pairs and stops \eqn{C_p}
+#'     early.  A semivariance of 0 holds nothing.  When \eqn{\tau^2} is not
+#'     the nugget as it stands, a warning of class \code{spatialkit_cp_noise}
+#'     says where it came from, and \code{attr(, "cp_noise")} records the
+#'     source and, when the semivariance held it, the number it replaced.
 #'     \strong{In practice its minimum is often a bound}, the support
 #'     ceiling when the nugget is a small share of the sill, and
 #'     \code{select_resolution()} then names the bound in \code{edge}.  The
@@ -1006,7 +1292,23 @@
 #'   \item{\code{spatialkit_constant_response}}{\code{resolution_profile()}:
 #'     the scored variable is constant to within rounding (a response the
 #'     predictors fit exactly leaves such residuals), so \code{cp},
-#'     \code{moran_i} and \code{moran_z} are \code{NA} at every level.}
+#'     \code{moran_i} and \code{moran_z} are \code{NA} at every level.  On
+#'     a profile with an \code{estimate} whose rows are constant too, so are
+#'     \code{loo} and \code{loo_se}, and for pooled values
+#'     \code{own_weight}; the message names them.  \code{summary()} of such a
+#'     profile stops with an error that says the response is constant.  Both
+#'     tests read the raw values and, where those show no spread, the values
+#'     centred on their median and scaled, so 1e15 plus a spread of 1 is not
+#'     constant while values that differ only by their rounding (0.1 beside
+#'     0.3 / 3) are; residuals are read against the rounding of the
+#'     regression and of the response, and where the residuals of the raw
+#'     values show no spread, they are those of a fit to the response less
+#'     its median.  The test for \code{cp} reads the scored rows of the
+#'     subsample and the estimate's every row of the layer (of its selection
+#'     half under \code{select_on = "split"}) with a value: where the first
+#'     finds the response constant and the second does not, the message
+#'     says that \code{loo} is scored, and the print does not call the
+#'     response a constant.}
 #'   \item{\code{spatialkit_empty_cells}}{\code{resolution_profile()},
 #'     \code{\link{get_voronoi_seeds}()} and
 #'     \code{\link{voronoi_seeds_kmeans}()} under \code{partition =
@@ -1053,15 +1355,17 @@
 #'     \code{\link{summarize_by_cell}(estimate = "pooled")} raises the class
 #'     for its own cells.}
 #'   \item{\code{spatialkit_no_elbow}}{\code{\link{determine_optimal_levels}()}:
-#'     the WSS curve has no elbow, or the ladder is too short to show one,
-#'     so the count returned is the ladder's and not a finding.  The
-#'     condition carries \code{k}, \code{sag} and \code{structured}.}
+#'     the WSS curve has no elbow, or the ladder is too short to show one, so
+#'     the count is the ladder's and not a finding.  A warning beside the
+#'     \code{NA} the function returns at the default, \code{on_no_elbow =
+#'     "na"}, and beside the count under \code{"warn"}; an error under
+#'     \code{"error"}.  The condition carries \code{k} (the ladder's count),
+#'     \code{sag} and \code{structured}.}
 #'   \item{\code{spatialkit_diagnostic_ranking}}{\code{\link{determine_optimal_levels}()}
-#'     under \code{criterion = "morans_i"} or \code{"combined"}: Moran's z
-#'     of the cell means, a diagnostic and not a count rule, ordered the
-#'     candidates returned.  The condition carries \code{k},
-#'     \code{criterion}, \code{first_computable}, \code{window} and
-#'     \code{upgraded}.}
+#'     under \code{criterion = "morans_i"}: Moran's z of the cell means, a
+#'     diagnostic and not a count rule, ordered the candidates returned.  The
+#'     condition carries \code{k}, \code{criterion}, \code{first_computable}
+#'     and \code{window}.}
 #'   \item{\code{spatialkit_ladder_unused}}{\code{resolution_profile()}: a
 #'     numeric \code{obs_per_cell} sets the ladder, and the caller also
 #'     supplied \code{n_levels}, \code{min_cell_n}, \code{sample_n} or
@@ -1073,9 +1377,11 @@
 #'     finer one does not, and its level is 2 (\code{reason} is
 #'     \code{"fewer than two cells"}); or a size asks for more cells than
 #'     k-means can place, and its level is the most that can (\code{reason}
-#'     is \code{"more cells than can be placed"}).  The condition carries
-#'     \code{obs_per_cell},
-#'     \code{wanted}, \code{used} and \code{reason}.  When the finest size
+#'     is \code{"more cells than can be placed"}).  It is raised once for
+#'     each reason, naming every size held for it.  The condition carries
+#'     \code{obs_per_cell} and \code{wanted} (one element for each such
+#'     size, in the order of the ladder), \code{used} and \code{reason}.
+#'     When the finest size
 #'     gives fewer than two cells the warning is
 #'     \code{spatialkit_not_supported}, with \code{obs_per_cell} among its
 #'     fields and \code{min_cell_n} \code{NA}; and
@@ -1089,26 +1395,88 @@
 #'     \code{NA} at every level.  The condition carries \code{n} (the rows
 #'     that share a location), \code{total} (the rows \code{loo} read) and
 #'     \code{column}.}
+#'   \item{\code{spatialkit_no_scored_rows}}{\code{resolution_profile()}
+#'     under \code{select_on = "split"}: no row of the selection half has a
+#'     response, and the rows of the layer with one are all in the
+#'     estimation half.  \code{rss}, \code{cp}, \code{moran_i} and
+#'     \code{moran_z}, which read the selection half, are \code{NA} at
+#'     every level.  With an \code{estimate}, whose check that it has rows
+#'     to read is made on the layer, \code{loo} and the estimate's other
+#'     columns read no row and are \code{NA} at every level too.  With
+#'     \code{predictor_vars} a row counts when it has a response and every
+#'     predictor.  Not raised when no row of the layer has a response.
+#'     Raised once, after the levels are scored.  The condition carries
+#'     \code{reason}
+#'     (\code{"no response in the selection half"}), \code{n} (0, the rows
+#'     of the selection half scored), \code{selection} (the rows of the
+#'     selection half), \code{n_response} (the rows of the layer with a
+#'     response) and \code{column}.  Raised too, with or without the split,
+#'     when rows of the layer have a response and none of them every
+#'     predictor: then \code{reason} is \code{"no row with a response and
+#'     every predictor"}, \code{n_response} the rows with a finite
+#'     response, and \code{selection} \code{NA} without the split.}
+#'   \item{\code{spatialkit_pool_unavailable}}{\code{resolution_profile()}
+#'     with an \code{estimate}: the values of the response lie beyond what
+#'     the arithmetic of the estimate holds, values so large, or so close to
+#'     their median, that the squares of many such values can overflow or
+#'     lose their precision, so \code{loo}, \code{loo_se} and
+#'     \code{own_weight} are \code{NA} at every level.  Where the test for
+#'     \code{cp} finds such a response constant, \code{cp}, \code{moran_i}
+#'     and \code{moran_z} are \code{NA} for the same reason, and this message
+#'     names them in place of \code{spatialkit_constant_response}.  The
+#'     message gives the bounds; the response rescaled by a power of ten is
+#'     scored.  Raised once, after the levels are scored.  The condition
+#'     carries \code{reason} (\code{"values out of range"}) and
+#'     \code{columns}, the response, as
+#'     \code{\link{summarize_by_cell}(estimate = "pooled")} raises the class
+#'     for its pooled columns.}
 #'   \item{\code{spatialkit_moran_skipped}}{\code{resolution_profile()}
 #'     with a level of more than 5,000 cells, on any ladder, when
-#'     \pkg{FNN} or \pkg{Matrix} is not installed: \code{moran_i} and
-#'     \code{moran_z} are \code{NA} at a level where more than 5,000 cells
-#'     hold a scored row, and every other column is computed.  Raised once,
+#'     \pkg{FNN} cannot be loaded or \pkg{Matrix} is not installed:
+#'     \code{moran_i} and \code{moran_z} are \code{NA} at a level where
+#'     more than 5,000 cells hold a scored row, and every other column is
+#'     computed.  Raised once,
 #'     before the first fit, when such a level can occur: the cells that
 #'     hold a scored row are counted after a level's fit, so where rows
 #'     without a response leave fewer of them the two columns are computed
 #'     after all.  The condition carries \code{limit}, \code{levels} (the
 #'     levels above the limit) and \code{missing}.}
+#'   \item{\code{spatialkit_variogram_unusable}}{\code{resolution_profile()}:
+#'     the variogram, the one estimated or \code{sac}, gives no usable range
+#'     (\code{rejected_reason} of \code{\link{estimate_sac_range}()}), so
+#'     \code{reliability} is \code{NA}, and the message says whether
+#'     \code{cp} may still take its nugget.  The condition carries
+#'     \code{reason}, \code{converged} (whether the variogram model
+#'     converged; \code{NA} when it does not say), \code{nugget} and
+#'     \code{nugget_used}.}
+#'   \item{\code{spatialkit_cp_noise}}{\code{resolution_profile()}:
+#'     \code{cp} does not take the variogram's nugget as it stands.  Its
+#'     noise variance is the residual mean square of the finest level
+#'     (the variogram gives no nugget, or its nugget is at the fit's lower
+#'     bound), or the semivariance of nearest-neighbour pairs, which holds
+#'     the nugget or that residual mean square where they are larger; or
+#'     there is none and \code{cp} is \code{NA} at every level: the finest
+#'     level whose cells hold two scored rows on average has a residual mean
+#'     square of 0 to within rounding, or, with the nugget at its bound, no
+#'     level's cells hold that many.  The
+#'     condition carries \code{source}, \code{value} and \code{level} (as
+#'     \code{attr(, "cp_noise")} holds them; with no noise variance
+#'     \code{source} and \code{value} are \code{NA}, and \code{level} is the
+#'     level whose residual mean square is 0 to within rounding, or
+#'     \code{NA}), \code{cap} (the
+#'     semivariance, \code{NA} when the variogram carries none),
+#'     \code{uncapped_source} and \code{uncapped_value} (what \code{cp}
+#'     would take without the hold, and with no noise variance what it
+#'     refused: the nugget at its bound, or that residual mean square).}
 #' }
 #' Two refusals are errors with a class: \code{spatialkit_diagnostic_criterion}
 #' (\code{select_resolution(criterion = "moran_z")} without
 #' \code{diagnostic = TRUE}) and \code{spatialkit_no_default_criterion} (a
 #' profile passed as a cell count whose \code{cp} is \code{NA} at every
 #' level while another criterion is finite).  The remaining warnings of
-#' these functions (points dropped, a variogram that gives \code{cp} no
-#' nugget, a zero nugget, a variogram of another variable) are R warnings
-#' without a class; rows left out for a missing response, a rising WSS
-#' curve and a subsample too small to reach the floor are logged only.
+#' these functions (points dropped, a variogram of another variable) are R
+#' warnings without a class; rows left out for a missing response, a rising
+#' WSS curve and a subsample too small to reach the floor are logged only.
 #'
 #' A third refusal is an error of class \code{spatialkit_work_limit}:
 #' \code{resolution_profile()} stops before a step whose count of
@@ -1143,8 +1511,15 @@
 #' its page.
 #'
 #' @param data_sf An sf object of points (other geometries are reduced to
-#'   representative points).  Features with empty or non-finite coordinates
-#'   are dropped with a warning.
+#'   representative points).  Features without a location (an empty point, or
+#'   a coordinate that is not finite or lies beyond 1e150, as given, once
+#'   projected or in the CRS of \code{sac}) are dropped with a warning.  A layer that mixes XY and XYZ (or XYM)
+#'   geometries is read in x and y, before and after it is reduced to points,
+#'   since sf reads a layer in the dimension of its first geometry.  So is a
+#'   layer whose geometries carry M (XYM or XYZM), which GEOS refuses.  The
+#'   points a layer is reduced to are read in x and y when they mix
+#'   dimensions, as those of a layer XYZ throughout that holds points and
+#'   polygons do.
 #' @param response_var Optional response column name (numeric or logical).
 #'   Enables \code{cp} and \code{moran_z}, and, when it is numeric, the
 #'   pooled estimate the default profile scores by \code{loo}.  A variogram
@@ -1165,7 +1540,9 @@
 #'   the ladder; values below 2, above the number of distinct locations, or
 #'   at or above the number of points, are dropped (k-means cannot place more
 #'   centres than there are distinct points, and \code{stats::kmeans()}
-#'   refuses as many centres as points).
+#'   refuses as many centres as points).  When none is left the call stops
+#'   with an error, before the variogram is estimated or read, so it raises
+#'   no warning about the variogram.
 #' @param n_levels Number of levels on the ladder.  Default 20.  The ladder
 #'   has fewer when rounding puts two of them on one count, and one more
 #'   when the range floor is added as a level (see "The ladder and its
@@ -1189,6 +1566,14 @@
 #'   describe the subsample; the bounds, \code{supported}, the variance term
 #'   of \code{cp} and \code{reliability} describe the whole layer, so the
 #'   answer does not change with \code{sample_n} except through the fits.
+#'   The fits are those of the subsample, which \code{seed} draws, so on a
+#'   layer of more than \code{sample_n} points the count read off the
+#'   profile can move with \code{seed} and with \code{sample_n}.
+#'   The level \code{\link{select_resolution}()} chooses off such a profile
+#'   without an estimate is refitted to every point before its seeds are
+#'   handed on (see \code{refit_rows} under "Value"); a profile with an
+#'   estimate scores it on every row in the cells of the centres fitted, and
+#'   hands those centres on.
 #' @param nstart Starts per level; the best is kept.  They are k-means++
 #'   starts unless \code{init} says otherwise.  \code{NULL} (default) is the
 #'   kind's own number: 3 for the kind \code{"density"} and 25 for the kind
@@ -1198,7 +1583,17 @@
 #'   \code{attr(, "nstart")} holds the number that was run.
 #' @param seed RNG seed for the subsample and the restarts; restored
 #'   afterwards.  Default 123.  The rows are put in coordinate order before
-#'   either, so the profile does not depend on the order they come in.
+#'   either, so the profile does not depend on the order they come in.  Each
+#'   level's restarts run on a stream of their own, seeded from \code{seed}
+#'   and the level, so for one \code{seed} a level gets the same cells on
+#'   any ladder that holds it and is fitted to the same rows, and with them
+#'   the same \code{wss}, \code{rss}, \code{moran_z} and the other columns
+#'   read off its cells.  On a layer of more than \code{sample_n} rows a
+#'   ladder of counts is fitted to a subsample and a ladder of sizes to every
+#'   row, so there the two can give a level other cells.
+#'   \code{cp} also reads its noise variance, which without a usable
+#'   variogram comes from the ladder's finest level
+#'   (\code{attr(, "cp_noise")}).
 #' @param sac Optional \code{sac_range} object from
 #'   \code{\link{estimate_sac_range}()} to take the range, nugget and
 #'   correlation function from.  Pass one fitted with \code{detrend =
@@ -1209,7 +1604,9 @@
 #'   to which the points are transformed first, so the area, the floor and
 #'   \code{cell_diam_median} are then in that CRS's units.  A sac whose
 #'   range was rejected (\code{NA} with a \code{rejected_reason}) gives
-#'   \code{cp} its nugget, with a warning, and leaves \code{reliability}
+#'   \code{cp} its nugget (held to the semivariance of nearest-neighbour
+#'   pairs, and not at all when it is at the fit's lower bound), with a
+#'   warning, and leaves \code{reliability}
 #'   \code{NA}, since that needs the range; one whose model did not converge
 #'   (its fit has no minimum inside the ranges searched, so its nugget and
 #'   sill are not fitted values), or whose range is below the shortest lag
@@ -1233,7 +1630,8 @@
 #'   the units of the CRS the profile is computed in (metres for lon/lat
 #'   input): it gives the range floor, \code{reliability}, which needs a
 #'   fitted model, is \code{NA}, and \code{cp} takes its noise variance from
-#'   the finest level.  A sac refused because the response shows no spatial
+#'   the finest level whose cells hold at least two scored rows on average
+#'   (see \code{cp} above).  A sac refused because the response shows no spatial
 #'   structure (either of the two \code{rejected_reason} values of
 #'   \code{\link{estimate_sac_range}()} that say so; the model it attaches
 #'   is a pure nugget) gives \code{cp} no
@@ -1336,7 +1734,10 @@
 #'   errors without a \code{response_var}, with \code{predictor_vars} (the
 #'   profile would then score residuals, and the summary reports cell values
 #'   of the response), with a logical response, and with a response that has
-#'   no finite value.
+#'   no finite value.  Under \code{select_on = "split"} a selection half
+#'   with no finite response is not an error: the five columns are
+#'   \code{NA} at every level, with a warning of class
+#'   \code{spatialkit_no_scored_rows}.
 #' @param obs_per_cell Rows per cell: \code{"auto"} (default; see below);
 #'   \code{NULL} for the ladder described under "The ladder and its
 #'   bounds", the default of earlier versions, whatever the other arguments
@@ -1376,7 +1777,9 @@
 #'   Like the other columns read off the fitted cells, the last two count
 #'   rows of the subsample when the layer is larger than \code{sample_n}:
 #'   the cells of the layer then hold about \code{n_response / n_scored}
-#'   times as many scored rows as \code{cell_resp_mean} shows.
+#'   times as many scored rows as \code{cell_resp_mean} shows (under
+#'   \code{select_on = "split"}, \code{split$n_response / n_scored}: both
+#'   count the rows of the selection half).
 #'   Columns a missing input leaves undefined are \code{NA}.  Attributes:
 #'   \code{bounds} (a list with \code{floor}, \code{ceiling},
 #'   \code{ceiling_from} (\code{"min_cell_n"}, \code{"min_cell_n (rows with a
@@ -1390,8 +1793,10 @@
 #'   support ceiling counts; \code{NA} without a
 #'   \code{response_var}), \code{n_scored} (the rows of the subsample the
 #'   response criteria read; \code{NA} without a \code{response_var}),
-#'   \code{levels_given} (whether \code{levels} set the ladder) and
-#'   \code{predictors} (whether \code{predictor_vars} were given)),
+#'   \code{levels_given} (whether \code{levels} set the ladder),
+#'   \code{predictors} (whether \code{predictor_vars} were given) and, where
+#'   rows have a response and none of them every predictor,
+#'   \code{n_response_only} (the rows with a finite response)),
 #'   \code{variogram} (a list with \code{nugget}, \code{psill}, \code{range}
 #'   (\code{NA} when rejected), \code{model} and \code{detrended} (whether
 #'   the sac says it is a variogram of residuals; \code{NA} when it does not
@@ -1400,11 +1805,24 @@
 #'   \code{sac} (the range object used) and, with \code{select_on =
 #'   "split"}, \code{split} (a \code{spatialkit_split}: \code{selection}
 #'   and \code{estimation}, integer row positions in \code{data_sf}, with
-#'   the \code{method} and \code{seed} that made them), \code{cp_noise} (a
-#'   list with \code{source}, \code{"variogram nugget"} or
-#'   \code{"finest-level residual mean square"}, \code{value}, the
-#'   \eqn{\tau^2} used, and \code{level}, the level it was read at or
-#'   \code{NA}; \code{NULL} when \code{cp} has neither), \code{one_cell}
+#'   the \code{method} and \code{seed} that made them, and with a
+#'   response \code{n_response}, the rows of the selection half with a
+#'   finite response and every predictor, counted on the layer before any
+#'   subsample), \code{cp_noise} (a
+#'   list with \code{source}, \code{"variogram nugget"},
+#'   \code{"finest-level residual mean square"} or \code{"short-lag
+#'   semivariance"}, \code{value}, the \eqn{\tau^2} used, and \code{level},
+#'   the level it was read at or \code{NA}; under the short-lag semivariance
+#'   also \code{cap}, that semivariance, and \code{uncapped}, a list of the
+#'   \code{source}, \code{value} and \code{level} it held; when the
+#'   finest level whose cells hold two scored rows on average has a
+#'   residual mean square of 0 to within rounding, \code{source} and
+#'   \code{value} \code{NA}, \code{level}, that level, \code{rows_per_cell},
+#'   its scored rows a cell, \code{rms}, its residual mean square (0, or the
+#'   rounding it was read as), and \code{reason}, which
+#'   \code{select_resolution()} gives;
+#'   \code{NULL} when \code{cp} has none for another reason; see \code{cp}
+#'   above), \code{one_cell}
 #'   (what one cell for the whole layer scores, the reference a level has to
 #'   beat: a list with \code{n}, the scored rows, \code{rss}, their total
 #'   sum of squares, \code{cp}, the same formula at one cell or \code{NA}
@@ -1418,12 +1836,20 @@
 #'   (a list named by level of the two-column matrices of the scored
 #'   partitions' centres), \code{centres_crs} (the CRS they are in) and
 #'   \code{hull} (the convex hull of the points profiled, an \code{sfc} in
-#'   that CRS).  A
+#'   that CRS), and, when the centres were fitted to a subsample and the
+#'   profile has no estimate, \code{refit_rows}: a list with \code{xy}, the
+#'   coordinates of every point in that CRS, and \code{iter_max}, the
+#'   iteration limit of the fits, from which
+#'   \code{\link{select_resolution}()} refits the level it chooses to every
+#'   point.  A
 #'   k-means partition is the Voronoi partition of its centres, so these
 #'   seed the very cells each level was scored on: \code{select_resolution()}
 #'   returns the chosen level's as \code{$seeds}, and
 #'   \code{\link{get_voronoi_seeds}()} and \code{\link{voronoi_seeds_kmeans}()}
-#'   use them when given the selection or the profile.  The centres carry the
+#'   use them when given the selection or the profile.  On a profile fitted
+#'   to a subsample without an estimate the seeds are the chosen level's
+#'   centres refitted to every point, whose cells are not the cells scored
+#'   (see \code{\link{select_resolution}}, "Value").  The centres carry the
 #'   hull as their \code{"cover"} attribute, which those two functions hand on
 #'   so that Voronoi cells built on the seeds reach the edge of the points.
 #'   A profile built with \code{partition = "density"} or \code{init =
@@ -1454,17 +1880,31 @@
 #'   of the weight a pooled value gives the cell's own mean; \code{NA}
 #'   under \code{"mean"}).  \code{loo}, \code{loo_se} and
 #'   \code{own_weight} are \code{NA} at a level where no cell holds two
-#'   scored rows, and at every level when the response is constant over the
-#'   rows \code{loo} reads.  It also carries \code{estimate}: a list with
-#'   \code{value} (\code{"mean"} or \code{"pooled"}), \code{neighbours}
+#'   scored rows, at every level when the response is constant over the
+#'   rows \code{loo} reads, and at every level when those rows' values lie
+#'   beyond what the arithmetic of the estimate holds, values so large or so
+#'   close to their median that the squares of many such values can overflow
+#'   or lose their precision (\code{spatialkit_pool_unavailable}).  All five
+#'   are \code{NA} at every level when no row of the selection half has a
+#'   response (\code{select_on = "split"};
+#'   \code{spatialkit_no_scored_rows}).  It also carries \code{estimate}: a
+#'   list with \code{value} (\code{"mean"} or \code{"pooled"}), \code{neighbours}
 #'   (8, or \code{NA} under \code{"mean"}), \code{response} (the column),
 #'   \code{n} (the rows \code{loo} read), \code{rows} (\code{"all"} or
 #'   \code{"selection half"}), \code{features} (\code{"points"}, or
 #'   \code{"other"} when the layer held features that were reduced to
 #'   points), \code{seed}, \code{constant} (whether the response is constant
-#'   over those rows; \code{FALSE} for fewer than two), \code{loo_one_cell}
+#'   over those rows by the estimate's test, which reads the raw values and
+#'   the values centred on their median and scaled, so that 1e15 plus a
+#'   spread of 1 is not constant while values that differ only by their
+#'   rounding, 0.1 beside 0.3 / 3, are; \code{FALSE} for fewer than two rows;
+#'   \code{one_cell$constant}, the test for \code{cp}, reads the scored rows
+#'   of the subsample the same way, and residuals against the rounding of
+#'   the regression and of the response), \code{loo_one_cell}
 #'   and \code{loo_one_cell_se} (the same error with one mean for all those
-#'   rows, the reference a level has to beat), \code{loo_levels} (the
+#'   rows, the reference a level has to beat; \code{NA} for a constant
+#'   response, for fewer than two rows and for values beyond the arithmetic
+#'   of the estimate), \code{loo_levels} (the
 #'   \code{loo} column those references belong to, named by level), and,
 #'   named by level, \code{sigma2} (the spread of the rows about their
 #'   cell's mean), \code{tau2} (the mean squared distance between a cell's
@@ -1538,6 +1978,10 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                                density_power = 1, density_k = 8L,
                                iter_max = NULL,
                                estimate = "auto", obs_per_cell = "auto") {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("resolution_profile", "data_sf")
+  on.exit(tie_end(returnValue(tie_end), data_sf), add = TRUE)
   # Which of the arguments that describe the automatic ladder the caller
   # supplied.  Read first, before any of them is altered: `obs_per_cell` is
   # resolved against them below.  A value a wrapper passes on counts as
@@ -1652,19 +2096,36 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     stop("resolution_profile(): pass one of `obs_per_cell` and `levels`: each sets the ",
          "ladder.", call. = FALSE)
 
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y,
+  # before the coerce and again after it: sf reads a layer in the dimension
+  # of its first geometry.  So is one whose geometries carry M, which GEOS
+  # refuses at the hull and in the coerce (.xy_if_mixed_or_m()).  The
+  # profile does not return the layer, so no warning.  A row without a
+  # location (an empty point, or a coordinate that is not finite or lies
+  # beyond 1e150) is read on the coordinates as given: it is emptied here,
+  # before the coerce and the projection, which could otherwise bring it
+  # back finite, and the layer is then read as it is read with that row
+  # empty.  A row at 1e200 kept as a point made the WSS NA at every level.
+  # Points in an sfc_GEOMETRY column are read as the same points in
+  # sfc_POINT (.typed_points()): sf::st_coordinates() refuses that class.
+  data_sf <- .empty_unlocated(.xy_if_mixed_or_m(.typed_points(data_sf)))
   # Whether the layer came as points: a feature that is not one is scored at
   # the point it is reduced to, and the record of an estimate says so.
   was_points <- all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")
+  # A polygon s2 cannot take a centroid of in degrees is refused in this
+  # function's words, naming `data_sf` (.pointize_auto()).
   if (!was_points)
-    data_sf <- coerce_to_points(data_sf, "auto")
+    data_sf <- .xy_if_mixed(.pointize_auto(data_sf, "resolution_profile", "`data_sf`"))
+  # The bound is read again after the projection, which can take a location
+  # away (a latitude beyond 90 comes back NaN).
   data_sf <- ensure_projected(data_sf)
   xy <- sf::st_coordinates(data_sf)[, 1:2, drop = FALSE]
-  ok_xy <- is.finite(xy[, 1]) & is.finite(xy[, 2])
+  ok_xy <- .located_rows(data_sf)
   if (!all(ok_xy)) {
     # An R warning, as in determine_optimal_levels(): a log line alone could
     # not be caught, and spatialkit_quiet() hid it.
-    .warn_and_log("resolution_profile(): dropping %d point(s) with empty or non-finite coordinates.",
-                  sum(!ok_xy))
+    .warn_and_log("resolution_profile(): dropping %d point(s) without a location (%s).",
+                  sum(!ok_xy), .UNLOCATED_WHAT)
     data_sf <- data_sf[ok_xy, , drop = FALSE]
     xy <- xy[ok_xy, , drop = FALSE]
   }
@@ -1716,12 +2177,41 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       !is.na(sf::st_crs(data_sf)) && !isTRUE(sf::st_crs(data_sf) == sac_crs)) {
     .log_info("resolution_profile(): working in the CRS of `sac` (%s), in which its range is a length.",
               sac_crs$input %||% "unnamed")
+    # The split's boxes are in data_sf's CRS: kept as given, with the row
+    # positions in the layer as passed, so a half that loses a row below is
+    # boxed again without it.
+    geom_given <- sf::st_geometry(data_sf)
+    pos_given  <- which(ok_xy)
     data_sf <- .transform_or_stamp(data_sf, sac_crs, what = "data_sf",
                                    caller = "resolution_profile")
     xy <- sf::st_coordinates(data_sf)[, 1:2, drop = FALSE]
-    if (!all(is.finite(xy)))
-      stop("resolution_profile(): some points have no coordinates in the CRS of `sac`.",
-           call. = FALSE)
+    # The rows without a location as given were dropped above, before this
+    # move; a row the move leaves without one (a coordinate that is not
+    # finite or lies beyond 1e150 in the CRS of `sac`) is dropped as they
+    # were, and the halves of the split lose it too.
+    ok_sac <- .located_rows(data_sf)
+    if (!all(ok_sac)) {
+      .warn_and_log(paste0("resolution_profile(): dropping %d point(s) without a location ",
+                           "in the CRS of `sac` (%s)."),
+                    sum(!ok_sac), .UNLOCATED_WHAT)
+      gone <- which(ok_xy)[!ok_sac]
+      ok_xy[gone] <- FALSE
+      data_sf <- data_sf[ok_sac, , drop = FALSE]
+      xy <- xy[ok_sac, , drop = FALSE]
+      if (!is.null(split)) {
+        in_sel <- in_sel[ok_sac]
+        split$selection  <- setdiff(split$selection, gone)
+        split$estimation <- setdiff(split$estimation, gone)
+        halves <- list(selection = split$selection, estimation = split$estimation)
+        split$extent <- lapply(halves, function(i)
+          sf::st_bbox(geom_given[match(i, pos_given)]))
+        sizes <- lengths(halves, use.names = FALSE)
+        split$balance <- max(sizes) / min(sizes)
+      }
+      if (nrow(xy) < 3L)
+        stop("resolution_profile(): fewer than three points in the CRS of `sac`.",
+             call. = FALSE)
+    }
   }
 
   resp <- NULL; pred <- NULL
@@ -1841,15 +2331,25 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   n_all  <- nrow(xy)
   n_resp <- if (has_resp) sum(resp_ok) else n_all
   n_support <- if (has_resp && n_resp > 0L) n_resp else n_all
+  # The rows with a finite response, whatever the predictors hold.  Where
+  # the predictors leave none of them complete, the layer has a response and
+  # nothing is scored, which spatialkit_no_scored_rows says below and the
+  # bounds record (`n_response_only`) carries for summary() and
+  # select_resolution().
+  n_resp_only <- if (has_resp) as.integer(sum(is.finite(resp))) else NA_integer_
+  no_complete <- has_resp && has_pred && n_resp == 0L && n_resp_only > 0L
   hull <- sf::st_convex_hull(sf::st_union(sf::st_geometry(data_sf)))
-  area <- suppressWarnings(as.numeric(sf::st_area(hull)))
+  # In the CRS's unit squared, as the range and every distance below are in
+  # its unit: sf::st_area() gives square metres for a unit it has no name
+  # for (a +to_meter of 1e6, or 3.28), which put a floor of 3 at 31 in units
+  # of 3.28 m and stopped the profile in units of 1000 km (.planar_area()).
+  area <- suppressWarnings(.planar_area(hull))
   bb   <- sf::st_bbox(data_sf)
   bbw  <- as.numeric(bb["xmax"] - bb["xmin"]); bbh <- as.numeric(bb["ymax"] - bb["ymin"])
   if (!is.finite(area) || area <= 0) area <- bbw * bbh
-  # duplicated() on a complex vector, because unique() on an n x 2 matrix
-  # pastes every row into a string: 0.01 s against 5 s at a million points.
-  n_uniq_all <- sum(!duplicated(complex(real = round(xy[, 1], 8),
-                                        imaginary = round(xy[, 2], 8))))
+  # Counted as stats::kmeans() is handed them (.n_locations()), so the count
+  # does not move with the unit or the origin.
+  n_uniq_all <- .n_locations(xy)
 
   # Subsample, keeping everything aligned, from the rows in a canonical order:
   # the subsample and every k-means++ draw index rows, so the same layer with
@@ -1857,8 +2357,11 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # WSS 2.6 percent apart and Cp picks of 222, 173 and 135 cells over
   # permutations of one 2000-point layer).  Coordinates first; the response
   # and the predictors break ties between repeat visits to one location.
-  # Every point is reordered even with no subsample to draw.
-  ord <- do.call(order, c(list(xy[, 1], xy[, 2]),
+  # Every point is reordered even with no subsample to draw.  First
+  # coordinates equal but for their last bits are one column, ordered by the
+  # second coordinate (.near_columns()): on gridded locations those bits move
+  # with the unit and the origin, and with them the rows a subsample draws.
+  ord <- do.call(order, c(list(.near_columns(xy[, 1], xy[, 2]), xy[, 2], xy[, 1]),
                           if (has_resp) list(resp),
                           if (has_pred) lapply(seq_len(ncol(pred)), function(j) pred[, j])))
   # What the estimate's columns read: every row of the layer with a finite
@@ -1871,38 +2374,129 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     if (!is.null(in_sel)) scored <- scored & in_sel[ord]
     lay <- list(xy = unname(xy[ord[scored], , drop = FALSE]), y = resp[ord[scored]])
   }
+  # Under select_on = "split", the rows of the selection half with a finite
+  # response (and every predictor), counted on the layer before the
+  # subsample: with an estimate, the rows it reads.  Kept on the split
+  # (`n_response`), where summary() and select_resolution() read that the
+  # half has none, with or without an estimate.
+  n_sel_resp <- NA_integer_
+  if (has_resp && !is.null(in_sel)) {
+    n_sel_resp <- as.integer(sum(resp_ok & in_sel))
+    split$n_response <- n_sel_resp
+  }
   # A size is a number of rows of the layer, so the centres of a ladder of
   # sizes are fitted to every row: no subsample is drawn, and `sample_n` is
   # not read.
   idx <- if (!size_ladder && n_all > sample_n) ord[sample(seq_len(n_all), sample_n)] else ord
+  # The centres of such a ladder are fitted to the subsample, and at a few
+  # subsample rows per cell they are far from the centres a fit to every row
+  # gives: a few steps of the kind's own iteration on every row, from the
+  # same centres, lower the rows' within-cell sum of squares a long way.
+  # Without an estimate every column is read off the subsample, so
+  # select_resolution() refits the level it chooses to every point before
+  # its seeds are handed on (.refit_level()), from the coordinates kept
+  # here, in the same order, with the same iteration limit.  An estimate is
+  # scored on every row of the layer (`lay`) in the cells of the centres as
+  # fitted, so those are the cells its record describes and the cells
+  # summarize_by_cell() checks: they are handed on as they are, and nothing
+  # is kept to refit them.
+  refit_rows <- if (length(idx) < n_all && is.null(est))
+    list(xy = unname(xy[ord, , drop = FALSE]), iter_max = as.integer(part_iter))
+  else NULL
   xy <- xy[idx, , drop = FALSE]
   data_sf <- data_sf[idx, , drop = FALSE]
   if (has_resp) { resp <- resp[idx]; resp_ok <- resp_ok[idx] }
   if (has_pred) pred <- pred[idx, , drop = FALSE]
   if (!is.null(in_sel)) in_sel <- in_sel[idx]
   n <- nrow(xy)
+  # The integer that seeds each level's partition (see the loop over the
+  # levels below), drawn after the subsample and before anything that runs
+  # only on some calls (the variogram).  Every level drew from the one
+  # stream in ladder order, so a level's cells, and every column read off
+  # them, depended on which other levels the ladder held: on twelve
+  # clusters the 20-cell level of the ladder 10, 20, 30, 40 and of the
+  # ladder 20, 30, 40 had other cells, and dropping low levels that did
+  # not win moved the count select_resolution() chose.  The bound keeps the
+  # integer plus any level (at most n - 1) an integer.
+  level_seed <- sample.int(.Machine$integer.max - n, 1L)
 
   # The variable the cells have to represent: the response, or what the
   # predictors leave of it.  Rows with a non-finite value drop out of the RSS
   # and the Moran statistic but stay in the geometry, and so, under
   # select_on = "split", do the rows of the estimation half.
+  # A response whose raw values lose their spread to rounding (1e15 plus a
+  # spread of 1) is scored about its centre (.regression_centre()), so that
+  # the OLS fit and Moran's regression on an intercept do not work on the
+  # rounding of the offset.  Nothing read off `y` changes under a shift.
+  # The centre is 0 for every other response, except where the residuals of
+  # the raw values show no spread (below).
   variable <- NA_character_
   y <- NULL
+  y_centre <- 0
+  resid_fit <- NULL
   if (has_resp) {
     use <- if (is.null(in_sel)) resp_ok else resp_ok & in_sel
     y <- rep(NA_real_, n)
-    y[use] <- resp[use]
+    y_centre <- .regression_centre(resp[use])
+    y[use] <- resp[use] - y_centre
     variable <- "response"
-    if (has_pred) {
+    # No complete row: there is nothing to fit, and nothing is scored.  The
+    # fit on zero rows raised base R's bare "number of rows of result is not
+    # a multiple of vector length" and logged that the raw response was
+    # scored, which no row was.
+    if (has_pred && any(use)) {
       # Fitted on the complete rows only.  lm.fit() refuses any NA, and a
       # first fit on every row turned one missing value into "the OLS fit
       # failed": the raw response, trend and all, was then scored against a
       # variogram estimate_sac_range() had fitted to the residuals.
-      fit <- if (sum(use) > ncol(pred) + 1L)
-        try(stats::lm.fit(x = cbind(1, pred[use, , drop = FALSE]), y = resp[use]),
-            silent = TRUE)
+      # A predictor at an offset (1e8 plus a spread of 1), which the raw fit
+      # drops as collinear with the intercept or fits on the rounding of the
+      # offset, is fitted about its centre (.lm_fit_centred()), and so is
+      # the refit below.
+      X_fit <- cbind(1, pred[use, , drop = FALSE])
+      fit <- NULL
+      centres <- NULL
+      if (sum(use) > ncol(pred) + 1L) {
+        kept <- .lm_fit_centred(X_fit, resp[use] - y_centre)
+        fit <- kept$fit
+        X_fit <- kept$X
+        centres <- kept$centres
+      }
+      # A response whose raw values show their spread through a trend (1e15
+      # plus 1e5 times a predictor plus a spread of 1) is fitted on its raw
+      # values, and the rounding of that fit at the offset is of the order
+      # of the spread.  So where its residuals show no spread to the raw
+      # bound of the test for `cp` below, the fit is taken again about the
+      # response's centre (.residual_centre()), and those residuals are
+      # scored and tested.  Where they show spread nothing changes.
+      if (!is.null(fit) && !inherits(fit, "try-error") && y_centre == 0) {
+        e0 <- fit$residuals
+        if (isTRUE(sum((e0 - mean(e0))^2) <= 100 * .Machine$double.eps^2 *
+                     max(sum(e0^2), sum(resp[use]^2)))) {
+          c0 <- .residual_centre(resp[use])
+          fit0 <- if (c0 != 0)
+            try(stats::lm.fit(x = X_fit, y = resp[use] - c0), silent = TRUE)
+          if (!is.null(fit0) && !inherits(fit0, "try-error")) {
+            fit <- fit0
+            y_centre <- c0
+          }
+        }
+      }
       if (!is.null(fit) && !inherits(fit, "try-error")) {
         y[use] <- fit$residuals
+        # The fit, for the test for `cp` below (.residuals_rounding()), on
+        # the predictors as given where they were centred
+        # (.rounding_design()).
+        rd <- .rounding_design(X_fit, fit$coefficients, centres)
+        resid_fit <- list(yd = resp[use] - y_centre, X = rd$X, b = rd$b)
+        # The size of each row's terms in the fit as taken, which bounds the
+        # rounding of its residual: rows of one location and one value have
+        # residuals that differ by that rounding alone, and the fallback for
+        # Cp's noise variance reads their sum of squares as 0.
+        b_fit <- as.numeric(fit$coefficients)
+        b_fit[!is.finite(b_fit)] <- 0
+        resid_fit$size <- rep(NA_real_, n)
+        resid_fit$size[use] <- abs(resid_fit$yd) + drop(abs(X_fit) %*% abs(b_fit))
         variable <- "residuals"
       } else {
         .log_warn(paste0("resolution_profile(): the OLS fit on `predictor_vars` failed ",
@@ -1914,7 +2508,7 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
 
   # The distinct locations.  `n_uniq_all` is the layer's (see above);
   # `n_uniq` is the subsample's, the locations k-means can place centres on.
-  n_uniq  <- nrow(unique(round(xy, 8)))
+  n_uniq  <- .n_locations(xy)
   if (n == n_all) n_uniq_all <- n_uniq
   # k-means can put a centre on every distinct location but no more, and
   # stats::kmeans() refuses as many centres as points (see the present
@@ -1962,6 +2556,55 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     centre_guard(finest)
   }
 
+  # The rows of the subsample the response criteria read (under select_on =
+  # "split", those of the selection half): what a fitted cell is scored on.
+  n_scored <- if (has_resp) sum(is.finite(y)) else NA_integer_
+  # On every other ladder the finest level is known before the variogram
+  # too: the largest of the caller's `levels` the locations allow, or else
+  # the ceiling, and neither reads the variogram.  So `levels` is checked,
+  # and the estimate's search of each scored row's nearest centre bounded,
+  # before the variogram is estimated and read.  They came after it, and a
+  # call they stopped had warned what `cp` and `reliability` would take from
+  # a variogram that no column ever read.
+  if (!size_ladder) {
+    by_support <- floor(n_support / min_cell_n)
+    # The ceiling is the smallest of what the layer's point count supports,
+    # what its distinct locations allow and, when the fits run on a subsample,
+    # what the subsample can fit: two of its points per cell.  k-means can put
+    # a centre on every distinct location but no more, and stats::kmeans()
+    # refuses as many centres as points, so that bound is the distinct
+    # locations when some repeat and one short of the points when none do.  It
+    # used to be one short of the distinct locations in every case, which
+    # dropped k = 5 on five stations visited thirty times each.  Which bound
+    # holds is recorded (below), because the print and the "bound is
+    # choosing" notes name it.
+    k_cap_fit    <- min(n_uniq, n - 1L)
+    data_ceiling <- min(by_support, k_cap_all)
+    # Two scored subsample rows per cell, not two subsample points: with 20,000
+    # points, a response on 5,000 and sample_n = 1500, half the subsample left
+    # about 0.5 scored rows per cell at a ceiling of 750.
+    fit_rows     <- if (has_resp && n_resp > 0L) n_scored else n
+    fit_cap      <- if (n < n_all) min(floor(fit_rows / 2), k_cap_fit) else Inf
+    # A ladder the caller set is scored as given.  Settled here, before the
+    # messages below, because they name it: with `levels = 2:4` on ten points
+    # the warning said "the profile scores 2 cells" over a table of three
+    # levels.
+    if (levels_given) {
+      levels <- sort(unique(as.integer(levels)))
+      levels <- levels[!is.na(levels) & levels >= 2L & levels <= k_cap_fit]
+      if (!length(levels))
+        stop("resolution_profile(): no usable value in `levels`.", call. = FALSE)
+    }
+    # Fewer than two cells that meet min_cell_n, or one distinct location, is
+    # no ladder at all.  The ceiling used to be raised to 2 without a word:
+    # ten points at min_cell_n = 9 came back as "ceiling 2 from min_cell_n",
+    # supported.
+    too_few <- data_ceiling < 2
+    ceiling_L    <- max(2L, as.integer(min(data_ceiling, fit_cap)))
+    # The ladder built below ends at the ceiling.
+    centre_guard(if (levels_given) max(levels) else ceiling_L)
+  }
+
   # Variogram: supplied, or estimated on the subsample (its selection half
   # under select_on = "split": the range reads the response).
   vg <- NULL
@@ -1999,6 +2642,10 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                 length(printed), paste(unique(printed), collapse = " | "))
   }
   range_eff <- NA_real_
+  # What Cp's noise variance may not exceed, and whether the variogram's
+  # nugget is the fit's lower bound (both read off `sac` below).
+  cp_cap <- NA_real_
+  nugget_bound <- FALSE
   if (!is.null(sac)) {
     vm <- attr(sac, "variogram_model")
     r  <- suppressWarnings(as.numeric(sac))[1L]
@@ -2044,7 +2691,47 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       if (!is.finite(vg$nugget)) vg$nugget <- 0
       if (!is.finite(vg$psill) || vg$psill <= 0) vg <- NULL
     }
+    # The semivariance of nearest-neighbour pairs, which estimate_sac_range()
+    # computes with no model (attr(sac, "short_lag_semivariance")).  A
+    # semivariance does not fall as the lag shrinks, so it bounds the nugget
+    # from above, and Cp's noise variance is held to it whatever its source.
+    # A noise variance above it is contradicted by the closest pairs: one
+    # that is too large stops Cp early.  A value of 0 holds nothing: it would
+    # take away the penalty that the refusal of a nugget at its bound keeps.
+    cp_cap <- suppressWarnings(as.numeric(attr(sac, "short_lag_semivariance",
+                                               exact = TRUE))[1L])
+    if (length(cp_cap) != 1L || !is.finite(cp_cap) || cp_cap <= 0) cp_cap <- NA_real_
+    # A nugget at the fit's lower bound (0, or at most 1e-4 of the sill) is
+    # the bound and not an estimate: estimate_sac_range() marks it as
+    # `nugget_at_bound`, and a sac that carries no mark is judged by the same
+    # rule.  As Cp's noise variance it is no penalty at all, and Cp then fell
+    # with every finer level to the ceiling whatever the field.  Cp does not
+    # take it: its noise variance comes from the finest level instead (see
+    # below).  Its range and sill still serve `reliability`.  Anything up to
+    # 1e-4 of the sill: a REML fit stops short of its bound, and a nugget of
+    # 6e-7 on a sill of 0.99 slipped past a test for exactly 0.
+    nugget_bound <- .nugget_at_bound(vg, sac)
+    # What a warning that refuses the nugget says of Cp's noise variance.
+    held <- if (is.finite(cp_cap))
+      sprintf(", held to the semivariance of nearest-neighbour pairs (%.3g)", cp_cap)
+    else ""
+    # What `cp` is left with when the variogram gives it no nugget, one clause
+    # for every refusal and log line below: the fallback reads the finest
+    # level whose cells hold at least two scored rows on average, and with
+    # none (only finer `levels` were asked for, or the response is missing on
+    # most rows) `cp` is NA at every level.  "From the finest level" alone
+    # was untrue there.
+    cp_finest <- sprintf(paste0("`cp` takes its noise variance from the finest level whose ",
+                                "cells hold at least two scored rows on average%s, and is NA ",
+                                "at every level when none does"), held)
     if (!is.null(vg) && !is.null(rejected)) {
+      # Classed, so a script can tell this outcome from the others without
+      # reading the text: the variogram gives no usable range, and `reason`
+      # says why.  `nugget_used` is whether Cp may still take its nugget.
+      unusable <- function(fmt, ..., nugget_used)
+        .warn_classed("spatialkit_variogram_unusable", fmt, ...,
+                      data = list(reason = rejected, converged = .vgm_converged(vm),
+                                  nugget = vg$nugget, nugget_used = nugget_used))
       if (not_converged) {
         # Both facts are named: why the range was refused, and that the fit
         # behind it did not converge, which the reason leaves out whenever it
@@ -2057,24 +2744,22 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
         # more sacs arrive here now that the model's own verdict is read: one
         # refused as past the lags gave `cp` 0.82 and 0.87 from its nugget of
         # 0.5 at 200 and 250 cells of 300 points, and gives NA.
-        .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s)%s; ",
-                             "its nugget and sill are where the fit stopped without ",
-                             "reaching a minimum, not ",
-                             "fitted values, so neither is used: `reliability` is NA and ",
-                             "`cp` takes its noise variance from the finest level whose ",
-                             "cells hold at least two scored rows on average, and is NA ",
-                             "at every level when none does."),
-                      sac_what, rejected,
-                      if (grepl("converge", rejected, fixed = TRUE)) ""
-                      else ", and its variogram model did not converge")
+        unusable(paste0("resolution_profile(): %s reports no usable range (%s)%s; ",
+                        "its nugget and sill are where the fit stopped without ",
+                        "reaching a minimum, not ",
+                        "fitted values, so neither is used: `reliability` is NA and ",
+                        "%s."),
+                 sac_what, rejected,
+                 if (grepl("converge", rejected, fixed = TRUE)) ""
+                 else ", and its variogram model did not converge",
+                 cp_finest, nugget_used = FALSE)
         vg <- NULL
       } else if (grepl("shortest lag", rejected, fixed = TRUE)) {
-        .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s): ",
-                             "a structure that dies out before the closest pairs of ",
-                             "points cannot be told from a nugget, so its nugget (%.3g) ",
-                             "is not identified either: `reliability` is NA and `cp` ",
-                             "takes its noise variance from the finest level."),
-                      sac_what, rejected, vg$nugget)
+        unusable(paste0("resolution_profile(): %s reports no usable range (%s): ",
+                        "a structure that dies out before the closest pairs of ",
+                        "points cannot be told from a nugget, so its nugget (%.3g) ",
+                        "is not identified either: `reliability` is NA and %s."),
+                 sac_what, rejected, vg$nugget, cp_finest, nugget_used = FALSE)
         vg <- NULL
       } else if (.sac_no_structure(sac)) {
         # A variogram refused because the response shows no spatial structure
@@ -2089,45 +2774,40 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
         # Its nugget is no more identified than its range, so Cp takes its
         # noise variance from the finest level, as for a range below the
         # shortest lag.
-        .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s), ",
-                             "so its nugget (%.3g) is not a fitted value either: ",
-                             "`reliability` is NA and `cp` takes its noise variance ",
-                             "from the finest level."),
-                      sac_what, rejected, vg$nugget)
+        unusable(paste0("resolution_profile(): %s reports no usable range (%s), ",
+                        "so its nugget (%.3g) is not a fitted value either: ",
+                        "`reliability` is NA and %s."),
+                 sac_what, rejected, vg$nugget, cp_finest, nugget_used = FALSE)
         vg <- NULL
+      } else if (nugget_bound) {
+        # The range is refused and the nugget is the fit's bound: Cp takes
+        # neither (see the rule above), and the warning on its noise variance
+        # follows the sweep.
+        unusable(paste0("resolution_profile(): %s reports no usable range (%s), and ",
+                        "its nugget (%.3g) is at the fit's lower bound, which is not an ",
+                        "estimate: `reliability` needs the range and is NA, and %s."),
+                 sac_what, rejected, vg$nugget, cp_finest, nugget_used = FALSE)
+        vg$cor_fn <- NULL
       } else {
-        .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s). ",
-                             "`cp` still takes its nugget (%.3g), fitted at the short lags; ",
-                             "`reliability` needs the range and is NA."),
-                      sac_what, rejected, vg$nugget)
+        unusable(paste0("resolution_profile(): %s reports no usable range (%s). ",
+                        "`cp` still takes its nugget (%.3g), fitted at the short lags%s; ",
+                        "`reliability` needs the range and is NA."),
+                 sac_what, rejected, vg$nugget,
+                 if (is.finite(cp_cap) && vg$nugget > cp_cap)
+                   sprintf(", held to the semivariance of nearest-neighbour pairs (%.3g)", cp_cap)
+                 else "",
+                 nugget_used = TRUE)
         vg$cor_fn <- NULL
       }
     } else if (is.null(vg)) {
       if (.sac_no_structure(sac))
         .log_info(paste0("resolution_profile(): %s found no spatial structure (%s), ",
-                         "and its model is a pure nugget; `reliability` is NA and ",
-                         "`cp` takes its noise variance from the finest level."),
-                  sac_what, rejected %||% "no reason recorded")
+                         "and its model is a pure nugget; `reliability` is NA and %s."),
+                  sac_what, rejected %||% "no reason recorded", cp_finest)
       else
-        .log_info("resolution_profile(): the variogram carries no usable model; `reliability` is NA and `cp` takes its noise variance from the finest level.")
+        .log_info(paste0("resolution_profile(): the variogram carries no usable model; ",
+                         "`reliability` is NA and %s."), cp_finest)
     }
-    # A nugget of 0 is usually the fit's lower bound, not an estimate
-    # (estimate_sac_range() marks it as `nugget_at_bound`), and with it Cp's
-    # penalty is 0: Cp
-    # is the RSS alone and falls with every finer level to the ceiling,
-    # whatever the field.  Zero to within 1e-4 of the sill: a REML fit stops
-    # short of its bound, and a nugget of 6e-7 on a sill of 0.99 slipped past
-    # a test for exactly 0.
-    if (has_resp && !is.null(vg) && vg$nugget <= 1e-4 * (vg$nugget + vg$psill))
-      .warn_and_log(paste0("resolution_profile(): the variogram's nugget is 0 (%.2g ",
-                           "against a sill of %.3g), so Cp has ",
-                           "no penalty and falls as the cells get finer: its minimum ",
-                           "will sit at or near the finest level whatever the field. ",
-                           "A zero nugget is usually the fit's lower bound; %s"),
-                    vg$nugget, vg$nugget + vg$psill,
-                    if (sac_given) "check it with plot() on the sac, or pass one whose nugget you trust."
-                    else paste0("check it with plot(attr(<profile>, \"sac\")), or pass a ",
-                                "`sac` whose nugget you trust."))
     # The variogram has to describe the variable the profile scores.  A
     # residual variogram's nugget put into Cp for the raw response (or the
     # reverse) moved the Cp pick from 2-4 cells to the ceiling of 44 in five
@@ -2149,10 +2829,8 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   }
 
   # Bounds.  `area`, `n_uniq_all`, `n_all` and `k_cap_all` are the layer's
-  # and `n_uniq` the subsample's (see above).
-  # The rows of the subsample the response criteria read (under select_on =
-  # "split", those of the selection half): what a fitted cell is scored on.
-  n_scored <- if (has_resp) sum(is.finite(y)) else NA_integer_
+  # and `n_uniq` the subsample's (see above); `n_scored` is the subsample's
+  # scored rows (above).
   # What a row has to carry to be scored, in the words of the messages: with
   # predictors a row with a response and no predictor is left out as well,
   # and "450 of the 900 points carry a response" was said of a layer on
@@ -2176,40 +2854,8 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     ceiling_L    <- sl$ceiling
     ceiling_from <- sl$ceiling_from
   } else {
-    by_support <- floor(n_support / min_cell_n)
-    # The ceiling is the smallest of what the layer's point count supports,
-    # what its distinct locations allow and, when the fits run on a subsample,
-    # what the subsample can fit: two of its points per cell.  k-means can put
-    # a centre on every distinct location but no more, and stats::kmeans()
-    # refuses as many centres as points, so that bound is the distinct
-    # locations when some repeat and one short of the points when none do.  It
-    # used to be one short of the distinct locations in every case, which
-    # dropped k = 5 on five stations visited thirty times each.  Which bound
-    # holds is recorded, because the print and the "bound is choosing" notes
-    # name it.
-    k_cap_fit    <- min(n_uniq, n - 1L)
-    data_ceiling <- min(by_support, k_cap_all)
-    # Two scored subsample rows per cell, not two subsample points: with 20,000
-    # points, a response on 5,000 and sample_n = 1500, half the subsample left
-    # about 0.5 scored rows per cell at a ceiling of 750.
-    fit_rows     <- if (has_resp && n_resp > 0L) n_scored else n
-    fit_cap      <- if (n < n_all) min(floor(fit_rows / 2), k_cap_fit) else Inf
-    # A ladder the caller set is scored as given.  Settled here, before the
-    # messages below, because they name it: with `levels = 2:4` on ten points
-    # the warning said "the profile scores 2 cells" over a table of three
-    # levels.
-    if (levels_given) {
-      levels <- sort(unique(as.integer(levels)))
-      levels <- levels[!is.na(levels) & levels >= 2L & levels <= k_cap_fit]
-      if (!length(levels))
-        stop("resolution_profile(): no usable value in `levels`.", call. = FALSE)
-    }
-    # Fewer than two cells that meet min_cell_n, or one distinct location, is
-    # no ladder at all.  The ceiling used to be raised to 2 without a word:
-    # ten points at min_cell_n = 9 came back as "ceiling 2 from min_cell_n",
-    # supported.
-    too_few <- data_ceiling < 2
-    ceiling_L    <- max(2L, as.integer(min(data_ceiling, fit_cap)))
+    # The ceiling, its parts and the caller's `levels` were settled before
+    # the variogram (above); which bound sets the ceiling is recorded here.
     ceiling_from <- if (k_cap_all < 2L) "fewer than two distinct locations"
                     else if (by_support < 2) "fewer than two supported cells"
                     else if (fit_cap < data_ceiling) "sample_n"
@@ -2230,20 +2876,43 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                      else sprintf("every point at min_cell_n = %d", min_cell_n)
       # On a subsample `cell_resp_mean` counts subsample rows, and the cells of
       # the layer hold more by this factor (12.3 against 167 in the case above).
-      per_layer <- if (n < n_all && isTRUE(n_scored > 0L)) n_support / n_scored else NA_real_
+      # Under the split both count the selection half's rows: `n_scored` is
+      # that half's rows of the subsample, so the layer's are that half's too
+      # (`n_sel_resp`).  Over the rows of both halves the factor came out about
+      # twice as large.  With no scored row of the subsample there is no
+      # factor, and the sentence that gives it is left out: it printed
+      # "about NA times as many".
+      split_rows <- !is.na(n_sel_resp)
+      per_layer <- if (n < n_all && isTRUE(n_scored > 0L))
+        (if (split_rows) n_sel_resp else n_support) / n_scored else NA_real_
       if (all_ceiling != ceiling_L) {
         msg <- if (identical(ceiling_from, "sample_n"))
-          sprintf(paste0("resolution_profile(): %d of the %d points of the subsample carry %s ",
-                         "(%d of the layer's %d), so the ceiling is %d cells, two scored ",
+          sprintf(paste0("resolution_profile(): %s, so the ceiling is %d cells, two scored ",
                          "subsample rows per cell, not the %d that %s would give. `sample_n` ",
                          "sets this ceiling, not `min_cell_n`: the layer's %d rows with %s ",
                          "support %d cells at min_cell_n = %d, and a larger `sample_n` raises ",
-                         "the ceiling towards that. `cell_resp_mean` counts the scored rows ",
-                         "of the subsample per occupied cell; the cells of the layer hold ",
-                         "about %.3g times as many."),
-                  n_scored, n, rows_carry, n_support, n_all, ceiling_L, all_ceiling, all_what,
+                         "the ceiling towards that.%s"),
+                  # Under the split the ceiling counts the selection half's
+                  # rows of the subsample, the rows the criteria read: "0 of
+                  # the 500 points of the subsample carry a response" was said
+                  # of a subsample in which about half of them did, all in the
+                  # estimation half.
+                  if (split_rows)
+                    sprintf(paste0("%d of the %d points of the subsample carry %s in the ",
+                                   "selection half, the half the criteria read under ",
+                                   "select_on = \"split\" (%d of the layer's %d carry %s ",
+                                   "in either half)"),
+                            n_scored, n, rows_carry, n_support, n_all, rows_carry)
+                  else
+                    sprintf("%d of the %d points of the subsample carry %s (%d of the layer's %d)",
+                            n_scored, n, rows_carry, n_support, n_all),
+                  ceiling_L, all_ceiling, all_what,
                   n_support, rows_carry, as.integer(min(by_support, k_cap_all)), min_cell_n,
-                  per_layer)
+                  if (is.finite(per_layer))
+                    sprintf(paste0(" `cell_resp_mean` counts the scored rows of the subsample ",
+                                   "per occupied cell; the cells of the layer hold about %.3g ",
+                                   "times as many."), per_layer)
+                  else "")
         else
           sprintf(paste0("resolution_profile(): %d of the %d points carry %s, so the ceiling ",
                          "is %d cells, not the %d that %s would give: the cell means the ",
@@ -2272,6 +2941,13 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     # R warnings with a class, not log lines: `supported = FALSE` changes what
     # every count read off the profile means, and a log line reaches neither
     # tryCatch() nor options(warn = 2).
+    # A ladder the caller set is scored as given, and said to be.
+    given_text <- function()
+      sprintf("The %d level%s asked for in `levels` (%s) %s scored as given",
+              length(levels), if (length(levels) == 1L) "" else "s",
+              if (length(levels) == 1L) sprintf("%d cells", levels)
+              else sprintf("%d to %d cells", min(levels), max(levels)),
+              if (length(levels) == 1L) "is" else "are")
     if (too_few) {
       # The largest min_cell_n that leaves two cells.  Below one there is none:
       # a single scored row was told to "lower `min_cell_n` (at most 0 here)".
@@ -2289,13 +2965,7 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                                  as.integer(by_support), if (by_support == 1) "" else "s"),
                     if (levels_given) "no cell count meets `min_cell_n`"
                     else "there is no ladder of cell counts to choose from",
-                    # A ladder the caller set is scored as given, and said to be.
-                    if (levels_given)
-                      sprintf("The %d level%s asked for in `levels` (%s) %s scored as given",
-                              length(levels), if (length(levels) == 1L) "" else "s",
-                              if (length(levels) == 1L) sprintf("%d cells", levels)
-                              else sprintf("%d to %d cells", min(levels), max(levels)),
-                              if (length(levels) == 1L) "is" else "are")
+                    if (levels_given) given_text()
                     else "The profile scores 2 cells so that level is still visible",
                     if (k_cap_all < 2L) "A tessellation needs points at two locations or more."
                     else if (half < 1L)
@@ -2305,23 +2975,40 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                                  support_what),
                     data = list(reason = ceiling_from, n = n_support, min_cell_n = min_cell_n))
     } else if (!supported)
+      # The bound named is the one that sets the data's ceiling, by the test
+      # `ceiling_from` takes, and a ladder the caller set is said to be
+      # scored as given.  The warning used to name min_cell_n whichever bound
+      # held ("60 points at min_cell_n = 9 support at most 5", where 9 allows
+      # 6 and 5 distinct locations set the 5), and said "the profile runs
+      # from 2 to 6" over the levels 4 and 5 the caller had asked for.
       .warn_classed("spatialkit_not_supported",
                     paste0("resolution_profile(): cells no wider than the autocorrelation ",
-                           "range (%.0f) would need at least %.0f of them, but %d %s ",
-                           "at min_cell_n = %d support at most %d. The data cannot ",
-                           "support a tessellation that respects their own ",
-                           "correlation structure; the profile runs from 2 to %d so ",
-                           "the cost of each level is still visible."),
-                    range_eff, floor_raw, n_support, support_what, min_cell_n,
-                    max(2L, as.integer(data_ceiling)), ceiling_L,
+                           "range (%s) would need at least %.0f of them, but %s. The data ",
+                           "cannot support a tessellation that respects their own ",
+                           "correlation structure; %s so the cost of each level is still ",
+                           "visible."),
+                    .fmt_len(range_eff), floor_raw,
+                    if (by_support <= k_cap_all)
+                      sprintf("%d %s at min_cell_n = %d support at most %d", n_support,
+                              support_what, min_cell_n, as.integer(data_ceiling))
+                    else if (k_cap_all < n_uniq_all)
+                      sprintf(paste0("k-means can fit at most %d cells to the %d points, one ",
+                                     "short of the points"), k_cap_all, n_all)
+                    else
+                      sprintf("the %d points sit on %d distinct locations, which allow at most %d cells",
+                              n_all, n_uniq_all, k_cap_all),
+                    if (levels_given) sub("^The", "the", given_text())
+                    else sprintf("the profile runs from 2 to %d", ceiling_L),
                     data = list(reason = "floor above ceiling", n = n_support,
                                 min_cell_n = min_cell_n))
     else if (floor_raw > ceiling_L)
       .log_warn(paste0("resolution_profile(): cells no wider than the autocorrelation ",
-                       "range (%.0f) need at least %.0f of them, which the %d %s ",
+                       "range (%s) need at least %.0f of them, which the %d %s ",
                        "support, but k-means on the %d-point subsample can fit at ",
-                       "most %d; raise `sample_n`. The profile runs from 2 to %d."),
-                range_eff, floor_raw, n_support, support_what, n, ceiling_L, ceiling_L)
+                       "most %d; raise `sample_n`. %s."),
+                .fmt_len(range_eff), floor_raw, n_support, support_what, n, ceiling_L,
+                if (levels_given) given_text()
+                else sprintf("The profile runs from 2 to %d", ceiling_L))
     # With range_floor = FALSE, the default, the ladder starts at 2 whatever the
     # range, and the floor is only reported.  The range is an estimate.  It is
     # re-estimated on every subset, and a floor that applies on one fold and
@@ -2359,17 +3046,16 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                  n_scored = as.integer(n_scored),
                  levels_given = levels_given || size_ladder,
                  predictors = has_pred)
+  # The rows with a finite response alone, where the predictors leave none
+  # of them complete: read by .no_complete_row().  Recorded in that case
+  # only, so the record of every other profile is as it was.
+  if (no_complete) bounds$n_response_only <- n_resp_only
   # The sizes, largest first, and the level each gives: NA for a size that
   # was dropped.
   if (size_ladder) {
     bounds$obs_per_cell <- ladder_sizes
     bounds$size_levels  <- sl$size_levels
   }
-
-  # A ladder of sizes passed its guards before the variogram (above).  On
-  # every other ladder the levels are known only now, and the one search to
-  # bound is the estimate's, of each scored row's nearest centre.
-  if (!size_ladder) centre_guard(max(levels))
 
   # Over the hull the area is measured on, not its bounding box (see
   # .rbar_domain()); reliability needs an identified range.
@@ -2392,6 +3078,17 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # mean does as well (picks of 2 to 750 cells over 29 white-noise layers).
   one_cell <- NULL
   is_const <- FALSE
+  # The engine's test of a constant column, on the rows the estimate's
+  # columns read: on the raw values and on the column centred and scaled, as
+  # .pool_fit() reads it (.constant_column()).  It takes two rows to be
+  # constant, as it does for `one_cell`: one scored row is too few rows, and
+  # the constant-response warning is not raised for it.  Computed here,
+  # before that warning, which names the estimate's columns when this test
+  # leaves them NA.  Values beyond what the engine's arithmetic holds leave
+  # them NA too (`est_range`), with a warning of their own after the sweep.
+  est_sc    <- if (!is.null(est) && length(lay$y) >= 2L) .spread_scaled(lay$y)
+  est_const <- !is.null(est_sc) && .constant_column(lay$y, est_sc)
+  est_range <- !is.null(est_sc) && !est_const && .pool_out_of_range(lay$y, est_sc)
   if (!is.null(y) && sum(is.finite(y)) >= 2L) {
     y1 <- y[is.finite(y)]
     one_cell <- list(n = length(y1), rss = sum((y1 - mean(y1))^2), cp = NA_real_)
@@ -2401,22 +3098,67 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     # response the predictors fit exactly are all rounding error, of size
     # 1e-15, and against their own sum of squares they never looked constant
     # (Cp was then computed with a noise variance of 7.9e-31).
-    one_cell$constant <- one_cell$rss <=
-      100 * .Machine$double.eps^2 * max(sum(y1^2), sum(resp[is.finite(y)]^2))
+    # A response is first read against 100 eps^2 times the sum of squares of
+    # its values.  On raw values far from 0 that bound calls a column
+    # constant that is not (1e15 plus a spread of 1, eight units in the last
+    # place), so where it finds no spread the response is read again as the
+    # estimate's test reads it, centred and scaled (.constant_column()), with
+    # values beyond the arithmetic left constant, as they were, for the
+    # warning after the sweep.  Where the raw values show spread nothing
+    # changes.
+    # Residuals are read against the rounding of the regression and of the
+    # raw response alone (.residuals_rounding()), which holds the residuals
+    # of exact fits whatever the number of predictors and rows.  The bound
+    # on the response's sum of squares held some and not others (7 w - 2 w2
+    # on w and w2 left a sum of squares more than twice it), and those were scored on
+    # their rounding while estimate_sac_range() refused the same layer.
+    r1 <- resp[is.finite(y)]
+    one_cell$constant <- if (identical(variable, "residuals"))
+      .residuals_rounding(y1, r1, resid_fit$yd, resid_fit$X, resid_fit$b)
+    else if (one_cell$rss <= 100 * .Machine$double.eps^2 * max(sum(y1^2), sum(r1^2))) {
+      sc1 <- .spread_scaled(r1)
+      .constant_column(r1, sc1) || .pool_out_of_range(r1, sc1)
+    } else FALSE
     is_const <- isTRUE(one_cell$constant)
     # Nothing is scored on a constant: `cp`, `moran_i` and `moran_z` stay NA
-    # (see the sweep), which is what the message says.  A response of
-    # 1e6 + 1e-9 x noise was called constant here and then given a finite
-    # `cp` computed from its rounding error, and a count of 2.
-    if (is_const)
+    # (see the sweep), which is what the message says.  A response called
+    # constant here was once given a finite `cp` computed from its rounding
+    # error, and a count of 2.  The
+    # estimate's `loo` and `loo_se`, and the pooled value's `own_weight`, are
+    # NA too when the estimate's own test finds the column constant; the
+    # message names them then, and only then, since the two tests read
+    # different rows.  The two tests read the values the same way, so they
+    # disagree where they read different rows: the test for `cp` the scored
+    # rows of the subsample, the estimate's every row of the layer with a
+    # value (of the selection half under the split).  Where the subsample is
+    # constant and the layer is not, `loo` is scored, and the message says
+    # so.  On values beyond the arithmetic (1e200 times a spread of 1) the
+    # warning of those values, after the sweep, names `cp`'s columns too.
+    est_spread <- !is.null(est_sc) && !est_const
+    if (is_const && est_spread && !est_range)
+      .warn_classed("spatialkit_constant_response",
+                    paste0("resolution_profile(): the test for `cp` finds the response ",
+                           "constant over the %d scored row(s)%s (its total sum of squares, ",
+                           "%.3g, is rounding error at most on their scale), so `cp`, ",
+                           "`moran_i` and `moran_z` are NA at every level. The estimate ",
+                           "reads the %d row(s) %s with a value, and finds spread there: ",
+                           "`loo` is scored."),
+                    one_cell$n, if (n < n_all) " of the subsample" else "", one_cell$rss,
+                    length(lay$y),
+                    if (is.null(in_sel)) "of the layer" else "of the layer's selection half",
+                    data = list(n = one_cell$n))
+    else if (is_const && !est_spread)
       .warn_classed("spatialkit_constant_response",
                     paste0("resolution_profile(): the %s is constant over the %d ",
                            "scored row(s) (its total sum of squares, %.3g, is ",
                            "rounding error at most), so no cell count fits it better ",
-                           "than another: `cp`, `moran_i` and `moran_z` are NA at ",
-                           "every level."),
+                           "than another: %s are NA at every level."),
                     if (identical(variable, "residuals")) "OLS residual of the response on `predictor_vars`"
                     else "response", one_cell$n, one_cell$rss,
+                    if (!est_const) "`cp`, `moran_i` and `moran_z`"
+                    else if (identical(est, "pooled"))
+                      "`cp`, `moran_i`, `moran_z`, `loo`, `loo_se` and `own_weight`"
+                    else "`cp`, `moran_i`, `moran_z`, `loo` and `loo_se`",
                     data = list(n = one_cell$n))
   }
   # Moran's z of the cell means needs FNN and Matrix above .KNN_DENSE_MAX
@@ -2435,15 +3177,18 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     !(backend("FNN") && backend("Matrix"))
   if (moran_off) {
     lacking <- c(if (!backend("FNN")) "FNN", if (!backend("Matrix")) "Matrix")
+    # FNN is in Imports, so it is installed and could not be loaded; Matrix
+    # is suggested, so it may not be installed.
     .warn_classed("spatialkit_moran_skipped",
                   paste0("resolution_profile(): `moran_i` and `moran_z` will be NA at a level ",
                          "where more than %d cells hold a scored row (this ladder reaches %d ",
-                         "cells), because %s not ",
-                         "installed: Moran's z of the cell means needs FNN to find each ",
-                         "cell's neighbours and Matrix to hold them. Every other column is ",
-                         "computed."),
+                         "cells), because %s: Moran's z of the cell means needs FNN to find ",
+                         "each cell's neighbours and Matrix to hold them. Every other column ",
+                         "is computed."),
                   .KNN_DENSE_MAX, max(levels),
-                  if (length(lacking) > 1L) "FNN and Matrix are" else paste(lacking, "is"),
+                  paste(c(if ("FNN" %in% lacking) "FNN could not be loaded",
+                          if ("Matrix" %in% lacking) "Matrix is not installed"),
+                        collapse = " and "),
                   data = list(limit = .KNN_DENSE_MAX,
                               levels = as.integer(levels[levels > .KNN_DENSE_MAX]),
                               missing = lacking))
@@ -2451,7 +3196,6 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # The estimate's columns, one value per level, and what every level is
   # compared with: one mean for all the rows `loo` reads.
   est_cols <- NULL
-  est_const <- FALSE
   est_one <- c(NA_real_, NA_real_)
   est_cache <- NULL
   if (!is.null(est)) {
@@ -2460,21 +3204,23 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                      own_weight = na_m, sigma2 = na_m, tau2 = na_m,
                      cells = rep(NA_integer_, m), f_p = na_m)
     n_lay <- length(lay$y)
-    # The engine's test of a constant column, and its error of one mean.  It
-    # takes two rows to be constant, as it does for `one_cell`: one scored
-    # row is too few rows, and the constant-response warning is not raised
-    # for it.
-    est_const <- n_lay >= 2L && .no_spread(sum((lay$y - mean(lay$y))^2), lay$y)
-    if (n_lay >= 2L && !est_const) {
-      e1 <- (lay$y - mean(lay$y)) * n_lay / (n_lay - 1)
-      est_one <- c(mean(e1^2), stats::sd(e1^2) / sqrt(n_lay))
+    # The error of one mean, unless the engine's test (`est_const`, above)
+    # finds the column constant or its values lie beyond the arithmetic
+    # (`est_range`).  As .pool_fit() computes it: on the column centred and
+    # scaled, and put back in its units, where the raw values have no spread
+    # by the test and the scaled column has.
+    if (n_lay >= 2L && !est_const && !est_range) {
+      raw1 <- .no_spread(sum((lay$y - mean(lay$y))^2), lay$y)
+      v1   <- if (raw1) est_sc$y else lay$y
+      e1   <- (v1 - mean(v1)) * n_lay / (n_lay - 1)
+      est_one <- .loo_mean_square(e1) * (if (raw1) est_sc$scale^2 else 1)
     }
     # A row alone in its region is predicted, under plain means, from the
     # region of its nearest other row.  The nearest other location of a
     # location is the same at every level, so every level's fit shares one
     # cache: filled here in one search with FNN, and on first need without.
     est_cache <- new.env(parent = emptyenv())
-    if (identical(est, "mean") && n_lay >= 2L && !est_const && backend("FNN"))
+    if (identical(est, "mean") && n_lay >= 2L && !est_const && !est_range && backend("FNN"))
       .nearest_other(lay$xy, rep.int(1L, n_lay), seq_len(n_lay), backend("FNN"), est_cache,
                      "resolution_profile")
   }
@@ -2550,10 +3296,15 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   L_fit_v <- as.numeric(levels)
   for (i in seq_len(m)) {
     L  <- levels[i]
-    kb <- .partition_centres(xy, L, partition = part$kind, init = part$init,
-                             nstart = nstart, iter.max = part_iter,
-                             density_power = density_power, density_k = density_k,
-                             use_fnn = backend("FNN"))
+    # A stream of its own for each level, the stream put back after it: a
+    # level gets the same cells on every ladder that holds it.
+    restore_stream <- .with_seed(level_seed + L)
+    kb <- tryCatch(
+      .partition_centres(xy, L, partition = part$kind, init = part$init,
+                         nstart = nstart, iter.max = part_iter,
+                         density_power = density_power, density_k = density_k,
+                         use_fnn = backend("FNN")),
+      finally = restore_stream())
     if (is.null(kb)) {
       .log_warn("resolution_profile(): %s failed at %d cells; that level is NA.",
                 if (identical(part$kind, "density")) "the density-weighted k-means"
@@ -2592,14 +3343,7 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
         cm  <- stats::ave(y[okr], cl[okr])
         out$rss[i] <- sum((y[okr] - cm)^2)
         m_ok_v[i] <- m_ok; L_ok_v[i] <- L_ok
-        # Cp for the cells of the whole layer, estimated from the subsample.
-        # RSS / m + tau^2 L_ok / m estimates the approximation error plus
-        # tau^2 (it adds back the optimism of the subsample's own cell means,
-        # tau^2 per cell); tau^2 L / N is the sampling variance of cell means
-        # built from the layer's N rows with a response.  With no subsample
-        # (m = N, L_ok = L) it is Mallows' RSS / n + 2 tau^2 L / n.
-        if (!is.null(vg) && !is_const)
-          out$cp[i] <- out$rss[i] / m_ok + vg$nugget * (L_ok / m_ok + L_fit / n_resp)
+        # Cp is computed after the sweep, once its noise variance is known.
       }
       # Moran's I of cell means that differ by rounding error alone is
       # rounding error too.
@@ -2631,6 +3375,71 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       for (nm in names(est_cols)) est_cols[[nm]][i] <- lv[[nm]]
     }
   }
+  # Under select_on = "split" the estimate reads the rows of the selection
+  # half that have a response, and the check that `estimate` has rows to read
+  # is made on the layer.  A layer whose rows with a response all lie in the
+  # estimation half passed it, and the profile returned a `loo` read off no
+  # row with nothing said.  The columns stay NA, and this says why.  Without
+  # an estimate `rss`, `cp` and the Moran columns are NA for the same reason,
+  # and this says so too.  Not raised when no row of the layer has a
+  # response: then the split is not the reason.  Raised after the sweep, so a
+  # call a guard stops says nothing of columns it never returns.
+  # So is a layer whose rows have a response and none of them every
+  # predictor, with or without the split: the same columns are NA at every
+  # level for the same want, and the layer, not the split, is the cause.
+  if (no_complete) {
+    .warn_classed("spatialkit_no_scored_rows",
+                  paste0("resolution_profile(): no row of the layer has a finite value of ",
+                         "'%s' and of every predictor, so `rss`, `cp`, `moran_i` and ",
+                         "`moran_z` are NA at every level. The %d row%s with a finite ",
+                         "value of '%s' %s a predictor that is missing or not finite."),
+                  response_var, n_resp_only, if (n_resp_only == 1L) "" else "s",
+                  response_var, if (n_resp_only == 1L) "has" else "each have",
+                  data = list(reason = "no row with a response and every predictor", n = 0L,
+                              selection = if (!is.null(split)) length(split$selection)
+                                          else NA_integer_,
+                              n_response = n_resp_only, column = response_var))
+  } else if (!is.null(split) && has_resp && n_resp > 0L && identical(n_sel_resp, 0L)) {
+    n_sel <- length(split$selection)
+    .warn_classed("spatialkit_no_scored_rows",
+                  paste0("resolution_profile(): no row of the selection half has a finite ",
+                         "value of '%s'%s, so %s. Under select_on = \"split\" the response is ",
+                         "read on the selection half alone (%d row%s); the %d row%s with %s %s ",
+                         "in the estimation half."),
+                  response_var, if (has_pred) " and of every predictor" else "",
+                  if (!is.null(est))
+                    paste0("`loo`, `loo_se`, `scored_per_cell`, `share_alone` and `own_weight` ",
+                           "are NA at every level, and so are `rss`, `cp`, `moran_i` and ",
+                           "`moran_z`, which also read the selection half")
+                  else paste0("`rss`, `cp`, `moran_i` and `moran_z`, which read the selection ",
+                              "half, are NA at every level"),
+                  n_sel, if (n_sel == 1L) "" else "s",
+                  as.integer(n_support), if (n_support == 1L) "" else "s",
+                  if (has_pred) "them" else "a finite value",
+                  if (n_support == 1L) "is" else "are all",
+                  data = list(reason = "no response in the selection half", n = 0L,
+                              selection = n_sel, n_response = as.integer(n_support),
+                              column = response_var))
+  }
+  # Values beyond what the engine's arithmetic holds: every level's fit
+  # refuses them (.pool_fit(), "values out of range"), and this says why the
+  # estimate's columns are NA.  After the sweep, for the same reason.
+  # Where the test for `cp` found the response constant on such values, its
+  # columns are NA for the same reason, and this names them too.
+  if (est_range)
+    .warn_classed("spatialkit_pool_unavailable",
+                  paste0("resolution_profile(): the values of '%s' lie beyond what the ",
+                         "arithmetic of the %s holds, which is values up to %s in ",
+                         "absolute value whose largest distance from their median is at ",
+                         "least %s; beyond these bounds the squares of many values can ",
+                         "overflow or lose their precision. So %s are NA at every level. ",
+                         "Rescaled by a power of ten to within that, the response is scored."),
+                  response_var, if (is_const) "profile" else "estimate",
+                  .bound_text(.POOL_Y_MAX), .bound_text(.POOL_Y_MIN),
+                  paste0(if (is_const) "`cp`, `moran_i`, `moran_z`, " else "",
+                         if (identical(est, "pooled")) "`loo`, `loo_se` and `own_weight`"
+                         else "`loo` and `loo_se`"),
+                  data = list(reason = "values out of range", columns = response_var))
   # Each row is left out alone, and the other rows at its location stay.
   # Said once, after the levels are scored and where one of them has a
   # `loo`: on a constant response, and where no level could be scored, the
@@ -2657,8 +3466,10 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # the residual mean square of the most flexible model, here the finest
   # level whose cells hold at least two scored rows on average.  It counts
   # the structure within those cells as noise as well, so on average it is
-  # no smaller than the nugget and errs towards fewer cells.
-  cp_noise <- if (!is.null(vg) && !is_const)
+  # no smaller than the nugget and errs towards fewer cells.  A nugget at the
+  # fit's lower bound is not taken (`nugget_bound`, above), and the fallback
+  # stands in for it too.
+  cp_noise <- if (!is.null(vg) && !is_const && !nugget_bound)
     list(source = "variogram nugget", value = vg$nugget, level = NA_integer_)
   else NULL
   # A ladder of sizes under sac = "auto" fits no variogram, and `cp` gets no
@@ -2669,40 +3480,167 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     cp_noise <- list(source = "none", value = NA_real_, level = NA_integer_,
                      reason = paste0("no variogram: a size ladder fits one only when ",
                                      "`sac` is given"))
-  if (is.null(vg) && !is.null(y) && !is_const && !no_vg) {
+  # Why the variogram gave Cp no nugget, when the fallback stands in.  A
+  # variogram that found no spatial structure does carry a model, the pure
+  # nugget summarize_by_cell() and kriging_adequacy() use, so "no usable
+  # variogram model" was untrue of it and contradicted the line logged
+  # above.  What it lacks is a nugget apart from the sill.
+  why_none <- function()
+    if (is.null(sac))
+      "no variogram was fitted (gstat is not installed, or estimate_sac_range() failed; see the log)"
+    else if (!is.data.frame(attr(sac, "variogram_model")))
+      sprintf("%s carries no variogram model and so no nugget", sac_what)
+    else if (.sac_no_structure(sac))
+      sprintf("%s found no spatial structure and gives no nugget that can be told from the sill",
+              sac_what)
+    else sprintf("%s gives no usable variogram model", sac_what)
+  why <- NULL
+  # The level the fallback reads when its residual mean square is 0, as it is
+  # when each cell of that level holds one location whose rows carry one
+  # value.  A noise variance of 0 is no penalty, so Cp is NA at every level,
+  # as with no level to read; this keeps which level it was, for the
+  # warning, the print and select_resolution().
+  zero_rms <- NULL
+  if (is.null(cp_noise) && !is.null(y) && !is_const && !no_vg) {
     dfree <- m_ok_v - L_ok_v
     cand  <- which(is.finite(out$rss) & is.finite(dfree) & dfree >= L_ok_v)
     if (length(cand)) {
       j  <- cand[which.max(levels[cand])]
       s2 <- out$rss[j] / dfree[j]
-      if (is.finite(s2) && s2 > 0) {
-        fin_cp <- is.finite(out$rss) & is.finite(m_ok_v) & m_ok_v > 0
-        out$cp[fin_cp] <- out$rss[fin_cp] / m_ok_v[fin_cp] +
-          s2 * (L_ok_v[fin_cp] / m_ok_v[fin_cp] + L_fit_v[fin_cp] / n_resp)
+      # A residual sum of squares within the rounding of the values scored is
+      # 0: residuals of an OLS fit on rows of one location and one value
+      # differ in their last bits (a mean square of 2.4e-31 on values of 1),
+      # and as a noise variance that rounding left Cp no penalty.  The bound
+      # is the constant-response test's, 100 eps^2 times the values' sum of
+      # squares, and for residuals also the rounding of the fit's terms
+      # (.residuals_rounding()), .FIT_EPS eps times the size of each row's.
+      # Both sides are taken in units of the power of two at or below the
+      # largest of those sizes, so that squares beyond the largest double do
+      # not make the bound infinite.
+      ok_y <- is.finite(y)
+      size <- abs(y[ok_y])
+      if (!is.null(resid_fit$size)) size <- pmax(size, resid_fit$size[ok_y])
+      a <- suppressWarnings(max(size[is.finite(size)]))
+      a <- if (is.finite(a) && a > 0) 2^floor(log2(a)) else 1
+      tiny <- max(100 * .Machine$double.eps^2 * sum((y[ok_y] / a)^2),
+                  if (!is.null(resid_fit$size))
+                    (.FIT_EPS * .Machine$double.eps)^2 * sum((resid_fit$size[ok_y] / a)^2)
+                  else 0)
+      rounding <- is.finite(s2) && s2 > 0 && isTRUE(out$rss[j] / a / a <= tiny)
+      if (is.finite(s2) && s2 > 0 && !rounding) {
         cp_noise <- list(source = "finest-level residual mean square", value = s2,
                          level = as.integer(levels[j]))
-        # A variogram that found no spatial structure does carry a model, the
-        # pure nugget summarize_by_cell() and kriging_adequacy() use, so "no
-        # usable variogram model" was untrue of it and contradicted the line
-        # logged above.  What it lacks is a nugget apart from the sill.
-        why <- if (is.null(sac))
-          "no variogram was fitted (gstat is not installed, or estimate_sac_range() failed; see the log)"
-        else if (!is.data.frame(attr(sac, "variogram_model")))
-          sprintf("%s carries no variogram model and so no nugget", sac_what)
-        else if (.sac_no_structure(sac))
-          sprintf("%s found no spatial structure and gives no nugget that can be told from the sill",
-                  sac_what)
-        else sprintf("%s gives no usable variogram model", sac_what)
-        .warn_and_log(paste0("resolution_profile(): %s, so `cp` takes its noise ",
-                             "variance from the residual mean square of the finest ",
-                             "level (%d cells: %.3g), Mallows' own choice. It counts ",
-                             "the structure within those cells as noise too, so it ",
-                             "errs towards fewer cells; attr(<profile>, \"cp_noise\") ",
-                             "records it. `reliability` needs the variogram's range ",
-                             "and is NA."),
-                      why, levels[j], s2)
+        why <- if (!is.null(vg))
+          sprintf(paste0("the variogram's nugget (%.2g against a sill of %.3g) is at the ",
+                         "fit's lower bound, which is not an estimate and as a noise ",
+                         "variance would leave Cp no penalty"),
+                  vg$nugget, vg$nugget + vg$psill)
+        else why_none()
+      } else if (isTRUE(out$rss[j] == 0) || rounding) {
+        zero_rms <- list(level = as.integer(levels[j]), rows_per_cell = m_ok_v[j] / L_ok_v[j],
+                         rms = if (rounding) s2 else 0)
+        zero_rms$text <- sprintf(paste0("the finest level whose cells hold at least two scored ",
+                                        "rows on average (%d cells, %.3g scored rows a cell) has ",
+                                        "a residual mean square of 0%s, which as a noise variance ",
+                                        "would leave `cp` no penalty"),
+                                 zero_rms$level, zero_rms$rows_per_cell,
+                                 if (rounding) sprintf(" to within rounding (%.3g)", s2) else "")
       }
     }
+  }
+  # Held to the semivariance of nearest-neighbour pairs (`cp_cap`, above),
+  # whatever the source: the record keeps the value it replaced.
+  uncapped <- NULL
+  if (!is.null(y) && !is.null(cp_noise) && is.finite(cp_noise$value) && is.finite(cp_cap) &&
+      cp_noise$value > cp_cap) {
+    uncapped <- cp_noise[c("source", "value", "level")]
+    cp_noise <- list(source = "short-lag semivariance", value = cp_cap, level = NA_integer_,
+                     cap = cp_cap, uncapped = uncapped)
+  }
+  # Said when Cp does not take the variogram's nugget as it stands: the
+  # fallback, the cap, and a nugget at its bound with no level to fall back
+  # on.  One classed warning for the noise variance Cp was given, with where
+  # it came from.
+  if (!is.null(why) || !is.null(uncapped)) {
+    rms <- if (!is.null(uncapped)) uncapped else cp_noise
+    sl_dist <- suppressWarnings(as.numeric(attr(sac, "short_lag_dist", exact = TRUE))[1L])
+    cap_text <- sprintf(paste0("the semivariance of nearest-neighbour pairs (%.3g%s), which ",
+                               "bounds %s from above"),
+                        cp_cap,
+                        if (length(sl_dist) == 1L && is.finite(sl_dist))
+                          sprintf(" at a median separation of %.3g", sl_dist) else "",
+                        if (identical(rms$source, "variogram nugget")) "the nugget"
+                        else "the noise variance")
+    msg <- if (identical(rms$source, "variogram nugget"))
+      sprintf(paste0("resolution_profile(): the variogram's nugget (%.3g) is above %s, so ",
+                     "`cp` takes that semivariance as its noise variance. ",
+                     "attr(<profile>, \"cp_noise\") records both."),
+              rms$value, cap_text)
+    else if (is.null(uncapped))
+      sprintf(paste0("resolution_profile(): %s, so `cp` takes its noise variance from the ",
+                     "residual mean square of the finest level (%d cells: %.3g), Mallows' ",
+                     "own choice. It counts the structure within those cells as noise too, ",
+                     "so it errs towards fewer cells; attr(<profile>, \"cp_noise\") ",
+                     "records it.%s"),
+              why, rms$level, rms$value,
+              if (is.null(vg$cor_fn)) " `reliability` needs the variogram's range and is NA."
+              else "")
+    else
+      sprintf(paste0("resolution_profile(): %s, so `cp` takes its noise variance from %s, ",
+                     "in place of the residual mean square of the finest level (%d cells: ",
+                     "%.3g), Mallows' own choice, which is above it. attr(<profile>, ",
+                     "\"cp_noise\") records both.%s"),
+              why, cap_text, rms$level, rms$value,
+              if (is.null(vg$cor_fn)) " `reliability` needs the variogram's range and is NA."
+              else "")
+    .warn_classed("spatialkit_cp_noise", "%s", msg,
+                  data = list(source = cp_noise$source, value = cp_noise$value,
+                              level = cp_noise$level, cap = cp_cap,
+                              uncapped_source = rms$source, uncapped_value = rms$value))
+  } else if (!is.null(zero_rms)) {
+    # The fallback found its level and that level's residual mean square is
+    # 0.  "No level's cells hold two scored rows" was said here, and nothing
+    # at all when the variogram gave no nugget, after a warning that `cp`
+    # takes its noise variance from that level.
+    zero_rms$why <- if (!is.null(vg))
+      sprintf(paste0("the variogram's nugget (%.2g against a sill of %.3g) is at the fit's ",
+                     "lower bound, which is not an estimate"), vg$nugget, vg$nugget + vg$psill)
+    else why_none()
+    .warn_classed("spatialkit_cp_noise",
+                  "resolution_profile(): %s, and %s, so `cp` is NA at every level.%s",
+                  zero_rms$why, zero_rms$text,
+                  if (is.null(vg$cor_fn)) " `reliability` needs the variogram's range and is NA."
+                  else "",
+                  data = list(source = NA_character_, value = NA_real_, level = zero_rms$level,
+                              cap = cp_cap,
+                              uncapped_source = "finest-level residual mean square",
+                              uncapped_value = zero_rms$rms))
+  } else if (nugget_bound && !is.null(vg) && !is.null(y) && !is_const && is.null(cp_noise))
+    .warn_classed("spatialkit_cp_noise",
+                  paste0("resolution_profile(): the variogram's nugget (%.2g against a sill ",
+                         "of %.3g) is at the fit's lower bound, which is not an estimate, and ",
+                         "no level's cells hold at least two scored rows on average to take ",
+                         "a noise variance from, so `cp` is NA at every level."),
+                  vg$nugget, vg$nugget + vg$psill,
+                  data = list(source = NA_character_, value = NA_real_, level = NA_integer_,
+                              cap = cp_cap, uncapped_source = "variogram nugget",
+                              uncapped_value = vg$nugget))
+  # The record of that level, set after the warnings, which read
+  # `cp_noise` NULL.  Its `value` is NA, so `cp` and Cp at one cell stay NA.
+  if (!is.null(zero_rms))
+    cp_noise <- list(source = NA_character_, value = NA_real_, level = zero_rms$level,
+                     rows_per_cell = zero_rms$rows_per_cell, rms = zero_rms$rms,
+                     reason = paste0(zero_rms$why, ", and ", zero_rms$text))
+  # Cp for the cells of the whole layer, estimated from the subsample.  RSS /
+  # m + tau^2 L_ok / m estimates the approximation error plus tau^2 (it adds
+  # back the optimism of the subsample's own cell means, tau^2 per cell);
+  # tau^2 L / N is the sampling variance of cell means built from the
+  # layer's N rows with a response.  With no subsample (m = N, L_ok = L) it
+  # is Mallows' RSS / n + 2 tau^2 L / n.
+  if (!is.null(y) && !is_const && !is.null(cp_noise) && is.finite(cp_noise$value)) {
+    fin_cp <- is.finite(out$rss) & is.finite(m_ok_v) & m_ok_v > 0
+    out$cp[fin_cp] <- out$rss[fin_cp] / m_ok_v[fin_cp] +
+      cp_noise$value * (L_ok_v[fin_cp] / m_ok_v[fin_cp] + L_fit_v[fin_cp] / n_resp)
   }
 
   # Cp at one cell, by the formula of the sweep (L = L_ok = 1) and with the
@@ -2855,7 +3793,55 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       cells        = stats::setNames(est_cols$cells, levels),
       f_p          = stats::setNames(est_cols$f_p, levels))
   }
+  # Every point's coordinates, when the centres were fitted to a subsample:
+  # what select_resolution() refits the chosen level to.
+  if (!is.null(refit_rows)) attr(out, "refit_rows") <- refit_rows
   out
+}
+
+
+# Whether no row of a split profile's selection half has a response (and
+# every predictor) while the layer has rows with one: the case of
+# spatialkit_no_scored_rows.  Read off the split's count (`n_response`), and
+# off the estimate's record for a profile kept from before the split carried
+# that count.
+.split_no_response <- function(x) {
+  sp  <- attr(x, "split", exact = TRUE)
+  est <- attr(x, "estimate", exact = TRUE)
+  b   <- attr(x, "bounds", exact = TRUE)
+  (is.list(sp) && isTRUE(sp$n_response == 0L) && is.list(b) && isTRUE(b$n_response > 0L)) ||
+    (is.list(est) && isTRUE(est$n == 0L) && identical(est$rows, "selection half"))
+}
+
+
+# Whether rows of the layer have a response and none of them every
+# predictor: the other case of spatialkit_no_scored_rows, where the layer and
+# not the split is the cause.  Read off the bounds record (`n_response` and
+# `n_response_only`).
+.no_complete_row <- function(x) {
+  b <- attr(x, "bounds", exact = TRUE)
+  is.list(b) && isTRUE(b$predictors) && isTRUE(b$n_response == 0L) &&
+    isTRUE(b$n_response_only > 0L)
+}
+
+# The rows of that case, in words: "the 400 rows with a response each have a
+# predictor that is missing or not finite".
+.no_complete_text <- function(x) {
+  k <- as.integer(attr(x, "bounds", exact = TRUE)$n_response_only)
+  sprintf("the %d row%s with a response %s a predictor that is missing or not finite",
+          k, if (k == 1L) "" else "s", if (k == 1L) "has" else "each have")
+}
+
+
+# Whether a variogram's nugget is at the fit's lower bound: marked so by
+# estimate_sac_range() (`nugget_at_bound`), or at most 1e-4 of the sill.
+# `vg` is the profile's variogram (`nugget`, `psill`), `sac` the range it
+# came from.  Read by resolution_profile(), where Cp does not take such a
+# nugget, and by the print method, which marks it.
+.nugget_at_bound <- function(vg, sac) {
+  !is.null(vg) &&
+    (isTRUE(attr(sac, "nugget_at_bound", exact = TRUE)) ||
+       isTRUE(vg$nugget <= 1e-4 * (vg$nugget + vg$psill)))
 }
 
 
@@ -2896,10 +3882,16 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
   # What a row carries to be counted: with predictors, a predictor missing
   # leaves it out as much as a response missing does.
   carry <- if (isTRUE(b$predictors)) "with a response and every predictor" else "with a response"
-  cat("Resolution profile:", nrow(x), "levels on", b$n,
+  # What was fitted to the subsample, by the kind that built the cells: the
+  # density kind's centres are not a k-means fit, and the header called them
+  # one.
+  fitted <- if (identical(attr(x, "partition", exact = TRUE)$kind, "density"))
+    "density-weighted k-means" else "k-means"
+  cat("Resolution profile:", nrow(x), if (nrow(x) == 1L) "level on" else "levels on", b$n,
       if (isTRUE(n_fit < b$n) && some_missing)
-        sprintf("points (%d %s; k-means fitted to a subsample of %d)\n", n_rsp, carry, n_fit)
-      else if (isTRUE(n_fit < b$n)) sprintf("points (k-means fitted to a subsample of %d)\n", n_fit)
+        sprintf("points (%d %s; %s fitted to a subsample of %d)\n", n_rsp, carry, fitted, n_fit)
+      else if (isTRUE(n_fit < b$n))
+        sprintf("points (%s fitted to a subsample of %d)\n", fitted, n_fit)
       else if (some_missing) sprintf("points (%d %s)\n", n_rsp, carry)
       else "points\n")
   # A ladder `obs_per_cell` set: its levels are the counts the sizes give,
@@ -2918,8 +3910,8 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
                 if (isTRUE(n_rsp > 0L)) paste(if (n_div == 1L) "row" else "rows", carry)
                 else "points",
                 if (!is.finite(b$range)) "2 (no range)"
-                else paste0(if (is.na(b$floor)) sprintf("beyond integer range from range %.0f", b$range)
-                            else sprintf("%d from range %.0f", b$floor, b$range),
+                else paste0(if (is.na(b$floor)) sprintf("beyond integer range from range %s", .fmt_len(b$range))
+                            else sprintf("%d from range %s", b$floor, .fmt_len(b$range)),
                             ", not applied"),
                 if (!isTRUE(b$supported) && identical(b$ceiling_from, "fewer than two distinct locations"))
                   "  -- the points sit on one location: not supported"
@@ -2931,8 +3923,8 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
     cat(sprintf("  ladder      : %d to %d cells (floor %s, ceiling %d%s)%s\n",
                 min(x$levels), max(x$levels),
                 if (!is.finite(b$range)) "2 (no range)"
-                else paste0(if (is.na(b$floor)) sprintf("beyond integer range from range %.0f", b$range)
-                            else sprintf("%d from range %.0f", b$floor, b$range),
+                else paste0(if (is.na(b$floor)) sprintf("beyond integer range from range %s", .fmt_len(b$range))
+                            else sprintf("%d from range %s", b$floor, .fmt_len(b$range)),
                             if (isFALSE(b$range_floor)) ", not applied" else ""),
                 b$ceiling,
                 # With no location repeated the cap is one short of the points
@@ -2967,42 +3959,118 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
   }
   vg <- attr(x, "variogram", exact = TRUE)
   cn <- attr(x, "cp_noise", exact = TRUE)
+  # Where Cp's noise variance came from when it is not the nugget as it
+  # stands: the residual mean square of a level, or the semivariance of
+  # nearest-neighbour pairs that holds either of the two (see
+  # resolution_profile()).
+  rms_at <- function(level) sprintf("the residual mean square at %d cells", level)
+  noise <- if (identical(cn$source, "finest-level residual mean square"))
+    sprintf("cp's noise variance %.3g is %s", cn$value, rms_at(cn$level))
+  else if (identical(cn$source, "short-lag semivariance"))
+    sprintf("cp's noise variance %.3g is the semivariance of nearest-neighbour pairs, below %s (%.3g)",
+            cn$value,
+            if (identical(cn$uncapped$source, "finest-level residual mean square"))
+              rms_at(cn$uncapped$level) else "the nugget",
+            cn$uncapped$value)
+  else NULL
+  # The nugget is still the variogram's when Cp takes another number: it is
+  # then at the fit's lower bound, unless the cap replaced it.  With no noise
+  # variance at all (`cp_noise` NULL) the nugget is marked by the rule the
+  # profile applied (.nugget_at_bound()), and on a profile of a response
+  # that is not constant the line says that `cp` is NA for want of a level
+  # to fall back on, as the warning did.  A record with no source is the
+  # level the fallback read and found a residual mean square of 0 at, and
+  # the line names it.
+  zero <- is.list(cn) && identical(cn$source, NA_character_) &&
+    isTRUE(is.finite(cn$level)) && isTRUE(is.finite(cn$rows_per_cell))
+  zero_text <- if (zero)
+    sprintf(paste0("cp is NA at every level: the residual mean square at %d cells (%.3g scored ",
+                   "rows a cell), the finest level whose cells hold two on average, is 0%s"),
+            as.integer(cn$level), cn$rows_per_cell,
+            if (isTRUE(cn$rms > 0)) sprintf(" to within rounding (%.3g)", cn$rms) else "")
+  no_noise <- (is.null(cn) || zero) && .nugget_at_bound(vg, attr(x, "sac", exact = TRUE))
+  bound <- (!is.null(vg) && !is.null(noise) &&
+              !identical(cn$uncapped$source, "variogram nugget")) || no_noise
+  one_c <- attr(x, "one_cell", exact = TRUE)
+  cp_none <- no_noise && !is.na(attr(x, "variable") %||% NA_character_) &&
+    !(is.list(one_c) && isTRUE(one_c$constant))
   cat(sprintf("  variogram   : %s\n",
               if (is.null(vg))
-                (if (identical(cn$source, "finest-level residual mean square"))
-                   sprintf(paste0("none usable (reliability is NA; cp's noise ",
-                                  "variance %.3g is the residual mean square at %d cells)"),
-                           cn$value, cn$level)
+                (if (!is.null(noise))
+                   sprintf("none usable (reliability is NA; %s)", noise)
+                 else if (zero)
+                   sprintf("none usable (reliability is NA; %s)", zero_text)
                  # A ladder of sizes that was given no `sac` fits none.
                  else if (identical(cn$source, "none"))
                    paste0("none fitted: a size ladder fits one only when `sac` is given ",
                           "(cp and reliability are NA)")
                  else "none usable (cp and reliability are NA)")
               else
-                sprintf("nugget %.3g, partial sill %.3g, range %s", vg$nugget, vg$psill,
-                        if (is.finite(vg$range)) sprintf("%.0f", vg$range) else "unidentified")))
+                paste0(sprintf("nugget %.3g%s, partial sill %.3g, range %s", vg$nugget,
+                               if (bound) " (at the fit's lower bound)" else "", vg$psill,
+                               if (is.finite(vg$range)) .fmt_len(vg$range)
+                               else "unidentified"),
+                       if (!is.null(noise)) paste0("; ", noise)
+                       else if (cp_none && zero) paste0("; ", zero_text)
+                       else if (cp_none)
+                         paste0("; cp is NA at every level: no level's cells hold two ",
+                                "scored rows on average")
+                       else "")))
   # The kind that built the cells: unrecorded for k-means from k-means++
   # starts, whose line is the one it always was.
   part <- attr(x, "partition", exact = TRUE)
-  cat(sprintf("  scored on   : %s; %s per level; WSS rises at %d step(s)\n",
+  # The steps the WSS curve rises at are counted between levels, so on a
+  # profile with fewer than two levels that have a WSS (the default ladder of
+  # one size among them) there is no step to count and no clause.  They are
+  # counted over the levels printed: a subset of the rows keeps the whole
+  # ladder's count in its attributes, and on a whole profile the two agree.
+  if ("wss" %in% names(x)) {
+    wss <- if ("levels" %in% names(x)) x$wss[order(x$levels)] else x$wss
+    wss <- wss[is.finite(wss)]
+    n_wss <- length(wss)
+    bumps <- .wss_bumps(wss)
+  } else {
+    n_wss <- nrow(x)
+    bumps <- attr(x, "wss_bumps")
+  }
+  cat(sprintf("  scored on   : %s; %s per level%s\n",
               if (is.na(attr(x, "variable"))) "geometry only" else attr(x, "variable"),
               if (is.list(part) && !is.null(part$kind)) .partition_label(part, attr(x, "nstart"))
-              else sprintf("%d k-means++ restarts", attr(x, "nstart")),
-              attr(x, "wss_bumps")))
+              else sprintf("%d k-means++ restart%s", attr(x, "nstart"),
+                           if (identical(as.integer(attr(x, "nstart")), 1L)) "" else "s"),
+              if (n_wss >= 2L) sprintf("; WSS rises at %d step(s)", bumps)
+              else ""))
   # What one cell for the whole layer scores: the ladder starts at 2, so the
   # level every other has to beat is not a row of the table.
   one <- attr(x, "one_cell", exact = TRUE)
-  if (is.list(one) && is.finite(one$rss %||% NA_real_))
+  if (is.list(one) && is.finite(one$rss %||% NA_real_)) {
+    # rss and cp in one notation (.one_notation()).
+    with_cp <- !isTRUE(one$constant) && is.finite(one$cp %||% NA_real_)
+    nums <- .one_notation(c(one$rss, if (with_cp) one$cp), digits)
+    # A response the test for `cp` finds constant on the subsample and the
+    # estimate's does not on the layer is not called a constant beside a
+    # `loo` that is scored.
+    case <- .cp_constant_case(one, attr(x, "estimate", exact = TRUE))
     cat(sprintf("  one cell    : rss %s%s (one mean for the layer; a level has to beat it)\n",
-                format(signif(one$rss, digits)),
-                if (isTRUE(one$constant)) ", a constant"
-                else if (is.finite(one$cp %||% NA_real_))
-                  sprintf(", cp %s", format(signif(one$cp, digits)))
+                nums[1L],
+                if (identical(case, "rows")) ", constant on the rows the test for cp reads"
+                else if (identical(case, "beyond")) ", values out of range"
+                else if (isTRUE(one$constant)) ", a constant"
+                else if (with_cp) sprintf(", cp %s", nums[2L])
                 else ""))
+  }
   # The estimate the profile scores, the rows its leave-one-out error reads,
   # and that error with one mean for all of them.
   est <- attr(x, "estimate", exact = TRUE)
-  if (is.list(est) && !is.null(est$value))
+  # Under the split a selection half with no response leaves `loo` no row to
+  # read; the line says that, and not "fewer than two rows".
+  if (is.list(est) && !is.null(est$value) && isTRUE(est$n == 0L) &&
+      identical(est$rows, "selection half"))
+    cat(sprintf("  estimate    : %s; loo NA: no row of the selection half has a response\n",
+                if (identical(est$value, "pooled"))
+                  sprintf("pooled toward the %d nearest cells", est$neighbours)
+                else "plain means"))
+  else if (is.list(est) && !is.null(est$value))
     cat(sprintf("  estimate    : %s; loo on %d row%s of the %s; one cell: loo %s\n",
                 if (identical(est$value, "pooled"))
                   sprintf("pooled toward the %d nearest cells", est$neighbours)
@@ -3011,6 +4079,7 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
                 if (identical(est$rows, "selection half")) "selection half" else "layer",
                 if (isTRUE(est$constant)) "NA (the response is constant)"
                 else if (isTRUE(est$n < 2L)) "NA (fewer than two rows)"
+                else if (.estimate_beyond_range(est)) "NA (the values are out of range)"
                 else format(signif(est$loo_one_cell, digits))))
   if (all(c("elbow", "wss") %in% names(x)) && !any(is.finite(x$elbow)) &&
       sum(is.finite(x$wss)) >= 2L)
@@ -3229,9 +4298,9 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'     of one mean for all scored rows is within \code{tol} of the error at
 #'     the level, or below it, or when the F test of the cells at the level
 #'     against one mean has \eqn{p \ge 0.05}.  The count stands either way,
-#'     since the caller set it: \code{structured = FALSE} says that the cell
-#'     values will say little that one mean for the layer does not.  The
-#'     functions that take the selection as a count then raise
+#'     since a size set it and no criterion: \code{structured = FALSE} says
+#'     that the cell values will say little that one mean for the layer does
+#'     not.  The functions that take the selection as a count then raise
 #'     \code{spatialkit_no_structure}.  On a profile without an estimate
 #'     \code{structured} is \code{NA}.}
 #'   \item{\code{auto}}{The rule that goes with the profile's estimate:
@@ -3276,8 +4345,12 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #' criterion that is finite at the level and says that the size set the
 #' count, and \code{plot()} draws each as one point, with no selected level
 #' and no band.  When none is finite, as on a constant response, where
-#' \code{loo} is \code{NA} too, \code{summary()} stops with an error that
-#' says so.
+#' \code{loo} is \code{NA} too, or when no row of the selection half has a
+#' response (\code{select_on = "split"}), \code{summary()} stops with an
+#' error that says so.  In that last case \code{"cp"} and \code{"moran_z"},
+#' and \code{"loo"} with an \code{estimate}, are errors that give the same
+#' reason, except \code{"cp"} on a size ladder that fitted no variogram,
+#' which gives the size ladder's reason, as above.
 #'
 #' @param profile A \code{resolution_profile}.
 #' @param criterion Which rule sets the count: \code{"cp"} (minimised),
@@ -3330,7 +4403,8 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   \code{values} (the criterion
 #'   at every level, \code{NA} where it could not be computed),
 #'   \code{structured} (for \code{cp}: \code{FALSE} when \code{cp} at one
-#'   cell is within \code{tol} of the optimum, when the cell means at the
+#'   cell is not above the optimum by more than \code{tol} (below it
+#'   included), when the cell means at the
 #'   optimum differ from one mean by no more than chance allows, or when
 #'   the variogram found no spatial structure; \code{TRUE} when the optimum
 #'   beats one cell on both counts; see "What each criterion returns".
@@ -3371,7 +4445,33 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   computed in; \code{NULL} for a profile that does not carry them).  Their
 #'   Voronoi cells are the cells that were scored;
 #'   \code{\link{get_voronoi_seeds}(method = "kmeans", n = <this>)} and
-#'   \code{\link{voronoi_seeds_kmeans}(k = <this>)} return them.  For a
+#'   \code{\link{voronoi_seeds_kmeans}(k = <this>)} return them.  On a
+#'   profile without an estimate whose centres were fitted to a subsample
+#'   (\code{n_sample} below \code{n} in \code{attr(profile, "bounds")}) the
+#'   seeds are those centres refitted to every point: the kind's own
+#'   iteration (Hartigan and Wong's for \code{"kmeans"}, Lloyd's on every
+#'   point's density weights for \code{"density"}) run from the centres
+#'   scored, with the profile's iteration limit and no random draw.  Where
+#'   Hartigan and Wong's algorithm refuses the centres, Lloyd's iteration
+#'   with every weight one runs in its place, and a log line says so.  They
+#'   carry \code{attr(, "refit")}: \code{rows} (the points),
+#'   \code{subsample} (the points the profile fitted to), \code{kind},
+#'   \code{iter}, \code{iter_max}, \code{converged}, \code{wss_scored}
+#'   (the within-cell sum of squares of every point in the cells of the
+#'   centres scored, each cell about its own mean) and \code{wss} (the same
+#'   of the refitted cells).  Their cells are then not the cells scored, and
+#'   the count is still the one the subsample gave; the centres scored are
+#'   \code{attr(profile, "centres")[[as.character(best)]]}.  The refit reads
+#'   every point's coordinates from \code{attr(profile, "refit_rows")}, which
+#'   every such profile this version builds carries; on one built before it
+#'   the centres scored are the seeds, and a log line says so.  The refit is
+#'   not run either, and the centres scored are the seeds, when it would
+#'   pass the work limits of a profile's own fits (see "Conditions" in
+#'   \code{\link{resolution_profile}}); a log line says so.  A profile with
+#'   an estimate scores it on every row of the layer in the cells of the
+#'   centres fitted to the subsample, so its seeds are those centres, whose
+#'   cells are the cells scored.  \code{summary()} and \code{plot()} of a
+#'   profile read no seeds and refit nothing.  For a
 #'   profile built with \code{partition = "density"} or \code{init =
 #'   "random"} the list also has \code{partition} (\code{kind},
 #'   \code{init}, \code{density_power}, \code{density_k}), and the seeds
@@ -3414,7 +4514,12 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   \code{scored_cells} (\code{NA}: the record stands for a count).
 #'   \code{seeds} carries the same record as \code{attr(, "count_rule")}
 #'   with \code{scored_cells = TRUE}, since they are the centres that were
-#'   scored.  The record travels on with the seeds, the cells and the
+#'   scored, or \code{FALSE} when they were refitted to every point, since
+#'   they are then other cells built from the count.  A \code{"cp"}
+#'   selection off a profile without an estimate has \code{count_rule} as
+#'   well, after \code{seeds}, and nothing else of this list: its
+#'   \code{estimate} is \code{"mean"}, since \eqn{C_p} scores plain means,
+#'   and \code{scored} is \code{NULL}.  The record travels on with the seeds, the cells and the
 #'   assigned layer to \code{\link{summarize_by_cell}()}, which warns when
 #'   it reports another cell value than the count was chosen for (class
 #'   \code{spatialkit_estimate_mismatch}) and when the cells or rows it is
@@ -3460,6 +4565,10 @@ select_resolution <- function(profile,
                                             "moran_z", "loo", "size"),
                               tol = 0.02, range_floor = TRUE, diagnostic = FALSE,
                               obs_per_cell = NULL) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("select_resolution", "the points of `profile`", plural = TRUE)
+  on.exit(tie_end(returnValue(tie_end), attr(profile, "centres_crs", exact = TRUE)), add = TRUE)
   if (!inherits(profile, "resolution_profile"))
     stop("select_resolution(): `profile` must come from resolution_profile().",
          call. = FALSE)
@@ -3487,13 +4596,16 @@ select_resolution <- function(profile,
     criterion <- if (identical(est_value, "pooled")) "size"
                  else if (identical(est_value, "mean")) "loo"
                  else "cp"
+  # "auto" is the default, and match.arg() gives it whether the caller named
+  # it or not, so it is called the default and not something asked for, as
+  # the default size is (.size_source_text()).
   if (!is.null(obs_per_cell) && criterion != "size")
     stop(sprintf(paste0("select_resolution(): `obs_per_cell` is read by criterion = \"size\" ",
-                        "only, and criterion = \"%s\" was asked for%s."),
-                 asked,
+                        "only, and %s."),
                  if (asked == "auto")
-                   sprintf(", which reads this profile by \"%s\"", criterion)
-                 else ""),
+                   sprintf("criterion = \"auto\", the default, reads this profile by \"%s\"",
+                           criterion)
+                 else sprintf("criterion = \"%s\" was asked for", asked)),
          call. = FALSE)
   # `[` keeps the class, so a subset arrives here looking like a profile.  An
   # empty one or a column subset missing the criterion used to fall through to
@@ -3526,6 +4638,25 @@ select_resolution <- function(profile,
   # A constant response is its own case: Cp is NA because no level fits a
   # constant better than another, and the message used to ask for "a level
   # whose cells hold two scored rows", which every level of that profile had.
+  # Where the estimate's test finds spread on the rows it reads, the message
+  # says what each test found.
+  case <- .cp_constant_case(one, est)
+  if (!any(ok) && criterion %in% c("cp", "moran_z") && identical(case, "beyond"))
+    stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because the values ",
+                        "of the response lie beyond what the arithmetic of the profile ",
+                        "holds, which is values up to %s in absolute value whose largest ",
+                        "distance from their median is at least %s. Rescaled by a power of ",
+                        "ten to within that, the response is scored."),
+                 criterion, .bound_text(.POOL_Y_MAX), .bound_text(.POOL_Y_MIN)),
+         call. = FALSE)
+  if (!any(ok) && criterion %in% c("cp", "moran_z") && identical(case, "rows"))
+    stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because the test ",
+                        "for `cp` finds the response constant on the %d scored row(s) it ",
+                        "reads: its total sum of squares is rounding error at most on their ",
+                        "scale. The estimate reads %d row(s), and finds spread there, so ",
+                        "`loo` is scored: select_resolution(criterion = \"loo\") reads it."),
+                 criterion, as.integer(one$n), as.integer(est$n)),
+         call. = FALSE)
   if (!any(ok) && criterion %in% c("cp", "moran_z") && is.list(one) && isTRUE(one$constant))
     stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because the %s is ",
                         "constant: its total sum of squares is rounding error at most, ",
@@ -3542,6 +4673,24 @@ select_resolution <- function(profile,
                         "so no cell count fits it better than another."),
                  criterion, "response"),
          call. = FALSE)
+  # And values beyond what the estimate's arithmetic holds: every level's
+  # fit refused them.
+  if (!any(ok) && criterion == "loo" && .estimate_beyond_range(est))
+    stop(sprintf(paste0("select_resolution(): `loo` is NA at every level because the values ",
+                        "of the response lie beyond what the arithmetic of the estimate ",
+                        "holds, which is values up to %s in absolute value whose largest ",
+                        "distance from their median is at least %s. Rescaled by a power of ",
+                        "ten to within that, the response is scored."),
+                 .bound_text(.POOL_Y_MAX), .bound_text(.POOL_Y_MIN)),
+         call. = FALSE)
+  # And under the split, a selection half with no response: the error read
+  # no row at all, and "a cell that holds two rows" is not what it lacks.
+  if (!any(ok) && criterion == "loo" && is.list(est) && isTRUE(est$n == 0L) &&
+      identical(est$rows, "selection half"))
+    stop(paste0("select_resolution(): `loo` is NA at every level because no row of the ",
+                "selection half has a response: under select_on = \"split\" the profile ",
+                "scores the estimate on that half alone."),
+         call. = FALSE)
   # A ladder of sizes that was given no `sac` fitted no variogram, so Cp has
   # no noise variance and the reliability no range.  Said here, with the
   # ways to get the column, and not as a profile that lacks a response.
@@ -3555,6 +4704,32 @@ select_resolution <- function(profile,
                         "criterion = \"size\" reads this profile."),
                  criterion, .got_text(ladder_sizes), criterion,
                  if (criterion == "cp") "noise variance" else "range"),
+         call. = FALSE)
+  # A layer whose rows have a response and none of them every predictor
+  # leaves `cp` and `moran_z` NA, with or without the split: "it needs a
+  # response" sent the caller to look for a response that the layer has.
+  if (!any(ok) && criterion %in% c("cp", "moran_z") && .no_complete_row(profile))
+    stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because no row of the ",
+                        "layer has a response and every predictor: %s."),
+                 criterion, .no_complete_text(profile)),
+         call. = FALSE)
+  # Under the split, a selection half with no response leaves `cp` and
+  # `moran_z` NA too, with or without an estimate, for the same reason.
+  if (!any(ok) && criterion %in% c("cp", "moran_z") && .split_no_response(profile))
+    stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because no row of the ",
+                        "selection half has a response%s: under select_on = \"split\" the ",
+                        "profile reads the response on that half alone."),
+                 criterion,
+                 if (isTRUE(attr(profile, "bounds", exact = TRUE)$predictors))
+                   " and every predictor" else ""),
+         call. = FALSE)
+  # The finest level whose cells hold two scored rows on average has a
+  # residual mean square of 0, so `cp` has no noise variance though the
+  # layer meets every need the general message names.
+  cn0 <- attr(profile, "cp_noise", exact = TRUE)
+  if (!any(ok) && criterion == "cp" && is.list(cn0) && identical(cn0$source, NA_character_) &&
+      is.character(cn0$reason) && length(cn0$reason) == 1L)
+    stop(sprintf("select_resolution(): `cp` is NA at every level: %s.", cn0$reason),
          call. = FALSE)
   if (!any(ok))
     stop(sprintf(paste0("select_resolution(): `%s` is NA at every level%s."),
@@ -3644,6 +4819,8 @@ select_resolution <- function(profile,
   one_cp <- NA_real_
   structure_p <- NA_real_
   note <- NULL
+  # Whether a note of Cp's already says that the count is not identified.
+  said_unidentified <- FALSE
   if (criterion == "cp") {
     ref <- if (is.list(one)) one$cp_levels else NULL
     same <- is.list(one) && is.finite(one$cp %||% NA_real_) && !is.null(ref) &&
@@ -3680,12 +4857,17 @@ select_resolution <- function(profile,
         (cn$value <= 0 ||
            (is.list(vgm) && is.finite(vgm$psill %||% NA_real_) &&
               cn$value <= 1e-4 * (cn$value + vgm$psill)))
+      said_unidentified <- !beats || by_chance
+      # The two numbers in one notation (.one_notation()).  The rule is
+      # one_cp <= opt * (1 + tol), so one cell may be below the optimum or a
+      # little above it, and the sentence says the rule, not "within".
+      nums <- .one_notation(c(one_cp, opt))
       if (!beats)
-        note <- sprintf(paste0("Cp at one cell (%s) is within %s%% of the optimum (%s): one ",
-                               "mean for the whole layer predicts as well as any level ",
-                               "scored, so the response shows no spatial structure the ",
-                               "cells can use and the count is not identified."),
-                        format(signif(one_cp, 3)), format(100 * tol), format(signif(opt, 3)))
+        note <- sprintf(paste0("Cp at one cell (%s) is not above the optimum (%s) by more ",
+                               "than %s%%: one mean for the whole layer predicts as well as ",
+                               "any level scored, so the response shows no spatial structure ",
+                               "the cells can use and the count is not identified."),
+                        nums[1L], nums[2L], format(100 * tol))
       else if (by_chance)
         note <- sprintf(paste0("the cell means at %d cells differ from one mean for the ",
                                "whole layer by no more than chance allows (F test of the ",
@@ -3698,7 +4880,7 @@ select_resolution <- function(profile,
                                  "with every finer level whatever the response.")
                         else sprintf(paste0("Cp at one cell is %s against %s at the optimum, ",
                                             "a gap that chance produces on a layer of this size."),
-                                     format(signif(one_cp, 3)), format(signif(opt, 3))))
+                                     nums[1L], nums[2L]))
       else if (isTRUE(structured) && no_penalty)
         note <- sprintf(paste0("Cp's noise variance is 0, so Cp is RSS / n and falls with ",
                                "every finer level by chance alone: its comparison with one ",
@@ -3711,11 +4893,20 @@ select_resolution <- function(profile,
     }
     sac_prof <- attr(profile, "sac", exact = TRUE)
     why_sac  <- attr(sac_prof, "rejected_reason")
+    # The notes are pasted one after the other into the warning
+    # get_voronoi_seeds() raises, so after another note this one is a
+    # sentence of its own, and after one that already says the count is not
+    # identified it does not say so again.
     if (.sac_no_structure(sac_prof)) {
       structured <- FALSE
-      note <- c(note, sprintf(paste0("the profile's variogram found no spatial structure in ",
-                                     "the response (%s), so the count is not identified."),
-                              as.character(why_sac)[1L]))
+      why_text <- as.character(why_sac)[1L]
+      note <- c(note,
+        if (said_unidentified)
+          sprintf("The profile's variogram found no spatial structure in the response either (%s).",
+                  why_text)
+        else sprintf(paste0("%s profile's variogram found no spatial structure in the response ",
+                            "(%s), so the count is not identified."),
+                     if (length(note)) "The" else "the", why_text))
     }
   } else if (criterion == "elbow") {
     structured <- TRUE
@@ -3740,13 +4931,16 @@ select_resolution <- function(profile,
       sprintf("p = %s after adjusting for the %d level%s searched",
               format(signif(structure_p, 2)), n_searched, if (n_searched == 1L) "" else "s")
     else ""
+    # As for Cp: the two numbers in one notation, and the rule said as it
+    # is, one_cell <= opt * (1 + tol), which holds where one mean is lower.
+    nums <- .one_notation(c(one_cp, opt))
     if (isFALSE(st$beats))
       note <- c(structure = sprintf(
-        paste0("the leave-one-out error at one cell (%s) is within %s%% of the optimum ",
-               "(%s): one mean for the whole layer predicts as well as any level scored, ",
-               "so the response shows no spatial structure the cells can use and the ",
-               "count is not identified."),
-        format(signif(one_cp, 3)), format(100 * tol), format(signif(opt, 3))))
+        paste0("the leave-one-out error at one cell (%s) is not above the optimum (%s) ",
+               "by more than %s%%: one mean for the whole layer predicts as well as any ",
+               "level scored, so the response shows no spatial structure the cells can ",
+               "use and the count is not identified."),
+        nums[1L], nums[2L], format(100 * tol)))
     else if (isFALSE(structured))
       note <- c(structure = sprintf(
         paste0("the cell means at %d cells differ from one mean for the whole layer by ",
@@ -3754,7 +4948,7 @@ select_resolution <- function(profile,
                "the response shows no spatial structure the cells can use and the count ",
                "is not identified. The leave-one-out error at one cell is %s against %s ",
                "at the optimum, a gap that chance produces on a layer of this size."),
-        as.integer(best), p_text, format(signif(one_cp, 3)), format(signif(opt, 3))))
+        as.integer(best), p_text, nums[1L], nums[2L]))
     else if (isTRUE(st$beats) && is.na(structured))
       note <- c(structure = paste0(
         "the leave-one-out error at one cell is above the optimum by more than `tol`, ",
@@ -3815,6 +5009,31 @@ select_resolution <- function(profile,
 }
 
 
+# Whether a profile's estimate is NA at every level because the response's
+# values lie beyond what the engine's arithmetic holds (.pool_out_of_range()).
+# It is the one case in which the estimate has two rows or more, a column
+# that is not constant, and no error of one mean.
+.estimate_beyond_range <- function(est)
+  is.list(est) && isFALSE(est$constant) && isTRUE(est$n >= 2L) &&
+    !is.finite(as.numeric(est$loo_one_cell %||% NA_real_)[1L])
+
+
+# What a profile's two tests of a constant found, where the test for `cp`
+# (`one`, the "one_cell" attribute) finds the response constant: "constant"
+# when the estimate's test agrees or there is no estimate of two rows or
+# more to ask; "beyond" when the estimate's values lie beyond the engine's
+# arithmetic (.estimate_beyond_range()); "rows" when the estimate's test
+# finds spread on the rows it reads (every row of the layer with a value,
+# where the test for `cp` reads the subsample's), so that `loo` is scored.
+# NA when the test for `cp` does not find it constant.
+.cp_constant_case <- function(one, est) {
+  if (!(is.list(one) && isTRUE(one$constant))) return(NA_character_)
+  if (.estimate_beyond_range(est)) "beyond"
+  else if (is.list(est) && isFALSE(est$constant) && isTRUE(est$n >= 2L)) "rows"
+  else "constant"
+}
+
+
 #' Whether `loo` is read where no criterion is named
 #'
 #' \code{summary()} and \code{plot()} of a profile take \code{loo} into
@@ -3853,7 +5072,8 @@ select_resolution <- function(profile,
 #' profile scored at the chosen level and the record of how the count was
 #' set, and its seeds carry that record.  The kind that built the profile's
 #' cells, when the profile records one, is the last element either way.  A
-#' selection from a profile without an estimate by \code{"cp"},
+#' selection from a profile without an estimate by \code{"cp"} gains the
+#' record alone, since \eqn{C_p} scores plain means; one by
 #' \code{"reliability"}, \code{"elbow"} or \code{"moran_z"} gains nothing
 #' but that kind, as before.
 #'
@@ -3893,11 +5113,17 @@ select_resolution <- function(profile,
                            obs_per_cell_asked = asked, structured = scored_structured,
                            scored_cells = NA)
     sel$count_rule <- rec
-    # The seeds are the centres the profile scored at this count.
-    if (inherits(sel$seeds, "sf")) {
-      rec$scored_cells <- TRUE
-      attr(sel$seeds, "count_rule") <- rec
-    }
+    # Assigned only to seeds there are: `sel$seeds <- NULL` would drop the
+    # element a selection without seeds keeps.
+    if (inherits(sel$seeds, "sf")) sel$seeds <- .count_rule_on_seeds(sel$seeds, rec)
+  } else if (identical(sel$criterion, "cp")) {
+    # Cp scores plain means, so a count it chose on a profile without an
+    # estimate carries a record too: summarize_by_cell() then warns when it
+    # pools on it.  Such a profile scored no estimate, so the record has no
+    # `scored` list, and the selection gains nothing else.
+    rec <- .count_rule_new(profile, rule = "cp", cells = sel$best, scored_cells = NA)
+    sel$count_rule <- rec
+    if (inherits(sel$seeds, "sf")) sel$seeds <- .count_rule_on_seeds(sel$seeds, rec)
   }
   # The kind that built the profile's cells, when it is not the present one
   # (see resolution_profile()): the selection names it, and its seeds carry
@@ -3906,6 +5132,28 @@ select_resolution <- function(profile,
   if (is.list(part) && !is.null(part$kind))
     sel$partition <- part[.partition_fields()]
   sel
+}
+
+
+#' Put a selection's record on its seeds
+#'
+#' The seeds of a selection are the centres the profile scored at the
+#' count, and the record says so (\code{scored_cells = TRUE}).  Centres the
+#' selection refitted to every point (\code{attr(, "refit")}, see
+#' \code{.refit_level()}) are other cells built from the count, and the
+#' record says that (\code{FALSE}): the numbers it keeps describe the cells
+#' the profile scored, so \code{summarize_by_cell()} does not check the
+#' refitted cells against them.
+#'
+#' @param seeds The selection's seeds, an sf layer.
+#' @param rec The record.
+#' @return \code{seeds}, with \code{attr(, "count_rule")} set.
+#' @keywords internal
+#' @noRd
+.count_rule_on_seeds <- function(seeds, rec) {
+  rec$scored_cells <- is.null(attr(seeds, "refit", exact = TRUE))
+  attr(seeds, "count_rule") <- rec
+  seeds
 }
 
 
@@ -4006,27 +5254,34 @@ select_resolution <- function(profile,
                               reason = "not a level"))
   }
   best <- as.integer(best)
-  note <- c(size = sprintf(paste0("the count is set by obs_per_cell = %s, the caller's ",
-                                  "choice; no criterion chose it."), format(size)))
+  # The default size is called that whoever named it; any other size is one
+  # the caller gave, here or to the profile.
+  note <- c(size = sprintf("the count is set by obs_per_cell = %s, %s; no criterion chose it.",
+                           format(size),
+                           if (.size_is_default(size)) "the default"
+                           else "the caller's choice"))
   if (held)
     note <- c(note, held = sprintf(
       paste0("the profile holds this size to %d cells, the most k-means can place on ",
              "this layer; obs_per_cell = %s asks for %d."), best, format(size), k_star))
   # Whether cells of this size beat one mean for the whole layer.  The count
-  # stands either way: the caller set it.
+  # stands either way: a size set it and no criterion.  The two errors are
+  # written in one notation (.one_notation()), as on the print's loo line.
   st <- .estimate_structure(profile, best, tol, n_searched = 1L)
-  if (isFALSE(st$structured))
+  if (isFALSE(st$structured)) {
+    nums <- .one_notation(c(st$loo, st$one_cell))
     note <- c(note, structure = paste0(
       if (isFALSE(st$beats))
         sprintf(paste0("at %d cells the leave-one-out error of the %s (%s) is not below ",
                        "that of one mean for the whole layer (%s) by more than %s%%"),
                 best, if (identical(est_value, "pooled")) "pooled value" else "plain mean",
-                format(signif(st$loo, 3)), format(signif(st$one_cell, 3)), format(100 * tol))
+                nums[1L], nums[2L], format(100 * tol))
       else
         sprintf(paste0("the cell means at %d cells differ from one mean for the whole ",
                        "layer by no more than chance allows (F test, p = %s)"),
                 best, format(signif(st$structure_p, 2))),
       ": the response shows no spatial structure that cells of this size can use."))
+  }
   sel <- structure(list(best = best, flat = best,
                  criterion = "size", value = n / best,
                  at_ceiling = NA, at_floor = NA, edge = NA_character_,
@@ -4043,6 +5298,11 @@ select_resolution <- function(profile,
 
 #' The scored partition's centres at one level, as an sf POINT layer
 #'
+#' On a profile whose centres were fitted to a subsample, and which kept
+#' every point's coordinates for it (\code{attr(, "refit_rows")}), the
+#' centres are first refitted to every point (\code{.refit_level()}) and
+#' carry what that did as \code{attr(, "refit")}.
+#'
 #' @param profile A \code{resolution_profile}.
 #' @param L The level (cell count).
 #' @return An sf POINT layer of \code{L} centres in the CRS the profile was
@@ -4053,6 +5313,8 @@ select_resolution <- function(profile,
   cen <- attr(profile, "centres", exact = TRUE)
   xy  <- if (is.list(cen)) cen[[as.character(L)]] else NULL
   if (!is.matrix(xy) || nrow(xy) < 1L || ncol(xy) < 2L) return(NULL)
+  refit <- if (isTRUE(.refit_state$off)) NULL else .refit_level(profile, xy)
+  if (!is.null(refit)) xy <- refit$centers
   crs <- attr(profile, "centres_crs", exact = TRUE)
   s <- sf::st_as_sf(data.frame(seed_id = seq_len(nrow(xy)), x = xy[, 1L], y = xy[, 2L]),
                     coords = c("x", "y"),
@@ -4068,7 +5330,160 @@ select_resolution <- function(profile,
   part <- attr(profile, "partition", exact = TRUE)
   if (is.list(part) && !is.null(part$kind))
     attr(s, "partition") <- part[.partition_fields()]
+  if (!is.null(refit)) attr(s, "refit") <- refit$record
   s
+}
+
+
+# summary() and plot() of a profile read every criterion through
+# select_resolution() and use no seeds, so they ask it not to refit
+# (.without_refit()): on a large layer a refit is the costliest step of a
+# selection.
+.refit_state <- new.env(parent = emptyenv())
+.refit_state$off <- FALSE
+
+#' Evaluate an expression in which select_resolution() refits nothing
+#'
+#' @param expr The expression.
+#' @return Its value.  The seeds of a selection made inside are the centres
+#'   the profile scored, as they were before any refit.
+#' @keywords internal
+#' @noRd
+.without_refit <- function(expr) {
+  old <- .refit_state$off
+  .refit_state$off <- TRUE
+  on.exit(.refit_state$off <- old, add = TRUE)
+  force(expr)
+}
+
+
+#' Refit a level of a profile fitted to a subsample to every point
+#'
+#' The centres a profile fits to a subsample of \code{sample_n} points are
+#' far from the centres a fit to every point gives: at a few subsample rows
+#' per cell every point of the layer, given to its nearest centre, sits in
+#' cells whose within-cell sum of squares a few more steps on every point
+#' lowers a long way.  A profile without an estimate reads every column off
+#' the subsample, and keeps every point's coordinates for this
+#' (\code{attr(, "refit_rows")}); one with an estimate scored it on every
+#' row in the cells of the centres as fitted, keeps none, and is not
+#' refitted.  The level chosen is refitted to every point by the
+#' kind's own iteration, from the centres scored: \code{stats::kmeans()}
+#' (Hartigan and Wong, in the frame of \code{.kmeans_frame()}, centres
+#' included) for the kind \code{"kmeans"}, Lloyd's iteration on
+#' the density weights of every point for the kind \code{"density"}, with
+#' the profile's iteration limit.  No start is drawn, so no random number
+#' is used, and the count is the level's.  Where Hartigan and Wong's
+#' algorithm refuses the centres (two centres in one place, or within one
+#' rounding step of that frame, or a centre with no point of the layer
+#' nearest it), Lloyd's iteration with every
+#' weight one is run in its place, with a log line.
+#'
+#' The work is bounded as a profile bounds its fits: the points times the
+#' centres (times the iteration limit for the density kind without
+#' \pkg{FNN}) may not pass \code{getOption("spatialkit.fit_work_max")}, and
+#' without \pkg{FNN} the square of the distinct locations may not pass
+#' \code{getOption("spatialkit.exact_pairs_max")} for the density weights.
+#' Above either the centres are handed on as scored, with a logged warning.
+#'
+#' @param profile A \code{resolution_profile}.
+#' @param centres The level's scored centres, a two-column matrix.
+#' @return \code{NULL} when the profile was not fitted to a subsample, keeps
+#'   no coordinates of its points (a profile with an estimate, or one built
+#'   before the refit, which a log line names), or the refit is not run;
+#'   otherwise a list
+#'   with \code{centers}, the refitted centres, and \code{record}, which
+#'   the seeds carry as \code{attr(, "refit")}: \code{rows} (the points
+#'   refitted to), \code{subsample} (the points the profile fitted to),
+#'   \code{kind}, \code{iter}, \code{iter_max}, \code{converged},
+#'   \code{wss_scored} (the within-cell sum of squares of every point in the
+#'   cells of the scored centres, each cell about its own mean) and
+#'   \code{wss} (the same of the refitted cells).
+#' @keywords internal
+#' @noRd
+.refit_level <- function(profile, centres) {
+  rows <- attr(profile, "refit_rows", exact = TRUE)
+  b    <- attr(profile, "bounds", exact = TRUE)
+  if (!is.list(rows) || !is.matrix(rows$xy) || !is.list(b)) {
+    # A profile without an estimate fitted to a subsample that keeps no
+    # coordinates was built before the refit: its centres are handed on as
+    # they were then, and the log says why.
+    one <- function(v) is.numeric(v) && length(v) == 1L && is.finite(v)
+    if (is.list(b) && one(b$n_sample) && one(b$n) && b$n_sample < b$n &&
+        is.null(attr(profile, "estimate", exact = TRUE)))
+      .log_info(paste0("select_resolution(): this profile was fitted to a subsample of %d ",
+                       "of %d points and keeps no coordinates of its points (attr(, ",
+                       "\"refit_rows\"), which a profile built by this version of spatialkit ",
+                       "carries), so the seeds are the centres fitted to the subsample, not ",
+                       "refitted to every point."),
+                as.integer(b$n_sample), as.integer(b$n))
+    return(NULL)
+  }
+  xy <- rows$xy
+  n  <- nrow(xy)
+  if (!(is.numeric(b$n_sample) && length(b$n_sample) == 1L && b$n_sample < n)) return(NULL)
+  centres <- unname(centres[, 1:2, drop = FALSE])
+  L <- nrow(centres)
+  if (L < 2L || L > n) return(NULL)
+  part <- .partition_record(profile)
+  density <- identical(part$kind, "density")
+  iter_max <- rows$iter_max %||% 50L
+  use_fnn <- .has_backend("FNN")
+  # The bounds of the profile's own fits (see .fit_guard()).
+  work <- as.numeric(n) * L * (if (density && !use_fnn) iter_max else 1)
+  n_u  <- if (density && !use_fnn && part$density_power > 0)
+    sum(!duplicated(complex(real = xy[, 1L], imaginary = xy[, 2L]))) else 0
+  if (work > .fit_work_max() || as.numeric(n_u)^2 > .exact_pairs_max()) {
+    .log_warn(paste0("select_resolution(): refitting %d cells to the %d points would pass a ",
+                     "limit of the work a fit may do (options(spatialkit.fit_work_max = ), ",
+                     "spatialkit.exact_pairs_max), so the seeds are the centres fitted to ",
+                     "the subsample of %d."), L, n, as.integer(b$n_sample))
+    return(NULL)
+  }
+  # Every point in the cells of the scored centres, each cell about its own
+  # mean: what the refit is measured against.
+  wss_of <- function(a) {
+    m  <- rowsum(xy, a, reorder = TRUE) / as.numeric(tabulate(a)[sort(unique(a))])
+    mu <- m[match(a, as.integer(rownames(m))), , drop = FALSE]
+    sum((xy - mu)^2)
+  }
+  a0 <- .nearest_centre(xy[, 1L], xy[, 2L], centres[, 1L], centres[, 2L], use_fnn)
+  fit <- NULL
+  if (!density) {
+    # In the frame of .kmeans_frame(), centres included, as the profile's own
+    # fits; the centres and the sum come back in the layer's coordinates.
+    fr <- .kmeans_frame(xy)
+    km <- tryCatch(.kmeans_back(suppressWarnings(stats::kmeans(fr$z, centers = fr$to(centres),
+                                                               iter.max = iter_max)), xy),
+                   error = function(e) NULL)
+    if (!is.null(km))
+      fit <- list(centers = unname(km$centers[, 1:2, drop = FALSE]), wss = km$tot.withinss,
+                  iter = min(as.integer(km$iter), as.integer(iter_max)),
+                  converged = is.null(km$ifault) || identical(as.integer(km$ifault), 0L))
+  }
+  if (is.null(fit)) {
+    if (!density)
+      .log_info(paste0("select_resolution(): Hartigan and Wong's algorithm refuses the %d ",
+                       "centres scored as a start, so they are refitted to the %d points by ",
+                       "Lloyd's iteration in its place."), L, n)
+    dk <- .density_kmeans(xy, L, power = if (density) part$density_power else 0,
+                          k_nn = if (density) part$density_k else 8L,
+                          iter.max = iter_max, use_fnn = use_fnn, centers = centres)
+    if (!is.null(dk))
+      fit <- list(centers = unname(dk$centers), wss = dk$wss, iter = as.integer(dk$iter),
+                  converged = isTRUE(dk$converged))
+  }
+  if (is.null(fit) || !all(is.finite(fit$centers))) {
+    .log_warn(paste0("select_resolution(): the refit of %d cells to the %d points failed; the ",
+                     "seeds are the centres fitted to the subsample of %d."),
+              L, n, as.integer(b$n_sample))
+    return(NULL)
+  }
+  list(centers = fit$centers,
+       record = list(rows = as.integer(n), subsample = as.integer(b$n_sample),
+                     kind = if (density) "density" else "kmeans",
+                     iter = fit$iter, iter_max = as.integer(iter_max),
+                     converged = fit$converged, wss_scored = wss_of(a0), wss = fit$wss))
 }
 
 # Which bound an optimum at the end of the scored levels is sitting on.  NA
@@ -4095,11 +5510,20 @@ select_resolution <- function(profile,
     if (max(scored) < max(ladder))
       return("the last level the criterion is computable at")
     if (size_ladder && !size_held) return("the finest size offered (obs_per_cell)")
+    # Where min_cell_n and the distinct locations set the same ceiling
+    # (`ceiling_from` names min_cell_n then), the label names the locations:
+    # neither `levels` past the ceiling nor a lower min_cell_n moves a bound
+    # the locations set, and the hint of the min_cell_n label offered both
+    # (45 rows on 5 stations at min_cell_n = 9).
+    at_cap <- is.list(bounds) &&
+      startsWith(as.character(bounds$ceiling_from %||% ""), "min_cell_n") &&
+      isTRUE(bounds$ceiling >= min(bounds$n_distinct %||% NA_integer_,
+                                   (bounds$n %||% NA_integer_) - 1L))
     if (is.list(bounds) && identical(as.integer(max(ladder)), as.integer(bounds$ceiling)))
-      return(if (identical(bounds$ceiling_from, "distinct locations") &&
+      return(if ((identical(bounds$ceiling_from, "distinct locations") || at_cap) &&
                  isTRUE(bounds$ceiling < (bounds$n_distinct %||% NA_integer_)))
                "the support ceiling (one short of the points, the most k-means can fit)"
-             else if (identical(bounds$ceiling_from, "distinct locations"))
+             else if (identical(bounds$ceiling_from, "distinct locations") || at_cap)
                "the support ceiling (as many cells as the distinct locations allow)"
              else if (identical(bounds$ceiling_from, "sample_n") &&
                       isTRUE((bounds$n_scored %||% NA_integer_) < (bounds$n_sample %||% NA_integer_)))
@@ -4127,12 +5551,44 @@ select_resolution <- function(profile,
 }
 
 
+#' The numbers of one printed line, in one notation
+#'
+#' \code{format(signif(x, digits))} writes each number in the notation that
+#' is shorter for it, so two numbers of one line could come out as
+#' "90200000" and "1.09e+08".  When some of the finite numbers come out in
+#' scientific notation and some do not, all are written in it with up to
+#' \code{digits} significant digits and no trailing zeros, as
+#' \code{format(signif(x, digits))} writes such a number ("1.1e+08");
+#' otherwise each is written as \code{format(signif(x, digits))} writes it,
+#' so a line whose numbers already share a notation prints as it did.
+#'
+#' @param x A numeric vector: the numbers of one line.
+#' @param digits Significant digits.
+#' @return A character vector of the length of \code{x}.
+#' @keywords internal
+#' @noRd
+.one_notation <- function(x, digits = 3L) {
+  x <- as.numeric(x)
+  each <- vapply(x, function(v) format(signif(v, digits)), character(1))
+  sci <- grepl("e", each, fixed = TRUE)
+  fin <- is.finite(x)
+  if (!any(sci) || all(sci[fin])) return(each)
+  vapply(x, function(v)
+    if (is.finite(v)) format(signif(v, digits), scientific = TRUE)
+    else format(v), character(1))
+}
+
+
 # What to do about an optimum on a bound, by the bound.  Shared by the print
-# method and by the warning the functions that take the count raise.
+# method and by the warning the functions that take the count raise.  At the
+# support ceiling, levels the caller names past it are scored as given and
+# leave the levels below it as they are; a lower min_cell_n raises the
+# ceiling too, but builds another ladder.
 .edge_hint <- function(edge) {
   if (is.null(edge) || is.na(edge)) return("")
   if (grepl("min_cell_n", edge, fixed = TRUE))
-    " Lower min_cell_n to see whether the criterion keeps going."
+    paste0(" Pass `levels` that run past this count to see whether the criterion keeps ",
+           "going; a lower min_cell_n raises the ceiling too, but moves every level below it.")
   else if (grepl("raise sample_n", edge, fixed = TRUE))
     " Raise sample_n to see whether the criterion keeps going."
   else if (grepl("range floor", edge, fixed = TRUE))
@@ -4153,15 +5609,19 @@ print.resolution_selection <- function(x, ...) {
   # A size has no flat region: its line gives the size asked for and the
   # rows per cell the count leaves.
   if (by_size) {
+    # The default size is called that whoever named it, as the selection's
+    # note and the count record's print call it; any other size is one the
+    # caller asked for (.size_source_text()).
     asked <- x$obs_per_cell_asked %||% NA_real_
     n_div <- if (is.null(rec)) NA_integer_ else rec$n
-    cat(sprintf("  size        : %s asked (obs_per_cell); %s rows / %d cells = %.2f\n",
+    cat(sprintf("  size        : %s%s (obs_per_cell); %s rows / %d cells = %.2f\n",
                 paste(format(asked), if (isTRUE(asked == 1)) "row per cell" else "rows per cell"),
+                .size_source_text(asked),
                 format(n_div), x$best, x$value))
   } else {
-    cat(sprintf("  flat region : %s (%d of %d levels)\n",
+    cat(sprintf("  flat region : %s (%d of %d level%s)\n",
                 .band_label(x$flat, .scored_levels(x$values)),
-                length(x$flat), x$n_levels))
+                length(x$flat), x$n_levels, if (isTRUE(x$n_levels == 1L)) "" else "s"))
   }
   # The kind that built the cells, when the profile recorded one; a selection
   # from a k-means profile prints as it always did.
@@ -4174,6 +5634,16 @@ print.resolution_selection <- function(x, ...) {
     cat(paste0(c(sprintf("  %-12s: ", label), rep("                ", length(body) - 1L)), body),
         sep = "\n")
   }
+  # Seeds refitted to every point, from centres the profile fitted to a
+  # subsample: they are not the cells the criterion was read on.
+  refit <- if (inherits(x$seeds, "sf")) attr(x$seeds, "refit", exact = TRUE) else NULL
+  if (is.list(refit))
+    say(do.call(sprintf, c(list(paste0(
+      "refitted to all %d points from the centres scored on a subsample of %d ",
+      "(within-cell sum of squares %s, against %s in the scored cells)"),
+      as.integer(refit$rows), as.integer(refit$subsample)),
+      as.list(.one_notation(c(refit$wss, refit$wss_scored))))),
+      label = "seeds")
   # What the profile scored at this count for its estimate, under the two
   # criteria that read it.
   est <- x$estimate %||% NA_character_
@@ -4208,13 +5678,15 @@ print.resolution_selection <- function(x, ...) {
                  if (is.finite(w)) sprintf("; median own weight %.2f", w) else ""),
           label = "at this size", width = 76)
     }
-    # Left out when the profile has neither number: a constant response.
+    # Left out when the profile has neither number: a constant response, or
+    # under the split a selection half with no response.
     loo <- x$loo %||% NA_real_
     one <- x$loo_one_cell %||% NA_real_
-    if (isTRUE(is.finite(loo)) || isTRUE(is.finite(one)))
+    if (isTRUE(is.finite(loo)) || isTRUE(is.finite(one))) {
+      both <- .one_notation(c(loo, one))
       cat(sprintf("  loo         : %s (one cell for %s: %s)\n",
-                  format(signif(loo, 3)), if (half) "that half" else "the layer",
-                  format(signif(one, 3))))
+                  both[1L], if (half) "that half" else "the layer", both[2L]))
+    }
   }
   edge <- x$edge %||% NA_character_
   if (!is.na(edge))
@@ -4292,7 +5764,10 @@ print.resolution_selection <- function(x, ...) {
 #'   edge optimum sits on, as \code{\link{select_resolution}()} reports it;
 #'   \code{NA} when interior) and \code{structured} (as
 #'   \code{select_resolution()} reports it: \code{FALSE} for a \code{cp}
-#'   that one cell matches).  Attributes: \code{bands} (a named list holding each
+#'   that one cell matches, and where the cells beat one cell but the F test
+#'   does not tell their means from one mean or, for \code{cp}, the
+#'   profile's variogram found no spatial structure).  Attributes:
+#'   \code{bands} (a named list holding each
 #'   criterion's flat region in full, since \code{flat_min} and
 #'   \code{flat_max} are only its ends and the region can have holes in it),
 #'   \code{common} (the levels in every flat region of the count criteria,
@@ -4301,7 +5776,11 @@ print.resolution_selection <- function(x, ...) {
 #'   criterion returned a finite value at, which is what decides whether a gap
 #'   in a band is a rejection or a level nothing was computed at),
 #'   \code{ladder} (every level on the profile), \code{n_levels}, \code{tol}
-#'   and \code{variable} (what the criteria were scored on).  The print method recomputes the closing
+#'   and \code{variable} (what the criteria were scored on), and, only when
+#'   some row has \code{structured} \code{FALSE} although its cells beat one
+#'   cell by more than \code{tol}, \code{not_identified} (a character vector
+#'   named by criterion that says why: the F test, or for \code{cp} the
+#'   profile's variogram).  The print method recomputes the closing
 #'   comparison from \code{bands}, so a row subset of the result reads
 #'   honestly.
 #' @family aggregation
@@ -4413,10 +5892,77 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
            "criterion columns (", paste(setdiff(selectable, "loo"), collapse = ", "),
            "); it is a column subset of a resolution profile. Pass the ",
            "profile resolution_profile() returned.", call. = FALSE)
+    # A constant response is said as such: then no criterion that reads the
+    # response can be finite, and the generic sentence named neither the
+    # cause nor `loo`.
+    one_c <- attr(object, "one_cell", exact = TRUE)
+    est_c <- attr(object, "estimate", exact = TRUE)
+    constant <- (is.list(one_c) && isTRUE(one_c$constant)) ||
+      (is.list(est_c) && isTRUE(est_c$constant))
+    n_const <- if (is.list(one_c) && isTRUE(one_c$constant)) one_c$n else est_c$n
+    # So is a selection half with no response under select_on = "split": the
+    # layer has rows with one, all in the estimation half, and "cp needs a
+    # response" sent the caller to look for a response that is there.
+    # Read off the split's count, so with or without an estimate.
+    split_none <- .split_no_response(object)
+    split_pred <- isTRUE(attr(object, "bounds", exact = TRUE)$predictors)
+    # And a layer whose rows have a response and none of them every
+    # predictor: "cp needs a response" was false there too.
+    none_complete <- .no_complete_row(object)
+    # And values beyond what the estimate's arithmetic holds: `loo` is NA for
+    # that, and not because the test for `cp` finds the response constant.
+    beyond <- .estimate_beyond_range(est_c)
+    # Where the test for `cp` finds such values constant, they are not called
+    # constant: both tests are NA for the values' size.
+    beyond_all <- beyond && identical(.cp_constant_case(one_c, est_c), "beyond")
     stop("summary.resolution_profile(): no count criterion is finite at any level. ",
-         "cp needs a response, reliability a usable variogram; a geometry-only ",
-         "profile carries elbow alone, ",
-         "and elbow is NA when the WSS curve has no elbow.",
+         if (none_complete)
+           sprintf(paste0("No row of the layer has a response and every predictor (%s), so ",
+                          "no criterion that reads the response is finite: cp and moran_z ",
+                          "are NA at every level, and reliability needs a usable variogram; ",
+                          "elbow, read off the points alone, is NA when the WSS curve has ",
+                          "no elbow."),
+                   .no_complete_text(object))
+         else if (split_none)
+           sprintf(paste0("No row of the selection half has a response%s, and under ",
+                          "select_on = \"split\" the response is read on that half alone, ",
+                          "so no criterion that reads it is finite: %s are NA at every ",
+                          "level, and reliability needs a usable variogram of that half; ",
+                          "elbow, read off the points alone, is NA when the WSS curve has ",
+                          "no elbow."),
+                   if (split_pred) " and every predictor" else "",
+                   if ("loo" %in% names(object)) "cp, loo and moran_z" else "cp and moran_z")
+         else if (beyond_all)
+           sprintf(paste0("The values of the response lie beyond what the arithmetic of the ",
+                          "profile holds, which is values up to %s in absolute value whose ",
+                          "largest distance from their median is at least %s, so no ",
+                          "criterion that reads them is finite: %s are NA at every level, and ",
+                          "reliability needs a usable variogram of them; elbow, read off the ",
+                          "points alone, is NA when the WSS curve has no elbow. Rescaled by a ",
+                          "power of ten to within that, the response is scored."),
+                   .bound_text(.POOL_Y_MAX), .bound_text(.POOL_Y_MIN),
+                   if ("loo" %in% names(object)) "cp, loo and moran_z" else "cp and moran_z")
+         else if (constant)
+           sprintf(paste0("The %s is constant over the %d scored row%s, so no criterion ",
+                          "that reads it is finite: %s are NA at every level, and ",
+                          "reliability needs a usable variogram of it; elbow, read off the ",
+                          "points alone, is NA when the WSS curve has no elbow."),
+                   if (identical(attr(object, "variable"), "residuals"))
+                     "OLS residual of the response on `predictor_vars`"
+                   else "response",
+                   as.integer(n_const), if (identical(as.integer(n_const), 1L)) "" else "s",
+                   if ("loo" %in% names(object) && !beyond) "cp, loo and moran_z"
+                   else "cp and moran_z")
+         else paste0("cp needs a response, reliability a usable variogram; a geometry-only ",
+                     "profile carries elbow alone, ",
+                     "and elbow is NA when the WSS curve has no elbow."),
+         if (beyond && !beyond_all)
+           sprintf(paste0(" loo is NA at every level because the values of the response lie ",
+                          "beyond what the arithmetic of the estimate holds, which is values ",
+                          "up to %s in absolute value whose largest distance from their ",
+                          "median is at least %s."),
+                   .bound_text(.POOL_Y_MAX), .bound_text(.POOL_Y_MIN))
+         else "",
          if ("moran_z" %in% names(object) &&
              any(is.finite(suppressWarnings(as.numeric(object[["moran_z"]])))))
            " moran_z is finite, and is a diagnostic: name it in `criteria` to see it."
@@ -4441,11 +5987,12 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
 
   sels <- if (explicit)
     # Naming moran_z in `criteria` is the request select_resolution() asks for.
-    lapply(criteria, function(cn) select_resolution(object, criterion = cn, tol = tol,
-                                                     diagnostic = TRUE))
+    # No seeds are read here, so no level is refitted (.without_refit()).
+    .without_refit(lapply(criteria, function(cn)
+      select_resolution(object, criterion = cn, tol = tol, diagnostic = TRUE)))
   else {
-    got <- lapply(criteria, function(cn)
-      try(select_resolution(object, criterion = cn, tol = tol), silent = TRUE))
+    got <- .without_refit(lapply(criteria, function(cn)
+      try(select_resolution(object, criterion = cn, tol = tol), silent = TRUE)))
     ok <- !vapply(got, inherits, logical(1), "try-error")
     if (!any(ok))
       stop("summary.resolution_profile(): no criterion could be read off this profile.",
@@ -4492,6 +6039,33 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
   # The one size of the ladder, for the print method's line; absent on every
   # other ladder.
   if (!is.null(one_size)) attr(out, "obs_per_cell") <- one_size
+  # Why a count is not identified where its cells do beat one cell for the
+  # whole layer by more than `tol` (the rule of select_resolution()): the F
+  # test does not tell the cell means from one mean, or, for cp, the
+  # profile's variogram found no spatial structure.  By criterion, and only
+  # when such a row exists, so the summary of any other profile is the
+  # object it was; the print method says it in place of "one cell ... does
+  # as well", which is untrue of these rows.
+  why <- vapply(sels, function(s) {
+    one <- as.numeric(s$one_cell %||% NA_real_)[1L]
+    val <- as.numeric(s$value %||% NA_real_)[1L]
+    if (!isFALSE(as.logical(s$structured %||% NA)[1L]) || !is.finite(one) ||
+        !is.finite(val) || one <= val * (1 + tol))
+      return(NA_character_)
+    p <- as.numeric(s$structure_p %||% NA_real_)[1L]
+    f_test <- is.finite(p) && p >= 0.05
+    vgm <- identical(s$criterion, "cp") &&
+      .sac_no_structure(attr(object, "sac", exact = TRUE))
+    if (!f_test && !vgm) return(NA_character_)
+    paste0(if (f_test)
+             sprintf("the F test does not tell the cell means from one mean (p = %s)",
+                     format(signif(p, 2))),
+           if (f_test && vgm) ", and " else "",
+           if (vgm) "the profile's variogram found no spatial structure in the response"
+           else "")
+  }, character(1))
+  names(why) <- out$criterion
+  if (any(!is.na(why))) attr(out, "not_identified") <- why[!is.na(why)]
   out
 }
 
@@ -4522,10 +6096,11 @@ print.resolution_summary <- function(x, ...) {
     b <- if (!is.null(bands[[cn]])) bands[[cn]] else seq(x$flat_min[i], x$flat_max[i])
     .band_label(b, rungs_of(cn))
   }
-  cat(sprintf("Resolution picks: %d criteri%s over %d level%s (%d to %d cells)\n\n",
+  cat(sprintf("Resolution picks: %d criteri%s over %d level%s (%s cells)\n\n",
               nrow(x), if (nrow(x) == 1L) "on" else "a",
               n_lv, if (n_lv == 1L) "" else "s",
-              min(lad), max(lad)))
+              if (min(lad) == max(lad)) sprintf("%d", as.integer(min(lad)))
+              else sprintf("%d to %d", as.integer(min(lad)), as.integer(max(lad)))))
   # The kind that built the cells, when the profile recorded one.
   part <- attr(x, "partition", exact = TRUE)
   if (is.list(part) && !is.null(part$kind))
@@ -4569,14 +6144,27 @@ print.resolution_summary <- function(x, ...) {
                   width = 78, prefix = "  ", exdent = 2), sep = "\n")
     cat("  There the bound is choosing, not the criterion.\n")
   }
-  # A count one cell matches is not identified, whatever the table shows.
+  # A count one cell matches is not identified, whatever the table shows.  A
+  # row whose cells beat one cell and still are not identified says why
+  # (attr(, "not_identified")), one line a criterion.
   if ("structured" %in% names(x) && any(x$structured %in% FALSE)) {
+    why <- attr(x, "not_identified", exact = TRUE)
+    unstructured <- x$criterion[x$structured %in% FALSE]
+    told <- unstructured[unstructured %in% names(why)]
+    as_well <- setdiff(unstructured, told)
     open_notes()
-    cat(strwrap(sprintf(paste0("%s: one cell for the whole layer does as well, so the ",
-                               "response shows no spatial structure the cells can use ",
-                               "and this count is not identified."),
-                        paste(x$criterion[x$structured %in% FALSE], collapse = ", ")),
-                width = 78, prefix = "  ", exdent = 2), sep = "\n")
+    if (length(as_well))
+      cat(strwrap(sprintf(paste0("%s: one cell for the whole layer does as well, so the ",
+                                 "response shows no spatial structure the cells can use ",
+                                 "and this count is not identified."),
+                          paste(as_well, collapse = ", ")),
+                  width = 78, prefix = "  ", exdent = 2), sep = "\n")
+    for (cn in told)
+      cat(strwrap(sprintf(paste0("%s: the cells beat one cell for the whole layer, but %s, ",
+                                 "so no spatial structure the cells can use is shown and ",
+                                 "this count is not identified."),
+                          cn, why[[cn]]),
+                  width = 78, prefix = "  ", exdent = 2), sep = "\n")
   }
   # moran_z gets its row when asked for, and no part in the comparison: it is
   # a diagnostic of the cell means, and its band says nothing about which
@@ -4602,8 +6190,12 @@ print.resolution_summary <- function(x, ...) {
     else sort(unique(attr(x, "common")))
     cat("\n")
     rng <- range(x$best[rule])
-    cat(sprintf("  picks span %d to %d cells (%.1fx)\n", rng[1L], rng[2L],
-                rng[2L] / max(rng[1L], 1L)))
+    # Picks that agree are one count, as the header writes one level.
+    if (isTRUE(rng[1L] == rng[2L]))
+      cat(sprintf("  every pick is %d cells\n", rng[1L]))
+    else
+      cat(sprintf("  picks span %d to %d cells (%.1fx)\n", rng[1L], rng[2L],
+                  rng[2L] / max(rng[1L], 1L)))
     if (length(cm))
       cat(sprintf("  in every flat region: %s (%d level%s)\n",
                   .band_label(cm, Reduce(intersect, lapply(crit, rungs_of))),
@@ -4613,6 +6205,20 @@ print.resolution_summary <- function(x, ...) {
           "  whole ladder. plot() draws the curves they were read from.\n", sep = "")
   }
   invisible(x)
+}
+
+
+# What a count refused for being NA is, when determine_optimal_levels()
+# handed it on: one sentence with a space before it, or "" for any other
+# value.  Shared by .resolve_cell_count() and by voronoi_seeds_kmeans() and
+# voronoi_seeds_random(), which take the count as `k`.
+.no_count_note <- function(x) {
+  if (isFALSE(attr(x, "structured", exact = TRUE)))
+    paste0(" It is what determine_optimal_levels() returns at its default, ",
+           "on_no_elbow = \"na\", when the points name no count: the WSS ",
+           "curve has no elbow, or there is no ladder long enough to show ",
+           "one. Pass a number.")
+  else ""
 }
 
 
@@ -4819,12 +6425,7 @@ print.resolution_summary <- function(x, ...) {
   if (!is.numeric(n) || length(n) != 1L || !is.finite(n) || n < 1)
     stop(sprintf("%s(): `%s` must resolve to a positive number of cells; got %s.%s",
                  caller, arg, paste(format(n), collapse = ", "),
-                 # determine_optimal_levels(on_no_elbow = "na") hands this on.
-                 if (isFALSE(attr(x, "structured", exact = TRUE)))
-                   paste0(" It is what determine_optimal_levels(on_no_elbow = \"na\") ",
-                          "returns when the WSS curve has no elbow: the points name no ",
-                          "count. Pass a number.")
-                 else ""), call. = FALSE)
+                 .no_count_note(x)), call. = FALSE)
   # Seeds only when they are the partition at exactly this count; a selection
   # edited by hand, or one whose level had no successful k-means, has none.
   if (!inherits(seeds, "sf") || nrow(seeds) != n) seeds <- NULL
@@ -4886,7 +6487,7 @@ print.resolution_summary <- function(x, ...) {
        criterion = sel$criterion, edge = sel$edge, at_floor = sel$at_floor,
        at_ceiling = sel$at_ceiling, structured = sel$structured,
        # How the count was set, for the functions that turn it into cells:
-       # NULL for a number, and for a count a present criterion read off a
-       # profile without an estimate.
+       # NULL for a number, and for a count "reliability", "elbow" or
+       # "moran_z" read off a profile without an estimate.
        count_rule = sel$count_rule)
 }

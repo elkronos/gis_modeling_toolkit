@@ -62,8 +62,10 @@ test_that("a few missing predictor values do not take Moran's z away from determ
   pts <- r2_pts(400, seed = 2)
   holed <- pts
   holed$w[c(5, 50, 150)] <- NA
+  # These points have no elbow: the window is scored under on_no_elbow = "warn".
   dol <- function(p) suppressWarnings(determine_optimal_levels(
-    p, max_levels = 40, response_var = "z", predictor_vars = "w", criterion = "morans_i"))
+    p, max_levels = 40, response_var = "z", predictor_vars = "w", criterion = "morans_i",
+    on_no_elbow = "warn"))
   a <- dol(pts); b <- dol(holed)
   da <- attr(a, "diagnostics"); db <- attr(b, "diagnostics")
   expect_false(is.null(db))
@@ -90,9 +92,13 @@ test_that("a misspelt column is an error in determine_optimal_levels(), and a mi
                                               criterion = "morans_i"))
   expect_true(any(grepl("needs a response_var, and none was given", out$warnings)))
   expect_null(attr(out$value, "diagnostics"))
+  # These points have no elbow, so the call runs to the end under
+  # on_no_elbow = "warn" only.
   resp_only <- r2_warnings(determine_optimal_levels(pts, max_levels = 6, response_var = "z",
-                                                    criterion = "morans_i"))
+                                                    criterion = "morans_i",
+                                                    on_no_elbow = "warn"))
   expect_false(any(grepl("falling back to geometric", resp_only$warnings)))
+  expect_true(all(is.finite(resp_only$value)))
 })
 
 
@@ -197,7 +203,12 @@ test_that("a zero nugget, and a sac of the other variable, are warned about", {
   pts <- r2_pts(300)
   out <- r2_warnings(resolution_profile(pts, "z", sac = r2_sac(300, nugget = 0),
                                         n_levels = 4, nstart = 2))
-  expect_true(any(grepl("nugget is 0", out$warnings)))
+  # Cp does not take the nugget, which is the fit's lower bound (BUG-02), and
+  # says where its noise variance comes from instead.
+  expect_true(any(grepl("nugget (0 against a sill of", out$warnings, fixed = TRUE)))
+  expect_true(any(grepl("is at the fit's lower bound, which is not an estimate", out$warnings,
+                        fixed = TRUE)))
+  expect_false(identical(attr(out$value, "cp_noise")$source, "variogram nugget"))
   # A residual variogram applied to the raw response, and the reverse.
   det <- r2_sac(300, detrended = TRUE)
   out <- r2_warnings(resolution_profile(pts, "z", sac = det, n_levels = 4, nstart = 2))
@@ -238,6 +249,13 @@ test_that("row order does not change the profile or the count", {
   expect_identical(c2$wss, c1$wss)
   d1 <- suppressWarnings(determine_optimal_levels(pts, max_levels = 8))
   d2 <- suppressWarnings(determine_optimal_levels(pts[perm, ], max_levels = 8))
+  expect_identical(d2, d1)
+  # These points have no elbow, so the default gives NA (with the same sag
+  # either way); the count the ladder gives is compared under "warn".
+  d1 <- suppressWarnings(determine_optimal_levels(pts, max_levels = 8, on_no_elbow = "warn"))
+  d2 <- suppressWarnings(determine_optimal_levels(pts[perm, ], max_levels = 8,
+                                                  on_no_elbow = "warn"))
+  expect_true(all(is.finite(d1)))
   expect_identical(d2, d1)
 })
 

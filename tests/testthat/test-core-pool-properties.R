@@ -97,16 +97,36 @@
 
 # ---- Definitions written again, row by row -----------------------------------
 
-# Each region's neighbours by the rule alone: every other region by squared
-# distance between centroids, a tie to the lower first coordinate, then the
-# lower second, then the lower number.
+# Of candidates `s` at squared distances `d2`, the one the tie rule picks:
+# those within .TIE_TOL of the least squared distance are a tie; of them,
+# those whose first coordinate is within .TIE_TOL of the distance of the
+# least; of those, the ones whose second coordinate is; and of those the
+# first in `rank`.
+.pt_pick <- function(s, d2, xy, rank) {
+  m <- min(d2[s])
+  s <- s[d2[s] <= m * (1 + .TIE_TOL)]
+  s <- s[xy[s, 1] <= min(xy[s, 1]) + .TIE_TOL * sqrt(m)]
+  s <- s[xy[s, 2] <= min(xy[s, 2]) + .TIE_TOL * sqrt(m)]
+  s[which.min(rank[s])]
+}
+
+# Each region's neighbours by the rule alone, one at a time: of the other
+# regions left, the nearest by squared distance between centroids, a tie
+# (within .TIE_TOL) to the lower first coordinate, then the lower second,
+# then the lower number.  The number, not the place in coordinate order,
+# which rounding sets between centroids that coincide only to rounding.
 .pt_neighbours <- function(cen, k = 8L) {
   K <- nrow(cen); k <- min(as.integer(k), K - 1L)
+  rank <- seq_len(K)
   out <- matrix(0L, K, k)
   for (j in seq_len(K)) {
     d2 <- (cen[, 1] - cen[j, 1])^2 + (cen[, 2] - cen[j, 2])^2
-    o  <- order(d2, cen[, 1], cen[, 2], seq_len(K))
-    out[j, ] <- o[o != j][seq_len(k)]
+    left <- seq_len(K)[-j]
+    for (t in seq_len(k)) {
+      p <- .pt_pick(left, d2, cen, rank)
+      out[j, t] <- p
+      left <- left[left != p]
+    }
   }
   out
 }
@@ -114,17 +134,17 @@
 # A nearest other row by the rule alone.  A row that shares its location
 # takes the first other row there, rows ordered by region and then as given;
 # a row alone at its location takes the first row of the nearest other
-# location, a tie to the lower first coordinate, then the lower second.
+# location, a tie (within .TIE_TOL) to the lower first coordinate, then the
+# lower second.
 .pt_nearest_other <- function(xy, gi, rows = seq_len(nrow(xy))) {
   n <- nrow(xy)
+  rank <- order(order(xy[, 1], xy[, 2]))
   vapply(rows, function(i) {
     here <- which(xy[, 1] == xy[i, 1] & xy[, 2] == xy[i, 2])
     here <- here[order(gi[here], here)]
     if (length(here) > 1L) return(here[here != i][1L])
     d2 <- (xy[, 1] - xy[i, 1])^2 + (xy[, 2] - xy[i, 2])^2
-    d2[i] <- Inf
-    near <- which(d2 == min(d2))
-    best <- near[order(xy[near, 1], xy[near, 2])][1L]
+    best <- .pt_pick(seq_len(n)[-i], d2, xy, rank)
     at <- which(xy[, 1] == xy[best, 1] & xy[, 2] == xy[best, 2])
     at[order(gi[at], at)][1L]
   }, integer(1))
@@ -403,13 +423,23 @@ test_that("11. a column constant inside every region and not overall is flat, no
   }
 })
 
-test_that("11. the rule for no spread is relative to the size of the values", {
+test_that("11. the rule for no spread does not depend on where the values sit or on their size", {
   L <- .pt_small()
   noise <- local({ .pt_seed(11); stats::rnorm(400) })
-  A <- .pool_fit(1e6 + 1e-9 * noise, L$gi, L$K, L$xy, use_fnn = FALSE)
-  expect_true(A$constant)
-  expect_identical(A$status, "no spread inside any cell")
-  expect_identical(A$w, rep(1, L$K))
+  # A spread of 1e-9 on values of 1e6 is 8.6 units in the last place.  By
+  # the bound on the raw values it is rounding; on the column centred and
+  # scaled it is spread, and the fit is that of the noise (BUG-21).
+  y <- 1e6 + 1e-9 * noise
+  expect_true(.no_spread(sum((y - mean(y))^2), y))
+  A <- .pool_fit(y, L$gi, L$K, L$xy, use_fnn = FALSE)
+  E <- .pool_fit((y - 1e6) * 1e9, L$gi, L$K, L$xy, use_fnn = FALSE)
+  expect_false(A$constant)
+  expect_false(A$flat)
+  expect_identical(A$status, E$status)
+  expect_equal(A$w, E$w, tolerance = 1e-12)
+  expect_equal(A$sigma2 * 1e18, E$sigma2, tolerance = 1e-12)
+  expect_equal(A$tau2 * 1e18, E$tau2, tolerance = 1e-12)
+  expect_equal(A$loo_pooled * 1e18, E$loo_pooled, tolerance = 1e-12)
   B <- .pool_fit(1e6 + 1e-3 * noise, L$gi, L$K, L$xy, use_fnn = FALSE)
   expect_false(B$constant)
   expect_false(B$flat)
@@ -810,9 +840,10 @@ test_that("13. no region is its own neighbour, and ties go by coordinate, then b
     expect_true(all(nb >= 1L & nb <= K), info = tag)
     expect_true(all(apply(nb, 1L, anyDuplicated) == 0L), info = tag)
     expect_identical(nb, .pt_neighbours(cen, 8L), info = tag)
-    # Nearest first.
-    d <- matrix(sqrt((cen[nb, 1] - cen[, 1])^2 + (cen[nb, 2] - cen[, 2])^2), K)
-    if (ncol(d) > 1L) expect_true(all(d[, -1L] >= d[, -ncol(d)]), info = tag)
+    # Nearest first, to within the tolerance of a tie.
+    d2 <- matrix((cen[nb, 1] - cen[, 1])^2 + (cen[nb, 2] - cen[, 2])^2, K)
+    if (ncol(d2) > 1L)
+      expect_true(all(d2[, -1L] >= d2[, -ncol(d2)] * (1 - .TIE_TOL)), info = tag)
     # Another number of neighbours.
     expect_identical(.region_neighbours(cen, 3L, f), .pt_neighbours(cen, 3L), info = tag)
     # Renumbered, the regions keep their neighbours, but for regions on one
@@ -865,8 +896,8 @@ test_that("13. FNN's path and the exact path return the same neighbours", {
 # distance in another order than the distances R computes, so it can hand
 # back the further members of such a group and leave the nearest out.  These
 # do that and nothing else: where the candidates around the end of the list
-# are within one part in 1e9 of one squared distance, as the package computes
-# it, the nearest of them is dropped and the next one taken in.  `count$rows`
+# are within .TIE_TOL of one squared distance, as the package computes it,
+# the nearest of them is dropped and the next one taken in.  `count$rows`
 # counts the rows it happened to.
 .pt_by_distance <- function(nn, d2) {
   o  <- t(apply(d2, 1L, order))
@@ -882,7 +913,7 @@ test_that("13. FNN's path and the exact path return the same neighbours", {
     d2 <- matrix((data[nn, 1] - data[, 1])^2 + (data[nn, 2] - data[, 2])^2, n)
     s  <- .pt_by_distance(nn, d2)
     # Places k - 1, k and k + 1 at nearly one distance: k - 1 is left out.
-    group <- s$d2[, k + 1L] <= s$d2[, k - 1L] * (1 + 1e-9)
+    group <- s$d2[, k + 1L] <= s$d2[, k - 1L] * (1 + .TIE_TOL)
     out <- s$nn[, seq_len(k), drop = FALSE]
     out[group, ] <- s$nn[group, c(seq_len(k - 2L), k, k + 1L), drop = FALSE]
     count$rows <- count$rows + sum(group)
@@ -898,7 +929,7 @@ test_that("13. FNN's path and the exact path return the same neighbours", {
     s  <- .pt_by_distance(nn, d2)
     # The location asked about stands first, at distance 0.  Its three
     # nearest others at nearly one distance: the nearest of them is left out.
-    group <- s$d2[, 4L] <= s$d2[, 2L] * (1 + 1e-9)
+    group <- s$d2[, 4L] <= s$d2[, 2L] * (1 + .TIE_TOL)
     out <- s$nn[, 1:3, drop = FALSE]
     out[group, ] <- s$nn[group, c(1L, 3L, 4L), drop = FALSE]
     count$rows <- count$rows + sum(group)
@@ -910,8 +941,8 @@ test_that("13. neighbours a kd-tree returns out of order within rounding are sea
   skip_if_not_installed("FNN")
   # On this platform FNN's distances are R's to the last bit, so the lattices
   # above give one answer whether or not near ties are searched again.  The
-  # margin of one part in 1e9 is for a kd-tree built with other arithmetic;
-  # the stand-in is one.
+  # margin of .TIE_TOL and one part in 1e9 is for a kd-tree built with other
+  # arithmetic; the stand-in is one.
   square <- .pt_lattice(667L)$xy
   a <- expand.grid(i = 0:29, j = 0:24)
   hexagonal <- unname(cbind(a$i + 0.5 * (a$j %% 2), a$j * sqrt(3) / 2)) * 100 + 0.1
@@ -956,9 +987,9 @@ test_that("13. centroids that share a point with eight others or more are not se
   searched <- NULL
   exact <- .knn_exact_rows
   local({
-    local_mocked_bindings(.knn_exact_rows = function(x, y, rows, k) {
+    local_mocked_bindings(.knn_exact_rows = function(x, y, rows, k, ...) {
       searched <<- c(searched, rows)
-      exact(x, y, rows, k)
+      exact(x, y, rows, k, ...)
     })
     expect_identical(.region_neighbours(cen, 8L, FALSE), rule)
   })
@@ -1008,9 +1039,9 @@ test_that("13. centroids that share a point with eight others or more are not se
   settle <- .knn_tied_rows
   knnx   <- FNN::get.knnx
   got <- local({
-    local_mocked_bindings(.knn_tied_rows = function(u, rows, k) {
+    local_mocked_bindings(.knn_tied_rows = function(u, rows, k, ...) {
       tied <<- rbind(tied, u[rows, , drop = FALSE])
-      settle(u, rows, k)
+      settle(u, rows, k, ...)
     })
     local_mocked_bindings(get.knnx = function(data, query, k = 10, ...) {
       asked <<- asked + as.numeric(nrow(query)) * k
@@ -1273,8 +1304,9 @@ test_that("16. an exact search above the limit stops with spatialkit_work_limit"
   expect_identical(
     conditionMessage(e),
     paste0("resolution_profile(): finding each cell's neighbours among 20 cells would compare ",
-           "4e+02 pairs without the FNN package, above the limit of 10 ",
-           "(options(spatialkit.exact_pairs_max = )). Install FNN: the result is the same."))
+           "400 pairs without the FNN package, above the limit of 10 ",
+           "(options(spatialkit.exact_pairs_max = )). FNN, which installs with spatialkit, ",
+           "could not be loaded: reinstall it; the result is the same."))
   # The caller's name is the one handed down.
   e2 <- tryCatch(.region_neighbours(cen, 8L, FALSE, caller = "cell_values_at"),
                  error = function(e) e)
@@ -1302,7 +1334,8 @@ test_that("16. the guard itself, the fit and the nearest other row", {
     conditionMessage(e),
     paste0("cell_values_at(): the spacing of 4 locations would compare 11 pairs without the ",
            "FNN package, above the limit of 10 (options(spatialkit.exact_pairs_max = )). ",
-           "Install FNN: the result is the same."))
+           "FNN, which installs with spatialkit, could not be loaded: reinstall it; the result ",
+           "is the same."))
   expect_match(conditionMessage(tryCatch(.work_guard(2, 1, "x", "f", remedy = "Do less."),
                                          error = function(e) e)), "Do less\\.$")
 

@@ -29,8 +29,10 @@ test_that("a constant response is called constant, by the profile and by select_
   p <- out$value
   expect_true("spatialkit_constant_response" %in% out$classes)
   expect_true(any(grepl("the response is constant over the 200 scored row", out$text)))
-  expect_true(any(grepl("`cp`, `moran_i` and `moran_z` are NA at every level", out$text,
-                        fixed = TRUE)))
+  # The profile has the default estimate, whose columns are NA too: the
+  # warning names them (BUG-07).
+  expect_true(any(grepl(paste0("`cp`, `moran_i`, `moran_z`, `loo`, `loo_se` and `own_weight` ",
+                               "are NA at every level"), out$text, fixed = TRUE)))
   expect_true(attr(p, "one_cell")$constant)
   expect_true(all(is.na(p$cp)))
   expect_true(all(is.na(p$moran_i)) && all(is.na(p$moran_z)))
@@ -47,8 +49,9 @@ test_that("a constant response is called constant, by the profile and by select_
 
 test_that("determine_optimal_levels() scores a response without predictors", {
   pts <- fus_pts(400, seed = 5)
+  # These points have no elbow: the window is scored under on_no_elbow = "warn".
   out <- fus_catch(determine_optimal_levels(pts, max_levels = 40, response_var = "z",
-                                            criterion = "morans_i"))
+                                            criterion = "morans_i", on_no_elbow = "warn"))
   # It fell back to the geometric ranking with "needs both response_var and
   # predictor_vars", though the statistic runs on an intercept alone.
   expect_false(any(grepl("falling back to geometric", out$text)))
@@ -59,11 +62,21 @@ test_that("determine_optimal_levels() scores a response without predictors", {
   expect_false(is.null(d))
   expect_true(any(is.finite(d$moran_z)))
   expect_true(all(out$value %in% d$eval_ks[is.finite(d$moran_z[d$eval_ks])]))
-  # A response alone does not change the default criterion.
-  geo <- fus_catch(determine_optimal_levels(pts, max_levels = 40, response_var = "z"))
+  # A response alone does not change the default criterion (compared under
+  # "warn", where these points have counts to compare).
+  geo <- fus_catch(determine_optimal_levels(pts, max_levels = 40, response_var = "z",
+                                            on_no_elbow = "warn"))
   expect_null(attr(geo$value, "diagnostics"))
+  expect_false("spatialkit_diagnostic_ranking" %in% geo$classes)
+  expect_true(all(is.finite(geo$value)))
   expect_identical(as.integer(geo$value),
-                   as.integer(fus_catch(determine_optimal_levels(pts, max_levels = 40))$value))
+                   as.integer(fus_catch(determine_optimal_levels(pts, max_levels = 40,
+                                                                 on_no_elbow = "warn"))$value))
+  # At the default the NA has no diagnostics either: the criterion stayed
+  # geometric.
+  geo_na <- fus_catch(determine_optimal_levels(pts, max_levels = 40, response_var = "z"))
+  expect_true(is.na(geo_na$value))
+  expect_null(attr(geo_na$value, "diagnostics"))
   # Without a response there is still nothing to score, and that is said.
   none <- fus_catch(determine_optimal_levels(pts, max_levels = 40, criterion = "morans_i"))
   expect_true(any(grepl("criterion = 'morans_i' needs a response_var, and none was given",
@@ -113,10 +126,12 @@ test_that("resolution_profile() lets nothing through to the console from the var
 })
 
 test_that("a response that is constant to within rounding scores nothing, as the message says", {
-  # 1e6 + 1e-9 x noise: called constant, and then given a finite `cp`
-  # computed from its rounding error, and 2 cells by select_resolution().
+  # A response constant to within rounding was called constant, and then
+  # given a finite `cp` computed from its rounding error, and 2 cells by
+  # select_resolution().  1e6 + 1e-10 x noise is 0.9 units in the last place
+  # (1e6 + 1e-9 x noise, 8.6 units, is a spread and is scored: BUG-36).
   near <- fus_pts(200)
-  near$z <- 1e6 + 1e-9 * near$z
+  near$z <- 1e6 + 1e-10 * near$z
   out <- fus_catch(resolution_profile(near, "z", n_levels = 5, nstart = 2))
   p <- out$value
   expect_true("spatialkit_constant_response" %in% out$classes)
@@ -127,9 +142,27 @@ test_that("a response that is constant to within rounding scores nothing, as the
   expect_true(is.na(attr(p, "one_cell")$cp))
   # No noise variance is read off rounding error, and none is announced.
   expect_false(any(grepl("takes its noise variance", out$text)))
+  # The estimate's test finds it constant too, and the errors say so.
+  expect_true(attr(p, "estimate")$constant)
   expect_error(select_resolution(p, "cp"), "because the response is constant")
   expect_error(select_resolution(p, "moran_z", diagnostic = TRUE),
                "because the response is constant")
+  q <- suppressWarnings(resolution_profile(near, "z", n_levels = 5, nstart = 2,
+                                           estimate = NULL))
+  expect_error(select_resolution(q, "cp"), "because the response is constant")
+  expect_error(select_resolution(q, "moran_z", diagnostic = TRUE),
+               "because the response is constant")
+  # 1e6 + 1e-9 x noise is scored by both tests, with a noise variance read
+  # off its spread.
+  far <- fus_pts(200)
+  far$z <- 1e6 + 1e-9 * far$z
+  out <- fus_catch(resolution_profile(far, "z", n_levels = 5, nstart = 2))
+  p <- out$value
+  expect_false("spatialkit_constant_response" %in% out$classes)
+  expect_false(attr(p, "one_cell")$constant)
+  expect_true(all(is.finite(p$cp)))
+  expect_false(is.null(attr(p, "cp_noise")))
+  expect_true(select_resolution(p, "cp")$best %in% p$levels)
 
   # A response the predictors fit exactly leaves residuals that are rounding
   # error on the response's scale.  Against their own sum of squares they

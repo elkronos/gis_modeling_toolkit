@@ -18,7 +18,8 @@
 \code{residuals(x)}; for a custom subclass with no \code{residuals()}
 method (optional, see \code{\link{new_spatial_fit}()}) they are the
 response minus \code{fitted(x)}, which is what the built-in backends'
-methods return.}
+methods return.  The maps are drawn in x and y: a \code{data_sf} whose
+geometries mix XY with XYZ or XYM is drawn without its Z and M.}
 
 \item{type}{One of:
 \describe{

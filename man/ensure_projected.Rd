@@ -21,12 +21,22 @@ length-scales read off the coordinates.  \code{"area"}: densities or rates
 per cell are going to be computed, so the CRS must be equal-area.  For
 lon/lat input the choice is then made among equal-area projections only:
 a Lambert azimuthal centred on the data, or an Albers conic where its
-parallels do not degenerate, whichever distorts distances less.  A UTM
-zone (conformal, not equal-area) never enters that comparison, and global
+parallels do not degenerate or pass a pole, whichever distorts distances
+less.  A UTM zone (conformal, not equal-area) never enters that
+comparison, and global
 coverage gets Equal Earth in place of Web Mercator.  Already-projected
 input is still returned untouched, but its area distortion over the
 extent is measured (the spread of planar-to-geodesic area ratios over
-probe polygons) and logged as a warning when it exceeds 1 percent.
+probe polygons) and logged as a warning when it exceeds 1 percent.  The
+probes are the layer's distinct polygons (exact copies of a polygon
+count once), or a 6 by 6 grid over its bounding box for a layer without
+polygons, a layer of one distinct polygon, which gives one ratio and no
+spread, and a layer with a polygon s2 cannot measure in degrees (edges
+that cross, a spike) or that \code{\link[sf:st_is_valid]{sf::st_is_valid()}} rejects in its CRS (a
+hole outside its shell), whose planar area is not the area it encloses.
+When the grid gives no figure either (a single
+point, a line along one axis), a warning says that the distortion could
+not be measured.
 Measured: a zone's own width edge to edge, 0.25 percent; the
 conterminous United States forced into one zone, 14 percent; Web
 Mercator over 2.5 degrees of latitude at 48N, 4 percent; an equal-area
@@ -56,6 +66,14 @@ attribute is also read on the way IN.  An object already carrying
 \code{"none"} is returned untouched, with the heuristic skipped, which is
 how a \code{predict()} method replays a fit's negative decision so that a
 subset of the training rows is not judged differently from the whole.
+A layer that mixes XY and XYZ (or XYM) geometries is returned in XY
+when it is transformed, with a warning of class
+\code{"spatialkit_zm_dropped"}: \code{\link[sf:st_transform]{sf::st_transform()}} reads a layer in
+the dimension of its first geometry and misplaces the others.  The
+projection is then chosen from the layer in XY.  A layer in one
+dimension is transformed with its Z and M, and so is a layer whose
+only geometries of another dimension than the first are empty and not
+points.  A layer that is not transformed is returned with its own geometry.
 }
 \description{
 Coerces spatial objects to a projected coordinate reference system suitable
@@ -79,12 +97,20 @@ several percent, and that error propagates straight into variogram
 ranges, block sizes, GWR bandwidths and GP length-scales. Which
 projection is actually best is then \strong{measured, not assumed}: the zone,
 a Lambert azimuthal equal-area centred on the data and (where its
-standard parallels do not degenerate) an Albers conic are each scored by
-projecting representative points of the data (a non-POINT layer is
+standard parallels do not degenerate or pass a pole) an Albers conic are
+each scored by projecting representative points of the data (a non-POINT layer is
 reduced to one point per feature, plus the vertices of its outline when
-it has fewer than 40 features, so a single study-area polygon is scored
-too) and comparing planar with geodesic pairwise distances, and the one
-that distorts least is used.
+fewer than 40 distinct points remain, so a single study-area polygon is
+scored too, however many rows repeat it; copies of one location count
+once, and rows without a finite location are left out) and comparing
+planar with geodesic distances over the pairs at least 1 mm apart, and
+the one that distorts least is used. A candidate must place every
+location of the layer to be used: one under which a vertex of the
+layer has no coordinates (a UTM zone about 90 degrees or more from its
+central meridian) gets \code{distance_error} \code{NA} and is not chosen, and
+the log line names it. A vertex at a latitude beyond 90, which no CRS
+places, takes no part in this test. When no candidate places every
+vertex, Web Mercator (Equal Earth for \code{purpose = "area"}) is used.
 The choice, both error figures and this argument are \strong{logged} (see the
 logging note under \code{\link[=spatialkit_quiet]{spatialkit_quiet()}}); they are not R warnings, so
 \code{tryCatch(warning = )} does not see them.}
@@ -106,13 +132,47 @@ falls back to EPSG:3857 (Equal Earth for \code{purpose = "area"}).}
 \item{Missing CRS}{With no \code{target_crs}, a bounding box that looks like
 lon/lat means EPSG:4326 is assumed (a real warning) and the rules above
 then apply; coordinates the heuristic declines are left exactly as they
-are. With \code{target_crs} supplied there is no source CRS to reproject
+are. The box is the one of the coordinates that have a location (see
+the next item). With \code{target_crs} supplied there is no source CRS to reproject
 from, so the same heuristic decides between two outcomes: lon/lat-looking
 coordinates are read as EPSG:4326 and reprojected to the target (a real
 warning), and anything else has the target \strong{stamped on without
 reprojection}. That is a relabel, logged only, so verify the
 coordinates really are in that CRS. Set the CRS explicitly to suppress
-either.}
+either. A \code{target_crs} in longitude and latitude is not stamped on
+coordinates that cannot be in it: an x outside -180 to 360 or a y
+beyond 90 north or south, in the box of the coordinates that have a
+location, stops the call with an error that gives the box.}
+\item{Rows without a location}{A coordinate that is not finite or lies
+beyond 1e150 has no location, and nor does a row whose geometry is
+empty. The lon/lat test of a layer without a CRS reads the
+coordinates that have a location, vertex by vertex: a polygon with one
+such vertex is read on its other vertices. The choice of a projection
+reads the rows that have a location: a row with one such coordinate
+takes no part in it, as an empty row would, and a layer in which no
+row has a location gets Web Mercator (Equal Earth for
+\code{purpose = "area"}). Moved to another CRS, these rows come back
+empty, in their own geometry type;
+\code{\link[sf:st_transform]{sf::st_transform()}} would drop the vertex it cannot move, or put a
+coordinate beyond 1e150 at a finite place, and return the rest of the
+feature. A row that has a location and that a move to another CRS
+cannot place in full comes back empty, or without the vertices the
+CRS cannot place, and a warning of class \code{spatialkit_rows_unplaced}
+names such rows (\code{rows} on the condition), from lon/lat or from a
+projected CRS. With the projection chosen
+here that happens only at a coordinate no CRS places, such as a
+latitude beyond 90; with a \code{target_crs}, wherever that CRS cannot
+place the layer. The choice of a projection does not read a row with
+a vertex at a latitude beyond 90 either: it is made on the other
+rows, and a layer each row of which is empty, has no location or has
+such a vertex gets Web Mercator (Equal Earth for \code{purpose = "area"}).
+The functions that read a lon/lat data layer row by row
+(\code{\link[=coerce_to_points]{coerce_to_points()}}, \code{\link[=prep_model_data]{prep_model_data()}} and the fits, the k-means
+seeders' points, the features of \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, the
+pooled readers of \code{\link[=summarize_by_cell]{summarize_by_cell()}} and \code{\link[=cell_values_at]{cell_values_at()}}, and
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}}) read a row with a vertex at a latitude
+beyond 90 as a row without a location, before anything else reads
+it, and say so in the words they use for such a row.}
 }
 
 \code{target_crs} overrides all of this. Pass it whenever you need a specific,

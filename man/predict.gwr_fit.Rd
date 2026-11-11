@@ -11,7 +11,9 @@
 
 \item{newdata}{An sf object with the same predictors.
 The response variable need not be present (true out-of-sample prediction
-is supported).  NULL = fitted values.}
+is supported).  NULL = fitted values.  A layer whose geometries mix XY
+with XYZ or XYM (as \code{rbind()} of an XY and an XYZ layer gives) is
+read in x and y.}
 
 \item{se.fit}{Logical; also return standard errors.  Default \code{FALSE}.}
 
@@ -25,7 +27,9 @@ estimated (see \strong{When a prediction is NA}); a warning counts
 those.  If the design matrix for \code{newdata} cannot be built, every
 value is \code{NA} and a warning says why.  CRS-less
 \code{newdata} first receives the interpretation the training data got, so
-the same rows land where they did at fit time.
+the same rows land where they did at fit time; when that is longitude and
+latitude, \code{newdata} with an x outside -180 to 360 or a y beyond 90
+north or south cannot be in it, and the call stops.
 
 With \code{se.fit = TRUE}, a list: \code{fit} (that vector),
 \code{se.fit} (the standard error of the fitted value,

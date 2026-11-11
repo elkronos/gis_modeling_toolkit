@@ -1006,6 +1006,43 @@ test_that("the help says of a level above the limit of Moran's z what the code d
                    if (.moran_skip_any_ladder()) 0L else 1L)
 })
 
+test_that("the help and the vignette say that a size set the count of a selection by size, not the caller", {
+  # On the default path no one names a size, and select_resolution()'s note
+  # calls it the default; the count stands because a size set it and no
+  # criterion, as the warning spatialkit_no_structure says.
+  said <- "The count stands either way, since a size set it and no criterion"
+  size <- .docs_parts()[["?select_resolution: What each criterion returns, size"]]
+  expect_identical(.docs_count(size, said), 1L)
+  expect_identical(.docs_count(size, "since the caller set it"), 0L)
+  prose <- .docs_vignette_texts(code = FALSE)
+  if (is.null(prose)) skip("the vignettes' sources are not installed")
+  setting <- prose[["vignette resolution: Setting a size"]]
+  expect_identical(.docs_count(setting, said), 1L)
+  expect_identical(.docs_count(setting, "since the caller set it"), 0L)
+})
+
+test_that("the help says, in \"Pooled values\" and under spatialkit_pool_few_cells, that a value can cross the overall mean and two cells' values change places", {
+  # Decision 9.2.18: with 2 to 9 cells the arithmetic stays, and the help
+  # and the warning say what follows from it.
+  parts <- .docs_parts()
+  pv <- parts[["?summarize_by_cell: Pooled values"]]
+  expect_identical(.docs_count(pv, paste(
+    "A cell whose own weight is below its share of the rows, n / N, then gets a pooled value",
+    "on the far side of the overall mean from its plain mean")), 1L)
+  expect_identical(.docs_count(pv,
+    "with two cells that is the other cell's mean, so the two values change places"), 1L)
+  cond <- parts[["?summarize_by_cell: Conditions"]]
+  expect_identical(.docs_count(cond, paste(
+    "\"spatialkit_pool_few_cells\": 2 to 9 cells, so each target is the mean of all the other",
+    "cells, and a cell whose own weight is below its share of the column's rows gets a pooled",
+    "value on the far side of the overall mean from its plain mean (cells, and own_weight, the",
+    "smallest, by column).")), 1L)
+  expect_identical(.docs_count(cond, paste(
+    "The text also names each column with two cells and tau2 at 0, which has cells 2 and",
+    "own_weight 0: each cell's pooled value is then the other cell's mean, so the two values",
+    "change places.")), 1L)
+})
+
 
 # ---- NEWS -----------------------------------------------------------------------------
 
@@ -1020,6 +1057,26 @@ test_that("the NEWS entries of this work are found, name no existing units and c
     expect_identical(.docs_calibrated(news[[what]]), character(0), info = what)
   }
   expect_identical(anyDuplicated(unlist(news)), 0L)
+})
+
+test_that("NEWS says what the warning about few cells now says, names no existing units and quotes no figure", {
+  lines <- .docs_news()
+  if (is.null(lines)) skip("NEWS.md is not there to read")
+  entry <- .docs_starting(.docs_news_entries(lines),
+    "**The warning spatialkit_pool_few_cells did not say when the pooled values of two cells change places.**")
+  expect_false(is.na(entry))
+  if (is.na(entry)) entry <- ""        # so the checks below fail and do not stop
+  expect_identical(.docs_barred(entry), character(0))
+  expect_identical(.docs_calibrated(entry), character(0))
+  # "2 to 9 cells"; "tau2 at 0" and "every own weight is 0"; "cells 2 and
+  # own_weight 0": no other number.
+  expect_identical(sort(.docs_numbers(entry)), c("0", "0", "0", "0", "2", "2", "9"))
+  for (said in c(
+    "a cell whose own weight is below its share of the column's rows gets a pooled value on the far side of the overall mean",
+    "With two cells and tau2 at 0 every own weight is 0, and each cell's pooled value is the other cell's mean.",
+    "names each column with two cells and tau2 at 0, whose two values change places.",
+    "The values and the condition's fields are unchanged: such a column has cells 2 and own_weight 0."))
+    expect_identical(.docs_count(entry, said), 1L, info = said)
 })
 
 
@@ -1202,7 +1259,10 @@ test_that("no number stands in those texts but the simulation's figures, its set
       level, level, level),            # the level checked; obs_level and conf_level in the run
     "?summarize_by_cell: Conditions" = c(
       pairs, "1", "0", "0",            # the limit; own weights of 1 and of 0; tau2 is 0
-      few, num(.POOL_MIN_DF), level, needed),
+      few, "0", "2", "0",              # 2 to 9 cells; tau2 at 0, cells 2 and own_weight 0
+      num(.POOL_MIN_DF), level, needed,
+      sci(.POOL_XY_MAX),               # a row beyond the bound has no location
+      "90"),                           # nor has one at a latitude beyond 90 degrees
     "?summarize_by_cell: Confidence intervals, the two intervals" = level,
     "?summarize_by_cell: argument estimate" = c(
       "1", nb, num(.POOL_NEIGHBOURS + 2L)),        # fewer than 10 cells: all the others
@@ -1288,4 +1348,322 @@ test_that("a text that says how a number tends to behave quotes a figure of the 
     "?select_resolution: What each criterion returns, loo"       = "tends",
     "vignette resolution: Setting a size"                        = c("tends", "tends"),
     "vignette diagnostics: 6. Warnings about pooled cell values" = "mostly"))
+})
+
+
+# ---- Sentences that stated something false about the code -------------------------------
+# Each test reads one sentence that described a branch or a figure the code
+# does not have, pins the sentence that replaced it, and checks the code it
+# describes.
+
+test_that("the vignette gives the edge rule for gridded locations with its condition on the rows' CRS, as the help does", {
+  prose <- .docs_vignette_texts(code = FALSE)
+  if (is.null(prose)) skip("the vignettes' sources are not installed")
+  vd <- prose[["vignette diagnostics: 6. Warnings about pooled cell values"]]
+  expect_identical(.docs_count(vd, paste0(
+    "assign_features_to_polygons() gives a point there the same cell when the cells carry ",
+    "the record of the centres scored, for rows that have a CRS exactly when the record ",
+    "names one, so a lattice passes the check. Rows without a CRS beside a record that ",
+    "names one, rows with a CRS beside a record that names none, rows assigned to the cells ",
+    "after they lost the record (written to a file and read back, say) and summarised with ",
+    "cells_sf set to the cells that carry it, and rows given their cells by another join ",
+    "are placed by the polygons alone, so a row on a boundary can sit in either cell.")), 1L)
+  # The sentence without its condition is gone, and so is the one that gave
+  # every row without a CRS to the polygons: rows without a CRS on cells
+  # whose record names none take the profile's cell (test-core-gridded-ties.R).
+  expect_identical(.docs_count(vd, "centres scored, so a lattice passes the check"), 0L)
+  expect_identical(.docs_count(vd, "Rows without a CRS, rows assigned"), 0L)
+  # The help states the same condition in the same words.
+  help <- .docs_squash(.docs_flat(.docs_rd("summarize_by_cell")))
+  expect_identical(.docs_count(help, paste0(
+    "for rows that have a CRS exactly when the record names one. Rows without a CRS beside ",
+    "a record that names one, rows with a CRS beside a record that names none, rows assigned ",
+    "to the cells after they lost the record (written to a file and read back, say) and ",
+    "summarised with cells_sf set to the cells that carry it, and rows given their cells by ",
+    "another join are placed by the polygons alone")), 1L)
+})
+
+test_that("the vignette says the inner folds of forward selection are block_kfold unless `method` names another scheme", {
+  expect_identical(eval(formals(select_features_forward)$method)[1L], "block_kfold")
+  lines <- .docs_vignette("diagnostics")
+  if (is.null(lines)) skip("the vignettes' sources are not installed")
+  sec <- .docs_md_sections(lines, depth = 2L, code = FALSE)[[
+    "5. Coordinates as predictors, and selection inside the folds"]]
+  expect_false(is.null(sec))
+  expect_identical(.docs_count(sec, "default to the scheme you pass"), 0L)
+  expect_identical(.docs_count(sec, paste0(
+    "Its inner folds are block_kfold unless method names another scheme, whatever folds ",
+    "the outer loop uses. Passing random_kfold there logs a caution:")), 1L)
+
+  # The code: random outer folds handed to cv_spatial() leave the inner
+  # folds of a selection that names no `method` at block_kfold.
+  set.seed(11)
+  n  <- 90
+  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+  xy$a <- rnorm(n); xy$b <- rnorm(n)
+  xy$z <- 1.5 * xy$a + rnorm(n, sd = 0.3)
+  pts <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  lm_fit <- function(train_sf, vars) lm_spatial_fit(train_sf, "z", vars)
+  inner <- character(0)
+  fit_sel <- function(train_sf) {
+    s <- select_features_forward(train_sf, "z", c("a", "b"), fit_fn = lm_fit, k = 3,
+                                 block_size = 400, seed = 1, quiet = TRUE)
+    inner <<- c(inner, s$params$method)
+    lm_fit(train_sf, s$selected)
+  }
+  outer <- make_folds(pts, k = 3, method = "random_kfold", seed = 2)
+  suppressWarnings(cv_spatial(pts, "z", c("a", "b"), fit_fn = fit_sel, folds = outer))
+  expect_identical(inner, rep("block_kfold", 3L))
+})
+
+test_that("?print.spatial_fit names the LOOIC a bayesian_fit prints and does not call it in-sample", {
+  rd <- .docs_rd("print.spatial_fit")
+  desc <- .docs_squash(.docs_flat(.docs_rd_part(rd, "\\description")))
+  expect_identical(.docs_count(desc, "Nothing printed here is an out-of-sample score."), 0L)
+  expect_identical(.docs_count(desc, paste0(
+    "the LOOIC when the fit computed it (compute_loo = TRUE, the default of ",
+    "fit_bayesian_spatial_model()), the slope prior")), 1L)
+  expect_identical(.docs_count(desc, paste0(
+    "Apart from a bayesian_fit's LOOIC, an approximate leave-one-out score of single rows ",
+    "rather than a spatial one, nothing printed here is an out-of-sample score.")), 1L)
+
+  # The code: the print shows the LOOIC when the fit holds one, and no LOOIC
+  # line when it does not.
+  pts <- sf::st_as_sf(data.frame(x = 5e5 + 1:10, y = 4e6 + (1:10)^2, a = 1:10,
+                                 z = sin(1:10)), coords = c("x", "y"), crs = 32617)
+  fit <- function(looic) new_spatial_fit("bayesian_fit", list(), z ~ a, "z", "a", pts,
+                                         info = list(gp_k = 5L, gp_n_basis = 25L, looic = looic))
+  expect_true(any(grepl("^  LOOIC   : 81\\.23$", capture.output(print(fit(81.23))))))
+  expect_false(any(grepl("LOOIC", capture.output(print(fit(NA_real_))), fixed = TRUE)))
+})
+
+test_that("the getting-started vignette gives the distance errors nc.shp's projection log gives", {
+  lines <- .docs_vignette("getting-started")
+  if (is.null(lines)) skip("the vignettes' sources are not installed")
+  text <- paste(lines, collapse = "\n")
+  at <- regexpr("(?s)chose a local Albers equal-area projection and logged why:.*?Pass `target_crs`",
+                text, perl = TRUE)
+  expect_gt(at, 0L)
+  para <- if (at > 0L) regmatches(text, at) else ""
+  # The figures are written from the object the chunk above builds, not as
+  # literals: the measured error moves with the PROJ build.
+  expect_false(grepl("0.20 percent", para, fixed = TRUE))
+  code <- sub("^`r ", "", sub("`$", "", regmatches(para, gregexpr("`r [^`]+`", para))[[1L]]))
+  expect_length(code, 2L)
+
+  nc <- sf::st_read(system.file("shape/nc.shp", package = "sf"), quiet = TRUE)
+  env <- new.env()
+  log <- capture_spatialkit_log(
+    env$counties <- ensure_projected(nc[, c("BIR74", "SID74", "NWBIR74")]),
+    level = logger::WARN)
+  line <- grep("against the zone's", log, value = TRUE, fixed = TRUE)
+  expect_length(line, 1L)
+  logged <- regmatches(line, regexec(
+    "worst-case distance error ([0-9.]+)% against the zone's ([0-9.]+)%", line))[[1L]]
+  # The sentence names the projection chosen as a local Albers equal-area
+  # one and the UTM zone as the other candidate quoted: a build that chose
+  # another would leave the words false while the figures followed it.
+  choice <- attr(env$counties, "crs_choice")
+  expect_true(startsWith(choice$name[choice$chosen], "Albers equal-area"))
+  expect_identical(sum(startsWith(choice$name, "UTM zone")), 1L)
+  shown <- vapply(code, function(cd) as.character(eval(parse(text = cd), env)), "")
+  # The zone first, then the projection chosen, as the sentence reads.
+  expect_identical(unname(shown), logged[c(3L, 2L)])
+})
+
+test_that("?sac_nugget and ?estimate_sac_range give nugget_at_bound's bound as a share of the sill", {
+  bound <- function(page) .docs_squash(.docs_flat(.docs_rd(page)))
+  nug <- bound("sac_nugget")
+  est <- bound("estimate_sac_range")
+  # "Within 1e-4 of the sill" reads as a nugget close to the sill, or 1e-4
+  # from it in the response's units; the code marks a share of the sill.
+  expect_identical(.docs_count(nug, "within 1e-4"), 0L)
+  expect_identical(.docs_count(est, "within 1e-4"), 0L)
+  expect_identical(.docs_count(nug, paste0(
+    "is TRUE when the fit put the nugget at its lower bound (0, or at most 10^{-4} ",
+    "of the sill): that is the bound and not an estimate")), 1L)
+  expect_identical(.docs_count(est, paste0(
+    "nugget_at_bound (TRUE when the nugget is at its lower bound, 0 or at most ",
+    "10^{-4} of the sill, and so is not an estimate)")), 1L)
+  # The wording ?resolution_profile uses for the same mark.
+  expect_identical(.docs_count(bound("resolution_profile"),
+                               "A nugget of 0, or of at most 10^{-4} of the sill"), 1L)
+
+  # The code: the mark is nugget <= 1e-4 * sill, so it does not move with the
+  # unit of the response.  A field with no noise has its nugget at 0, marked at
+  # every scale; the same field with noise of sd 0.2 has a nugget near 8
+  # percent of the sill, marked at none, although at a scale of 1e-3 it lies
+  # within 1e-4 of the sill in the response's units.
+  set.seed(5)
+  n  <- 300
+  xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+  L  <- t(chol(exp(-as.matrix(stats::dist(xy)) / 120) + diag(1e-8, n)))
+  z1 <- rnorm(n); z2 <- rnorm(n)
+  p  <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  p$A <- drop(L %*% z2)
+  p$B <- drop(L %*% z1) + 0.2 * z2
+  for (v in c("A", "B")) for (k in c(1, 1e-3, 1e3)) {
+    p$zk <- p[[v]] * k
+    r <- NULL
+    capture_spatialkit_log(r <- estimate_sac_range(p, "zk"), level = logger::WARN)
+    sill <- sum(attr(r, "variogram_model")$psill)
+    expect_identical(attr(r, "nugget_at_bound"), sac_nugget(r) <= 1e-4 * sill,
+                     info = paste(v, k))
+    expect_identical(attr(r, "nugget_at_bound"), v == "A", info = paste(v, k))
+  }
+})
+
+test_that("estimate_sac_range() advises a larger `cutoff` for a range past the lags only where one is accepted", {
+  # A linear trend: the variogram rises with no sill at every cutoff.
+  set.seed(4)
+  n  <- 300
+  xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+  xy$t <- xy$x / 50 + rnorm(n, sd = 0.3)
+  p  <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  over <- function(cutoff, ...) {
+    r <- NULL
+    log <- capture_spatialkit_log(r <- estimate_sac_range(p, "t", cutoff = cutoff, ...),
+                                  level = logger::WARN)
+    expect_true(is.na(r))
+    expect_identical(attr(r, "rejected_reason"), "fitted range exceeds the largest lag fitted")
+    line <- grep("exceeds the largest lag the variogram was fitted over", log,
+                 value = TRUE, fixed = TRUE)
+    expect_length(line, 1L)
+    paste(line, collapse = "\n")
+  }
+  # At cutoff = 1 the lags already run to the farthest pair, and a larger
+  # value is refused: the advice is to detrend or set a block size.
+  at_one <- over(1)
+  expect_false(grepl("Raise `cutoff`", at_one, fixed = TRUE))
+  expect_true(grepl(paste0("Returning NA. The lags already run to the farthest pair of ",
+                           "points (`cutoff` = 1); supply `predictor_vars` to detrend, or ",
+                           "set a block size explicitly."), at_one, fixed = TRUE))
+  expect_error(estimate_sac_range(p, "t", cutoff = 1.01),
+               "a single number above 0 and at most 1", fixed = TRUE)
+  # Detrended on a predictor that does not carry the trend, the advice to
+  # try other predictors stands without the larger cutoff.
+  p$noise <- rnorm(n)
+  at_one_dt <- over(1, predictor_vars = "noise")
+  expect_false(grepl("Raise `cutoff`", at_one_dt, fixed = TRUE))
+  expect_true(grepl("(`cutoff` = 1); try predictors that carry the trend", at_one_dt,
+                    fixed = TRUE))
+  # Below 1 a larger cutoff is accepted, and the advice keeps it.
+  for (cf in c(0.5, 0.9, 0.99))
+    expect_true(grepl(paste0("Returning NA. Raise `cutoff` to fit longer lags, supply ",
+                             "`predictor_vars` to detrend, or set a block size explicitly."),
+                      over(cf), fixed = TRUE), info = paste("cutoff", cf))
+})
+
+test_that("the over-cutoff warning names the n_max subsample at cutoff = 1", {
+  # With n above n_max the lags run to the farthest pair of the subsample,
+  # not of every point, and the warning says which.
+  set.seed(4)
+  n  <- 300
+  xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+  xy$t <- xy$x / 50 + rnorm(n, sd = 0.3)
+  p  <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  r <- NULL
+  log <- capture_spatialkit_log(r <- estimate_sac_range(p, "t", cutoff = 1, n_max = 100),
+                                level = logger::WARN)
+  expect_true(is.na(r))
+  expect_identical(attr(r, "rejected_reason"), "fitted range exceeds the largest lag fitted")
+  expect_true(any(grepl(paste0("The lags already run to the farthest pair of the `n_max` ",
+                                  "subsample of points (`cutoff` = 1)"), log, fixed = TRUE)))
+  log_all <- capture_spatialkit_log(estimate_sac_range(p, "t", cutoff = 1), level = logger::WARN)
+  expect_false(any(grepl("subsample", log_all, fixed = TRUE)))
+})
+
+test_that("a range inside the lags refused by range_frac below 1 is not said to run past them", {
+  # An exponential field of scale 150 m on a 1 km square: its variogram sills
+  # inside the lags at both cutoffs.  A range_frac of 0.2 refuses that range
+  # although it lies within the largest lag fitted, so the warning must not
+  # say it exceeds that lag or that the variogram never reached a sill, and
+  # the remedy is a larger range_frac, not a larger cutoff.  The help of
+  # range_frac says the bound is the longest lag only at its default.
+  est <- .docs_squash(.docs_flat(.docs_rd("estimate_sac_range")))
+  expect_identical(.docs_count(est, paste0(
+    "range_frac * cutoff * max_dist (at the default of 1, beyond the longest lag the ",
+    "empirical variogram was actually fitted over) is treated as unidentified")), 1L)
+  expect_identical(.docs_count(est, "(that is, beyond the longest lag"), 0L)
+  set.seed(5)
+  n  <- 300
+  xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+  L  <- t(chol(exp(-as.matrix(stats::dist(xy)) / 150) + diag(1e-8, n)))
+  p  <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  p$A <- drop(L %*% rnorm(n))
+  for (cf in c(0.5, 1)) {
+    ok <- NULL
+    capture_spatialkit_log(ok <- estimate_sac_range(p, "A", cutoff = cf), level = logger::WARN)
+    expect_true(is.finite(ok), info = paste("cutoff", cf))
+    r <- NULL
+    log <- capture_spatialkit_log(r <- estimate_sac_range(p, "A", cutoff = cf, range_frac = 0.2),
+                                  level = logger::WARN)
+    # The value and the reason are as before: only the text changes.
+    expect_true(is.na(r), info = paste("cutoff", cf))
+    expect_identical(attr(r, "rejected_reason"),
+                     "fitted range exceeds the largest lag fitted", info = paste("cutoff", cf))
+    expect_equal(attr(r, "rejected_range"), as.numeric(ok), info = paste("cutoff", cf))
+    expect_lte(attr(r, "rejected_range"), attr(r, "cutoff_dist"))
+    expect_gt(attr(r, "rejected_range"), 0.2 * attr(r, "cutoff_dist"))
+    line <- grep("estimate_sac_range(): fitted range", log, value = TRUE, fixed = TRUE)
+    expect_length(line, 1L)
+    expect_false(grepl("never reached a sill", line, fixed = TRUE), info = paste("cutoff", cf))
+    expect_false(grepl("exceeds the largest lag", line, fixed = TRUE), info = paste("cutoff", cf))
+    expect_false(grepl("Raise `cutoff`", line, fixed = TRUE), info = paste("cutoff", cf))
+    expect_true(grepl(sprintf(paste0(
+      "fitted range (%.4g) exceeds the largest range `range_frac` accepts (%.4g = 0.2 x ",
+      "the largest lag fitted, %.4g), although it lies within that lag. Returning NA"),
+      attr(r, "rejected_range"), 0.2 * attr(r, "cutoff_dist"), attr(r, "cutoff_dist")),
+      line, fixed = TRUE), info = paste("cutoff", cf))
+    expect_true(grepl("Raise `range_frac` (at 1 it accepts any range within the lags), or set a block size explicitly.",
+                      line, fixed = TRUE), info = paste("cutoff", cf))
+  }
+  # A range past the largest lag keeps the old text with range_frac below 1.
+  set.seed(4)
+  xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+  xy$t <- xy$x / 50 + rnorm(n, sd = 0.3)
+  q  <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  r <- NULL
+  log <- capture_spatialkit_log(r <- estimate_sac_range(q, "t", range_frac = 0.5),
+                                level = logger::WARN)
+  expect_gt(attr(r, "rejected_range"), attr(r, "cutoff_dist"))
+  expect_true(any(grepl("exceeds the largest lag the variogram was fitted over", log, fixed = TRUE)))
+  expect_true(any(grepl("never reached a sill", log, fixed = TRUE)))
+  expect_true(any(grepl("Raise `cutoff` to fit longer lags", log, fixed = TRUE)))
+})
+
+test_that("?sac_nugget says a nugget at a floor of at most 1e-4 of the sill is marked", {
+  txt <- .docs_squash(.docs_flat(.docs_rd("sac_nugget")))
+  expect_identical(.docs_count(txt, paste0(
+    "A nugget equal to its floor is the variance between visits, a measurement, ",
+    "and nugget_at_bound stays FALSE for it unless the floor itself is at most ",
+    "10^{-4} of the sill.")), 1L)
+  # The code: 600 locations visited twice, on a field with no noise, so the
+  # fit puts the nugget at its floor, the variance between visits.  With a
+  # visit sd of 1e-3 that floor is about 1e-6 of the sill and the nugget is
+  # marked; with 0.05 it is about 2.5e-3 of the sill and it is not.
+  one <- function(visit_sd) {
+    set.seed(5203)
+    n <- 600L
+    x <- runif(n, 0, 400e3); y <- runif(n, 0, 300e3)
+    D <- as.matrix(stats::dist(cbind(x, y)))
+    f <- drop(crossprod(chol(exp(-3 * D / 30e3) + diag(1e-8, n)), rnorm(n)))
+    set.seed(1)
+    d <- rbind(data.frame(x = 5e5 + x, y = 4e6 + y, z = f + rnorm(n, 0, visit_sd)),
+               data.frame(x = 5e5 + x, y = 4e6 + y, z = f + rnorm(n, 0, visit_sd)))
+    r <- NULL
+    capture_spatialkit_log(
+      r <- estimate_sac_range(sf::st_as_sf(d, coords = c("x", "y"), crs = 32615), "z"),
+      level = logger::WARN)
+    r
+  }
+  for (vs in c(1e-3, 0.05)) {
+    r <- one(vs)
+    sill <- sum(attr(r, "variogram_model")$psill)
+    flo  <- attr(r, "nugget_floor")
+    expect_gt(flo, 0)
+    expect_equal(sac_nugget(r), flo, tolerance = 1e-12, info = paste("visit sd", vs))
+    expect_identical(attr(r, "nugget_at_bound"), flo <= 1e-4 * sill, info = paste("visit sd", vs))
+    expect_identical(attr(r, "nugget_at_bound"), vs == 1e-3, info = paste("visit sd", vs))
+  }
 })

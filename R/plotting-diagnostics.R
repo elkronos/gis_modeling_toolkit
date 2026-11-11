@@ -229,11 +229,13 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
 #' inside nor outside; it is left out of the curve and the caption counts it.
 #'
 #' When location has an index of its own (a \code{gwr_fit}, a
-#' \code{bayesian_fit}, or \code{coords = "yes"}; see
-#' \code{\link{area_of_applicability}()}), the curves and the dashed line are
-#' the predictor index alone.  The subtitle then counts three things: the
-#' locations beyond the predictor threshold, those beyond the location
-#' threshold, and those outside the area of applicability, which is either.
+#' \code{bayesian_fit}, a forest fitted with \code{include_coords = TRUE},
+#' or \code{coords = "yes"}; see \code{\link{area_of_applicability}()}), the
+#' curves and the dashed line are the predictor index alone (for the forest,
+#' its \code{..x} and \code{..y} columns included).  The subtitle then counts
+#' three things: the locations beyond the predictor threshold, those beyond
+#' the location threshold, and those outside the area of applicability, which
+#' is either.
 #'
 #' @param x An \code{aoa} object from \code{\link{area_of_applicability}()}.
 #' @param type \code{"ecdf"} (default), the two empirical distribution
@@ -653,6 +655,22 @@ plot_calibration <- function(cv, ...) {
 }
 
 
+#' Why a ladder of sizes is not supported, in the words of a subtitle
+#'
+#' @param sizes The sizes of the ladder, \code{bounds$obs_per_cell}.
+#' @return The end of the subtitle when the finest size gives fewer than two
+#'   cells: that size named as the default (the default size, or the finest
+#'   of the default sizes) or as the size asked for (\code{.size_is_default()}).
+#' @keywords internal
+#' @noRd
+.too_few_size_text <- function(sizes) {
+  if (!.size_is_default(sizes)) return("; fewer than two cells of the size asked for")
+  sprintf("; fewer than two cells of the size (obs_per_cell = %s, %s)",
+          format(min(sizes)),
+          if (length(sizes) == 1L) "the default" else "the finest of the default sizes")
+}
+
+
 #' Plot a resolution profile
 #'
 #' The criteria of a \code{\link{resolution_profile}()} against the number of
@@ -771,7 +789,8 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
     rows[[cn]] <- data.frame(panel = labels[[cn]], x = lv[ok], y = v[ok],
                              stringsAsFactors = FALSE)
     if (cn %in% selectable && !one_size) {
-      sel <- try(select_resolution(x, criterion = cn, tol = tol), silent = TRUE)
+      # The level alone is drawn, so no seeds are refitted (.without_refit()).
+      sel <- .without_refit(try(select_resolution(x, criterion = cn, tol = tol), silent = TRUE))
       if (!inherits(sel, "try-error")) {
         chosen[[cn]] <- data.frame(panel = labels[[cn]], x = sel$best,
                                    y = v[match(sel$best, lv)], stringsAsFactors = FALSE)
@@ -797,8 +816,9 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
               paste(skipped, collapse = ", "))
   df <- do.call(rbind, rows)
   subtitle <- if (is.list(bounds))
-    sprintf("%d levels from %d to %d cells (floor %s, ceiling %s)%s",
-            nrow(x), min(lv), max(lv),
+    sprintf("%s (floor %s, ceiling %s)%s",
+            if (nrow(x) == 1L) sprintf("1 level of %d cells", lv)
+            else sprintf("%d levels from %d to %d cells", nrow(x), min(lv), max(lv)),
             if (is.finite(bounds$floor %||% NA)) format(bounds$floor) else "none",
             if (is.finite(bounds$ceiling %||% NA)) format(bounds$ceiling) else "none",
             # Why a profile is not supported, as its bounds record it: "the
@@ -807,8 +827,11 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
             if (isTRUE(bounds$supported)) ""
             else if (identical(bounds$ceiling_from, "fewer than two supported cells"))
               sprintf("; fewer than two cells meet min_cell_n = %s", format(bounds$min_cell_n))
+            # The finest size is named by its value, as the selection's print
+            # names a size: the default size, or the finest of the default
+            # ladder, is the default whoever named it (.size_is_default()).
             else if (identical(bounds$ceiling_from, "fewer than two cells of the size"))
-              "; fewer than two cells of the size asked for"
+              .too_few_size_text(bounds$obs_per_cell)
             else "; the floor exceeds the ceiling")
   else NULL
   caption <- if (one_size)

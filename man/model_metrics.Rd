@@ -68,8 +68,17 @@ measured against the prediction it had to beat, the training mean, not
 against the new rows' own mean, which it could not have known.  It is
 below 0 when the model predicts the new rows worse than the training mean
 does, and it is \code{NA} when the response does not vary about that
-baseline by more than rounding error (100 machine epsilons of its
-magnitude, whatever its units).
+baseline beyond the rounding of its values, whatever its units and
+origin.
+
+A \code{gwr_fit} whose response \code{fit_gwr_model()} took about a
+centre (\code{fit$engine$centres$response}, a response at a large offset)
+is scored on the response and the fitted values or predictions less that
+centre, which keep the spread a double rounds away at the response's
+size: \code{RMSE}, \code{MAE} and \eqn{R^2} are those of the same values
+at 0, and \code{MAPE} and \code{SMAPE} divide the same errors by the
+values in the response's units.  \code{fitted()} and \code{predict()}
+still return values in the response's units.
 }
 
 \section{Percentage errors on responses with zeros}{

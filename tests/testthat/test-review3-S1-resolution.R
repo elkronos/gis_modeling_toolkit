@@ -109,11 +109,12 @@ test_that("the no-elbow warnings name the bound that ended the ladder", {
                y = 5e6 + c(runif(25, 0, 10), runif(25, 90, 100))),
     coords = c("x", "y"), crs = 32632)
   # A two-level ladder has no line to test: it used to be told it fell in a
-  # straight line "as it does for points with no cluster structure".
-  out <- r3_warnings(determine_optimal_levels(two, max_levels = 2))
+  # straight line "as it does for points with no cluster structure".  The
+  # warnings are those of on_no_elbow = "warn"; the default returns NA.
+  out <- r3_warnings(determine_optimal_levels(two, max_levels = 2, on_no_elbow = "warn"))
   expect_true(any(grepl("too short to read an elbow.*raise max_levels", out$warnings)))
   expect_false(any(grepl("no cluster structure", out$warnings)))
-  out <- r3_warnings(determine_optimal_levels(two, max_levels = 1))
+  out <- r3_warnings(determine_optimal_levels(two, max_levels = 1, on_no_elbow = "warn"))
   expect_true(any(grepl("max_levels = 1, raised to 2", out$warnings)))
   # With three levels the elbow is there.
   expect_length(r3_warnings(determine_optimal_levels(two, max_levels = 3))$warnings, 0L)
@@ -121,7 +122,7 @@ test_that("the no-elbow warnings name the bound that ended the ladder", {
   set.seed(5)
   few <- sf::st_as_sf(data.frame(x = 5e5 + runif(12, 0, 1000), y = 5e6 + runif(12, 0, 1000)),
                       coords = c("x", "y"), crs = 32632)
-  out <- r3_warnings(determine_optimal_levels(few, max_levels = 40))
+  out <- r3_warnings(determine_optimal_levels(few, max_levels = 40, on_no_elbow = "warn"))
   expect_true(any(grepl("k = 1 to 11, one short of the 12 points", out$warnings)))
   expect_false(any(grepl("max_levels\\)", out$warnings)))
 })
@@ -143,7 +144,8 @@ test_that("combined returns the geometric ranking when the elbow is below ten ce
   expect_identical(geo[1L], 6L)
   lines <- capture_spatialkit_log(
     k <- suppressWarnings(determine_optimal_levels(pts, max_levels = 30,
-                                                   response_var = "z", predictor_vars = "p")))
+                                                   response_var = "z", predictor_vars = "p",
+                                                   criterion = "combined")))
   dg <- attr(k, "diagnostics")
   expect_identical(dg$knee_k, 6L)
   expect_identical(as.integer(k), as.integer(geo))
@@ -154,10 +156,12 @@ test_that("combined returns the geometric ranking when the elbow is below ten ce
 })
 
 
-test_that("combined ranks geometry on the log-log sag and unscored candidates last", {
+test_that("combined ranks the window on the log-log sag alone, the elbow first", {
   # Twelve separated clusters: the elbow is 12, its window 8 to 16, and 8
   # and 9 sit below the nine-cell floor.  The linear chord across the window
-  # used to rank a k next to the window's own middle first.
+  # used to rank a k next to the window's own middle first, and Moran's z,
+  # averaged with the sag, gave every unscored candidate the last place on
+  # its axis and ordered the counts after the elbow.
   set.seed(1)
   K <- 12; n <- 720
   cen <- cbind(rep(c(0, 6000, 12000, 18000), 3), rep(c(0, 7000, 14000), each = 4))
@@ -168,7 +172,8 @@ test_that("combined ranks geometry on the log-log sag and unscored candidates la
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
   expect_identical(determine_optimal_levels(pts, max_levels = 30)[1L], 12L)
   k  <- suppressWarnings(determine_optimal_levels(pts, max_levels = 30,
-                                                  response_var = "z", predictor_vars = "p"))
+                                                  response_var = "z", predictor_vars = "p",
+                                                  criterion = "combined"))
   dg <- attr(k, "diagnostics")
   expect_identical(dg$knee_k, 12L)
   expect_identical(dg$criterion, "combined")
@@ -176,35 +181,41 @@ test_that("combined ranks geometry on the log-log sag and unscored candidates la
   ks <- as.integer(names(cr))
   scored <- is.finite(dg$moran_z[ks])
   expect_true(any(scored) && any(!scored))
-  # Every unscored candidate takes the last place on the Moran axis, so a
-  # scored one comes first ...
-  expect_true(k[1L] %in% ks[scored])
-  # ... and the unscored rank behind the elbow on the rank average.
+  # The sag is largest at the elbow, so it comes first and ranks 1 ...
+  expect_identical(k[1L], 12L)
+  expect_identical(unname(cr[ks == 12L]), 1)
+  # ... the unscored rank behind it by their sag, as every count does ...
   expect_true(all(cr[!scored] > cr[ks == 12L]))
+  # ... and the counts come in the order of that rank, ties to the elbow.
+  expect_identical(as.vector(k), head(ks[order(cr, abs(ks - 12L))], 3L))
 })
 
 
-test_that("combined on points with no elbow is ordered by Moran's z alone", {
+test_that("combined on points with no elbow keeps the geometric order", {
   set.seed(7)
   n <- 800
   d <- data.frame(x = 5e5 + runif(n, 0, 1e4), y = 5e6 + runif(n, 0, 1e4), p = rnorm(n))
   d$z <- d$p + rnorm(n)
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+  # With no elbow the window is scored under on_no_elbow = "warn" only.
   k  <- suppressWarnings(determine_optimal_levels(pts, max_levels = 40,
-                                                  response_var = "z", predictor_vars = "p"))
+                                                  response_var = "z", predictor_vars = "p",
+                                                  criterion = "combined",
+                                                  on_no_elbow = "warn"))
   dg <- attr(k, "diagnostics")
   cr <- dg$combined_rank
   ks <- as.integer(names(cr))
   scored <- is.finite(dg$moran_z[ks])
   expect_true(any(scored))
-  # A flat geometric axis: every unscored candidate is tied ...
-  expect_length(unique(cr[!scored]), 1L)
-  # ... behind every scored one, which come in order of |z|.
-  expect_true(max(cr[scored]) < min(cr[!scored]))
-  sk <- ks[scored]
-  expect_identical(k[seq_along(sk)], sk[order(abs(dg$moran_z[sk]))])
-  # Ties go to the candidates nearest the elbow the window was drawn around.
-  expect_identical(k[length(sk) + 1L], dg$knee_k)
+  # The sag is flat, so every candidate ties, scored or not; Moran's z,
+  # which used to order the scored ones first (10 11 7), takes no part ...
+  expect_length(unique(cr), 1L)
+  # ... and the ties go to the candidates nearest the elbow the window was
+  # drawn around, which is the geometric call's order.
+  expect_identical(k[1L], dg$knee_k)
+  expect_identical(as.vector(k), head(ks[order(abs(ks - dg$knee_k))], 3L))
+  geo <- suppressWarnings(determine_optimal_levels(pts, max_levels = 40, on_no_elbow = "warn"))
+  expect_identical(as.vector(k), as.vector(geo))
 })
 
 
@@ -245,7 +256,10 @@ test_that("a nugget next to zero is warned about like a nugget of zero", {
   pts <- r3_pts(200)
   out <- r3_warnings(resolution_profile(pts, "z", sac = r3_sac(300, nugget = 6e-7, psill = 0.99),
                                         n_levels = 4, nstart = 2))
-  expect_true(any(grepl("nugget is 0 \\(6e-07 against a sill of 0.99\\)", out$warnings)))
+  # Not taken by Cp, as a nugget of zero is not (BUG-02).
+  expect_true(any(grepl("nugget (6e-07 against a sill of 0.99) is at the fit's lower bound",
+                        out$warnings, fixed = TRUE)))
+  expect_false(identical(attr(out$value, "cp_noise")$source, "variogram nugget"))
   # A nugget that is a real share of the sill raises nothing.
   expect_length(r3_warnings(resolution_profile(pts, "z", sac = r3_sac(300, nugget = 0.01),
                                                n_levels = 4, nstart = 2))$warnings, 0L)

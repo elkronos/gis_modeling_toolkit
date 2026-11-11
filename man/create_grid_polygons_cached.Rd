@@ -14,7 +14,15 @@ create_grid_polygons_cached(
 )
 }
 \arguments{
-\item{boundary}{An sf or sfc polygonal object.}
+\item{boundary}{An sf or sfc polygonal object. One that mixes XY and XYZ
+(or XYM) geometries, or whose geometries carry M (XYM or XYZM), is read
+without Z and M, as in \code{\link[=create_grid_polygons]{create_grid_polygons()}}, and shares its cache
+entry with the same boundary in XY.
+Its rows without a location, and those the repair leaves without a
+polygon, are left out, and a boundary with none left, or in a
+geographic CRS with a latitude beyond 90 degrees, is refused, as in
+\code{\link[=create_grid_polygons]{create_grid_polygons()}}; a boundary shares its cache entry with its
+rows that have a location.}
 
 \item{target_cells}{Approximate desired number of cells. Default \code{NULL},
 as in \code{\link[=create_grid_polygons]{create_grid_polygons()}}, so the grid can be sized by \code{cellsize}
@@ -45,6 +53,17 @@ values on the wrong polygons.
 \description{
 Builds a grid via \code{create_grid_polygons()} and memoizes the result
 so repeated calls with the same inputs return instantly.
+}
+\details{
+A grid returned in degrees (a geographic \code{crs} passed through \code{...}) is
+cached once per \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} setting: a grid laid in degrees is
+clipped by s2 with the setting on and by GEOS with it off, and
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}} rebuilds the cells s2 or GEOS calls invalid
+with s2's rebuild with the setting on and repairs every cell with GEOS with it off,
+so the grid differs between the two settings. A call is handed the grid
+of the session's setting. A grid laid and returned in a
+projected CRS is clipped and repaired by GEOS under either setting and is
+cached once.
 }
 \examples{
 library(sf)

@@ -553,9 +553,10 @@ test_that("a rejected sac cannot size a design effect", {
 
 
 test_that("the ICC guard matches its documentation", {
-  # Docs: "at least 2 cells with 2+ observations; falls back to deff = 1
-  # otherwise."  All-singleton cells give MSW = 0 and an ICC of exactly 1 -- a
-  # design effect of n from data with no within-cell information at all.
+  # Docs: an ICC needs at least 2 cells with 2+ observations; otherwise it
+  # cannot be estimated and is NA, with the reason.  All-singleton cells give
+  # MSW = 0 and an ICC of exactly 1 -- a design effect of n from data with no
+  # within-cell information at all.
   set.seed(13)
   singles <- sf::st_as_sf(
     data.frame(x = seq(5, 795, by = 100), y = 50,
@@ -564,6 +565,10 @@ test_that("the ICC guard matches its documentation", {
   out <- suppressWarnings(summarize_by_cell(singles, response_var = "resp",
                                             deff = "kish"))
   expect_null(attr(out, "deff_applied"))
+  icc <- attr(out, "icc")
+  expect_true(is.na(icc$resp))
+  expect_identical(icc$reason,
+                   c(resp = "fewer than two cells hold two or more of its values"))
 })
 
 
@@ -710,7 +715,7 @@ test_that("get_voronoi_seeds clusters in 2-D and drops unusable points", {
   sf::st_geometry(cloud) <- g
   expect_warning(get_voronoi_seeds(bnd, method = "kmeans", n = 2,
                                    sample_points = cloud),
-                 "non-finite coordinates")
+                 "without a location \\(an empty point")
 })
 
 
@@ -975,7 +980,7 @@ test_that("summary() applies the same response guard as model_metrics()", {
   d$z <- 2 * d$a + rnorm(40)
   fit <- new_spatial_fit(
     subclass = "lmsurf_fit", engine = stats::lm(z ~ a, sf::st_drop_geometry(d)),
-    formula = z ~ a, response_var = "z_chr", predictor_vars = "a",
+    formula = z_chr ~ a, response_var = "z_chr", predictor_vars = "a",
     data_sf = transform(d, z_chr = as.character(round(d$z, 3))))
   expect_error(summary(fit), "not numeric")
   expect_error(model_metrics(fit), "not numeric")
@@ -1067,8 +1072,11 @@ test_that("determine_optimal_levels refuses a factor response", {
                                a = rnorm(n)), coords = c("x", "y"), crs = 32632)
   d$z  <- 2 * d$a + rnorm(n)
   d$zf <- cut(d$z, 3, labels = c("low", "mid", "high"))
+  # Under a criterion that reads it.  "geometric", the default, does not
+  # read the response, also with both variables given.
   expect_error(determine_optimal_levels(d, response_var = "zf",
-                                        predictor_vars = "a", max_levels = 8),
+                                        predictor_vars = "a", max_levels = 8,
+                                        criterion = "combined"),
                "must be numeric or logical")
 })
 

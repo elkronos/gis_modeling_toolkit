@@ -1,10 +1,16 @@
 #' Prepare and sanitize an sf dataset for spatial modeling
 #'
 #' Ensures point geometry, projected CRS, and removes rows with missing or
-#' non-finite values in modeling columns, \emph{including} rows whose
-#' geometry is empty or whose coordinates are not finite, which no model
-#' backend can use.  All non-POINT geometries (including MULTIPOINT) are
-#' coerced to representative points via \code{coerce_to_points()}, so
+#' non-finite values in modeling columns, \emph{including} rows without a
+#' location: an empty geometry, or a coordinate that is not finite or lies
+#' beyond 1e150, which no model backend can use, and in a layer with a
+#' geographic CRS a vertex at a latitude beyond 90 degrees, which is no place
+#' on the Earth.  The bound is read on the
+#' coordinates as given, before the projection, and again after it: a move
+#' between CRSs can bring a coordinate beyond it back finite, and that point
+#' is not a place the caller gave.  All non-POINT geometries (including
+#' MULTIPOINT) are coerced to representative points via
+#' \code{coerce_to_points()}, so
 #' downstream coordinate extraction always aligns one row per observation.
 #' Any Z or M coordinate (POINT Z from a GPS, a GeoPackage or KML) is
 #' dropped, because every backend works in 2-D map distance.
@@ -30,21 +36,29 @@
 #' @param boundary Optional sf/sfc whose CRS the data are projected to.  It
 #'   is not a clip: rows that fall outside it are kept.  Subset
 #'   \code{data_sf} yourself (for example with \code{sf::st_filter()}) to
-#'   restrict the rows.
+#'   restrict the rows.  One that mixes XY and XYZ (or XYM) geometries is
+#'   read in x and y, since sf reads a layer in the dimension of its first
+#'   geometry.
 #' @param pointize Strategy for non-point geometry coercion, passed to
 #'   \code{\link{coerce_to_points}}.  One of \code{"auto"} (default),
 #'   \code{"centroid"}, \code{"point_on_surface"}, \code{"surface"} (an alias
 #'   for \code{"point_on_surface"}), \code{"line_midpoint"} or
-#'   \code{"bbox_center"}.
+#'   \code{"bbox_center"}.  In longitude and latitude with s2 on, a polygon
+#'   whose centroid s2 cannot take even without its repeated vertices (edges
+#'   that cross) stops the call with the error of class
+#'   \code{"spatialkit_features_degenerate"}, which gives its rows of
+#'   \code{data_sf}; see \code{\link{coerce_to_points}}.
 #' @param require_response Logical; if FALSE the response column is not
 #'   required to be present (useful for out-of-sample prediction where the
 #'   response is unknown).  Default TRUE.
 #' @return An sf object with 2-D (XY) POINT geometry, cleaned of rows
-#'   carrying missing or non-finite values in the modelling columns or in the
-#'   coordinates.  What
+#'   carrying missing or non-finite values in the modelling columns and of
+#'   rows without a location.  What
 #'   was removed is recorded on the attribute \code{"dropped"}, a list with
-#'   \code{n} (rows dropped), \code{n_geometry} (how many of them for an
-#'   empty or non-finite geometry), \code{which} (their positions in
+#'   \code{n} (rows dropped), \code{n_geometry} (how many of them for no
+#'   location: an empty point, a coordinate that is not finite or lies
+#'   beyond 1e150, or a latitude beyond 90 degrees in a geographic CRS),
+#'   \code{which} (their positions in
 #'   \code{data_sf}), \code{row_id} (their \code{..row_id} values when the
 #'   layer carries that column, else \code{NULL}) and \code{reason} (one per
 #'   dropped row: \code{"geometry"}, \code{"missing"} or
@@ -54,8 +68,9 @@
 #'   non-finite in; a row can count under several),
 #'   \code{response_std_diff} (the mean response of the dropped rows minus
 #'   that of the kept rows, in standard deviations of the response over both;
-#'   \code{NA} when the response is not numeric, or is itself missing in
-#'   every dropped row),
+#'   \code{NA} when the response is not numeric, is itself missing in
+#'   every dropped row, or takes one value up to the rounding of its
+#'   values),
 #'   plus \code{n_rows}, the number of rows returned, which the record was
 #'   made for.  The same record carries two marks on the rows that were
 #'   kept: \code{constant_predictors}, the names of the predictors that take
@@ -80,7 +95,7 @@
 #'   declines are passed through as-is.  Set the CRS on \code{data_sf} if the
 #'   data are planar.
 #' @section Warnings:
-#' When preparing data for a fit (\code{require_response = TRUE}) two
+#' When preparing data for a fit (\code{require_response = TRUE}) three
 #' conditions are raised as R warnings, each with a class so it can be caught
 #' by name with \code{tryCatch()} or \code{withCallingHandlers()}:
 #' \describe{
@@ -91,6 +106,13 @@
 #'     that remain describes those rows only; when the difference is large
 #'     the rows are not missing at random and the fit is biased towards the
 #'     complete ones.}
+#'   \item{\code{spatialkit_response_imprecise}}{The response lies so far
+#'     from zero that doubles there are spaced more than a millionth of its
+#'     standard deviation apart (a standard deviation of 1 at about 1e10,
+#'     \eqn{2^{33}}, or beyond).  Its values are rounded to that spacing, and so is every
+#'     mean and prediction computed at that size: the fit, its scores and
+#'     any choice made on them read that rounding.  The rows are kept;
+#'     subtract a constant from the response first.}
 #'   \item{\code{spatialkit_constant_predictor}}{A predictor takes a single
 #'     value in every row that remains.  Its coefficient cannot be told from
 #'     the intercept: a GWR window is rank-deficient, a Bayesian slope is
@@ -101,11 +123,15 @@
 #' passes these on.  \code{\link{compare_models_cv}()},
 #' \code{\link{cv_block_size_sweep}()} and
 #' \code{\link{select_features_forward}()} run several cross-validations
-#' of one layer, each of which prepares it, and raise a warning of either
-#' class once per distinct text for the run.
+#' of one layer, each of which prepares it, and raise
+#' \code{spatialkit_rows_dropped} and \code{spatialkit_constant_predictor}
+#' once per distinct text for the run and
+#' \code{spatialkit_response_imprecise} once per response column;
+#' \code{\link{cv_spatial}()} raises the last once as well when its
+#' \code{fit_fn} prepares each fold's rows again.
 #'
 #' With \code{require_response = FALSE} (how every \code{predict()} method
-#' prepares \code{newdata}) neither is raised: the dropped rows are written
+#' prepares \code{newdata}) none is raised: the dropped rows are written
 #' to the log and to the record, and the prediction for each comes back
 #' \code{NA}, so nothing is lost without a trace.  Repeated locations are
 #' legitimate (repeat visits to one site) and are counted in the record and
@@ -191,8 +217,34 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   # (fit_bayesian_spatial_model()'s cbind, GWmodel's Spatial coercion).
   # coerce_to_points() maps MULTIPOINT to its centroid, so single-vertex
   # MULTIPOINTs (common in shapefiles) are unchanged in practice.
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y
+  # (.xy_if_mixed()), before the coerce and again after it: the point on the
+  # surface of a POLYGON Z is XY beside the POINT Z rows kept.  So is one
+  # whose geometries carry M, which GEOS refuses in the coerce
+  # (.xy_if_mixed_or_m()); .drop_zm() below drops Z and M from the points
+  # in any case.
+  # When s2 refuses a polygon of `data_sf` that coerce_to_points() cannot
+  # take a centroid of, its error is raised again in this function's words
+  # (.pointize_refused()).
+  # A feature with a vertex that is not finite or lies beyond .POOL_XY_MAX
+  # has no location (.unlocated_features()), so it is emptied before the
+  # coerce and comes back as an empty point, dropped below with the
+  # geometry count.  So is a row of a layer in a geographic CRS with a vertex
+  # at a latitude beyond 90 degrees (lat = TRUE), points included: a polygon
+  # with such a vertex was kept, with sf's bare "bounding box has
+  # potentially an invalid value range for longlat data" or, under
+  # pointize = "bbox_center", at a box centre half way to the vertex, with
+  # nothing said.
+  # Points held in a column of the general class sfc_GEOMETRY are read in
+  # sfc_POINT (.typed_points()): sf::st_coordinates() below refuses that
+  # class.
+  data_sf <- .typed_points(data_sf)
+  ll_given <- .is_longlat(data_sf)
   if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")) {
-    data_sf <- coerce_to_points(data_sf, pointize)
+    data_sf <- .xy_if_mixed(tryCatch(
+      coerce_to_points(.empty_unlocated(.xy_if_mixed_or_m(data_sf), lat = TRUE), pointize),
+      spatialkit_features_degenerate = function(e)
+        .pointize_refused(e, "prep_model_data", pointize)))
   }
 
   # Drop any Z or M coordinate.  Every backend works in 2-D map distance, but
@@ -205,12 +257,29 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   # estimate_sac_range() and the fold-separation check already drop ZM.
   data_sf <- .drop_zm(data_sf)
 
+  # A point with a coordinate that is not finite or lies beyond .POOL_XY_MAX
+  # has no location, and the bound is read here, on the coordinates as
+  # given, before the projection: a move between CRSs can bring such a
+  # coordinate back finite (a northing of 1e200 in EPSG:32616 lands at a
+  # finite point in EPSG:32617), and the fits, the block-size sweep and the
+  # prediction grid then read a place the caller never gave.  Those rows are
+  # emptied, so they take no part in the projection and are dropped below
+  # with the rows whose geometry is empty: the layer is read as it is read
+  # with those rows empty.  A point of a layer in a geographic CRS at a
+  # latitude beyond 90 degrees is emptied too (lat = TRUE): the move gave it
+  # ensure_projected()'s warning that it cannot place the row, beside the
+  # drop line below.
+  data_sf <- .empty_unlocated(data_sf, lat = TRUE)
+
   if (!is.null(boundary)) {
     bnd <- if (inherits(boundary, "sfc")) sf::st_as_sf(boundary) else boundary
     if (!inherits(bnd, "sf"))
       stop("prep_model_data(): 'boundary' must be sf/sfc when supplied.",
            call. = FALSE)
-    bnd <- ensure_projected(bnd)
+    # Only its CRS is taken, so a boundary that mixes XY and XYZ (or XYM)
+    # geometries is read in x and y before it is projected, with no warning
+    # about a copy that is not returned.
+    bnd <- ensure_projected(.xy_if_mixed(bnd))
     data_sf <- ensure_projected(data_sf, .crs_or_null(bnd))
   } else {
     data_sf <- ensure_projected(data_sf)
@@ -240,17 +309,21 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   # where one infinite coordinate makes max(Xgp) infinite, so the GP boundary
   # is infinite and EVERY basis function on the surface is NaN.  make_folds()
   # already drops these rows and says how many; do the same here.
+  # The bound .POOL_XY_MAX is read again after the projection (the test
+  # .values_at_xy() applies), so a row the move put beyond it is dropped too.
+  located <- function(m) is.finite(m[, 1L]) & is.finite(m[, 2L]) &
+    abs(m[, 1L]) <= .POOL_XY_MAX & abs(m[, 2L]) <= .POOL_XY_MAX
   xy_mat  <- sf::st_coordinates(sf::st_geometry(data_sf))
   ok_geom <- rep(TRUE, nrow(data_sf))
   if (nrow(xy_mat) == nrow(data_sf) && ncol(xy_mat) >= 2L) {
-    ok_geom <- is.finite(xy_mat[, 1L]) & is.finite(xy_mat[, 2L])
+    ok_geom <- located(xy_mat)
   } else if (nrow(data_sf) > 0L) {
     # Empty geometries drop out of st_coordinates() entirely, so the row
     # counts disagree; fall back to the per-feature test.
     ok_geom <- !sf::st_is_empty(sf::st_geometry(data_sf))
     xy_ok <- sf::st_coordinates(sf::st_geometry(data_sf)[ok_geom])
     if (nrow(xy_ok) == sum(ok_geom) && ncol(xy_ok) >= 2L)
-      ok_geom[ok_geom] <- is.finite(xy_ok[, 1L]) & is.finite(xy_ok[, 2L])
+      ok_geom[ok_geom] <- located(xy_ok)
   }
 
   keep <- ok_cc & ok_fin & ok_geom
@@ -285,11 +358,32 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
     if (is.numeric(y_all)) {
       y_drop <- y_all[!keep]; y_drop <- y_drop[is.finite(y_drop)]
       y_keep <- y_all[keep]
-      s_all  <- stats::sd(c(y_drop, y_keep))
-      if (length(y_drop) > 0L && is.finite(s_all) && s_all > 0) {
+      # A response at a large offset (1e15 plus a spread of 1) is stored to
+      # an eighth, and so is each of the two means: their difference reads
+      # that rounding.  Where the raw values lose their spread, the means and
+      # the spread are taken less the centre (.regression_centre(), 0
+      # otherwise, so every other response is read as before), and the
+      # centre goes back only on the means the message quotes.  A response
+      # of one value up to rounding has no centre and a standard deviation
+      # of its last bit; it has no spread to measure a shift in, as one of
+      # a single value has none (.constant_column(), which a response with
+      # spread fails at its first, raw test).
+      y_ctr  <- .regression_centre(c(y_drop, y_keep), bounded = FALSE)
+      if (y_ctr != 0) {
+        y_drop <- y_drop - y_ctr
+        y_keep <- y_keep - y_ctr
+      }
+      # .sd_any_size() is sd() wherever sd() is finite and at least
+      # .POOL_Y_MIN; it reads the spread on a power of two where sd() is
+      # Inf (values near 1e160) or loses its bits (near 1e-160), so the
+      # shift is measured whatever the response's units.
+      s_all  <- .sd_any_size(c(y_drop, y_keep))
+      if (length(y_drop) > 0L && is.finite(s_all) && s_all > 0 &&
+          (y_ctr != 0 || !.constant_column(c(y_drop, y_keep)))) {
         resp_means <- c(dropped = mean(y_drop), kept = mean(y_keep))
         response_std_diff <- unname((resp_means[["dropped"]] -
                                        resp_means[["kept"]]) / s_all)
+        if (y_ctr != 0) resp_means <- resp_means + y_ctr
         # Two standard errors of a difference of means in SD units: below
         # that, a handful of dropped rows says nothing about why they are
         # missing, and the message states the difference without reading it.
@@ -318,21 +412,22 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
       .warn_classed(
         "spatialkit_rows_dropped",
         paste0("prep_model_data(): dropped %d of %d row(s) (%.1f%%): %d with ",
-               "a missing value, %d with a non-finite value, %d with an empty ",
-               "or non-finite geometry. Rows affected by column: %s.%s The ",
+               "a missing value, %d with a non-finite value and %d without a ",
+               "location (%s). Rows affected by column: %s.%s The ",
                "fit uses the %d row(s) that remain; attr(, \"dropped\") lists ",
                "the rows removed."),
         dropped, nrow(data_sf), 100 * dropped / nrow(data_sf),
-        n_miss, n_nonf, dropped_geo, cols_txt, shift_txt, sum(keep))
+        n_miss, n_nonf, dropped_geo, .unlocated_what(ll_given), cols_txt,
+        shift_txt, sum(keep))
     } else {
       # Prediction mode.  Every predict() method returns NA at exactly these
       # rows, so the result itself says which they are; an R warning per call
       # would fire on every chunk of a predict_surface() grid with covariate
       # gaps.  The log line and the record stay.
       .log_warn(paste0("prep_model_data(): dropping %d row(s) with non-finite or ",
-                       "missing values (%d of them with an empty or non-finite ",
-                       "geometry). Rows affected by column: %s."),
-                dropped, dropped_geo, cols_txt)
+                       "missing values (%d of them without a location: %s). ",
+                       "Rows affected by column: %s."),
+                dropped, dropped_geo, .unlocated_what(ll_given), cols_txt)
     }
   }
 
@@ -367,6 +462,9 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
                                                       imaginary = xy_k[, 2L])))
   }
   if (require_response) {
+    y_out <- out_df[[response_var]]
+    if (is.numeric(y_out))
+      .warn_response_imprecise(y_out, "prep_model_data", response_var)
     if (length(constant_predictors) > 0L)
       .warn_classed(
         "spatialkit_constant_predictor",
@@ -467,7 +565,10 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 #'
 #' @param coords_xy Numeric matrix or data.frame of coordinates with at least
 #'   two columns; the first two are used, and replicated rows are collapsed
-#'   before the distance quantiles are taken.  \code{brms::gp()} defaults to
+#'   before the distance quantiles are taken.  A row with a coordinate that
+#'   is missing, not finite or beyond 1e150 has no location: it is left out,
+#'   with a warning of class \code{spatialkit_rows_dropped} that gives the
+#'   count.  \code{brms::gp()} defaults to
 #'   \code{gr = TRUE} and reduces its covariates to unique rows, so a
 #'   heavily-sampled station would otherwise weight the quantile by how often it
 #'   was measured rather than by where the sites are.
@@ -477,10 +578,14 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 #'   dominated by within-cluster spacing in clustered data, producing
 #'   a misleadingly small lower bound.
 #' @param max_n Maximum number of \emph{distinct} points to use in the distance
-#'   computation.  Default 1000. Set to \code{Inf} to use all of them.
+#'   computation.  Default 1000. Set to \code{Inf} to use all of them.  Above
+#'   it, a subsample is drawn with a fixed seed from the distinct points in
+#'   coordinate order, so the bounds do not depend on the row order of
+#'   \code{coords_xy}, and the caller's random-number stream is left where it
+#'   was.
 #' @return Named numeric vector \code{c(lower, upper)} on the length-scale;
-#'   \code{c(lower = 0.001, upper = 1)} when fewer than two distinct locations
-#'   or no positive distances remain.
+#'   \code{c(lower = 0.001, upper = 1)} when fewer than two distinct located
+#'   rows or no positive distances remain.
 #' @family model fitting
 #' @examples
 #' set.seed(1)
@@ -508,6 +613,24 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
   # bounds in mixed units (elevation metres mixed into map metres).
   coords_xy <- as.matrix(coords_xy)[, 1:2, drop = FALSE]
 
+  # A row with a coordinate that is missing, not finite or beyond
+  # .POOL_XY_MAX has no location (the test .values_at_xy() applies): no
+  # distance can be taken from it.  An NA row stopped quantile() with base
+  # R's message, and an Inf or 1e200 row made the upper bound Inf.  The
+  # bounds are those of the other rows, and the warning gives the count.
+  located <- is.finite(coords_xy[, 1L]) & is.finite(coords_xy[, 2L]) &
+    abs(coords_xy[, 1L]) <= .POOL_XY_MAX & abs(coords_xy[, 2L]) <= .POOL_XY_MAX
+  if (!all(located)) {
+    .warn_classed(
+      "spatialkit_rows_dropped",
+      paste0("gp_lengthscale_bounds(): %d of %d row(s) of `coords_xy` have no ",
+             "location (an empty point, or a coordinate that is not finite or ",
+             "lies beyond 1e150); the bounds are taken from the other %d."),
+      sum(!located), length(located), sum(located),
+      data = list(n = sum(!located), which = which(!located)))
+    coords_xy <- coords_xy[located, , drop = FALSE]
+  }
+
   # brms::gp() defaults to gr = TRUE and reduces its covariates to their
   # UNIQUE rows before doing anything else, so replicated locations (repeat
   # visits, a heavily-sampled reference station) would otherwise weight the
@@ -516,6 +639,16 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
   coords_xy <- coords_xy[!duplicated(coords_xy), , drop = FALSE]
   if (nrow(coords_xy) < 2L) return(c(lower = 0.001, upper = 1))
 
+  # Above max_n the distances are taken on a subsample, which .safe_dist()
+  # draws by row position.  The distinct locations go in coordinate order
+  # first (.canonical_order(); they are distinct, so the order is total), so
+  # the subsample is the same for the locations in any row order.  In the
+  # order given, 1500 locations got a lower bound of 675.7 as given and
+  # 684.0 reversed.
+  if (nrow(coords_xy) > max_n)
+    coords_xy <- coords_xy[.canonical_order(coords_xy[, 1L], coords_xy[, 2L],
+                                            coords_xy[, 1L], coords_xy[, 2L]), ,
+                           drop = FALSE]
   d <- .safe_dist(coords_xy, max_n = max_n)
   d <- d[d > 0]
   if (!length(d)) return(c(lower = 0.001, upper = 1))
@@ -660,3 +793,113 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 # NOTE: the previously defined .matern_rho() and .safe_ll() helpers were
 # removed as dead code (no callers anywhere in the package); mvtnorm was
 # dropped from Suggests along with .safe_ll().
+
+
+#' Raise coerce_to_points()'s refusal of a polygon in the caller's words
+#'
+#' coerce_to_points() stops with the error of class
+#' \code{"spatialkit_features_degenerate"} when s2 refuses a polygon whose
+#' centroid it takes in degrees, and when GEOS puts the centroid of a
+#' feature outside it (\code{.raise_centroids_off()}, \code{site =
+#' "geos_centroid"}), which is raised again in the same form with remedies
+#' that do not name a transform.  So is its refusal of a line its temporary
+#' projection cannot place (\code{.raise_unplaced_lines()}, \code{site =
+#' "projection"}), whose remedy is the centroid in longitude and latitude.  Raised as it came, the error named
+#' \code{x} and \code{coerce_to_points()}, which the caller of
+#' \code{prep_model_data()}, \code{make_folds()} or \code{cell_values_at()}
+#' never called, and offered a \code{mode}, which none of them takes.  The
+#' rows are the rows of the caller's argument, which the coerce reads row
+#' for row.  The remedy says to run the call again, not to call this
+#' function again: the \code{cv_*()} and \code{fit_*()} functions reach
+#' \code{prep_model_data()} with the \code{data_sf} they were given.
+#'
+#' @param e The condition coerce_to_points() raised, or one this function
+#'   raised for a function the caller's function called (the inner folds of
+#'   \code{select_features_forward()}).
+#' @param caller The function the error names.
+#' @param pointize The \code{pointize} the caller passed; \code{NULL} for a
+#'   function that takes none, which reduces the layer with mode
+#'   \code{"auto"}: the error then says to reduce the layer to points first.
+#' @param arg The argument the error names, with its backquotes.
+#' @param at The rows of the caller's argument the coerce was handed, when
+#'   they are not all of them in order; \code{NULL} when they are.
+#' @param n The number of rows of the caller's argument; \code{NULL} for
+#'   the number the coerce was handed.
+#' @return Does not return.
+#' @keywords internal
+#' @noRd
+.pointize_refused <- function(e, caller, pointize = NULL, arg = "`data_sf`", at = NULL,
+                              n = NULL) {
+  rows <- if (is.null(at)) e$rows else at[e$rows]
+  if (is.null(n)) n <- e$n
+  # A centroid GEOS put outside its feature (.raise_centroids_off()): no
+  # transform helps, so the remedies are a point on the surface and a repair.
+  if (identical(e$site, "geos_centroid")) {
+    plain <- gsub("`", "", arg, fixed = TRUE)
+    .raise_centroids_off(
+      rows, e$reasons, n, caller, arg,
+      if (is.null(pointize))
+        sprintf(paste0("Reduce %s to points first, for example with ",
+                       "coerce_to_points(%s, \"point_on_surface\"), which takes a point ",
+                       "on each geometry with GEOS, or repair the features with ",
+                       "sf::st_make_valid(), and run the call again."), arg, plain)
+      else
+        paste0("Pass pointize = \"point_on_surface\", which takes a point on each ",
+               "geometry with GEOS, or repair the features with sf::st_make_valid() ",
+               "and run the call again."))
+  }
+  # A line the temporary projection cannot place (.raise_unplaced_lines()):
+  # the centroid in longitude and latitude needs no projection.
+  if (identical(e$site, "projection")) {
+    plain <- gsub("`", "", arg, fixed = TRUE)
+    .raise_unplaced_lines(
+      rows, n, caller, arg, e$crs,
+      if (is.null(pointize))
+        sprintf(paste0("Reduce %s to points first, for example with ",
+                       "coerce_to_points(%s, \"centroid\"), which takes the point in ",
+                       "longitude and latitude, without the projection, and run the ",
+                       "call again."), arg, plain)
+      else
+        paste0("Pass pointize = \"centroid\", which takes the point in longitude ",
+               "and latitude, without the projection, and run the call again."))
+  }
+  # pointize = "auto" is offered only when every row refused is a POLYGON
+  # or MULTIPOLYGON (auto_helps): "auto" takes the centroid of a collection
+  # and refuses the same row again.  A condition without the field keeps
+  # the offer.
+  .raise_cells_degenerate(
+    e$parent, rows, e$reasons, n, caller, arg, "sf::st_centroid()",
+    "run the call again; the centroids are then taken in that CRS",
+    of = sprintf("the %d features of %s", n, arg), kind = "features",
+    more = if (is.null(pointize))
+      sprintf(paste0("Or reduce %s to points first, for example with ",
+                     "coerce_to_points(%s, \"point_on_surface\"), which takes a point ",
+                     "on each geometry with GEOS."), arg, gsub("`", "", arg, fixed = TRUE))
+    else if (identical(pointize, "auto") || isFALSE(e$auto_helps))
+      paste0("Or pass pointize = \"point_on_surface\", which takes a point on ",
+             "each geometry with GEOS.")
+    else
+      paste0("Or pass pointize = \"auto\", which takes a point on the ",
+             "surface of each polygon with GEOS."),
+    auto_helps = e$auto_helps)
+}
+
+
+#' Reduce the caller's layer to points, or refuse in the caller's words
+#'
+#' \code{coerce_to_points(x, "auto")}, whose refusal of a polygon s2 cannot
+#' take a centroid of, or of a centroid GEOS puts outside its feature, is
+#' raised again by \code{.pointize_refused()}, naming \code{caller} and
+#' \code{arg}.  Other conditions are passed on.
+#'
+#' @param x The layer, row for row with the caller's argument unless
+#'   \code{at} says otherwise.
+#' @param caller,arg,at,n As for \code{.pointize_refused()}.
+#' @return \code{coerce_to_points(x, "auto")}.
+#' @keywords internal
+#' @noRd
+.pointize_auto <- function(x, caller, arg, at = NULL, n = NULL) {
+  tryCatch(coerce_to_points(x, "auto"),
+           spatialkit_features_degenerate = function(e)
+             .pointize_refused(e, caller, arg = arg, at = at, n = n))
+}

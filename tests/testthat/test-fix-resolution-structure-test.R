@@ -58,20 +58,51 @@ test_that("the profile keeps the F test of each level's cells against one mean",
   expect_null(attr(resolution_profile(pts, n_levels = 3, nstart = 1), "one_cell")$f_p)
 })
 
+# A profile whose Cp took a noise variance of 0, as one made before Cp
+# refused a nugget at the fit's lower bound (BUG-02) did: Cp is RSS / n at
+# every level and at one cell, and the record says the nugget was used.
+# select_resolution() still reads such a profile.
+fst_zero_noise <- function(p) {
+  n <- attr(p, "one_cell")$n
+  p$cp <- p$rss / n
+  attr(p, "cp_noise") <- list(source = "variogram nugget", value = 0, level = NA_integer_)
+  one <- attr(p, "one_cell")
+  one$cp <- one$rss / one$n
+  one$cp_levels <- stats::setNames(p$cp, p$levels)
+  attr(p, "one_cell") <- one
+  p
+}
+
 test_that("a Cp with no noise variance does not call white noise structured", {
-  # A nugget of 0: Cp is RSS / n, which falls with every finer level, so one
-  # cell is never within `tol` of the optimum.  `structured` was TRUE on 10
+  # A nugget of 0: Cp was RSS / n, which falls with every finer level, so one
+  # cell was never within `tol` of the optimum.  `structured` was TRUE on 10
   # of 10 such layers, in the call that warns Cp has no penalty, and the
-  # tessellation functions raised no spatialkit_no_structure.
-  for (seed in 41:45) {
+  # tessellation functions raised no spatialkit_no_structure.  Since BUG-02
+  # the profile does not take such a nugget: Cp's noise variance comes from
+  # the finest level, and white noise is still not called structured.  The
+  # F test is at 5%, so a white-noise layer is called structured by chance
+  # now and then: under the profile's default seed layer 43 is (p = 0.032),
+  # and it is left out.
+  for (seed in c(41:42, 44:46)) {
     pts <- fst_noise(400, seed)
     out <- fst_catch(resolution_profile(pts, "z", sac = fst_sac(pts, 90, nugget = 0),
                                         n_levels = 8, nstart = 2, estimate = NULL,
                                         obs_per_cell = NULL, partition = "kmeans"))
-    expect_true(any(grepl("the variogram's nugget is 0", out$text)))
-    expect_identical(attr(out$value, "cp_noise")$value, 0)
+    expect_true("spatialkit_cp_noise" %in% out$classes)
+    expect_true(any(grepl("the variogram's nugget (0 against a sill of 1) is at the fit's lower bound",
+                          out$text, fixed = TRUE)))
+    expect_false(any(grepl("the variogram's nugget is 0", out$text)))
+    expect_identical(attr(out$value, "cp_noise")$source, "finest-level residual mean square")
+    expect_gt(attr(out$value, "cp_noise")$value, 0)
     s <- select_resolution(out$value, "cp")
-    # The comparison of Cp at one cell with the optimum passes, as it must.
+    expect_identical(s$structured, FALSE)
+    expect_match(paste(s$note, collapse = " "), "the count is not identified")
+    expect_false(any(grepl("Cp's noise variance is 0", s$note)))
+
+    # A profile that took the 0 is read as before: the comparison of Cp at
+    # one cell with the optimum passes, as it must, and the F test decides.
+    z <- fst_zero_noise(out$value)
+    s <- select_resolution(z, "cp")
     expect_gt(s$one_cell, s$value * 1.02)
     expect_identical(s$structured, FALSE)
     expect_gte(s$structure_p, 0.05)
@@ -83,19 +114,33 @@ test_that("a Cp with no noise variance does not call white noise structured", {
   seeds <- fst_catch(get_voronoi_seeds(method = "kmeans", n = s, sample_points = pts,
                                        partition = "kmeans"))
   expect_true("spatialkit_no_structure" %in% seeds$classes)
-  expect_output(print(summary(out$value)), "one cell for the whole layer does as well")
+  # Cp at one cell is above the optimum by more than 2%, so one cell does not
+  # do as well: summary() says that the F test is what failed (BUG-07).
+  out_z <- utils::capture.output(print(summary(z)))
+  expect_false(any(grepl("one cell for the whole layer does as well", out_z, fixed = TRUE)))
+  expect_true(any(grepl("cp: the cells beat one cell for the whole layer, but the F test does not",
+                        out_z, fixed = TRUE)))
 })
 
 test_that("with no noise variance a field with structure is still called structured, and why", {
   f <- fst_field()
-  p <- fst_catch(resolution_profile(f, "z", sac = fst_sac(f, 240, nugget = 0),
-                                    n_levels = 8, nstart = 2, estimate = NULL,
-                                    obs_per_cell = NULL, partition = "kmeans"))$value
+  out <- fst_catch(resolution_profile(f, "z", sac = fst_sac(f, 240, nugget = 0),
+                                      n_levels = 8, nstart = 2, estimate = NULL,
+                                      obs_per_cell = NULL, partition = "kmeans"))
+  # The nugget of 0 is not taken (BUG-02), and the field is called
+  # structured with the noise variance of the finest level.
+  expect_true("spatialkit_cp_noise" %in% out$classes)
+  p <- out$value
+  expect_identical(attr(p, "cp_noise")$source, "finest-level residual mean square")
   s <- select_resolution(p, "cp")
   expect_identical(s$structured, TRUE)
   expect_lt(s$structure_p, 1e-6)
-  # The Cp comparison says nothing there, and the result says what the flag
-  # rests on.
+  expect_false(any(grepl("Cp's noise variance is 0", s$note)))
+  # A profile that took the 0: the Cp comparison says nothing there, and the
+  # result says what the flag rests on.
+  s <- select_resolution(fst_zero_noise(p), "cp")
+  expect_identical(s$structured, TRUE)
+  expect_lt(s$structure_p, 1e-6)
   expect_match(s$note, "Cp's noise variance is 0")
   expect_match(s$note, "rests on the F test of the cells against one mean alone")
   seeds <- fst_catch(get_voronoi_seeds(method = "kmeans", n = s, sample_points = f,

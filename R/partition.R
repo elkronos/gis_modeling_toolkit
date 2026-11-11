@@ -312,6 +312,136 @@
 }
 
 
+# The step the coordinates handed to stats::kmeans() are rounded to, as a
+# fraction of the diagonal of their bounding box (about a billionth).
+.KMEANS_STEP <- 2^-30
+
+
+#' The coordinates the kind "kmeans" hands to stats::kmeans()
+#'
+#' On gridded locations many points are equally far from two centres, and
+#' \code{stats::kmeans()} (Hartigan and Wong) settles each such tie by the
+#' last bits of the coordinates.  Those bits move with the unit and the
+#' origin, so the same layer in metres, in feet or with another false origin
+#' got other regions.  The algorithm takes no tolerance, so it is handed the
+#' coordinates in a frame that does not move with either: centred on the
+#' middle of their bounding box, divided by its diagonal and rounded to
+#' \code{.KMEANS_STEP}.  A coordinate that lies within its own rounding noise
+#' of the middle of a step can still fall on either side of it.  The frame
+#' does not reach the last bits of \code{stats::kmeans()}'s own compiled
+#' arithmetic, which differ between platforms (Linux on x86-64 and macOS on
+#' arm64 give a 40 by 30 lattice at 250 m other clusters from the same frame
+#' and the same starts), so where ties decide cells the regions can differ
+#' between platforms.  Rows at
+#' distinct locations that would round to one point keep their coordinates
+#' centred and scaled but not rounded, so the frame has as many distinct
+#' points as the layer: the callers count the locations a partition can
+#' separate on the layer itself, and \code{stats::kmeans()} refuses more
+#' centres than distinct points.  Such rows lie within a billionth of the
+#' extent of each other, which the locations of a lattice never do.  The
+#' starting centres, drawn at random or by k-means++, are drawn from these
+#' coordinates too, and so is the count of distinct points
+#' \code{stats::kmeans()} refuses on.  \code{.kmeans_back()} takes the
+#' result back to the caller's coordinates.
+#'
+#' @param xy Numeric matrix of finite coordinates, in the caller's unit.
+#' @return A list: \code{z} (the matrix in the frame, with the dimnames of
+#'   \code{xy}), \code{to} (the function that maps a matrix of points in
+#'   the caller's coordinates, such as starting centres, to the frame,
+#'   rounded), \code{mid} (the middle of the bounding box) and \code{scale}
+#'   (its diagonal, 1 for one location), in the caller's unit.
+#' @keywords internal
+#' @noRd
+.kmeans_frame <- function(xy) {
+  xy <- as.matrix(xy)
+  lo <- apply(xy, 2L, min); hi <- apply(xy, 2L, max)
+  mid <- lo / 2 + hi / 2
+  d <- sqrt(sum((hi - lo)^2))
+  # One location: every point maps to 0.
+  if (!is.finite(d) || d <= 0) d <- 1
+  scaled <- function(p) sweep(as.matrix(p), 2L, mid) / d
+  to <- function(p) {
+    z <- round(scaled(p) / .KMEANS_STEP) * .KMEANS_STEP
+    dimnames(z) <- dimnames(as.matrix(p))
+    z
+  }
+  z <- to(xy)
+  # Distinct locations that round to one point keep their unrounded
+  # coordinates.  Rows are keyed as complex numbers for two columns
+  # (duplicated() on a matrix pastes every row into a string).
+  key <- function(m) if (ncol(m) == 2L) complex(real = m[, 1L], imaginary = m[, 2L])
+                     else apply(m, 1L, function(r) paste(format(r, digits = 17L), collapse = " "))
+  kz <- key(z); kx <- key(xy)
+  gz <- match(kz, unique(kz))
+  nd <- tabulate(gz[!duplicated(kx)], nbins = max(gz))
+  merged <- nd[gz] > 1L
+  if (any(merged)) z[merged, ] <- scaled(xy[merged, , drop = FALSE])
+  list(z = z, to = to, mid = mid, scale = d)
+}
+
+
+#' A stats::kmeans() fit made in the frame of .kmeans_frame(), in the
+#' caller's coordinates
+#'
+#' The clusters are the fit's.  The centres are the means of their points
+#' in the caller's coordinates, and \code{withinss}, \code{tot.withinss},
+#' \code{totss} and \code{betweenss} are sums of squares in those
+#' coordinates, so they agree with what \code{stats::kmeans()} would report
+#' on them to rounding.  \code{cluster}, \code{size}, \code{iter} and
+#' \code{ifault} are kept as they are.
+#'
+#' @param km A \code{kmeans} fit to \code{.kmeans_frame(xy)$z}.
+#' @param xy The coordinates in the caller's unit, in the rows of the fit.
+#' @return \code{km} with its centres and sums of squares replaced.
+#' @keywords internal
+#' @noRd
+.kmeans_back <- function(km, xy) {
+  xy <- as.matrix(xy)
+  k  <- nrow(km$centers)
+  cl <- as.integer(km$cluster)
+  nk <- tabulate(cl, nbins = k)
+  s  <- rowsum(xy, cl, reorder = TRUE)
+  g  <- as.integer(rownames(s))
+  cen <- matrix(NA_real_, k, ncol(xy))
+  cen[g, ] <- s / nk[g]
+  dimnames(cen) <- dimnames(km$centers)
+  w <- numeric(k)
+  w[g] <- as.numeric(rowsum(rowSums((xy - cen[cl, , drop = FALSE])^2), cl, reorder = TRUE))
+  km$centers <- cen
+  km$withinss <- w
+  km$tot.withinss <- sum(w)
+  km$totss <- sum(scale(xy, scale = FALSE)^2)
+  km$betweenss <- km$totss - km$tot.withinss
+  km
+}
+
+
+#' The number of distinct locations a partition can put a centre on
+#'
+#' Counted on the coordinates \code{stats::kmeans()} is handed, the frame of
+#' \code{.kmeans_frame()}, so the count does not move with the unit or the
+#' origin and \code{stats::kmeans()} accepts as many centres.  The callers
+#' used to count after rounding the coordinates to 8 or 10 decimals of the
+#' layer's unit, so two locations a micrometre apart were two in metres and
+#' one in kilometres, and the ceiling of a ladder or the number of seeds
+#' changed with the unit.  The density kind places its centres on the
+#' layer's own distinct locations, of which there are at least as many.
+#'
+#' @param xy Numeric matrix of finite coordinates; the first two columns are
+#'   used.
+#' @return Integer: the number of distinct rows of the frame.
+#' @keywords internal
+#' @noRd
+.n_locations <- function(xy) {
+  xy <- as.matrix(xy)
+  if (nrow(xy) < 2L) return(nrow(xy))
+  z <- .kmeans_frame(xy[, 1:2, drop = FALSE])$z
+  # duplicated() on a complex vector, because unique() on an n x 2 matrix
+  # pastes every row into a string: 0.01 s against 5 s at a million points.
+  sum(!duplicated(complex(real = z[, 1L], imaginary = z[, 2L])))
+}
+
+
 #' The centres of a partition of the points into k regions
 #'
 #' The one place the package computes region centres.
@@ -323,7 +453,10 @@
 #' drawn at random, as \code{stats::kmeans(centers = k)} draws them;
 #' \code{one_call = TRUE} hands the whole job to one
 #' \code{stats::kmeans(centers = k, nstart = nstart)} call, which is what the
-#' seeding functions have always run, warnings and errors included.
+#' seeding functions have always run, warnings and errors included.  Every
+#' call of \code{stats::kmeans()} is given the coordinates in the frame of
+#' \code{.kmeans_frame()}, and the centres and sums of squares are taken
+#' back to the caller's coordinates (\code{.kmeans_back()}).
 #'
 #' \strong{Kind \code{"density"}.}  See \code{.density_kmeans()}.
 #'
@@ -338,8 +471,8 @@
 #' @param density_power,density_k The weight's power and the number of
 #'   neighbours the local density is read from.  Kind \code{"density"} only.
 #' @param sort_rows Kind \code{"kmeans"} only: put the rows in coordinate
-#'   order before the starts are drawn, so that the result does not depend on
-#'   the order they come in.  \code{FALSE} where the caller has already put
+#'   order, by columns (\code{.near_columns()}), before the starts are drawn,
+#'   so that the result does not depend on the order they come in.  \code{FALSE} where the caller has already put
 #'   them in an order of its own, and where the rows are clustered as given.
 #'   The kind \code{"density"} always works in coordinate order.
 #' @param one_call See above.
@@ -374,10 +507,16 @@
     return(.density_kmeans(xy, k, power = density_power, k_nn = density_k,
                            init = init, nstart = nstart, iter.max = iter.max,
                            use_fnn = use_fnn))
-  o <- if (isTRUE(sort_rows)) order(xy[, 1L], xy[, 2L]) else NULL
+  # Coordinate order by columns (.near_columns()): first coordinates equal
+  # but for their last bits are one column, so the order, and with it the
+  # rows the starts draw, does not move with the unit or the origin.
+  o <- if (isTRUE(sort_rows)) order(.near_columns(xy[, 1L], xy[, 2L]), xy[, 2L], xy[, 1L])
+       else NULL
   xs <- if (is.null(o)) xy else xy[o, , drop = FALSE]
   if (identical(init, "random") && isTRUE(one_call)) {
-    km <- stats::kmeans(xs, centers = k, iter.max = iter.max, nstart = nstart)
+    # In the frame of .kmeans_frame(), as every start of .kmeans_best().
+    km <- .kmeans_back(stats::kmeans(.kmeans_frame(xs)$z, centers = k, iter.max = iter.max,
+                                     nstart = nstart), xs)
     spread <- NA_real_; n_ok <- NA_integer_
   } else {
     kb <- .kmeans_best(xs, k, nstart = nstart, iter.max = iter.max, init = init)
@@ -385,7 +524,10 @@
     km <- kb$km; spread <- kb$spread; n_ok <- kb$n_ok
   }
   cluster <- km$cluster
-  if (!is.null(o)) { cluster <- integer(length(o)); cluster[o] <- km$cluster }
+  if (!is.null(o)) {
+    cluster <- integer(length(o)); cluster[o] <- km$cluster
+    km$cluster <- cluster
+  }
   list(centers = unname(km$centers[, 1:2, drop = FALSE]), cluster = cluster,
        size = as.integer(km$size), withinss = as.numeric(km$withinss),
        wss = km$tot.withinss, objective = km$tot.withinss,
@@ -451,19 +593,96 @@
 }
 
 
+#' The column of each point, first coordinates equal but for their last bits
+#' counting as one
+#'
+#' The first coordinates are sorted, and a step of more than \code{.TIE_TOL}
+#' times the extent \code{ex} starts a new column.  The extent is the
+#' diagonal of the points' bounding box unless the caller gives another:
+#' points that all lie within the last bits of each other have a box whose
+#' diagonal is itself last-bits small, and those bits would part them, so a
+#' caller whose points are read off a larger layer (the box centres of
+#' \code{.surface_nearest_shapes()}) gives the diagonal of that layer.  The
+#' columns are numbered from the lowest first coordinate.  Where no two first
+#' coordinates are that close, the column is the rank of the distinct first
+#' coordinate, and \code{order(col, y)} is \code{order(x, y)}.
+#'
+#' @param x,y Finite coordinates of the points.
+#' @param ex The extent the step is a part of: by default the diagonal of
+#'   the points' bounding box.
+#' @return Integer vector: the column of each point.
+#' @keywords internal
+#' @noRd
+.near_columns <- function(x, y, ex = sqrt(diff(range(x))^2 + diff(range(y))^2)) {
+  n <- length(x)
+  if (n < 2L) return(rep.int(1L, n))
+  o   <- order(x)
+  col <- integer(n)
+  col[o] <- cumsum(c(TRUE, diff(x[o]) > .TIE_TOL * ex))
+  col
+}
+
+
+#' The distinct locations in coordinate order, by columns
+#'
+#' After another unit or origin the first coordinates of one column of a
+#' lattice differ in their last bits (by about 1e-9 m after a change of
+#' projection), so the exact order of \code{.partition_locations()} puts
+#' the column's locations in an order those bits set, and the random draws of
+#' the density partition, which index the locations in that order, pick
+#' other locations.  Here sorted first coordinates whose steps are no more
+#' than \code{.TIE_TOL} times the diagonal of the locations' bounding box
+#' are one column, and within a column the locations are in order of the
+#' second coordinate.  Where no two first coordinates are that close the
+#' order is that of \code{.partition_locations()}.
+#'
+#' @param loc The list \code{.partition_locations()} returns.
+#' @return The same list, with \code{u}, \code{m} and \code{gid} in the
+#'   new order of the locations; \code{order} is unchanged.
+#' @keywords internal
+#' @noRd
+.locations_by_column <- function(loc) {
+  u <- loc$u
+  if (nrow(u) < 2L) return(loc)
+  col <- .near_columns(u[, 1L], u[, 2L])
+  o2  <- order(col, u[, 2L], u[, 1L])
+  if (!is.unsorted(o2)) return(loc)
+  loc$u   <- u[o2, , drop = FALSE]
+  loc$m   <- loc$m[o2]
+  loc$gid <- match(loc$gid, o2)
+  loc
+}
+
+
 #' For chosen rows, the k nearest other locations by exact search
 #'
 #' Every squared distance is \code{(x - x')^2 + (y - y')^2} in R's own
-#' arithmetic, and ties go to the lower row number.  This is the definition
-#' the kd-tree path of \code{.knn_locations()} has to agree with.
+#' arithmetic.  With \code{tol = 0} ties go to the lower row number.  This is
+#' the definition the kd-tree path of \code{.knn_locations()} has to agree
+#' with.  With \code{tol} above 0 the \code{k} are picked by the rule of
+#' \code{.knn_pick_rows()}: squared distances within \code{tol} of each other
+#' are a tie, and a tie goes to the lower first coordinate, then the lower
+#' second, then the lower \code{num}.  The pooling's searches and the
+#' density partition's (\code{.knn_locations()}) pass \code{.TIE_TOL}.
 #'
-#' @param x,y Coordinates of the locations.
+#' @param x,y Coordinates of the locations.  With \code{tol} above 0 they are
+#'   in coordinate order (first coordinate, then second), so that the lower
+#'   row is the lower coordinate.
 #' @param rows The rows to search for.
 #' @param k Number of neighbours, below \code{length(x)}.
+#' @param tol Relative difference up to which two squared distances are a
+#'   tie; 0, the default, for exact ties alone.
+#' @param num With \code{tol} above 0, the number of each location that the
+#'   last step of the rule takes the lowest of: the row, by default.
+#' @param rnd With \code{tol} above 0, the rounding the ties are compared
+#'   with (\code{.tie_rounding()}), or \code{NULL}: each row's \code{k}-th
+#'   squared distance and the next one past its tie are handed to
+#'   \code{.tie_note()}, which flags a tie the rounding of the coordinates
+#'   can have parted.  The result does not change.
 #' @return An integer matrix, \code{length(rows) x k}.
 #' @keywords internal
 #' @noRd
-.knn_exact_rows <- function(x, y, rows, k) {
+.knn_exact_rows <- function(x, y, rows, k, tol = 0, num = seq_along(x), rnd = NULL) {
   n <- length(x)
   out <- matrix(0L, length(rows), k)
   if (!length(rows)) return(out)
@@ -474,8 +693,88 @@
     r  <- rows[at]
     d2 <- outer(x[r], x, "-")^2 + outer(y[r], y, "-")^2
     d2[cbind(seq_along(r), r)] <- Inf            # a location is not its own neighbour
-    # order() leaves ties in their original order: the lower row number first.
-    out[at, ] <- t(apply(d2, 1L, function(v) order(v)[seq_len(k)]))
+    if (tol > 0) {
+      # No pick of the rule is further than the k-th nearest by more than
+      # tol, so it is made among those as near as that: column i of `ord` is
+      # row i's candidates, nearest first.
+      nr   <- length(r)
+      ord  <- apply(d2, 1L, order)
+      dk   <- d2[cbind(seq_len(nr), ord[k, ])]
+      w    <- max(rowSums(d2 <= dk * (1 + tol)))
+      cand <- t(ord[seq_len(w), , drop = FALSE])
+      pick <- .knn_pick_rows(matrix(d2[cbind(rep(seq_len(nr), w), as.vector(cand))], nr, w),
+                             cand, k, tol, x, y, num)
+      out[at, ] <- matrix(cand[cbind(rep(seq_len(nr), k), as.vector(pick))], nr, k)
+      if (!is.null(rnd)) {
+        # The furthest pick, and the least squared distance past its tie.
+        got <- cbind(rep(seq_len(nr), k), as.vector(out[at, , drop = FALSE]))
+        a   <- apply(matrix(d2[got], nr, k), 1L, max)
+        d2[got] <- Inf
+        d2[d2 <= a * (1 + tol)] <- Inf
+        .tie_note(a, apply(d2, 1L, min), rnd)
+      }
+    } else {
+      # order() leaves ties in their original order: the lower row number first.
+      out[at, ] <- t(apply(d2, 1L, function(v) order(v)[seq_len(k)]))
+    }
+  }
+  out
+}
+
+
+#' Of each row's candidates, the k nearest by the tie rule of the pooling
+#'
+#' For each row of \code{d2}, \code{k} times: of the candidates left, those
+#' whose squared distance is no more than \code{(1 + tol)} times the least
+#' one left are a tie.  Of these, those whose first coordinate is within
+#' \code{tol * d} of the least first coordinate among them, \code{d} the
+#' square root of that least squared distance; of those, the ones whose
+#' second coordinate is within \code{tol * d} of the least second one; and of
+#' those the one of the lowest \code{num}.  It leaves the candidates, and the
+#' next pick starts again from what is left.  With the locations in
+#' coordinate order a tie goes to the lower first coordinate, then the lower
+#' second, coordinates that differ in their last bits counting as equal, then
+#' the lower \code{num}.  The rule takes \code{k} passes over the matrix and
+#' no loop over its rows.
+#'
+#' @param d2 Matrix of squared distances: a row per location searched for, a
+#'   column per candidate, \code{Inf} where there is none.
+#' @param cand Integer matrix of the shape of \code{d2}: the candidates'
+#'   numbers.
+#' @param k Number of picks, at most the finite entries of any row.
+#' @param tol Relative difference up to which two squared distances are a
+#'   tie.
+#' @param x,y Coordinates of the locations, by number.
+#' @param num The number the last step takes the lowest of, by number: the
+#'   number itself by default.  \code{.region_neighbours()} passes each
+#'   centroid's region, so that centroids which coincide to rounding are told
+#'   apart by their region and not by their place in coordinate order, which
+#'   the rounding sets.
+#' @return An integer matrix, \code{nrow(d2) x k}: the columns of \code{d2}
+#'   picked, in the order they were picked.
+#' @keywords internal
+#' @noRd
+.knn_pick_rows <- function(d2, cand, k, tol, x, y, num = seq_along(x)) {
+  nr <- nrow(d2); q <- ncol(d2)
+  out <- matrix(0L, nr, k)
+  if (!nr) return(out)
+  rr <- seq_len(nr)
+  low <- function(M) M[cbind(rr, max.col(-M, ties.method = "first"))]   # each row's least
+  X <- matrix(x[cand], nr, q)
+  Y <- matrix(y[cand], nr, q)
+  C <- matrix(as.numeric(num[cand]), nr, q)
+  for (j in seq_len(k)) {
+    m   <- low(d2)
+    tie <- d2 <= m * (1 + tol)
+    gap <- tol * sqrt(m)
+    M <- X; M[!tie] <- Inf
+    tie <- tie & M <= low(M) + gap
+    M <- Y; M[!tie] <- Inf
+    tie <- tie & M <= low(M) + gap
+    M <- C; M[!tie] <- Inf
+    p <- max.col(-M, ties.method = "first")
+    out[, j] <- p
+    d2[cbind(rr, p)] <- Inf
   }
   out
 }
@@ -486,22 +785,30 @@
 #' The answer of \code{.knn_exact_rows()} without its comparison of each row
 #' with every location.  \pkg{FNN} shortlists more neighbours than are
 #' wanted, R recomputes their distances, and the \code{k} nearest are taken
-#' with the same rule: by distance, ties to the lower row number.  A
-#' shortlist is long enough when its furthest member is further than the
-#' \code{k}-th, by more than one part in a thousand million: every location
-#' as near as the \code{k}-th is then on it.  A row whose shortlist ends
-#' inside the tie gets one twice as long, up to all the other locations.  On
-#' a lattice, or on coordinates rounded to the metre, most rows tie and a
-#' short list settles each, so the time grows with the number of locations
-#' and not with its square.
+#' with the same rule: by distance, ties to the lower row number, or with
+#' \code{tol} above 0 by the rule of \code{.knn_pick_rows()}.  A shortlist is
+#' long enough when its furthest member is further than the furthest pick,
+#' by more than \code{tol} and one part in a thousand million: every location
+#' the rule could pick is then on it.  A row whose shortlist ends inside the
+#' tie gets one twice as long, up to all the other locations.  On a lattice,
+#' or on coordinates rounded to the metre, most rows tie and a short list
+#' settles each, so the time grows with the number of locations and not with
+#' its square.
 #'
-#' @param u Two-column matrix of distinct locations.
+#' @param u Two-column matrix of distinct locations; in coordinate order when
+#'   \code{tol} is above 0.
 #' @param rows The rows to search for.
 #' @param k Number of neighbours, below \code{nrow(u)}.
+#' @param tol As for \code{.knn_exact_rows()}: 0, the default, for exact ties
+#'   alone.
+#' @param num As for \code{.knn_exact_rows()}: the row, by default.
+#' @param rnd As for \code{.knn_exact_rows()}: \code{NULL}, or the rounding
+#'   each settled row's \code{k}-th squared distance and the next one past
+#'   its tie are handed to \code{.tie_note()} with.
 #' @return An integer matrix, \code{length(rows) x k}.
 #' @keywords internal
 #' @noRd
-.knn_tied_rows <- function(u, rows, k) {
+.knn_tied_rows <- function(u, rows, k, tol = 0, num = seq_len(nrow(u)), rnd = NULL) {
   n <- nrow(u); x <- u[, 1L]; y <- u[, 2L]
   out  <- matrix(0L, length(rows), k)
   todo <- seq_along(rows)
@@ -515,18 +822,38 @@
     if (length(none)) { self[none, ] <- FALSE; self[none, q + 1L] <- TRUE }
     cand <- matrix(t(nn)[!t(self)], nr, q, byrow = TRUE)
     d2   <- matrix((x[cand] - x[r])^2 + (y[cand] - y[r])^2, nr, q)
-    # Each row's candidates by distance, then by row number: column i of
-    # `ord` is row i's, nearest first.
-    ord  <- matrix(order(rep.int(seq_len(nr), q), d2, cand), nrow = q)
-    pick <- ord[seq_len(k), , drop = FALSE]
-    dk   <- d2[pick[k, ]]
-    far  <- d2[ord[q, ]]
-    done <- q >= n - 1L | far > dk * (1 + 1e-9)
-    # as.vector(): a two-column matrix of positions would be read as pairs
-    # of (row, column).
-    if (any(done))
-      out[todo[done], ] <- matrix(cand[as.vector(pick[, done, drop = FALSE])],
-                                  sum(done), k, byrow = TRUE)
+    if (tol > 0) {
+      pick <- .knn_pick_rows(d2, cand, k, tol, x, y, num)
+      at   <- cbind(rep(seq_len(nr), k), as.vector(pick))
+      got  <- matrix(d2[at], nr, k)
+      dk   <- got[cbind(seq_len(nr), max.col(got, ties.method = "first"))]
+      far  <- d2[cbind(seq_len(nr), max.col(d2, ties.method = "first"))]
+      done <- q >= n - 1L | far > dk * (1 + tol + 1e-9)
+      if (any(done))
+        out[todo[done], ] <- matrix(cand[at], nr, k)[done, , drop = FALSE]
+      if (!is.null(rnd) && any(done)) {
+        # The least squared distance on the list past the tie of the
+        # furthest pick: a settled list holds it, or none is left.
+        past <- d2
+        past[at] <- Inf
+        past[past <= dk * (1 + tol)] <- Inf
+        nx <- past[cbind(seq_len(nr), max.col(-past, ties.method = "first"))]
+        .tie_note(dk[done], nx[done], rnd)
+      }
+    } else {
+      # Each row's candidates by distance, then by row number: column i of
+      # `ord` is row i's, nearest first.
+      ord  <- matrix(order(rep.int(seq_len(nr), q), d2, cand), nrow = q)
+      pick <- ord[seq_len(k), , drop = FALSE]
+      dk   <- d2[pick[k, ]]
+      far  <- d2[ord[q, ]]
+      done <- q >= n - 1L | far > dk * (1 + 1e-9)
+      # as.vector(): a two-column matrix of positions would be read as pairs
+      # of (row, column).
+      if (any(done))
+        out[todo[done], ] <- matrix(cand[as.vector(pick[, done, drop = FALSE])],
+                                    sum(done), k, byrow = TRUE)
+    }
     todo <- todo[!done]
     q <- min(n - 1L, 2L * q)
   }
@@ -536,23 +863,39 @@
 
 #' The k nearest other locations of every location
 #'
+#' The neighbours are picked by the pooling's tie rule
+#' (\code{.knn_pick_rows()} with \code{.TIE_TOL}): squared distances within
+#' one part in ten million of each other are a tie, which goes to the lower
+#' first coordinate, then the lower second, coordinates that differ in their
+#' last bits counting as equal.  On a lattice many neighbours are the same
+#' distance away, and which one rounding makes nearer moves with the unit and
+#' the origin of the coordinates; under this rule it does not matter.
+#'
 #' With \pkg{FNN} the kd-tree shortlists \code{k + 1} neighbours and R
 #' recomputes their distances.  A row whose next neighbour is no further than
-#' its \code{k}-th, to within one part in a thousand million, is settled by
-#' \code{.knn_tied_rows()} with the rule of the exact search, so the set
-#' returned for every row is the one the exact search gives and the two paths
-#' agree to the last bit.  Without \pkg{FNN} every row is searched exactly,
-#' which compares each location with every other.
+#' its \code{k}-th, to within \code{.TIE_TOL} and one part in a thousand
+#' million, is settled by \code{.knn_tied_rows()} with the rule of the exact
+#' search, so the set returned for every row is the one the exact search
+#' gives and the two paths agree to the last bit.  Without \pkg{FNN} every
+#' row is searched exactly, which compares each location with every other.
 #'
-#' @param u Two-column matrix of distinct locations.
+#' @param u Two-column matrix of distinct locations, in coordinate order
+#'   (first coordinate, then second, as \code{.density_kmeans()} orders
+#'   them).
 #' @param k Number of neighbours, below \code{nrow(u)}.
 #' @param use_fnn Whether to use \pkg{FNN}.
+#' @param rnd The rounding the ties are compared with
+#'   (\code{.tie_rounding()} of the layer, over the scale \code{u} is
+#'   divided by), or \code{NULL}: each row's \code{k}-th squared distance
+#'   and the next one past its tie are handed to \code{.tie_note()}, which
+#'   flags a tie the rounding of the layer's coordinates can have parted.
 #' @return A list: \code{idx} (an \code{nrow(u) x k} matrix of row numbers;
 #'   the set matters, the order within a row does not) and \code{d} (the
 #'   distance to the furthest of them, the \code{k}-th nearest).
 #' @keywords internal
 #' @noRd
-.knn_locations <- function(u, k, use_fnn = requireNamespace("FNN", quietly = TRUE)) {
+.knn_locations <- function(u, k, use_fnn = requireNamespace("FNN", quietly = TRUE),
+                           rnd = NULL) {
   n <- nrow(u); x <- u[, 1L]; y <- u[, 2L]
   d2_of <- function(idx) matrix((x[idx] - x)^2 + (y[idx] - y)^2, n, ncol(idx))
   if (isTRUE(use_fnn)) {
@@ -560,40 +903,130 @@
     idx <- matrix(FNN::get.knn(u, k = kq)$nn.index, n, kq)
     d2  <- d2_of(idx)
     dk  <- do.call(pmax, lapply(seq_len(k), function(j) d2[, j]))
-    close <- if (kq > k) which(d2[, kq] <= dk * (1 + 1e-9)) else integer(0)
+    close <- if (kq > k) which(d2[, kq] <= dk * (1 + .TIE_TOL + 1e-9)) else integer(0)
+    if (kq > k && !is.null(rnd)) {
+      clear <- setdiff(seq_len(n), close)
+      .tie_note(dk[clear], d2[clear, kq], rnd)
+    }
     idx <- idx[, seq_len(k), drop = FALSE]
     if (length(close)) {
-      idx[close, ] <- .knn_tied_rows(u, close, k)
+      idx[close, ] <- .knn_tied_rows(u, close, k, tol = .TIE_TOL, rnd = rnd)
       d2 <- d2_of(idx)
       dk <- do.call(pmax, lapply(seq_len(k), function(j) d2[, j]))
     }
     return(list(idx = idx, d = sqrt(dk)))
   }
-  idx <- .knn_exact_rows(x, y, seq_len(n), k)
+  idx <- .knn_exact_rows(x, y, seq_len(n), k, tol = .TIE_TOL, rnd = rnd)
   d2  <- d2_of(idx)
   list(idx = idx, d = sqrt(do.call(pmax, lapply(seq_len(k), function(j) d2[, j]))))
 }
 
 
+#' The length margin of the nearest-centre searches
+#'
+#' \code{.edge_tol()} of the box of the centres that have a location: one
+#' part in 1e10 of their largest coordinate, at most a millionth of the
+#' diagonal of their box and at least four units in the last place of their
+#' largest coordinate.  Taken once per search from the full set of centres,
+#' so that the exact search, the FNN shortlist and the points searched again
+#' all use one margin.
+#'
+#' @param cx,cy Coordinates of the centres.
+#' @return One number, in the units of the coordinates; 0 when no centre has
+#'   a location.
+#' @keywords internal
+#' @noRd
+.centres_tol <- function(cx, cy) {
+  ok <- is.finite(cx) & is.finite(cy)
+  if (!any(ok)) return(0)
+  .edge_tol(.xy_box(cx[ok], cy[ok]))
+}
+
+
+#' The squared distance up to which a centre ties with the nearest
+#'
+#' A squared distance ties with the least, \code{best}, when it is at most
+#' \code{best * (1 + .TIE_TOL) + tol * (2 * sqrt(best) + tol)}: within one
+#' part in ten million of it, plus what the margin \code{tol} adds to the
+#' distance (\code{(sqrt(best) + tol)^2 - best}).  The relative part alone
+#' fails near a pair of centres: two records of one station that differ in
+#' the last bits of their coordinates, \code{delta} apart, have squared
+#' distances from a point \code{r} away that differ by about
+#' \code{2 r delta}, within one part in ten million of \code{r^2} only
+#' while \code{r} is more than about twenty million times \code{delta}.
+#' Closer than that the nearer by those bits was taken, and they move with
+#' the unit and the origin.  With \code{tol} 0 the bound is the relative
+#' one to the bit, also where a squared distance overflows to \code{Inf}
+#' (\code{0 * Inf} would make it \code{NaN}).  The margin grows with the
+#' largest coordinate, so it is not the same with another origin: a point
+#' whose distances to two centres differ by less than it in one frame and
+#' by more in the other takes the lower-numbered centre in the first and
+#' the nearer in the second.
+#'
+#' @param best The least squared distance of each point.
+#' @param tol The margin, \code{.centres_tol()}.
+#' @param slack Added to \code{.TIE_TOL} in the relative part: the FNN
+#'   pre-checks pass a little more than the exact search ties, so that every
+#'   point the exact search could tie is searched again.
+#' @return The bound, one per point.
+#' @keywords internal
+#' @noRd
+.tie_bound <- function(best, tol, slack = 0) {
+  rel <- best * (1 + .TIE_TOL + slack)
+  if (isTRUE(tol > 0)) rel + tol * (2 * sqrt(best) + tol) else rel
+}
+
+
 #' For chosen points, the nearest centre by exact search
 #'
-#' One pass over the centres, each compared with every point at once.  A
-#' centre replaces the best so far only when it is strictly nearer, so a tie
-#' goes to the lower centre number.
+#' Two passes over the centres, each compared with every point at once: the
+#' first finds the least squared distance, the second takes the
+#' lowest-numbered centre whose squared distance ties with it
+#' (\code{.tie_bound()}: within \code{.TIE_TOL}, one part in ten million,
+#' of it, plus the margin \code{tol} on the distance).  Centres the same
+#' distance away but for the last bits of the coordinates are a tie, so on a
+#' lattice, and near two records of one station that differ in those bits,
+#' the cells do not depend on the unit or the origin of the coordinates.  A
+#' point whose distances to two centres differ by less than the margin
+#' takes the lower-numbered one; the margin grows with the largest
+#' coordinate, so with the origin moved by a large part of the coordinates
+#' such a point can take the nearer (\code{.tie_bound()}).
 #'
 #' @param x,y Coordinates of the points.
 #' @param cx,cy Coordinates of the centres.
+#' @param tol The length margin, \code{.centres_tol()} of all the centres
+#'   of the search.
+#' @param rnd \code{NULL}, or the rounding of a layer that the points and
+#'   centres are a frame of (\code{.tie_rounding()}): each point's least
+#'   squared distance and the least one past its tie bound are then handed
+#'   to \code{.tie_note()}, which flags a tie the rounding of the layer's
+#'   coordinates can have parted.  In the layer's own units the margin
+#'   \code{tol}, at least four units in the last place of the largest
+#'   coordinate, holds more than that rounding can move a distance, and no
+#'   caller passes it.  The result does not change.
 #' @return Integer vector: the centre of each point.
 #' @keywords internal
 #' @noRd
-.nearest_exact <- function(x, y, cx, cy) {
+.nearest_exact <- function(x, y, cx, cy, tol = .centres_tol(cx, cy), rnd = NULL) {
   best <- (x - cx[1L])^2 + (y - cy[1L])^2
-  idx  <- rep.int(1L, length(x))
-  for (j in seq_along(cx)[-1L]) {
-    d2 <- (x - cx[j])^2 + (y - cy[j])^2
-    nearer <- d2 < best
-    best[nearer] <- d2[nearer]
-    idx[nearer]  <- j
+  for (j in seq_along(cx)[-1L]) best <- pmin.int(best, (x - cx[j])^2 + (y - cy[j])^2)
+  # Not "replace when nearer by more than the tolerance" in one pass: with
+  # squared distances 1 + 1.5e-7, 1 + 0.8e-7 and 1 that keeps centre 3,
+  # where the rule takes centre 2.
+  lim <- .tie_bound(best, tol)
+  idx <- rep.int(NA_integer_, length(x))
+  for (j in seq_along(cx)) {
+    hit <- is.na(idx) & (x - cx[j])^2 + (y - cy[j])^2 <= lim
+    idx[hit] <- j
+  }
+  if (!is.null(rnd)) {
+    nx <- rep.int(Inf, length(x))
+    for (j in seq_along(cx)) {
+      d <- (x - cx[j])^2 + (y - cy[j])^2
+      past <- d > lim & d < nx
+      nx[past] <- d[past]
+    }
+    .tie_note(best, nx, rnd)
   }
   idx
 }
@@ -602,25 +1035,31 @@
 #' The nearest centre of every point
 #'
 #' With \pkg{FNN} the kd-tree shortlists the two nearest centres and R
-#' recomputes both distances.  A point whose two candidates are within one
-#' part in a thousand million of each other is searched exactly, so the
-#' answer is the one \code{.nearest_exact()} gives for every point, with or
-#' without \pkg{FNN}: on a lattice, where a point can be the same distance
-#' from two centres, the cells do not depend on which is installed.  Up to 16
+#' recomputes both distances.  A point whose two candidates tie by
+#' \code{.tie_bound()} with one part in a thousand million more on its
+#' relative part is searched exactly, so the answer is the one
+#' \code{.nearest_exact()} gives for every point, with or without
+#' \pkg{FNN}: on a lattice, where a point can be the same distance from two
+#' centres, the cells do not depend on which is installed.  Up to 16
 #' centres the exact search is the faster of the two and is used either way
 #' (measured at 1,500 to 100,000 points; the kd-tree wins from about 32).
 #'
 #' @param x,y Coordinates of the points.
 #' @param cx,cy Coordinates of the centres.
 #' @param use_fnn Whether to use \pkg{FNN}.
+#' @param tol The length margin of the tie, \code{.centres_tol()} of all
+#'   the centres of the search.
+#' @param rnd As for \code{.nearest_exact()}: \code{NULL}, or the rounding
+#'   of the layer the points and centres are a frame of.
 #' @return Integer vector: the centre of each point.
 #' @keywords internal
 #' @noRd
 .nearest_centre <- function(x, y, cx, cy,
-                            use_fnn = requireNamespace("FNN", quietly = TRUE)) {
+                            use_fnn = requireNamespace("FNN", quietly = TRUE),
+                            tol = .centres_tol(cx, cy), rnd = NULL) {
   K <- length(cx)
   if (K == 1L) return(rep.int(1L, length(x)))
-  if (!isTRUE(use_fnn) || K <= 16L) return(.nearest_exact(x, y, cx, cy))
+  if (!isTRUE(use_fnn) || K <= 16L) return(.nearest_exact(x, y, cx, cy, tol, rnd))
   nn <- FNN::get.knnx(cbind(cx, cy), cbind(x, y), k = 2L)$nn.index
   a <- nn[, 1L]; b <- nn[, 2L]
   da <- (x - cx[a])^2 + (y - cy[a])^2
@@ -628,8 +1067,12 @@
   out <- a
   swap <- db < da
   out[swap] <- b[swap]
-  close <- which(pmax(da, db) <= pmin(da, db) * (1 + 1e-9))
-  if (length(close)) out[close] <- .nearest_exact(x[close], y[close], cx, cy)
+  close <- which(pmax(da, db) <= .tie_bound(pmin(da, db), tol, slack = 1e-9))
+  if (!is.null(rnd)) {
+    clear <- setdiff(seq_along(x), close)
+    .tie_note(pmin(da, db)[clear], pmax(da, db)[clear], rnd)
+  }
+  if (length(close)) out[close] <- .nearest_exact(x[close], y[close], cx, cy, tol, rnd)
   out
 }
 
@@ -657,15 +1100,17 @@
 #' @param power The power, from 0 to 2.
 #' @param k_nn Number of neighbours.
 #' @param use_fnn Whether to use \pkg{FNN}.
+#' @param rnd The rounding of the layer in the units of \code{u}
+#'   (\code{.tie_rounding()}), or \code{NULL}, for \code{.knn_locations()}.
 #' @return The weight of one point at each location.  All one when
 #'   \code{power} is 0 or there is one location.
 #' @keywords internal
 #' @noRd
-.density_weights <- function(u, m, power, k_nn, use_fnn) {
+.density_weights <- function(u, m, power, k_nn, use_fnn, rnd = NULL) {
   n_u <- nrow(u)
   if (power == 0 || n_u < 2L) return(rep(1, n_u))
   kk  <- min(as.integer(k_nn), n_u - 1L)
-  nn  <- .knn_locations(u, kk, use_fnn)
+  nn  <- .knn_locations(u, kk, use_fnn, rnd)
   d   <- pmax(nn$d, .DENSITY_FLOOR_REL)
   cnt <- (m - 1) + rowSums(matrix(m[nn$idx], n_u, kk))
   w   <- (cnt / (pi * d^2))^power
@@ -681,6 +1126,16 @@
 #' and Vassilvitskii 2007, with weights).  A location that already holds a
 #' centre has distance zero and is not drawn again.
 #'
+#' For one draw \code{sample.int(prob = )} uses Walker's alias method where
+#' more than 200 weights are large, and its tables compare each weight with
+#' their mean, so weights that are equal but for their last bits (as on a
+#' lattice, where those bits move with the unit and the origin) can change
+#' the location drawn.  The first draw is therefore made on the weights with
+#' near ties made equal: sorted, cut into runs whose consecutive values rise
+#' by no more than \code{.TIE_TOL}, and each run given its lowest value.
+#' Where no two weights are that close the draw is the one of the weights as
+#' they stand.  The later draws read the weights as they stand.
+#'
 #' @param x,y Coordinates of the locations.
 #' @param W Weight of each location (the weights of its points, summed).
 #' @param k Number of centres, at most the number of locations.
@@ -690,7 +1145,12 @@
 .wkmeanspp <- function(x, y, W, k) {
   n <- length(x)
   idx <- integer(k)
-  idx[1L] <- sample.int(n, 1L, prob = W)
+  o   <- order(W)
+  ws  <- W[o]
+  run <- cumsum(c(TRUE, ws[-1L] > ws[-n] * (1 + .TIE_TOL)))
+  Wd  <- W
+  Wd[o] <- ws[!duplicated(run)][run]
+  idx[1L] <- sample.int(n, 1L, prob = Wd)
   d2 <- (x - x[idx[1L]])^2 + (y - y[idx[1L]])^2
   if (k > 1L) for (j in 2:k) {
     wd  <- W * d2
@@ -726,7 +1186,10 @@
 #' a centre left without a point stays where it is.  The iteration stops when
 #' no coordinate of a centre changes by \code{.DENSITY_TOL_REL} of the extent
 #' or more, or after \code{iter.max} steps.  The start with the lowest
-#' weighted sum is kept.
+#' weighted sum is kept; a later start replaces an earlier one only when its
+#' sum is lower by more than \code{.TIE_TOL}, so of starts whose sums agree
+#' to rounding (mirror images of one another on a lattice) the first is
+#' kept.
 #'
 #' What makes the result depend on nothing but the points:
 #' \itemize{
@@ -737,11 +1200,22 @@
 #'     and divided by its diagonal first.  The floor on the neighbour
 #'     distance and the stopping tolerance are fractions of that diagonal,
 #'     and the centres are put back in the caller's units at the end.
+#'   \item \emph{Units and origin on gridded locations.}  Another unit or
+#'     origin moves the last bits of the coordinates, and on a lattice those
+#'     bits would settle the many ties.  So first coordinates within
+#'     \code{.TIE_TOL} of the diagonal of each other are one column when
+#'     the locations are put in order (\code{.locations_by_column()}); the
+#'     neighbour and nearest-centre searches count squared distances within
+#'     \code{.TIE_TOL} as a tie (\code{.knn_locations()},
+#'     \code{.nearest_exact()}); the first k-means++ centre is drawn on
+#'     weights with near ties made equal (\code{.wkmeanspp()}); and of two
+#'     starts whose sums agree to \code{.TIE_TOL} the first is kept.
 #'   \item \emph{Repeated locations.}  See \code{.density_weights()}.  Points
 #'     at one location always share a cell.
 #'   \item \emph{\pkg{FNN}.}  It shortlists neighbours; every distance that
 #'     decides anything is computed in R, and near-ties are settled by an
-#'     exact search with one tie rule (see \code{.nearest_centre()}).
+#'     exact search with one tie rule (see \code{.knn_locations()} and
+#'     \code{.nearest_centre()}).
 #' }
 #'
 #' With \code{power = 0} every weight is one and this is plain k-means by
@@ -756,6 +1230,11 @@
 #' @param init \code{"kmeans++"} or \code{"random"}.
 #' @param nstart,iter.max Starts, and Lloyd steps per start.
 #' @param use_fnn Whether to use \pkg{FNN}.
+#' @param centers Optional \code{k x 2} matrix of starting centres, in the
+#'   units of \code{xy}.  Given, it is the one start: \code{k} is its number
+#'   of rows, \code{init} and \code{nstart} are not read, and no random
+#'   number is drawn.  \code{select_resolution()} refits a level of a
+#'   profile fitted to a subsample this way, from the centres scored.
 #' @return As \code{.partition_centres()}, with \code{km} \code{NULL} and
 #'   two further elements: \code{weights} (the weight of each row of
 #'   \code{xy}) and \code{converged} (whether the best start stopped before
@@ -765,13 +1244,20 @@
 #' @noRd
 .density_kmeans <- function(xy, k, power = 1, k_nn = 8L, init = "kmeans++",
                             nstart = 3L, iter.max = 50L,
-                            use_fnn = requireNamespace("FNN", quietly = TRUE)) {
+                            use_fnn = requireNamespace("FNN", quietly = TRUE),
+                            centers = NULL) {
   xy <- unname(as.matrix(xy)[, 1:2, drop = FALSE])
   storage.mode(xy) <- "double"
   if (!all(is.finite(xy)))
     stop(".density_kmeans(): non-finite coordinates.", call. = FALSE)
+  if (!is.null(centers)) {
+    centers <- unname(as.matrix(centers)[, 1:2, drop = FALSE])
+    if (!all(is.finite(centers)))
+      stop(".density_kmeans(): non-finite starting centres.", call. = FALSE)
+    k <- nrow(centers); nstart <- 1L
+  }
   n <- nrow(xy); k <- as.integer(k)
-  loc <- .partition_locations(xy)
+  loc <- .locations_by_column(.partition_locations(xy))
   n_u <- nrow(loc$u)
   if (n < 1L || is.na(k) || k < 1L || k > n_u) return(NULL)
 
@@ -794,9 +1280,13 @@
                    paste0("partition = \"density\" on %d locations without the FNN ",
                           "package: the neighbour searches compare every pair of ",
                           "locations, and every location with every centre at each ",
-                          "step. The result is the same; install FNN to get it sooner."),
+                          "step. FNN, which installs with spatialkit, could not be loaded; ",
+                          "reinstalling it gives the same result sooner."),
                    n_u)
-  w  <- .density_weights(cbind(zx, zy), m, power, k_nn, use_fnn)
+  # The rounding of the layer's coordinates, in the units of the frame, for
+  # the ties of the neighbour and nearest-centre searches (.tie_note()).
+  rnd <- .tie_rounding(loc$u, scale = extent)
+  w  <- .density_weights(cbind(zx, zy), m, power, k_nn, use_fnn, rnd)
   W  <- m * w
   zw <- cbind(W, zx * W, zy * W)
 
@@ -804,12 +1294,18 @@
   best <- NULL
   objs <- rep(NA_real_, nstart)
   for (r in seq_len(nstart)) {
-    start <- if (identical(init, "random")) sample.int(n_u, k) else .wkmeanspp(zx, zy, W, k)
-    cx <- zx[start]; cy <- zy[start]
+    if (is.null(centers)) {
+      start <- if (identical(init, "random")) sample.int(n_u, k) else .wkmeanspp(zx, zy, W, k)
+      cx <- zx[start]; cy <- zy[start]
+    } else {
+      # The centres given, in the same centred and scaled units.
+      cx <- (centers[, 1L] - mid[1L]) / extent
+      cy <- (centers[, 2L] - mid[2L]) / extent
+    }
     it <- 0L; moved <- Inf
     while (it < iter.max) {
       it <- it + 1L
-      a  <- .nearest_centre(zx, zy, cx, cy, use_fnn)
+      a  <- .nearest_centre(zx, zy, cx, cy, use_fnn, rnd = rnd)
       s  <- rowsum(zw, a, reorder = TRUE)
       id <- as.integer(rownames(s))
       nx <- cx; ny <- cy
@@ -820,11 +1316,11 @@
       if (moved < .DENSITY_TOL_REL) break
     }
     # The cells are those of the centres as they now stand.
-    a   <- .nearest_centre(zx, zy, cx, cy, use_fnn)
+    a   <- .nearest_centre(zx, zy, cx, cy, use_fnn, rnd = rnd)
     obj <- sum(W * ((zx - cx[a])^2 + (zy - cy[a])^2))
     if (!is.finite(obj) || !all(is.finite(cx)) || !all(is.finite(cy))) next
     objs[r] <- obj
-    if (is.null(best) || obj < best$obj)
+    if (is.null(best) || obj < best$obj * (1 - .TIE_TOL))
       best <- list(cx = cx, cy = cy, a = a, obj = obj, iter = it,
                    converged = moved < .DENSITY_TOL_REL)
   }

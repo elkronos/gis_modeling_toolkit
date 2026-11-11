@@ -125,26 +125,33 @@
 
 # ---- What exists today is what it was ----------------------------------------
 
-test_that("a selection by a present criterion from a profile without an estimate has today's names", {
+test_that("a selection by a present criterion from a profile without an estimate has today's names, and cp's its record", {
   p <- .cs_plain()
   expect_null(attr(p, "estimate"))
-  for (cr in c("cp", "moran_z")) {
-    s <- select_resolution(p, criterion = cr, diagnostic = TRUE)
-    expect_identical(names(s), .cs_present, info = cr)
-    expect_null(s$count_rule, info = cr)
-    expect_null(attr(s$seeds, "count_rule"), info = cr)
-    expect_identical(s$criterion, cr)
-  }
-  # A profile of the density kind names its kind last, and nothing else.
+  s <- select_resolution(p, criterion = "moran_z", diagnostic = TRUE)
+  expect_identical(names(s), .cs_present)
+  expect_null(s$count_rule)
+  expect_null(attr(s$seeds, "count_rule"))
+  expect_identical(s$criterion, "moran_z")
+  # A cp selection gains the record of how the count was set, after its
+  # seeds, and nothing else (BUG-02): it used to carry none.
+  s <- select_resolution(p, criterion = "cp")
+  expect_identical(names(s), c(.cs_present, "count_rule"))
+  expect_identical(s$count_rule$rule, "cp")
+  expect_identical(s$count_rule$estimate, "mean")
+  expect_identical(attr(s$seeds, "count_rule")$scored_cells, TRUE)
+  expect_identical(s$criterion, "cp")
+  # A profile of the density kind names its kind last.
   d <- suppressWarnings(.cs_profile(.cs_600(), n_levels = 6L, sac = 3e4, estimate = NULL,
                                     obs_per_cell = NULL))
   s <- select_resolution(d, criterion = "cp")
-  expect_identical(names(s), c(.cs_present, "partition"))
-  expect_null(attr(s$seeds, "count_rule"))
-  # The names the baseline's selections have.
+  expect_identical(names(s), c(.cs_present, "count_rule", "partition"))
+  expect_identical(attr(s$seeds, "count_rule")$rule, "cp")
+  # The names the baseline's selections have, as the fixture holds them now.
   base <- readRDS(test_path("fixtures", "core-frozen.rds"))
-  expect_identical(names(base$records$select_default_cp$value), .cs_present)
-  expect_identical(names(base$records$select_density_cp$value), c(.cs_present, "partition"))
+  expect_identical(names(base$records$select_default_cp$value), c(.cs_present, "count_rule"))
+  expect_identical(names(base$records$select_density_cp$value),
+                   c(.cs_present, "count_rule", "partition"))
 })
 
 test_that("a profile of today, read by cp, by \"auto\" or as a count, gives the baseline's results", {
@@ -205,8 +212,9 @@ test_that("a profile of today, read by cp, by \"auto\" or as a count, gives the 
                "is a resolution profile with no criterion finite at any level", fixed = TRUE)
   expect_true("spatialkit_no_structure" %in%
                 unlist(lapply(got$count_seeds_noise$conditions, function(c) c$class)))
-  expect_false("count_rule" %in% names(got$select_default_cp$value))
-  expect_null(attr(got$seeds_profile$value, "count_rule"))
+  # A count cp chose carries its record (BUG-02).
+  expect_identical(got$select_default_cp$value$count_rule$rule, "cp")
+  expect_identical(attr(got$seeds_profile$value, "count_rule")$rule, "cp")
 })
 
 
@@ -361,13 +369,27 @@ test_that("the edge labels and their hints: a ladder of sizes has its own, every
   # The same bounds without sizes: the labels of today.
   auto <- utils::modifyList(sized, list(obs_per_cell = NULL, ceiling_from = "min_cell_n"))
   expect_identical(.ladder_edge(133L, lv, lv, auto), "the support ceiling (n / min_cell_n)")
+  # min_cell_n alone binds where the locations allow more cells; where they
+  # allow the same number the label names them, and its hint offers nothing
+  # that cannot move them (BUG-161).
+  expect_identical(.ladder_edge(133L, lv, lv,
+                                utils::modifyList(auto, list(n_distinct = 400L, n = 1200L))),
+                   "the support ceiling (n / min_cell_n)")
+  expect_identical(.ladder_edge(133L, lv, lv,
+                                utils::modifyList(auto, list(n_distinct = 133L, n = 1200L))),
+                   "the support ceiling (as many cells as the distinct locations allow)")
   expect_identical(.ladder_edge(67L, lv, lv, auto), "the first level of the ladder")
   expect_identical(.ladder_edge(133L, lv, lv, NULL), "the last level of the ladder")
   hint <- " `obs_per_cell` sets the sizes offered; how small a cell may be is the caller's choice."
   expect_identical(.edge_hint("the finest size offered (obs_per_cell)"), hint)
   expect_identical(.edge_hint("the coarsest size offered (obs_per_cell)"), hint)
+  # At the support ceiling the hint names `levels` past it, which leave the
+  # levels below it as they are; a lower min_cell_n builds another ladder
+  # (BUG-07).
   expect_identical(.edge_hint("the support ceiling (n / min_cell_n)"),
-                   " Lower min_cell_n to see whether the criterion keeps going.")
+                   paste0(" Pass `levels` that run past this count to see whether the criterion ",
+                          "keeps going; a lower min_cell_n raises the ceiling too, but moves every ",
+                          "level below it."))
   expect_identical(.edge_hint("the only level scored"),
                    " One level leaves nothing to compare it with.")
   expect_identical(.edge_hint(NA_character_), "")
@@ -517,8 +539,9 @@ test_that("\"size\" returns the count of the size when the profile has that leve
   expect_identical(s$one_cell, attr(p, "estimate")$loo_one_cell)
   expect_identical(s$share_alone, p$share_alone[2L])
   expect_identical(s$own_weight, p$own_weight[2L])
+  # 4.5 is the default size, and the note says so whoever named it.
   expect_identical(s$note, c(size = paste0("the count is set by obs_per_cell = 4.5, the ",
-                                           "caller's choice; no criterion chose it.")))
+                                           "default; no criterion chose it.")))
   expect_identical(nrow(s$seeds), 133L)
   expect_identical(names(s), c(.cs_present, .cs_added, "partition"))
   # Without a size of its own the profile is read at the default size.
@@ -680,7 +703,7 @@ test_that("\"size\" on a column subset is the error that names the row count", {
   l <- .cs_levels()
   s <- select_resolution(l[, c("levels", "cp")], criterion = "cp")
   expect_identical(s$best, select_resolution(l, criterion = "cp")$best)
-  expect_identical(names(s), .cs_present)
+  expect_identical(names(s), c(.cs_present, "count_rule"))
 })
 
 test_that("no bound chooses a size: no spatialkit_bound_chosen downstream", {
@@ -1074,14 +1097,16 @@ test_that("obs_per_cell is NULL or one number of at least 1, and is read by \"si
                      sprintf(paste0("select_resolution(): `obs_per_cell` is read by criterion = ",
                                     "\"size\" only, and criterion = \"%s\" was asked for."), cr))
   }
-  # "auto" that does not resolve to "size" says what it resolved to.
+  # "auto" that does not resolve to "size" says what it resolved to, and
+  # calls itself the default, named or not.
   e <- .cs_error(select_resolution(.cs_mean7(), criterion = "auto", obs_per_cell = 4.5))
   expect_identical(conditionMessage(e),
                    paste0("select_resolution(): `obs_per_cell` is read by criterion = \"size\" ",
-                          "only, and criterion = \"auto\" was asked for, which reads this ",
+                          "only, and criterion = \"auto\", the default, reads this ",
                           "profile by \"loo\"."))
   e <- .cs_error(select_resolution(.cs_plain(), criterion = "auto", obs_per_cell = 4.5))
-  expect_match(conditionMessage(e), "which reads this profile by \"cp\".", fixed = TRUE)
+  expect_match(conditionMessage(e), "\"auto\", the default, reads this profile by \"cp\".",
+               fixed = TRUE)
   # And one that does is read.
   expect_identical(select_resolution(.cs_pooled7(), criterion = "auto", obs_per_cell = 9)$best,
                    rung_k(600L, 9))
@@ -1119,7 +1144,7 @@ test_that("what the selection reads before it applies a rule: the size, the subs
   s <- select_resolution(q, criterion = "auto")
   expect_identical(s$criterion, "cp")
   expect_identical(s, select_resolution(q, criterion = "cp"))
-  expect_identical(names(s), .cs_present)
+  expect_identical(names(s), c(.cs_present, "count_rule"))
   # A profile built as today whose column is NA at every level has the
   # present error, not the one of a ladder of sizes.
   na <- .cs_plain(); na$cp <- NA_real_; na$reliability <- NA_real_
@@ -1369,12 +1394,15 @@ test_that("the notes of \"loo\" on a response without structure are Cp's, for th
   expect_identical(s$structure_p, min(1, finite * est$f_p[[as.character(s$best)]]))
   # One mean does as well as any level.
   expect_lte(s$one_cell, s$value * 1.02)
+  # The rule is one_cell <= value * (1 + tol), which holds where one mean is
+  # lower too, and the note says that, not "within 2%" (BUG-07).
   expect_identical(
     s$note,
     c(structure = sprintf(
-      paste0("the leave-one-out error at one cell (%s) is within 2%% of the optimum (%s): one ",
-             "mean for the whole layer predicts as well as any level scored, so the response ",
-             "shows no spatial structure the cells can use and the count is not identified."),
+      paste0("the leave-one-out error at one cell (%s) is not above the optimum (%s) by more ",
+             "than 2%%: one mean for the whole layer predicts as well as any level scored, so ",
+             "the response shows no spatial structure the cells can use and the count is not ",
+             "identified."),
       format(signif(s$one_cell, 3)), format(signif(s$value, 3)))))
   # The other ground: the cells beat one mean by the margin, and by no more
   # than chance.  A margin of 0 on a column made to beat one mean barely.
@@ -1620,10 +1648,11 @@ test_that("with a variogram cp on a ladder of one size returns the level, and sa
   expect_identical(s$edge, "the only level scored")
   expect_identical(s$note[c("estimate", "ladder")],
                    c(estimate = .cs_pooled_note, ladder = note("cp")))
-  # Without an estimate the list is today's, with the note in it.
+  # Without an estimate the list is today's and cp's record, with the note
+  # in it.
   bare <- suppressWarnings(.cs_profile(pts, sac = 3e4, estimate = NULL))
   s <- select_resolution(bare, criterion = "cp")
-  expect_identical(names(s), c(.cs_present, "partition"))
+  expect_identical(names(s), c(.cs_present, "count_rule", "partition"))
   expect_identical(s$note[["ladder"]], note("cp"))
   expect_false("estimate" %in% names(s$note))
   expect_identical(s$edge, "the only level scored")
@@ -1826,13 +1855,18 @@ test_that(".resolve_cell_count() returns the record with the count", {
   expect_identical(res$count_rule, s$count_rule)
   expect_identical(res$from, paste0("select_resolution(criterion = \"loo\")",
                                     if (is.na(s$edge)) "" else sprintf(", an optimum at %s", s$edge)))
-  # A number, and a selection of today, carry none.
+  # A number carries none; a count cp chose, from a selection or from a
+  # profile without an estimate, carries cp's (BUG-02).
   expect_null(.resolve_cell_count(12, "n", "f")$count_rule)
   expect_identical(.resolve_cell_count(12, "n", "f")$n, 12)
   plain <- select_resolution(.cs_plain(), criterion = "cp")
-  expect_null(suppressWarnings(.resolve_cell_count(plain, "n", "f"))$count_rule)
-  expect_null(suppressWarnings(.resolve_cell_count(.cs_plain(), "n", "f"))$count_rule)
+  expect_identical(suppressWarnings(.resolve_cell_count(plain, "n", "f"))$count_rule,
+                   plain$count_rule)
+  expect_identical(suppressWarnings(.resolve_cell_count(.cs_plain(), "n", "f"))$count_rule,
+                   plain$count_rule)
   expect_identical(suppressWarnings(.resolve_cell_count(.cs_plain(), "n", "f"))$criterion, "cp")
+  z <- select_resolution(.cs_plain(), criterion = "moran_z", diagnostic = TRUE)
+  expect_null(suppressWarnings(.resolve_cell_count(z, "n", "f"))$count_rule)
 })
 
 test_that("a profile of a constant response passed as a count: a size has one, a minimum has none", {
@@ -1868,7 +1902,7 @@ test_that("a selection by size prints its size, the estimate, the level's number
   out <- .cs_print(s)
   expect_identical(out[1:6], c(
     "Resolution by size: 133 cells",
-    "  size        : 4.5 rows per cell asked (obs_per_cell); 600 rows / 133 cells = 4.51",
+    "  size        : 4.5 rows per cell, the default (obs_per_cell); 600 rows / 133 cells = 4.51",
     "  cells       : density-weighted k-means++ starts (power 1, 8 neighbours)",
     "  estimate    : pooled toward the 8 nearest cells",
     sprintf("  at this size: %.1f%% of the rows are alone in their cell; median own weight %.2f",
@@ -1876,8 +1910,8 @@ test_that("a selection by size prints its size, the estimate, the level's number
     sprintf("  loo         : %s (one cell for the layer: %s)", format(signif(p$loo, 3)),
             format(signif(attr(p, "estimate")$loo_one_cell, 3)))))
   expect_identical(out[7:8], c(
-    "  note        : the count is set by obs_per_cell = 4.5, the caller's choice;",
-    "                no criterion chose it."))
+    "  note        : the count is set by obs_per_cell = 4.5, the default; no",
+    "                criterion chose it."))
   expect_length(out, 8L)
   expect_false(any(grepl("flat region", out, fixed = TRUE)))
   expect_false(any(grepl("the bound is choosing", out, fixed = TRUE)))
@@ -1900,6 +1934,53 @@ test_that("a selection by size prints its size, the estimate, the level's number
     "                criterion chose it."))
 })
 
+test_that("on the default path the note calls the size the default, not the caller's choice", {
+  # A profile and a selection that name nothing.
+  p <- resolution_profile(.cs_600(), "z")
+  expect_identical(attr(p, "bounds")$obs_per_cell, .OBS_PER_CELL_DEFAULT)
+  s <- select_resolution(p)
+  expect_identical(s$criterion, "size")
+  expect_identical(s$obs_per_cell_asked, 4.5)
+  default <- "the count is set by obs_per_cell = 4.5, the default; no criterion chose it."
+  expect_identical(s$note, c(size = default))
+  out <- .cs_print(s)
+  expect_false(any(grepl("caller", out, fixed = TRUE)))
+  # The size line calls the size the default, as the note does: nothing was
+  # asked (BUG-07).
+  expect_identical(out[1:2], c(
+    "Resolution by size: 133 cells",
+    "  size        : 4.5 rows per cell, the default (obs_per_cell); 600 rows / 133 cells = 4.51"))
+  expect_identical(out[7:8], c(
+    "  note        : the count is set by obs_per_cell = 4.5, the default; no",
+    "                criterion chose it."))
+  expect_length(out, 8L)
+  # A profile of several sizes read with none named is read at the default.
+  expect_identical(select_resolution(.cs_pooled7(), criterion = "size")$note[["size"]], default)
+  # A size the caller gives, to the selection or to the profile, is the
+  # caller's choice.
+  r <- .cs_catch(select_resolution(p, obs_per_cell = 6))
+  expect_identical(.cs_classes(r), "spatialkit_size_not_reached")
+  expect_identical(r$value$note[["size"]],
+                   "the count is set by obs_per_cell = 6, the caller's choice; no criterion chose it.")
+  nine <- .cs_profile(.cs_600(), obs_per_cell = 9)
+  expect_identical(select_resolution(nine)$note[["size"]],
+                   "the count is set by obs_per_cell = 9, the caller's choice; no criterion chose it.")
+  expect_identical(.cs_print(select_resolution(nine))[7:8], c(
+    "  note        : the count is set by obs_per_cell = 9, the caller's choice; no",
+    "                criterion chose it."))
+  # So is a size below the default, to the selection or to the profile.
+  r <- .cs_catch(select_resolution(p, obs_per_cell = 3))
+  expect_identical(.cs_classes(r), "spatialkit_size_not_reached")
+  expect_identical(r$value$note[["size"]],
+                   "the count is set by obs_per_cell = 3, the caller's choice; no criterion chose it.")
+  three <- .cs_profile(.cs_600(), obs_per_cell = 3)
+  expect_identical(select_resolution(three)$note[["size"]],
+                   "the count is set by obs_per_cell = 3, the caller's choice; no criterion chose it.")
+  expect_identical(.cs_print(select_resolution(three))[7:8], c(
+    "  note        : the count is set by obs_per_cell = 3, the caller's choice; no",
+    "                criterion chose it."))
+})
+
 test_that("under the split the print says which rows the level's numbers are of", {
   half <- .cs_profile(.cs_600(), select_on = "split")
   s <- select_resolution(half, criterion = "size")
@@ -1907,7 +1988,7 @@ test_that("under the split the print says which rows the level's numbers are of"
   n_half <- attr(half, "estimate")$n
   # The size line counts the rows of both halves.
   expect_identical(out[2L],
-                   "  size        : 4.5 rows per cell asked (obs_per_cell); 600 rows / 133 cells = 4.51")
+                   "  size        : 4.5 rows per cell, the default (obs_per_cell); 600 rows / 133 cells = 4.51")
   # The rows the error read, the cells that hold one of them, and the rows
   # per such cell: 299 rows in 75 of the 133 cells.
   occupied <- unname(attr(half, "estimate")$cells[["133"]])
@@ -2089,6 +2170,10 @@ test_that("for a ladder of one size summary() says the size set the count", {
   e <- .cs_error(summary(k))
   expect_match(conditionMessage(e),
                "^summary.resolution_profile\\(\\): no count criterion is finite at any level\\. ")
+  # It says that the response is constant, and names loo (BUG-07).
+  expect_match(conditionMessage(e),
+               paste0("The response is constant over the 600 scored rows, so no criterion that ",
+                      "reads it is finite: cp, loo and moran_z are NA at every level"), fixed = TRUE)
   ending <- paste0(" The ladder is one size (obs_per_cell = 4.5); the count is set by the size, ",
                    "and select_resolution(criterion = \"size\") reads it.")
   expect_identical(substring(conditionMessage(e), nchar(conditionMessage(e)) - nchar(ending) + 1L),
@@ -2102,9 +2187,13 @@ test_that("for a ladder of one size summary() says the size set the count", {
   expect_match(conditionMessage(e), "no count criterion is finite at any level", fixed = TRUE)
   # Several sizes are named as a ladder of sizes, with the missing variogram
   # where the profile fitted none and without it where the caller gave one.
+  # The response is constant, and the error says so in place of the general
+  # sentence on what each criterion needs (BUG-07).
   present <- paste0("summary.resolution_profile(): no count criterion is finite at any level. ",
-                    "cp needs a response, reliability a usable variogram; a geometry-only ",
-                    "profile carries elbow alone, and elbow is NA when the WSS curve has no elbow.")
+                    "The response is constant over the 600 scored rows, so no criterion that ",
+                    "reads it is finite: cp, loo and moran_z are NA at every level, and ",
+                    "reliability needs a usable variogram of it; elbow, read off the points ",
+                    "alone, is NA when the WSS curve has no elbow.")
   expect_identical(
     conditionMessage(e),
     paste0(present, " The profile is on a ladder of sizes (obs_per_cell = c(9, 4.5)), which ",
@@ -2135,6 +2224,12 @@ test_that("plot() draws loo like a count criterion, and a ladder of one size as 
   marked <- g$layers[[which(geoms(g) == "GeomVline")]]$data
   expect_identical(marked$x, select_resolution(l, criterion = "loo")$best)
   expect_match(g$labels$caption, "^Red: the level each criterion selects")
+  # The subtitle gives the number of levels and their range, from two levels
+  # up.
+  expect_identical(g$labels$subtitle, "3 levels from 50 to 300 cells (floor 11, ceiling 66)")
+  two <- .cs_profile(.cs_600(), obs_per_cell = c(9, 4.5))
+  expect_identical(plot(two, criteria = "loo")$labels$subtitle,
+                   "2 levels from 67 to 133 cells (floor 2, ceiling 133)")
   # Drawn by default where the column is finite, after the other count criteria.
   panels <- as.character(unique(points_of(plot(l))$panel))
   expect_true(label %in% panels)
@@ -2166,14 +2261,14 @@ test_that("plot() draws loo like a count criterion, and a ladder of one size as 
   g <- plot(p, criteria = "loo")
   expect_identical(points_of(g)$y, p$loo)
   expect_false("GeomVline" %in% geoms(g))
-  expect_identical(g$labels$subtitle, "1 levels from 133 to 133 cells (floor 2, ceiling 133)")
+  expect_identical(g$labels$subtitle, "1 level of 133 cells (floor 2, ceiling 133)")
   # A size too coarse for the layer: the subtitle says why the profile is not
-  # supported.  Six rows at 4.5 a cell.
+  # supported.  Six rows at 4.5 a cell, the default size.
   few <- suppressWarnings(.cs_profile(.cs_600()[1:6, ]))
   expect_false(attr(few, "bounds")$supported)
   expect_identical(plot(few, criteria = "wss")$labels$subtitle,
-                   paste0("1 levels from 2 to 2 cells (floor 2, ceiling 2); fewer than two ",
-                          "cells of the size asked for"))
+                   paste0("1 level of 2 cells (floor 2, ceiling 2); fewer than two ",
+                          "cells of the size (obs_per_cell = 4.5, the default)"))
 })
 
 test_that("a profile of one level that is not a ladder of one size is summarised and drawn as today", {
@@ -2221,4 +2316,72 @@ test_that("plot() marks a level on a ladder of several sizes, and draws no line 
     expect_identical(.cs_geoms(g), "GeomPoint")
     expect_false(any(grepl(one, .cs_drawn(g), fixed = TRUE)))
   }
+})
+
+
+# ---- Where a size or a criterion came from --------------------------------------
+
+test_that("a size is the default by its value", {
+  # 4.5 alone, or the plain mean's seven sizes in any order, is the default;
+  # any other size or ladder is the caller's.
+  expect_true(.size_is_default(4.5))
+  expect_true(.size_is_default(c(18, 12, 9, 6, 4.5, 3, 2)))
+  expect_true(.size_is_default(c(2, 3, 4.5, 6, 9, 12, 18)))
+  for (x in list(6, 2, c(6, 4.5), c(18, 12, 9, 6, 4.5, 3), NA_real_, NULL, "4.5",
+                 numeric(0)))
+    expect_false(.size_is_default(x))
+  expect_identical(.size_source_text(4.5), ", the default")
+  expect_identical(.size_source_text(6), " asked")
+  expect_identical(.size_source_text(NA_real_), " asked")
+  # The default is 4.5 exactly: a size near it is the caller's, so the print
+  # never calls a named 4.6 or 4.4 the default.
+  expect_false(.size_is_default(4.6))
+  expect_false(.size_is_default(4.5 + 1e-9))
+  expect_identical(.size_source_text(4.4), " asked")
+  # sort() drops NA, so an NA beside the default size or the default ladder
+  # must not read as the default.
+  expect_false(.size_is_default(c(4.5, NA)))
+  expect_false(.size_is_default(c(18, 12, 9, 6, 4.5, 3, 2, NA)))
+})
+
+test_that("a size beside the default criterion is refused without calling the default asked for", {
+  # The caller names no criterion; "auto" is the default, and the refusal
+  # used to say it "was asked for".
+  for (case in list(list(p = .cs_mean7(), by = "loo"), list(p = .cs_plain(), by = "cp"))) {
+    e <- .cs_error(select_resolution(case$p, obs_per_cell = 4.5))
+    expect_identical(conditionMessage(e), sprintf(paste0(
+      "select_resolution(): `obs_per_cell` is read by criterion = \"size\" only, and ",
+      "criterion = \"auto\", the default, reads this profile by \"%s\"."), case$by))
+    expect_false(grepl("asked", conditionMessage(e), fixed = TRUE))
+  }
+  # A criterion the caller named is one asked for.
+  e <- .cs_error(select_resolution(.cs_mean7(), criterion = "loo", obs_per_cell = 4.5))
+  expect_identical(conditionMessage(e), paste0(
+    "select_resolution(): `obs_per_cell` is read by criterion = \"size\" only, and ",
+    "criterion = \"loo\" was asked for."))
+})
+
+test_that("the plot's subtitle names a size too coarse for the layer by where it came from", {
+  skip_if_not_installed("ggplot2")
+  six <- .cs_600()[1:6, ]
+  sub_of <- function(p) plot(p)$labels$subtitle
+  head <- "1 level of 2 cells (floor 2, ceiling 2); fewer than two cells of the size"
+  # The default size, left to "auto" or named.
+  dflt <- paste0(head, " (obs_per_cell = 4.5, the default)")
+  expect_identical(sub_of(suppressWarnings(resolution_profile(six, "z", seed = 1))), dflt)
+  expect_identical(sub_of(suppressWarnings(.cs_profile(six))), dflt)
+  # A size, or a ladder, the caller named; the ladder ends at 4.5 and is
+  # still the caller's.
+  expect_identical(sub_of(suppressWarnings(.cs_profile(six, obs_per_cell = 5))),
+                   paste0(head, " asked for"))
+  expect_identical(sub_of(suppressWarnings(.cs_profile(six, obs_per_cell = c(6, 4.5)))),
+                   paste0(head, " asked for"))
+  # The plain mean's default ladder, too coarse at its finest size on two
+  # rows with a response.
+  two <- six
+  two$z[3:6] <- NA
+  pm <- suppressWarnings(resolution_profile(two, "z", estimate = "mean", seed = 1))
+  expect_identical(attr(pm, "bounds")$obs_per_cell, c(18, 12, 9, 6, 4.5, 3, 2))
+  expect_identical(sub_of(pm),
+                   paste0(head, " (obs_per_cell = 2, the finest of the default sizes)"))
 })

@@ -79,14 +79,19 @@
 .gt_lattice_path <- function(d, sp, kind)
   .gt_keep(sprintf("%dx%d-%g-%s", d[1L], d[2L], sp, kind),
            .gt_path(.gt_lattice(d[1L], d[2L], sp), kind))
+# The same lattice with its rows in EPSG:4326 and the cells returned there
+# (build_tessellation(crs = 4326)).
+.gt_lonlat_path <- function(d, sp, kind)
+  .gt_keep(sprintf("%dx%d-%g-%s-4326", d[1L], d[2L], sp, kind),
+           .gt_path(sf::st_transform(.gt_lattice(d[1L], d[2L], sp), 4326), kind, crs = 4326))
 
 .gt_bare <- function(x) { attr(x, "count_rule") <- NULL; x }
 .gt_cell_of <- function(asg, pts, id = "cell_id") asg[[id]][match(pts$row, asg$row)]
 
 # The profile's rule, written out: each row to the centre the least squared
-# distance away in the record's CRS, of two as near the lower-numbered one
-# (.nearest_exact() replaces the best so far only when a centre is strictly
-# nearer), and the cell build_tessellation() built around that centre.
+# distance away in the record's CRS, of two whose squared distances agree to
+# within .TIE_TOL the lower-numbered one (.nearest_exact()), and the cell
+# build_tessellation() built around that centre.
 .gt_profile_rule <- function(P, pts) {
   rec <- P$sel$count_rule
   cen <- rec$scored$centres
@@ -95,10 +100,16 @@
        xy = xy, cen = cen)
 }
 
-# What the polygons alone give: the same cells without the record.
-.gt_polygon_rule <- function(P, pts)
-  .gt_cell_of(assign_features_to_polygons(pts, .gt_bare(P$tess$cells),
-                                          polygon_id_col = "cell_id", quiet = TRUE), pts)
+# What the polygons alone give: the same cells without the record.  Cells
+# returned in longitude and latitude are put back in the record's CRS, where
+# they were drawn and where the assignment joins them with the record: on the
+# sphere s2 refuses some of them (two corners at one point).
+.gt_polygon_rule <- function(P, pts) {
+  cells <- .gt_bare(P$tess$cells)
+  if (isTRUE(sf::st_is_longlat(cells))) cells <- sf::st_transform(cells, P$sel$count_rule$crs)
+  .gt_cell_of(assign_features_to_polygons(pts, cells, polygon_id_col = "cell_id", quiet = TRUE),
+              pts)
+}
 
 # Everything a lattice's path has to show.  Returns how many rows the
 # polygons alone would have placed in another cell than the profile's.
@@ -158,15 +169,16 @@ test_that("on lattices at spacings of 1, 30, 250 and 1000 every row is in the ce
   }
   expect_length(moved$density, 16L)
   expect_length(moved$kmeans, 16L)
-  # Which rows lie on an edge rests on exact ties, which another GEOS or
-  # another arithmetic can settle the other way, so the counts are held only
-  # on the platform the frozen fixture was recorded on.  There the polygons
-  # alone would place rows of 11 of the 16 lattices in another cell than the
-  # profile's under the density kind, and none under k-means, so on those 11
-  # the profile's rule decides the rows on an edge.
+  # Which rows the polygons alone settle the other way rests on GEOS, so the
+  # counts are held only on the platform the frozen fixture was recorded on.
+  # There the polygons alone would place rows of three of the four lattices
+  # in another cell than the profile's under the density kind, and none
+  # under k-means,
+  # so the profile's rule decides the rows on an edge.  A point within the
+  # margin of an edge is on it in every unit, so the four spacings of one
+  # lattice, scaled copies of each other, give one count.
   if (.gt_same_platform()) {
-    expect_identical(moved$density, c(0L, 1L, 0L, 0L, 2L, 3L, 0L, 2L,
-                                      3L, 1L, 0L, 1L, 1L, 3L, 3L, 3L))
+    expect_identical(moved$density, rep(c(0L, 1L, 7L, 19L), each = 4L))
     expect_identical(moved$kmeans, rep(0L, 16L))
   }
 })
@@ -202,6 +214,177 @@ test_that("on a lattice in longitude and latitude the rows are placed as the pro
                      list(centres = rec$scored$centres, seed = seq_len(nrow(seed_xy))),
                      info = info)
   }
+})
+
+test_that("cells returned in EPSG:4326 are joined in the profile's CRS: rows in degrees on the sixteen lattices are in the cell the profile scored them in, under either kind", {
+  refused <- list(density = integer(0), kmeans = integer(0))
+  for (kind in c("density", "kmeans")) for (d in .gt_dims) for (sp in .gt_spacing) {
+    info <- sprintf("%d x %d at %g, %s, in degrees", d[1L], d[2L], sp, kind)
+    pts <- sf::st_transform(.gt_lattice(d[1L], d[2L], sp), 4326)
+    P <- .gt_lonlat_path(d, sp, kind)
+    # The cells come back in degrees, and their record names the profile's
+    # projected CRS.
+    expect_true(sf::st_is_longlat(P$tess$cells), info = info)
+    expect_false(sf::st_is_longlat(P$sel$count_rule$crs), info = info)
+    # The rows come back as they came.
+    expect_identical(sf::st_geometry(P$asg)[match(pts$row, P$asg$row)], sf::st_geometry(pts),
+                     info = info)
+    refused[[kind]] <- c(refused[[kind]], sum(!sf::st_is_valid(P$tess$cells)))
+    .gt_expect_scored(P, pts, info)
+  }
+  # On gridded locations four centres can stand the same distance from one
+  # point, and the cells there meet at two corners less than a nanometre
+  # apart, which the transform to degrees puts at one point: s2 refuses such
+  # a cell, and a join on the sphere stopped.  Which cells that hits rests on
+  # the last bits of GEOS's corners and of PROJ, so the counts are held only
+  # on the fixture's platform: there it is 14 of the 16 lattices under
+  # k-means and 8 of the 16 under the density kind.
+  if (.gt_same_platform() && sf::sf_use_s2()) {
+    expect_identical(sum(refused$kmeans > 0L), 14L)
+    expect_identical(sum(refused$density > 0L), 8L)
+  }
+})
+
+test_that("on the k-means cells of a lattice returned in EPSG:4326, rows without a CRS and squares in degrees are joined in the profile's CRS too, whether or not sf uses s2", {
+  pts <- sf::st_transform(.gt_lattice(30L, 20L, 30), 4326)
+  P <- .gt_lonlat_path(c(30L, 20L), 30, "kmeans")
+  join <- function(x, cells) assign_features_to_polygons(x, cells, polygon_id_col = "cell_id",
+                                                         quiet = TRUE)
+  in_rec <- sf::st_transform(.gt_bare(P$tess$cells), P$sel$count_rule$crs)
+  # Rows without a CRS are read as degrees, with a warning, and the cells
+  # place them alone (the profile's rule is for rows whose CRS is known), in
+  # the record's CRS: every row has a cell.
+  r <- .gt_catch(join(sf::st_set_crs(pts, NA), P$tess$cells))
+  expect_length(r$warnings, 1L)
+  expect_match(conditionMessage(r$warnings[[1L]]), "has no CRS; its coordinates look like lon/lat",
+               fixed = TRUE)
+  expect_identical(nrow(r$value), nrow(pts))
+  expect_identical(.gt_cell_of(r$value, pts), .gt_polygon_rule(P, pts))
+  # They come back in the polygons' CRS, with the coordinates they arrived
+  # with, not with those of the join.
+  expect_true(sf::st_crs(r$value) == sf::st_crs(4326))
+  expect_identical(unname(sf::st_coordinates(r$value[match(pts$row, r$value$row), ])),
+                   unname(sf::st_coordinates(pts)))
+  # Squares of 6 m around the rows, in degrees, get the cell they overlap
+  # most there, and no cell is reported invalid: in the CRS they were drawn
+  # in the cells are valid.
+  sq <- sf::st_sf(row = pts$row, geometry = sf::st_transform(sf::st_buffer(
+    sf::st_geometry(.gt_lattice(30L, 20L, 30)), 3, endCapStyle = "SQUARE"), 4326))
+  r <- .gt_catch(join(sq, P$tess$cells))
+  expect_length(r$warnings, 0L)
+  expect_false(anyNA(.gt_cell_of(r$value, sq)))
+  expect_identical(.gt_cell_of(r$value, sq), .gt_cell_of(join(sq, in_rec), sq))
+  # Without s2 the join is in the record's CRS as well, so sf does not take
+  # the degrees for planar coordinates.
+  old <- suppressMessages(sf::sf_use_s2(FALSE))
+  withr::defer(suppressMessages(sf::sf_use_s2(old)))
+  expect_no_message(got <- join(pts, P$tess$cells))
+  expect_identical(.gt_cell_of(got, pts), .gt_profile_rule(P, pts)$cell)
+})
+
+test_that("on the k-means cells of a lattice returned in EPSG:4326, rows in a third projected CRS are joined in the profile's CRS and come back as they came", {
+  # Two CRSs on the datum of the profile's (WGS 84), so that the rows reach
+  # the record's CRS by the projections alone.  The profile's rule is taken
+  # on the rows' own coordinates moved to the record's CRS, as the profile
+  # measures rows that arrive in another CRS.
+  P <- .gt_lonlat_path(c(30L, 20L), 30, "kmeans")
+  for (epsg in c(3857, 32616)) {
+    info <- sprintf("rows in EPSG:%d", epsg)
+    x <- sf::st_transform(.gt_lattice(30L, 20L, 30), epsg)
+    got <- assign_features_to_polygons(x, P$tess$cells, polygon_id_col = "cell_id", quiet = TRUE)
+    expect_identical(nrow(got), nrow(x), info = info)
+    expect_identical(.gt_cell_of(got, x), .gt_profile_rule(P, x)$cell, info = info)
+    expect_true(sf::st_crs(got) == sf::st_crs(epsg), info = info)
+    expect_identical(sf::st_geometry(got)[match(x$row, got$row)], sf::st_geometry(x), info = info)
+  }
+})
+
+test_that("a lattice sized by a selection and returned in EPSG:4326 is joined as before", {
+  # Hexagons sized by the selection are not the cells the profile scored
+  # (their record says scored_cells = FALSE), so the polygons place every row
+  # where they stand, in degrees.
+  pts <- sf::st_transform(.gt_lattice(30L, 20L, 30), 4326)
+  P <- .gt_lattice_path(c(30L, 20L), 30, "density")
+  join <- function(x, cells) assign_features_to_polygons(x, cells, polygon_id_col = "cell_id",
+                                                         quiet = TRUE)
+  bnd <- sf::st_sf(geometry = sf::st_transform(sf::st_buffer(sf::st_as_sfc(sf::st_bbox(
+    .gt_lattice(30L, 20L, 30))), 30), 4326))
+  hex <- suppressWarnings(build_tessellation(pts, boundary = bnd, method = "hex",
+                                             approx_n_cells = P$sel, crs = 4326, quiet = TRUE))
+  expect_true(sf::st_is_longlat(hex$cells))
+  expect_identical(attr(hex$cells, "count_rule")$scored_cells, FALSE)
+  expect_identical(.gt_bare(join(pts, hex$cells)), join(pts, .gt_bare(hex$cells)))
+})
+
+test_that("the cells of centres refitted to every point, returned in EPSG:4326, are joined as before", {
+  # A profile with no estimate whose centres were fitted to 300 of the 600
+  # rows: the seeds of its selection are the chosen level refitted to every
+  # row, which are not the centres it scored.  Their record names a
+  # projected CRS and says scored_cells = FALSE, so the polygons place every
+  # row where they stand, in degrees.
+  pts <- sf::st_transform(.gt_lattice(30L, 20L, 30), 4326)
+  prof <- suppressWarnings(resolution_profile(pts, "z", partition = "density", nstart = 3,
+                                              sac = "auto", seed = 123, estimate = NULL,
+                                              obs_per_cell = NULL, sample_n = 300))
+  sel <- suppressWarnings(select_resolution(prof, criterion = "cp"))
+  seeds <- suppressWarnings(get_voronoi_seeds(method = "kmeans", n = sel, sample_points = pts))
+  expect_false(is.null(attr(seeds, "refit")))
+  tess <- suppressWarnings(build_tessellation(seeds, method = "voronoi", crs = 4326, quiet = TRUE))
+  expect_true(sf::st_is_longlat(tess$cells))
+  rec <- attr(tess$cells, "count_rule")
+  expect_identical(rec$scored_cells, FALSE)
+  expect_false(sf::st_is_longlat(rec$crs))
+  join <- function(cells) assign_features_to_polygons(pts, cells, polygon_id_col = "cell_id",
+                                                      quiet = TRUE)
+  expect_identical(.gt_bare(join(tess$cells)), join(.gt_bare(tess$cells)))
+})
+
+test_that("the help and NEWS say which cells in lon/lat are joined in the record's CRS, and which are not", {
+  # Only the Voronoi cells of the scored centres are: a hex lattice sized by
+  # a selection and the cells of centres refitted to every point (above)
+  # carry a record that says scored_cells = FALSE, and cells of a count
+  # given as a number carry none.
+  pts <- sf::st_transform(.gt_lattice(30L, 20L, 30), 4326)
+  seeds <- suppressWarnings(get_voronoi_seeds(method = "kmeans", n = 50, sample_points = pts,
+                                              set_seed = 1))
+  expect_null(attr(seeds, "count_rule"))
+  expect_null(attr(suppressWarnings(build_tessellation(seeds, method = "voronoi", crs = 4326,
+                                                       quiet = TRUE))$cells, "count_rule"))
+  root <- testthat::test_path("..", "..")
+  if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
+    skip("the help's source is not here to read")
+  read <- function(...) gsub("[[:space:]]+", " ",
+                             paste(readLines(file.path(root, ...), warn = FALSE), collapse = " "))
+  rd <- read("man", "assign_features_to_polygons.Rd")
+  expect_match(rd, paste0("Cells in lon/lat whose record of their count says they are the cells a ",
+                          "profile scored, and holds its centres in a projected CRS (the Voronoi ",
+                          "cells \\code{\\link[=build_tessellation]{build_tessellation()}} builds ",
+                          "on the centres a profile scored and returns in a geographic ",
+                          "\\code{crs}; see Value), were drawn in the record's CRS, and the join ",
+                          "runs there."), fixed = TRUE)
+  expect_match(rd, paste0("Otherwise (other polygons in lon/lat, such as a hex or square lattice ",
+                          "sized by a selection or the cells of centres refitted to every point, ",
+                          "or polygons without a CRS) the join runs in the CRS of ",
+                          "\\code{features_sf}."), fixed = TRUE)
+  rd <- read("man", "summarize_by_cell.Rd")
+  expect_match(rd, paste0("(the Voronoi cells of the scored centres that ",
+                          "\\code{\\link[=build_tessellation]{build_tessellation()}} returns in a ",
+                          "geographic \\code{crs} are joined in the record's CRS while they carry ",
+                          "it)"), fixed = TRUE)
+  rd <- read("man", "create_voronoi_polygons.Rd")
+  expect_match(rd, paste0("a join of rows in degrees to other cells (cells without the record, such ",
+                          "as those of a count given as a number or those a verb that drops ",
+                          "attributes has stripped of it, and cells whose record says ",
+                          "\\code{scored_cells = FALSE}, such as those of centres refitted to ",
+                          "every point) go to s2 and stop on such a cell"), fixed = TRUE)
+  news <- read("NEWS.md")
+  expect_match(news, paste0("so features that are not points get their cell from overlaps and areas ",
+                            "measured in that CRS"), fixed = TRUE)
+  expect_match(news, paste0("Other cells in lon/lat are joined as before: cells without the record ",
+                            "(from a count given as a number, or after a verb that drops ",
+                            "attributes) and cells whose record says they are not the cells the ",
+                            "profile scored (`scored_cells = FALSE`, such as the cells of centres ",
+                            "refitted to every point)."), fixed = TRUE)
 })
 
 test_that("the same lattices in two units and two CRSs are placed as the profile placed them in each", {
@@ -326,6 +509,290 @@ test_that("seeds placed in the CRS of a boundary are drawn in the profile's CRS;
   expect_true(sf::st_crs(P$tess$cells) == sf::st_crs(26915))
 })
 
+test_that("cells drawn in a projected CRS the caller names are its nearest-seed cells, and a row they put elsewhere is reported", {
+  # ?build_tessellation, `crs`: Voronoi cells built in another projected CRS,
+  # named there, are the nearest-seed cells of that CRS, so a row near a
+  # boundary can fall in the neighbouring cell, and summarize_by_cell() then
+  # reports that the cells are not the ones scored.  A lattice at 1000 m in
+  # EPSG:32615, its cells about 2 km across: CONUS Albers and Web Mercator
+  # put the rows the same distance from two centres metres off the edges of
+  # the cells drawn there, NAD83 / UTM 15N leaves them on the edges.
+  pts <- .gt_lattice(50L, 40L, 1000)
+  n_elsewhere <- integer(0)
+  what <- character(0)
+  for (to in c(26915L, 5070L, 3857L)) {
+    info <- paste("crs", to)
+    P <- suppressWarnings(.gt_path(pts, "density", crs = to))
+    rec <- P$sel$count_rule
+    # Drawn in the CRS named, with the record of the scored centres, which
+    # the profile measured in the layer's own CRS.
+    expect_true(sf::st_crs(P$tess$cells) == sf::st_crs(to), info = info)
+    expect_true(rec$crs == sf::st_crs(32615), info = info)
+    expect_identical(attr(P$tess$cells, "count_rule")$scored_cells, TRUE, info = info)
+    # The polygons alone put each row in the cell of its nearest seed measured
+    # in that CRS, or, a row the same distance from two seeds there, in one
+    # of their two cells.
+    s_xy <- unname(sf::st_coordinates(sf::st_transform(P$seeds, to))[, 1:2])
+    p_xy <- unname(sf::st_coordinates(sf::st_transform(pts, to))[, 1:2])
+    two  <- .two_nearest(p_xy[, 1L], p_xy[, 2L], s_xy[, 1L], s_xy[, 2L], FALSE)
+    by_polygons <- .gt_polygon_rule(P, pts)
+    expect_false(anyNA(by_polygons), info = info)
+    off <- which(by_polygons != P$tess$index[two$first])
+    expect_true(all(abs(two$d2[off] - two$d1[off]) / two$d1[off] < 1e-6), info = info)
+    # A row the assignment puts in another cell than the profile's is in the
+    # cell of its nearest seed in the CRS named, or of one as near there.
+    # The scale of that CRS varies across the layer, so in the profile's CRS
+    # such a row can be a few parts in a thousand, or more, from a tie.
+    rule   <- .gt_profile_rule(P, pts)
+    placed <- .gt_cell_of(P$asg, pts)
+    expect_false(anyNA(placed), info = info)
+    elsewhere <- which(placed != rule$cell)
+    if (length(elsewhere)) {
+      tied_there <- abs(two$d2[elsewhere] - two$d1[elsewhere]) / two$d1[elsewhere] < 1e-6
+      expect_true(all(placed[elsewhere] == P$tess$index[two$first[elsewhere]] | tied_there),
+                  info = info)
+    }
+    # The summary reports such rows, and only then; with the same rows in as
+    # many cells, the warning names cells built in another CRS.
+    w <- .gt_of(P, "spatialkit_cells_differ")
+    check <- attr(P$out, "count_rule")$check
+    if (length(elsewhere)) {
+      expect_identical(check$cells, "differ", info = info)
+      expect_length(w, 1L)
+      expect_true(w[[1L]]$what %in% c("cells", "loo"), info = info)
+      if (identical(w[[1L]]$what, "loo")) {
+        expect_match(conditionMessage(w[[1L]]),
+                     paste0("the cells were built in, or transformed to, another CRS than the ",
+                            "one the profile measured the rows in (crs in the count record)"),
+                     fixed = TRUE)
+        expect_false(grepl("rows exactly on a boundary between two cells",
+                           conditionMessage(w[[1L]]), fixed = TRUE), info = info)
+      }
+    } else {
+      expect_identical(check, list(estimate = "match", cells = "match"), info = info)
+      expect_length(w, 0L)
+    }
+    n_elsewhere[as.character(to)] <- length(elsewhere)
+    what[as.character(to)] <- if (length(w)) w[[1L]]$what else NA_character_
+  }
+  # Which ties the CRS named settles the other way rests on PROJ and GEOS,
+  # so the counts are held only on the platform the frozen fixture was
+  # recorded on.  There no row is elsewhere in NAD83 / UTM 15N, and 11 and
+  # 10 are, each with the warning's `what = "loo"`, in Albers and Web
+  # Mercator.
+  if (.gt_same_platform()) {
+    expect_identical(n_elsewhere, c(`26915` = 0L, `5070` = 11L, `3857` = 10L))
+    expect_identical(what, c(`26915` = NA_character_, `5070` = "loo", `3857` = "loo"))
+  }
+})
+
+# The rows placed in another cell than the profile's, each checked to be a
+# row the same distance from two centres in the profile's CRS: the centre of
+# the cell it was placed in is as near as the profile's, exactly or to the
+# rounding of the coordinates.
+.gt_expect_ties <- function(rule, placed, index, info) {
+  elsewhere <- which(placed != rule$cell)
+  if (length(elsewhere)) {
+    d2 <- function(rows, centre) (rule$xy[rows, 1L] - rule$cen[centre, 1L])^2 +
+                                 (rule$xy[rows, 2L] - rule$cen[centre, 2L])^2
+    nearest <- match(rule$cell[elsewhere], index)
+    other   <- match(placed[elsewhere], index)
+    gap <- abs(d2(elsewhere, other) - d2(elsewhere, nearest)) / d2(elsewhere, nearest)
+    expect_true(all(gap < 1e-6), info = info)
+  }
+  elsewhere
+}
+
+# The summary of assigned rows, handed `cells` as `cells_sf`: "differ" with
+# one warning exactly when rows are elsewhere, and with `what = "loo"` the
+# warning holds `clause`.  Returns the warning's `what`, NA without one.
+.gt_expect_reported <- function(asg, cells, n_elsewhere, clause, info) {
+  r <- .gt_catch(summarize_by_cell(asg, "z", id_col = "cell_id", cells_sf = cells,
+                                   estimate = "pooled"))
+  w <- .gt_of(r, "spatialkit_cells_differ")
+  check <- attr(r$value, "count_rule")$check
+  if (n_elsewhere > 0L) {
+    expect_identical(check$cells, "differ", info = info)
+    expect_length(w, 1L)
+    expect_true(w[[1L]]$what %in% c("cells", "loo"), info = info)
+    if (identical(w[[1L]]$what, "loo"))
+      expect_match(conditionMessage(w[[1L]]), clause, fixed = TRUE, info = info)
+  } else {
+    expect_identical(check, list(estimate = "match", cells = "match"), info = info)
+    expect_length(w, 0L)
+  }
+  if (length(w)) w[[1L]]$what else NA_character_
+}
+
+test_that("rows the polygons alone place beside the record are reported, and the warning names that cause", {
+  # The edge rule of assign_features_to_polygons() runs on cells that carry
+  # the record, for rows that have a CRS exactly when the record names one.
+  # Rows without a CRS beside a record in EPSG:32615, rows assigned to the
+  # cells after they lost the record (a file written and read back) and rows
+  # given their cells by sf::st_join() are placed by the polygons alone.  Summarised with the scored cells as `cells_sf`, they are still
+  # checked against the record, and a row on a boundary the polygons put in
+  # the other cell is reported.
+  clause <- paste0("A row on or near a boundary can sit in the neighbouring cell when the ",
+                   "polygons alone placed it (as for rows without a CRS beside a count ",
+                   "record that names one or the reverse, rows assigned to cells without ",
+                   "their count record, such as cells read back from a file, ",
+                   "and rows given their cells by another join than ",
+                   "assign_features_to_polygons())")
+  n_elsewhere <- integer(0)
+  what <- character(0)
+  for (L in list(list(c(30L, 20L), 30), list(c(50L, 40L), 1000))) {
+    d <- L[[1L]]; sp <- L[[2L]]
+    pts <- .gt_lattice(d[1L], d[2L], sp)
+    P <- .gt_lattice_path(d, sp, "density")
+    cells <- P$tess$cells
+    expect_identical(attr(cells, "count_rule")$scored_cells, TRUE)
+    rule <- .gt_profile_rule(P, pts)
+    # Rows without a CRS: the CRS of the cells is set on them, with a
+    # warning, and they take the cells' record, so the summary checks them.
+    nocrs <- .gt_catch(assign_features_to_polygons(sf::st_set_crs(pts, NA), cells,
+                                                   polygon_id_col = "cell_id", quiet = TRUE))
+    expect_length(nocrs$warnings, 1L)
+    expect_identical(attr(nocrs$value, "count_rule"), attr(cells, "count_rule"))
+    # Cells written to a GeoPackage and read back have lost the record, and
+    # are the cells without it.
+    if ("GPKG" %in% sf::st_drivers("vector")$name) {
+      file <- withr::local_tempfile(fileext = ".gpkg")
+      sf::st_write(cells, file, quiet = TRUE)
+      back <- sf::st_read(file, quiet = TRUE)
+      expect_null(attr(back, "count_rule"))
+      expect_identical(
+        .gt_cell_of(assign_features_to_polygons(pts, back, polygon_id_col = "cell_id",
+                                                quiet = TRUE), pts),
+        .gt_cell_of(assign_features_to_polygons(pts, .gt_bare(cells),
+                                                polygon_id_col = "cell_id", quiet = TRUE), pts))
+    }
+    bare <- assign_features_to_polygons(pts, .gt_bare(cells), polygon_id_col = "cell_id",
+                                        quiet = TRUE)
+    expect_null(attr(bare, "count_rule"))
+    # The caller's own join, the first cell of a row on an edge kept.
+    joined <- sf::st_join(pts, cells["cell_id"], join = sf::st_intersects, left = TRUE)
+    joined <- joined[!duplicated(joined$row), ]
+    ways <- list(`rows without a CRS` = nocrs$value, `cells without the record` = bare,
+                 `sf::st_join()` = joined)
+    for (way in names(ways)) {
+      info <- sprintf("%d x %d at %g, %s", d[1L], d[2L], sp, way)
+      placed <- .gt_cell_of(ways[[way]], pts)
+      expect_false(anyNA(placed), info = info)
+      elsewhere <- .gt_expect_ties(rule, placed, P$tess$index, info)
+      what[info] <- .gt_expect_reported(ways[[way]], cells, length(elsewhere), clause, info)
+      n_elsewhere[info] <- length(elsewhere)
+    }
+  }
+  # Which ties the polygons settle the other way rests on GEOS, so the counts
+  # are held only on the platform the frozen fixture was recorded on.  There
+  # the polygons put 1 row of the 30 m lattice and 19 of the 1000 m one in
+  # the other cell (a point within the margin of an edge is on it, and the
+  # smallest-area rule settles it), the first match of sf::st_join() 1 and
+  # 6, and every warning has `what = "loo"`.
+  if (.gt_same_platform()) {
+    expect_identical(unname(n_elsewhere), c(1L, 1L, 1L, 19L, 19L, 6L))
+    expect_identical(unname(what), rep("loo", 6L))
+  }
+})
+
+test_that("cells transformed to another projected CRS keep the record and are joined there, and a row they put elsewhere is reported", {
+  # sf::st_transform() keeps the record, and the join runs in the cells' CRS:
+  # a row's nearest centre is measured in the record's CRS, and a row within
+  # the margin of its own cell and of that centre's cell goes to the latter.
+  # The edges of the cells moved there are straight lines between corners
+  # moved there, so a row the same distance from two centres is off them by
+  # the bend of the bisector.  On cells about 60 m across (a lattice at
+  # 30 m) that bend is micrometres, well inside the margin, and every row is
+  # in the profile's cell.  On cells about 2 km across (at 1000 m) it is
+  # millimetres, and a row the polygons put in the other cell is reported.
+  clause <- paste0("when the cells were built in, or transformed to, another CRS than the one ",
+                   "the profile measured the rows in (crs in the count record)")
+  n_elsewhere <- integer(0)
+  what <- character(0)
+  for (L in list(list(c(30L, 20L), 30), list(c(50L, 40L), 1000))) for (to in c(5070L, 3857L)) {
+    d <- L[[1L]]; sp <- L[[2L]]
+    info <- sprintf("%d x %d at %g to EPSG:%d", d[1L], d[2L], sp, to)
+    pts <- .gt_lattice(d[1L], d[2L], sp)
+    P <- .gt_lattice_path(d, sp, "density")
+    cells <- sf::st_transform(P$tess$cells, to)
+    expect_identical(attr(cells, "count_rule"), attr(P$tess$cells, "count_rule"))
+    asg <- assign_features_to_polygons(pts, cells, polygon_id_col = "cell_id", quiet = TRUE)
+    expect_true(sf::st_crs(asg) == sf::st_crs(pts), info = info)
+    placed <- .gt_cell_of(asg, pts)
+    expect_false(anyNA(placed), info = info)
+    elsewhere <- .gt_expect_ties(.gt_profile_rule(P, pts), placed, P$tess$index, info)
+    if (sp == 30) expect_length(elsewhere, 0L)
+    what[info] <- .gt_expect_reported(asg, cells, length(elsewhere), clause, info)
+    n_elsewhere[info] <- length(elsewhere)
+  }
+  # On the platform the frozen fixture was recorded on, 11 rows of the
+  # 1000 m lattice are elsewhere in each CRS, each time with `what = "loo"`.
+  if (.gt_same_platform()) {
+    expect_identical(unname(n_elsewhere), c(0L, 0L, 11L, 11L))
+    expect_identical(unname(what), c(NA_character_, NA_character_, "loo", "loo"))
+  }
+})
+
+test_that("the help and NEWS name rows the polygons alone place among the causes of what = \"loo\"", {
+  root <- testthat::test_path("..", "..")
+  if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
+    skip("the help's source is not here to read")
+  read <- function(...) gsub("[[:space:]]+", " ",
+                             paste(readLines(file.path(root, ...), warn = FALSE), collapse = " "))
+  rd <- read("man", "summarize_by_cell.Rd")
+  expect_match(rd, paste0("It does so on cells that carry the record, for rows that have a CRS ",
+                          "exactly when the record names one. Rows without a CRS beside a record ",
+                          "that names one, rows with a CRS beside a record that names none, rows ",
+                          "assigned to the cells after they lost the record (written to a file ",
+                          "and read back, say) and summarised with \\code{cells_sf} set to the ",
+                          "cells that carry it, and rows given their cells by another join are ",
+                          "placed by the polygons alone, so a row on a boundary can sit in ",
+                          "either cell."),
+               fixed = TRUE)
+  expect_match(rd, paste0("cells transformed to another projected CRS are joined there, so a row ",
+                          "near a boundary, on it or not, can sit in another cell than the ",
+                          "profile put it in."), fixed = TRUE)
+  expect_match(rd, "and the warning names these cases.", fixed = TRUE)
+  news <- read("NEWS.md")
+  expect_match(news, paste0("for rows that have a CRS exactly when the record names one. The ",
+                            "warning now names the cases that remain: rows the polygons alone ",
+                            "placed (rows without a CRS beside a count record that names one or ",
+                            "the reverse, rows assigned to cells without their count record, ",
+                            "such as cells read back from a file, and rows given their cells by ",
+                            "another join), cells built in, or transformed to, another CRS than ",
+                            "the one the profile measured the rows in,"), fixed = TRUE)
+})
+
+test_that("on cells whose record names no CRS, rows without a CRS take the profile's cell and rows with one are placed by the polygons alone", {
+  # The edge rule runs for rows that have a CRS exactly when the record
+  # names one.  A profile on rows without a CRS records none, and its cells
+  # carry none: rows without a CRS on them take the cell the profile scored
+  # them in, and the summary's check reads "match".  The same rows with a
+  # CRS beside that record are placed as the cells without the record place
+  # them.
+  pts <- sf::st_set_crs(.gt_lattice(30L, 20L, 30), NA)
+  P <- .gt_keep("30x20-30-density-nocrs", .gt_path(pts, "density"))
+  cells <- P$tess$cells
+  rec <- attr(cells, "count_rule")
+  expect_identical(rec$scored_cells, TRUE)
+  expect_true(is.na(rec$crs))
+  expect_true(is.na(sf::st_crs(cells)))
+  # The profile's rule, on the coordinates as they are.
+  cen <- rec$scored$centres
+  xy  <- unname(sf::st_coordinates(pts)[, 1:2])
+  profile <- P$tess$index[.nearest_exact(xy[, 1L], xy[, 2L], cen[, 1L], cen[, 2L])]
+  expect_identical(.gt_cell_of(P$asg, pts), profile)
+  expect_identical(attr(P$out, "count_rule")$check$cells, "match")
+  expect_length(.gt_of(list(warnings = P$warnings), "spatialkit_cells_differ"), 0L)
+  with_crs <- sf::st_set_crs(pts, 32615)
+  placed <- .gt_cell_of(suppressWarnings(assign_features_to_polygons(
+    with_crs, cells, polygon_id_col = "cell_id", quiet = TRUE)), pts)
+  alone <- .gt_cell_of(suppressWarnings(assign_features_to_polygons(
+    with_crs, .gt_bare(cells), polygon_id_col = "cell_id", quiet = TRUE)), pts)
+  expect_false(anyNA(placed))
+  expect_identical(placed, alone)
+})
+
 test_that("on a ladder of sizes the record holds the centres of the level chosen, and the rows are placed by them", {
   pts <- .gt_lattice(30L, 20L, 30)
   for (kind in c("density", "kmeans")) for (size in c(18, 9)) {
@@ -441,7 +908,7 @@ test_that("cells whose record says they are not the scored cells keep the polygo
                                                  quiet = TRUE))
   }
   # The rule changed something on this lattice, so the record is what decided.
-  if (.gt_same_platform()) expect_identical(sum(old != .gt_cell_of(P$asg, pts)), 3L)
+  if (.gt_same_platform()) expect_identical(sum(old != .gt_cell_of(P$asg, pts)), 1L)
 })
 
 
@@ -503,14 +970,25 @@ test_that("on the cells of scored centres a point on an edge goes to the lowest-
 test_that("a point rounding put a hair inside a cell is on its edge; one a little farther is not", {
   sq <- .gt_squares()
   tol <- .edge_tol(sf::st_bbox(sq))
-  expect_equal(tol, 1e-10 * (5e6 + 20))
+  # A layer 20 m across at a northing of 5,000 km: a millionth of its
+  # diagonal (2.8e-5 m), below one part in 1e10 of the northing (BUG-225).
+  expect_equal(tol, 1e-6 * sqrt(20^2 + 20^2), tolerance = 1e-12)
   # Centres moved right by 2e-5: the edge between their cells lies 2e-5 east
   # of the squares' edge, so a point 1e-5 east of it is nearer the left centre
-  # and inside the right square, within the margin of its edge.
+  # and inside the right square, within the margin of its edge.  The polygons
+  # alone read it as on the edge too, and give it the left square, the lower
+  # then leftmost of the two.
   near <- .gt_points(10 + 1e-5, 5)
   moved <- .gt_middles(); moved[, 1L] <- moved[, 1L] + 2e-5
-  expect_identical(.gt_assign(near, sq)$cell_id, 2L)
+  expect_identical(.gt_assign(near, sq)$cell_id, 1L)
   expect_identical(.gt_assign(near, .count_rule_put(sq, .gt_record(moved)))$cell_id, 1L)
+  # Centres moved left by 2e-5, and a point 1e-5 west of the squares' edge,
+  # inside the left square: the polygons give the left square, the record
+  # the right one, the cell of the nearer centre.
+  west <- .gt_points(10 - 1e-5, 5)
+  moved <- .gt_middles(); moved[, 1L] <- moved[, 1L] - 2e-5
+  expect_identical(.gt_assign(west, sq)$cell_id, 1L)
+  expect_identical(.gt_assign(west, .count_rule_put(sq, .gt_record(moved)))$cell_id, 2L)
   # Moved 2e-2, with a point 1e-2 east of the edge: nearer the left centre
   # too, and more than ten times the margin inside the right square, so it is
   # not on the edge, and the polygon that holds it decides.
@@ -590,7 +1068,8 @@ test_that("a centre outside the boundary that clipped its cell gives that cell t
                                         coords = c("x", "y"), crs = 32617), .gt_record(cen))
   tess <- suppressWarnings(build_tessellation(seeds, boundary = bnd, method = "voronoi",
                                               quiet = TRUE))
-  expect_identical(tess$index, c(NA, 1L, 2L, NA))
+  # B, outside the boundary, has the cell it generates, the strip; D has none.
+  expect_identical(tess$index, c(3L, 1L, 2L, NA))
   expect_equal(as.numeric(sf::st_area(tess$cells)), c(100, 100, 420))
   # (10, 5) and (10, 2) are as near B as A: B's cell, the strip.  (11, 5) is
   # in the strip.  The polygons alone give the first two the smaller square.
@@ -614,6 +1093,39 @@ test_that("a point on an edge whose nearest centre stands in a third cell keeps 
   got <- .gt_assign(pt, .count_rule_put(sq, .gt_record(cen)))
   expect_identical(got$cell_id, .gt_assign(pt, sq)$cell_id)
   expect_identical(got$cell_id, 1L)
+})
+
+test_that("a point two centres tie for goes to the lower-numbered one beyond the margin of an edge, and only such a point", {
+  # Squares at coordinates near 0, so the margin of an edge is 2e-9.  From a
+  # point 5e-8 right of the edge LL|LR the squared distances to the middles
+  # of LL (centre 1) and LR (centre 2) differ by 4e-8 of either: a tie, which
+  # the profile gives to centre 1, though the polygon LR holds the point 25
+  # margins from the edge.
+  sq <- .gt_squares(x0 = 0, y0 = 0)
+  cen <- .gt_middles(x0 = 0, y0 = 0)
+  tol <- .edge_tol(sf::st_bbox(sq))
+  pt <- .gt_points(10 + 5e-8, 5, x0 = 0, y0 = 0)
+  xy <- unname(sf::st_coordinates(pt))
+  expect_gt(5e-8, 10 * tol)
+  expect_identical(.nearest_centre(xy[, 1L], xy[, 2L], cen[, 1L], cen[, 2L]), 1L)
+  expect_identical(.gt_assign(pt, sq)$cell_id, 2L)
+  expect_identical(.gt_assign(pt, .count_rule_put(sq, .gt_record(cen)))$cell_id, 1L)
+  # Beyond the tie, 1e-6 right of the edge, the point is nearer centre 2 and
+  # stays in LR.
+  far <- .gt_points(10 + 1e-6, 5, x0 = 0, y0 = 0)
+  expect_identical(.gt_assign(far, .count_rule_put(sq, .gt_record(cen)))$cell_id, 2L)
+  # A point the rule gives to another centre that is strictly nearer than its
+  # cell's own one gets the margin alone: with centre 2 at x = 15.1 the
+  # bisector is at x = 10.05, and a point at 10.001, in LR and nearer centre
+  # 1, keeps LR, as a point placed by cells drawn in another CRS does.
+  cen2 <- cen; cen2[2L, 1L] <- 15.1
+  off <- .gt_points(10.001, 5, x0 = 0, y0 = 0)
+  oxy <- unname(sf::st_coordinates(off))
+  expect_identical(.nearest_exact(oxy[, 1L], oxy[, 2L], cen2[, 1L], cen2[, 2L]), 1L)
+  expect_identical(.gt_assign(off, .count_rule_put(sq, .gt_record(cen2)))$cell_id, 2L)
+  # Within the margin it goes to centre 1's cell, as before.
+  on <- .gt_points(10 + tol / 2, 5, x0 = 0, y0 = 0)
+  expect_identical(.gt_assign(on, .count_rule_put(sq, .gt_record(cen2)))$cell_id, 1L)
 })
 
 test_that("only points on cells with the scored centres in a CRS the join can measure are placed by the profile's rule", {
@@ -646,6 +1158,10 @@ test_that("only points on cells with the scored centres in a CRS the join can me
   # Points without a CRS beside a record with one are left to the polygons.
   r <- .gt_catch(.gt_assign(bare(pts), .count_rule_put(sq, .gt_record(cen))))
   expect_identical(r$value$cell_id, polygons)
+  # So are points and cells without a CRS beside a record with one: the
+  # cells have no CRS to be moved from, and the join runs as they are.
+  expect_identical(.gt_assign(bare(pts), .count_rule_put(bare(sq), .gt_record(cen)))$cell_id,
+                   polygons)
   # Features that are not points: squares split evenly by an edge, and
   # multipoints, are placed as the polygons place them.
   boxes <- sf::st_sf(row = 1:2, geometry = sf::st_buffer(sf::st_geometry(pts)[c(1L, 4L)], 1,
@@ -656,15 +1172,43 @@ test_that("only points on cells with the scored centres in a CRS the join can me
     sf::st_multipoint(rbind(c(5e5 + 10, 5e6 + 5))), sf::st_multipoint(rbind(c(5e5 + 15, 5e6 + 10))),
     crs = 32617))
   expect_identical(.gt_assign(multi, .count_rule_put(sq, .gt_record(cen)))$cell_id, c(1L, 2L))
-  # Cells and points in longitude and latitude: the join is on the sphere, and
-  # the polygons decide.
+  # Cells and points in longitude and latitude, with a record in EPSG:32617:
+  # the cells are joined in that CRS, and a point on an edge goes to its
+  # nearest centre, measured on its coordinates there, as the profile
+  # measures rows that arrive in degrees.  The round trip through degrees
+  # moves the points by up to 1e-9 m, far less than one part in ten million
+  # of their squared distances, so their ties to the centres stay ties and go
+  # to the lower-numbered centre, as on the points before the round trip.
   ll <- function(x) sf::st_transform(x, 4326)
+  xy <- unname(sf::st_coordinates(sf::st_transform(ll(pts), 32617)))
+  xy0 <- unname(sf::st_coordinates(pts))
+  nearest <- .nearest_exact(xy[, 1L], xy[, 2L], cen[, 1L], cen[, 2L])
+  expect_identical(nearest, .nearest_exact(xy0[, 1L], xy0[, 2L], cen[, 1L], cen[, 2L]))
   expect_identical(.gt_assign(ll(pts), .count_rule_put(ll(sq), .gt_record(cen)))$cell_id,
-                   .gt_assign(ll(pts), ll(sq))$cell_id)
+                   c(4L, 3L, 2L, 1L)[nearest])
+  mids <- .gt_middles()
+  from_ll <- .gt_assign(ll(pts), .count_rule_put(ll(sq), .gt_record(mids)))$cell_id
+  expect_identical(from_ll, .nearest_exact(xy[, 1L], xy[, 2L], mids[, 1L], mids[, 2L]))
+  expect_identical(from_ll, .nearest_exact(xy0[, 1L], xy0[, 2L], mids[, 1L], mids[, 2L]))
+  expect_identical(from_ll, c(1L, 1L, 1L, 2L, 1L, 4L))
+  # On the sphere the four points on an edge lie within the margin of each
+  # square they touch, and `tie_break` settles them by the squares' areas
+  # there, where the upper two are smaller by about two parts in 1e8: the
+  # point between the lower squares goes to the left one, the profile's
+  # centre 2 gives it the right one.  What s2 measures rests on its build,
+  # so that is held on the fixture's platform.
+  if (.gt_same_platform() && sf::sf_use_s2()) {
+    expect_identical(c(4L, 3L, 2L, 1L)[nearest], profile)
+    expect_identical(.gt_assign(ll(pts), ll(sq))$cell_id, c(1L, 3L, 4L, 4L, 1L, 4L))
+  }
   # Two squares of 0.01 degree drawn in degrees on either side of the meridian
   # 80 W, five points on it, and a record in EPSG:32617 whose centres stand
-  # near the meridian on one side or the other: the sphere decides each
-  # point, whichever centre is nearer.
+  # near the meridian on one side or the other.  In that CRS the squares'
+  # shared edge is a straight line, which the meridian leaves by 0.2 to 0.3
+  # mm, within the margin of an edge, so each point goes to the cell of the
+  # nearer centre.  Without the record, with a record in degrees, or with one
+  # that says these are not the scored cells, the join is on the sphere and
+  # the polygons decide each point, whichever centre is nearer.
   deg <- function(x0) sf::st_polygon(list(cbind(x0 + c(0, 0.01, 0.01, 0, 0),
                                                45 + c(0, 0, 0.01, 0.01, 0))))
   cells_ll <- sf::st_sf(cell_id = 1:2, geometry = sf::st_sfc(deg(-80.01), deg(-80), crs = 4326))
@@ -674,8 +1218,45 @@ test_that("only points on cells with the scored centres in a CRS the join can me
   for (at in list(c(-0.001, 0.009), c(-0.009, 0.001))) {
     mid <- sf::st_as_sf(data.frame(x = -80 + at, y = 45.005), coords = c("x", "y"), crs = 4326)
     centres <- unname(sf::st_coordinates(sf::st_transform(mid, 32617))[, 1:2])
+    nearer <- if (at[1L] == -0.001) 1L else 2L
     expect_identical(.gt_assign(on_meridian, .count_rule_put(cells_ll, .gt_record(centres)))$cell_id,
-                     sphere)
+                     rep(nearer, 5L))
+    expect_identical(.gt_assign(on_meridian, .count_rule_put(cells_ll, .gt_record(
+      centres, scored_cells = FALSE)))$cell_id, sphere)
+    centres_ll <- unname(sf::st_coordinates(mid)[, 1:2])
+    expect_identical(.gt_assign(on_meridian, .count_rule_put(cells_ll, .gt_record(
+      centres_ll, crs = sf::st_crs(4326))))$cell_id, sphere)
+  }
+  # There every point on the meridian lies within the margin of both
+  # squares, which are equal in area to 9 digits and in the height of their
+  # centres, so each goes to the western square.
+  if (.gt_same_platform() && sf::sf_use_s2()) expect_identical(sphere, rep(1L, 5L))
+})
+
+test_that("cells in a projected CRS are joined in it, whatever projected CRS their record names", {
+  # Two squares of 50 km side by side in EPSG:5070, as build_tessellation()
+  # draws cells in a projected `crs` the caller names, with a record in
+  # EPSG:32615 whose centres are the squares' middles, and points 0.5, 0.05
+  # and 0.02 m either side of the middle of the squares' shared edge,
+  # measured in EPSG:5070.  The edge is straight in EPSG:5070; moved to
+  # EPSG:32615 its corners are joined by a line that passes about 0.66 m
+  # from the edge's middle, so a join there would put all six points in one
+  # square.  None of them is on the edge, so the polygons place them.
+  s <- 5e4; x0 <- 1e5; y0 <- 1.9e6
+  sq <- function(x) sf::st_polygon(list(rbind(c(x, y0), c(x + s, y0), c(x + s, y0 + s),
+                                               c(x, y0 + s), c(x, y0))))
+  cells <- sf::st_sf(cell_id = 1:2, geometry = sf::st_sfc(sq(x0), sq(x0 + s), crs = 5070))
+  middles <- sf::st_sfc(sf::st_point(c(x0 + s / 2, y0 + s / 2)),
+                        sf::st_point(c(x0 + 1.5 * s, y0 + s / 2)), crs = 5070)
+  centres <- unname(sf::st_coordinates(sf::st_transform(middles, 32615))[, 1:2])
+  cells <- .count_rule_put(cells, .gt_record(centres, crs = sf::st_crs(32615)))
+  off <- c(-0.5, -0.05, -0.02, 0.02, 0.05, 0.5)
+  near <- sf::st_sf(row = seq_along(off), geometry = sf::st_sfc(
+    lapply(off, function(d) sf::st_point(c(x0 + s + d, y0 + s / 2))), crs = 5070))
+  for (x in list(near, sf::st_transform(near, 4326))) {
+    got <- .gt_assign(x, cells)
+    expect_identical(got$cell_id, c(1L, 1L, 1L, 2L, 2L, 2L))
+    expect_identical(sf::st_geometry(got), sf::st_geometry(x))
   }
 })
 
@@ -809,8 +1390,11 @@ test_that("cell_values_at() places a location on an edge where the assignment pl
   bare <- values; attr(bare, "count_rule") <- NULL
   expect_identical(cell_values_at(newdata, bare, asg, "z", id_col = "cell_id")$cell_id,
                    c(1L, 1L, 1L, 2L, 1L, 4L))
+  # With the seeds, searched as given: the seed moved by 1e-9 is as near as
+  # the others to one part in ten million, so the ties stay ties and go to
+  # the seed that comes first, which here is the lower-numbered centre.
   expect_identical(cell_values_at(newdata, bare, asg, "z", id_col = "cell_id",
-                                  seeds = seeds)$cell_id, c(2L, 3L, 3L, 2L, 1L, 4L))
+                                  seeds = seeds)$cell_id, c(2L, 3L, 4L, 4L, 1L, 4L))
 })
 
 

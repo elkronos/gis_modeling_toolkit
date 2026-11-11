@@ -368,7 +368,11 @@ test_that("the public functions clamp a count at or above the number of points",
   expect_identical(nrow(voronoi_seeds_kmeans(pts, 1, partition = "density")), 1L)
   expect_identical(nrow(voronoi_seeds_kmeans(pts, n - 1L, partition = "density")), n - 1L)
   for (k in c(n, n + 50L)) {
-    expect_warning(s <- voronoi_seeds_kmeans(pts, k, partition = "density"), "clamping to 79")
+    # Every point at its own position: the bound is one short of the points,
+    # which stats::kmeans() needs, and the warning gives that reason.
+    expect_warning(s <- voronoi_seeds_kmeans(pts, k, partition = "density"),
+                   "support at most 79 (80 unique position(s) among 80 point(s)); clamping.",
+                   fixed = TRUE)
     expect_identical(nrow(s), n - 1L)
     expect_true(all(is.finite(partition_xy(s))))
     expect_warning(g <- get_voronoi_seeds(method = "kmeans", n = k, sample_points = pts,
@@ -380,7 +384,8 @@ test_that("the public functions clamp a count at or above the number of points",
   # A layer of repeats is held to its distinct locations.
   dup <- pts[rep(1:10, each = 6L), ]
   expect_warning(s <- voronoi_seeds_kmeans(dup, 25, partition = "density"),
-                 "only 10 unique positions")
+                 "support at most 10 (10 unique position(s) among 60 point(s)); clamping.",
+                 fixed = TRUE)
   expect_identical(nrow(s), 10L)
   # A density profile's ladder stops where a k-means one does.
   p <- resolution_profile(pts, n_levels = 4, nstart = 2, min_cell_n = 1, partition = "density")
@@ -512,8 +517,9 @@ test_that("tied neighbour distances are settled by the kd-tree as the exact sear
     b <- spatialkit:::.knn_locations(u, k, use_fnn = FALSE)
     expect_identical(a$d, b$d)
     expect_identical(t(apply(a$idx, 1L, sort)), t(apply(b$idx, 1L, sort)))
-    # The tie search on its own, asked for every row.
-    tied <- spatialkit:::.knn_tied_rows(u, seq_len(nrow(u)), k)
+    # The tie search on its own, asked for every row, with the partition's
+    # tolerance.
+    tied <- spatialkit:::.knn_tied_rows(u, seq_len(nrow(u)), k, tol = spatialkit:::.TIE_TOL)
     expect_identical(t(apply(tied, 1L, sort)), t(apply(b$idx, 1L, sort)))
     invisible(a)
   }
@@ -547,11 +553,12 @@ test_that("tied neighbour distances are settled by the kd-tree as the exact sear
       expect_identical(a$d[origin], 5)
     }
   }
-  # In any row order: the rule is the lower row number, whatever order the
-  # kd-tree meets the tied locations in.  36 locations at distance exactly
-  # 65 from the origin, in shuffled rows, so that a shortlist that ends
-  # inside the tie seldom holds the lowest row numbers and has to be
-  # lengthened until it holds every tied location.
+  # In any row order: a tie goes to the lower first coordinate, then the
+  # lower second, whatever order the kd-tree meets the tied locations in.
+  # 36 locations at distance exactly 65 from the origin, in shuffled rows,
+  # so that a shortlist that ends inside the tie seldom holds the first of
+  # them in coordinate order and has to be lengthened until it holds every
+  # tied location.
   p65  <- rbind(c(16, 63), c(25, 60), c(33, 56), c(39, 52))
   oct  <- rbind(p65, p65[, 2:1])
   r65  <- rbind(oct, cbind(-oct[, 1L], oct[, 2L]), cbind(oct[, 1L], -oct[, 2L]), -oct,
@@ -565,9 +572,10 @@ test_that("tied neighbour distances are settled by the kd-tree as the exact sear
     origin <- which(u[, 1L] == 0 & u[, 2L] == 0)
     tied <- which(rowSums(u^2) == 4225)
     expect_length(tied, 36L)
+    tied <- tied[order(u[tied, 1L], u[tied, 2L])]
     for (k in c(1L, 2L, 3L, 7L, 20L)) {
       a <- same(u, k)
-      expect_identical(sort(a$idx[origin, ]), tied[seq_len(k)])
+      expect_identical(sort(a$idx[origin, ]), sort(tied[seq_len(k)]))
     }
   }
   # With FNN no row is compared with every location, tied or not: the exact

@@ -17,13 +17,16 @@ voronoi_seeds_kmeans(
 )
 }
 \arguments{
-\item{points_sf}{An sf object with POINT geometries.}
+\item{points_sf}{An sf object with POINT geometries. Points that mix XY
+and XYZ (or XYM) are read without Z and M before they are projected or
+clustered, since sf reads a layer in the dimension of its first geometry.}
 
 \item{k}{Integer; requested number of clusters, treated as an upper bound
 only. It is clamped, with a warning, to whichever is smaller of the number
-of distinct point positions and \code{nrow(points_sf) - 1}, because k-means can
-produce neither more centres than there are distinct points nor as many
-centres as there are rows. Check \code{nrow()} on the result. A
+of distinct point positions and one fewer than the number of points with
+a location (rows without one are dropped first), and not below 1, because
+k-means can produce neither more centres than there are distinct points
+nor as many centres as there are rows. Check \code{nrow()} on the result. A
 \code{\link[=select_resolution]{select_resolution()}} result or a \code{\link[=resolution_profile]{resolution_profile()}} is also
 accepted: its scored centres are returned when it carries them,
 whatever \code{partition}, \code{init} and density settings the call names (see
@@ -59,7 +62,12 @@ uneven as \code{"kmeans"} gives below that. \code{"kmeans"}: the same sum
 unweighted; compact cells whose counts are several times higher in
 dense places than in sparse ones. It is the run of earlier versions,
 whose default it was: \code{\link[stats:kmeans]{stats::kmeans()}} from 10 random starts on the
-rows as they come. Without the 'FNN' package the density kind
+rows as they come, with the coordinates centred, divided by the
+diagonal of their bounding box and rounded to 2^-30 of it, so that the
+seeds do not move with the unit or the origin; on gridded locations
+they can differ from those of earlier versions, and where the locations
+span less than a kilometre a change of unit or origin can still move
+them (see "The partition" in \code{\link[=resolution_profile]{resolution_profile()}}). Without the 'FNN' package the density kind
 finds its weights by comparing every pair of distinct locations, so its
 time grows with the square of their number; the seeds are the same, and
 nothing stops the call. See "Details".}
@@ -93,9 +101,12 @@ starts keeps the warning \code{\link[stats:kmeans]{stats::kmeans()}} gives.}
 }
 \value{
 An sf object of \strong{at most} \code{k} cluster-centre POINTs (fewer when
-\code{k} exceeds the number of distinct positions), with \code{seed_id} and
+\code{k} is clamped, see \code{k}), with \code{seed_id} and
 \code{method = "kmeans"} columns matching \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}, and
-\code{attr(, "cover")}, the convex hull of \code{points_sf} (an sfc in its CRS).
+\code{attr(, "cover")}, the convex hull of the coordinates of \code{points_sf}
+(an sfc in its CRS): for lon/lat points, the hull in degrees, with the
+longitudes of points on both sides of 180 degrees taken from 0 to 360
+(-170 as 190).
 Seeds placed with \code{partition = "density"} or \code{init = "kmeans++"}, and
 the scored centres of a profile of the density kind or from random
 starts, also carry \code{attr(, "partition")}: a list with
@@ -107,10 +118,10 @@ with no such record are plain k-means: from random starts when this call
 placed them, or the scored centres of a k-means profile from k-means++
 starts. When \code{k} is a
 \code{\link[=select_resolution]{select_resolution()}} result that carries \code{count_rule}, or a profile
-built with an \code{estimate}, the seeds carry that record as
+built with an \code{estimate} or read by \code{cp}, the seeds carry that record as
 \code{attr(, "count_rule")}, with \code{scored_cells} \code{TRUE} for the scored
-centres and \code{FALSE} for centres this call fits itself at that count
-(see \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}).
+centres and \code{FALSE} for refitted centres and for centres this call fits
+itself at that count (see \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}).
 }
 \description{
 Places \code{k} seed points at k-means cluster centres of the observed
@@ -131,9 +142,12 @@ name.
 Lon/lat input is projected first so the k-means distances are metric and not
 degrees; so is input with no CRS whose coordinates look like lon/lat (the
 heuristic \code{\link[=ensure_projected]{ensure_projected()}} applies, with its warning), and the seeds
-come back in the input's own coordinates. Rows with empty or non-finite
-coordinates are dropped with a warning, and \code{k} is clamped to the number of
-distinct positions.
+come back in the input's own coordinates. Rows without a location (an
+empty point, a coordinate that is not finite or lies beyond 1e150, or in
+a geographic CRS a latitude beyond 90 degrees, read as given before the
+projection) are dropped with a warning, and \code{k} is
+clamped to the number of distinct positions or one fewer than the number
+of points, whichever is smaller, and not below 1.
 
 A count given as a number gets a fresh partition, which is not the
 partition \code{\link[=resolution_profile]{resolution_profile()}} or \code{\link[=determine_optimal_levels]{determine_optimal_levels()}} scored
@@ -142,6 +156,9 @@ subsample, and keep the best of their own starts. Pass the
 \code{\link[=select_resolution]{select_resolution()}} result or the profile itself as \code{k} to get the
 scored one: the centres of the scored partition are then returned (in
 the CRS of \code{points_sf}, with \code{attr(, "n_from")}), and no k-means is run.
+On a profile without an estimate whose centres were fitted to a
+subsample, they are those centres refitted to every point by
+\code{\link[=select_resolution]{select_resolution()}}, with \code{attr(, "refit")}.
 
 \code{partition} says what the seeds minimise. \code{"kmeans"} is the sum of
 squared distances from the points to their nearest seed, from \code{nstart}

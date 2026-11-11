@@ -243,10 +243,14 @@ test_that("plot() captions the floor refusal with the refused range and the floo
 test_that("kriging_adequacy() says why there is no variogram model, and whose", {
   skip_if_not_installed("gstat")
   s <- .r3s4_ka_setup()
+  # The reason estimate_sac_range() gives when fewer than three lag bins
+  # hold point pairs (it said "(singular fits)" before BUG-07).
   sing <- structure(NA_real_, class = c("sac_range", "numeric"),
-                    rejected_reason = "no variogram model could be fitted (singular fits)")
+                    rejected_reason = paste0("no variogram model could be fitted: fewer than ",
+                                             "three lag bins hold point pairs"))
   expect_error(kriging_adequacy(s$asg, "z", s$cells, sac = sing),
-               "`sac` carries no variogram model.*no variogram model could be fitted \\(singular fits\\)")
+               paste0("`sac` carries no variogram model.*no variogram model could be fitted: ",
+                      "fewer than three lag bins hold point pairs"))
   # No `sac` passed: the estimate made here is named, not the argument.
   flat <- s$asg; flat$z <- 1
   err <- tryCatch(suppressWarnings(kriging_adequacy(flat, "z", s$cells)),

@@ -146,21 +146,33 @@
 # the call without is in the call with, identical; every condition of the
 # call without is raised again, same class and text, same order; and what the
 # estimate adds is five columns, one attribute and conditions of `extra`.
-.co_expect_unchanged <- function(call, what, extra = character(0)) {
+# One attribute goes: the call without an estimate fitted to a subsample
+# keeps every point's coordinates (`refit_rows`) for select_resolution() to
+# refit the chosen level, and the call with one, scored on every row in the
+# cells of the centres fitted, keeps none (BUG-02).  `texts`, when given,
+# maps the texts of the call without an estimate and the estimate to the
+# texts the call with it raises: on a constant response the warning names
+# the estimate's columns too (BUG-07).
+.co_expect_unchanged <- function(call, what, extra = character(0),
+                                 texts = function(txt, est) txt) {
   base <- .co_catch(call(NULL))
   cols <- names(base$value)
   at   <- attributes(base$value)
+  sub  <- attr(base$value, "bounds")$n_sample < attr(base$value, "bounds")$n
+  expect_identical(!is.null(at$refit_rows), sub, info = what)
   for (est in c("pooled", "mean")) {
     info <- paste(what, est)
     r <- .co_catch(call(est))
     expect_identical(names(r$value), c(cols, .co_new), info = info)
     for (col in cols) expect_identical(r$value[[col]], base$value[[col]], info = paste(info, col))
     expect_identical(setdiff(names(attributes(r$value)), names(at)), "estimate", info = info)
-    for (a in setdiff(names(at), "names"))
+    expect_identical(setdiff(names(at), names(attributes(r$value))),
+                     if (sub) "refit_rows" else character(0), info = info)
+    for (a in setdiff(names(at), c("names", "refit_rows")))
       expect_identical(attr(r$value, a, exact = TRUE), at[[a]], info = paste(info, a))
     added <- .co_classes(r) %in% extra
     expect_identical(.co_classes(r)[!added], .co_classes(base), info = info)
-    expect_identical(.co_texts(r)[!added], .co_texts(base), info = info)
+    expect_identical(.co_texts(r)[!added], texts(.co_texts(base), est), info = info)
     expect_identical(sort(unique(.co_classes(r)[added])), sort(extra), info = info)
     expect_identical(attr(r$value, "estimate")$value, est, info = info)
   }
@@ -201,15 +213,22 @@ test_that("an estimate adds five columns and one attribute, and changes nothing 
   }
 })
 
-test_that("an estimate changes nothing on a constant response, a supplied sac or missing values", {
+test_that("an estimate changes nothing on a constant response (but the columns its warning names), a supplied sac or missing values", {
   skip_if_not_installed("gstat")
   pts <- .co_layer(400, 403)
   flat <- pts
   flat$z <- 0.1
+  # The one text that changes: the constant-response warning names the
+  # estimate's columns, which are NA too (`own_weight` for pooled values).
+  named <- function(txt, est)
+    sub("`cp`, `moran_i` and `moran_z` are NA",
+        if (est == "pooled") "`cp`, `moran_i`, `moran_z`, `loo`, `loo_se` and `own_weight` are NA"
+        else "`cp`, `moran_i`, `moran_z`, `loo` and `loo_se` are NA", txt, fixed = TRUE)
   base <- .co_expect_unchanged(function(est)
     .co_profile(flat, estimate = est, obs_per_cell = NULL, sac = NULL, n_levels = 5),
-    "constant")
+    "constant", texts = named)
   expect_true("spatialkit_constant_response" %in% .co_classes(base))
+  expect_true(any(grepl("`cp`, `moran_i` and `moran_z` are NA", .co_texts(base), fixed = TRUE)))
 
   .co_expect_unchanged(function(est)
     .co_profile(pts, estimate = est, obs_per_cell = NULL, sac = 20000, n_levels = 5,
@@ -517,18 +536,23 @@ test_that("features that are not points are scored at the point each is reduced 
 
 # ---- A constant response, and repeated locations ------------------------------
 
-test_that("a constant response has no loo, and the present warning says so in its present words", {
+test_that("a constant response has no loo, and the warning names it among the columns that are NA", {
   pts <- .co_600()
   pts$z <- 0.1
   for (est in c("mean", "pooled")) {
     r <- .co_catch(.co_profile(pts, estimate = est, obs_per_cell = c(18, 4.5)))
     expect_identical(.co_classes(r), "spatialkit_constant_response", info = est)
+    # The estimate's columns are NA too, and the warning says so: `loo` and
+    # `loo_se`, and `own_weight` for pooled values (BUG-07).
     expect_identical(.co_texts(r),
                      sprintf(paste0("resolution_profile(): the response is constant over the 600 ",
                                     "scored row(s) (its total sum of squares, %.3g, is rounding ",
                                     "error at most), so no cell count fits it better than another: ",
-                                    "`cp`, `moran_i` and `moran_z` are NA at every level."),
-                             attr(r$value, "one_cell")$rss), info = est)
+                                    "%s are NA at every level."),
+                             attr(r$value, "one_cell")$rss,
+                             if (est == "pooled")
+                               "`cp`, `moran_i`, `moran_z`, `loo`, `loo_se` and `own_weight`"
+                             else "`cp`, `moran_i`, `moran_z`, `loo` and `loo_se`"), info = est)
     p <- r$value
     expect_identical(p$loo, c(NA_real_, NA_real_))
     expect_identical(p$loo_se, c(NA_real_, NA_real_))
@@ -542,15 +566,27 @@ test_that("a constant response has no loo, and the present warning says so in it
     expect_true(all(is.finite(p$share_alone)))
     out <- utils::capture.output(print(p))
     expect_true(any(grepl("one cell: loo NA (the response is constant)", out, fixed = TRUE)))
-    # The warning is the one the call raises without an estimate.
+    # Without an estimate the warning names the three columns alone.
     none <- .co_catch(.co_profile(pts, estimate = NULL, obs_per_cell = c(18, 4.5)))
-    expect_identical(.co_texts(none), .co_texts(r), info = est)
+    expect_identical(.co_texts(none),
+                     sprintf(paste0("resolution_profile(): the response is constant over the 600 ",
+                                    "scored row(s) (its total sum of squares, %.3g, is rounding ",
+                                    "error at most), so no cell count fits it better than another: ",
+                                    "`cp`, `moran_i` and `moran_z` are NA at every level."),
+                             attr(r$value, "one_cell")$rss), info = est)
   }
-  # A response that varies by rounding error alone is constant by the same rule.
+  # A response whose spread is a few units in the last place of its values:
+  # both tests read it centred and scaled where the raw values show no
+  # spread, find its spread, and score it; `loo` is that of the spread
+  # (BUG-21, BUG-36).
   pts$z <- 1e6 + 1e-9 * sin(seq_len(600))
-  p <- suppressWarnings(.co_profile(pts, estimate = "pooled", obs_per_cell = 4.5))
-  expect_true(attr(p, "estimate")$constant)
-  expect_identical(p$loo, NA_real_)
+  r <- .co_catch(.co_profile(pts, estimate = "pooled", obs_per_cell = 4.5))
+  p <- r$value
+  expect_false(attr(p, "one_cell")$constant)
+  expect_false("spatialkit_constant_response" %in% .co_classes(r))
+  expect_false(attr(p, "estimate")$constant)
+  expect_true(is.finite(p$loo))
+  expect_true(is.finite(attr(p, "estimate")$loo_one_cell))
 })
 
 test_that("rows that share locations raise spatialkit_repeated_locations once", {
@@ -749,11 +785,13 @@ test_that("without FNN the search of each row's nearest centre is bounded", {
   # The scored rows times the centres of the finest level, before any fit.
   expect_identical(.co_fields(e), list(work = 600 * 133, limit = 600 * 133 - 1,
                                        what = "nearest centre"))
+  # The work and the limit in full: one pair apart, they used to print as
+  # "8e+04 ... 8e+04" (BUG-07).
   expect_identical(conditionMessage(e),
                    paste0("resolution_profile(): finding the nearest of 133 centres for each of 600 ",
-                          "rows would compare 8e+04 pairs without the FNN package, above the limit ",
-                          "of 8e+04 (options(spatialkit.exact_pairs_max = )). Install FNN: the ",
-                          "result is the same."))
+                          "rows would compare 79,800 pairs without the FNN package, above the limit ",
+                          "of 79,799 (options(spatialkit.exact_pairs_max = )). FNN, which installs ",
+                          "with spatialkit, could not be loaded: reinstall it; the result is the same."))
   expect_null(conditionCall(e))
   # At the limit the search runs: the fit is reached.
   withr::local_options(spatialkit.exact_pairs_max = 600 * 133)
@@ -797,7 +835,9 @@ test_that("the nearest other location of a location is searched once for the who
   run <- function(est, fnn = TRUE) {
     testthat::local_mocked_bindings(.nearest_location_search = spy)
     if (!fnn) .co_without_fnn()
-    .co_profile(pts, estimate = est, obs_per_cell = c(9, 4.5, 2))
+    # Under seed 1 two levels hold a row alone in its region (133 and 300
+    # cells), so without FNN there is more than one level to search at.
+    .co_profile(pts, estimate = est, obs_per_cell = c(9, 4.5, 2), seed = 1)
   }
   # With FNN: one search, of every location, before the sweep.
   with <- run("mean")

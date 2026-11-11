@@ -227,24 +227,54 @@
 #' forest fitted with \code{include_coords = TRUE} is measured in the same
 #' space it was fitted in.
 #'
+#' @param data_sf The training data or \code{newdata}.
+#' @param arg The argument of \code{area_of_applicability()} it is, with its
+#'   backquotes, which a refusal to reduce a feature to a point names
+#'   (\code{.pointize_auto()}).
 #' @keywords internal
 #' @noRd
-.aoa_add_coords <- function(data_sf) {
+.aoa_add_coords <- function(data_sf, arg) {
   # st_coordinates() returns one row per VERTEX, so a POLYGON or MULTIPOINT
   # layer -- this package's own create_grid_polygons() output, say -- produced
   # a longer vector than the data frame has rows and the assignment below died
   # with a bare "replacement has 45 rows, data has 9", naming nothing.  Every
   # sibling (make_folds(), estimate_sac_range(), prep_model_data()) pointizes
   # first; do the same.
+  # A layer that mixes XY and XYZ (or XYM) geometries, or whose geometries
+  # carry M, is pointized in x and y (.xy_if_mixed_or_m()), and so are the
+  # points when they mix dimensions: sf reads a layer in the dimension of
+  # its first geometry, and GEOS does not read M.  The points are this
+  # function's own, so nothing is said.  A POINT layer keeps its geometry;
+  # its coordinates are read from a copy in XY when it mixes dimensions.
+  # A feature with a vertex that is not finite or lies beyond .POOL_XY_MAX
+  # has no location (.unlocated_features()): it is emptied before it is
+  # pointized, and its point is an empty one.  A feature whose centroid
+  # cannot be taken is refused in this function's words, naming `arg`.
   if (inherits(data_sf, "sf") &&
       !all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT"))
-    data_sf <- coerce_to_points(data_sf, "auto")
-  crd <- sf::st_coordinates(data_sf)
+    data_sf <- .xy_if_mixed(.pointize_auto(
+      .empty_unlocated(.xy_if_mixed_or_m(data_sf)), "area_of_applicability", arg))
+  # Points held in a column of the general class sfc_GEOMETRY are read from
+  # a copy in sfc_POINT (.typed_points()): sf::st_coordinates() refuses that
+  # class.  The layer keeps its own column, as `newdata` does in `aoa` when
+  # it is read by .aoa_location_coords().
+  crd <- sf::st_coordinates(.xy_if_mixed(.typed_points(data_sf)))
   if (ncol(crd) < 2L)
     stop("area_of_applicability(): could not extract X/Y coordinates.",
          call. = FALSE)
-  data_sf[["..x"]] <- as.numeric(crd[, 1L])
-  data_sf[["..y"]] <- as.numeric(crd[, 2L])
+  # A row without a location (an empty point, or a coordinate that is not
+  # finite or lies beyond .POOL_XY_MAX, the test .values_at_xy() applies)
+  # has NA coordinates, as an empty point has: a coordinate of 1e200 is
+  # finite, and read as a predictor it put the row a long way from every
+  # training row where the same row emptied has no index.
+  x <- as.numeric(crd[, 1L])
+  y <- as.numeric(crd[, 2L])
+  off <- !(is.finite(x) & is.finite(y) &
+           abs(x) <= .POOL_XY_MAX & abs(y) <= .POOL_XY_MAX)
+  x[off] <- NA_real_
+  y[off] <- NA_real_
+  data_sf[["..x"]] <- x
+  data_sf[["..y"]] <- y
   data_sf
 }
 
@@ -278,12 +308,34 @@
   # the same information and the same standardised values, but only the first
   # survived -- and the second's absence flipped an obvious extrapolation
   # (DI 25.9, outside the AOA) into a point comfortably inside it (DI 0.03).
-  # The manual says "predictors with zero variance are dropped"; scale the test
-  # by the column's own magnitude so that is what it means.
+  # The bound below compares the standard deviation with the column's largest
+  # absolute value, that is with its distance from 0, not with its spread: it
+  # keeps every column whose spread is more than 1.5e-8 of its size, and
+  # nothing more.
   mag  <- apply(abs(X_train), 2L, function(z) max(z, na.rm = TRUE))
   mag[!is.finite(mag) | mag <= 0] <- 1
   keep <- is.finite(ctr) & is.finite(scl) & scl > tol * mag
   names(keep) <- colnames(X_train)
+  # A column the bound drops is read a second time, as the fits read a
+  # column: dropped only when .constant_column() finds it constant, its values
+  # differing by no more than their rounding.  A predictor at an offset (a
+  # timestamp at 1.7e9, a value at 1e8 with sd 1) has spread there, and its
+  # centre and standard deviation are taken on .spread_scaled(), which
+  # holds them where the raw squares would overflow or vanish.  Columns the
+  # bound keeps are untouched.
+  num   <- if (is.null(indicator)) rep(TRUE, ncol(X_train)) else !indicator
+  again <- which(!keep & num)
+  for (j in again) {
+    x  <- X_train[, j]
+    if (!all(is.finite(x)) || .constant_column(x)) next
+    sx <- .spread_scaled(x)
+    cj <- sx$centre + sx$scale * mean(sx$y)
+    sj <- sx$scale * stats::sd(sx$y)
+    if (!(is.finite(cj) && is.finite(sj) && sj > 0)) next
+    ctr[j]  <- cj
+    scl[j]  <- sj
+    keep[j] <- TRUE
+  }
   if (!is.null(indicator) && any(indicator)) {
     for (v in unique(col_var[indicator])) {
       cols <- which(indicator & col_var == v)
@@ -553,9 +605,20 @@
          call. = FALSE)
   subsampled <- FALSE
   if (is.finite(max_n) && n > max_n) {
+    # Drawn from the rows in a canonical order, so the subsample is the same
+    # for the training rows in any order: the predictors by their columns in
+    # turn, the location by its coordinates (.canonical_order()).  Equal rows
+    # contribute alike to the mean distance, so these are the only keys.
+    # Drawn from the rows as given, 1000 training rows at max_n = 300 got a
+    # normaliser of 1.018 as given and 1.155 reversed.
+    ord <- if (identical(what, "location"))
+      .canonical_order(X[, 1L], X[, 2L], X[, 1L], X[, 2L])
+    else
+      do.call(order, c(unname(lapply(seq_len(ncol(X)), function(j) X[, j])),
+                       list(seq_len(n), na.last = TRUE, method = "radix")))
     cleanup <- .with_seed(seed)
     on.exit(cleanup(), add = TRUE)
-    X <- X[sort(sample.int(n, as.integer(max_n))), , drop = FALSE]
+    X <- X[ord[sort(sample.int(n, as.integer(max_n)))], , drop = FALSE]
     subsampled <- TRUE
     .log_info("area_of_applicability(): %snormaliser estimated from a %d-point subsample of %d training points.",
               if (identical(what, "location")) "location " else "",
@@ -585,9 +648,17 @@
 #' to representative points.  A geographic CRS is refused: the index is a
 #' map distance, and a degree of longitude is not a fixed one.
 #'
+#' A row without a location (an empty geometry, or a coordinate that is not
+#' finite or lies beyond \code{.POOL_XY_MAX}) is \code{NA}.  The bound is
+#' read on the coordinates as given, before the move, and again after it: a
+#' move between CRSs can bring a coordinate beyond it back finite, and a
+#' transform of it is not a place the caller gave.  Those rows are emptied
+#' before the move (\code{.empty_unlocated()}), so they are read as the same
+#' rows empty to begin with.
+#'
 #' @param why A clause naming why location is measured, for the messages.
 #' @return A list of two two-column matrices, \code{train} and \code{new},
-#'   row for row with the layers; a row with an empty geometry is \code{NA}.
+#'   row for row with the layers; a row without a location is \code{NA}.
 #' @keywords internal
 #' @noRd
 .aoa_location_coords <- function(train_sf, newdata, why) {
@@ -600,6 +671,16 @@
                  paste(c(if (!inherits(train_sf, "sf")) "the training data is not",
                          if (!inherits(newdata, "sf")) "`newdata` is not"),
                        collapse = "; ")), call. = FALSE)
+  # Both layers are copies, read only for their x and y: one that mixes XY
+  # and XYZ (or XYM) geometries, or whose geometries carry M, is read in XY
+  # before it is moved or pointized (sf reads a layer in the dimension of
+  # its first geometry, and GEOS does not read M), and so are the points
+  # when they mix dimensions.
+  # A row without a location as given is emptied before the move.
+  # Points held in a column of the general class sfc_GEOMETRY are read in
+  # sfc_POINT (.typed_points()): sf::st_coordinates() refuses that class.
+  train_sf <- .empty_unlocated(.xy_if_mixed_or_m(.typed_points(train_sf)))
+  newdata  <- .empty_unlocated(.xy_if_mixed_or_m(.typed_points(newdata)))
   tr_crs <- sf::st_crs(train_sf)
   if (!is.na(tr_crs)) {
     if (!identical(sf::st_crs(newdata), tr_crs))
@@ -615,18 +696,23 @@
          "the training data is in a geographic CRS (longitude/latitude). ",
          "Project both layers first, with sf::st_transform() or ",
          "ensure_projected(), or pass coords = \"no\".", call. = FALSE)
-  xy <- function(x) {
+  # A feature whose centroid cannot be taken is refused in this function's
+  # words, naming its argument (.pointize_auto()).
+  xy <- function(x, arg) {
     if (!all(sf::st_geometry_type(x, by_geometry = TRUE) == "POINT"))
-      x <- coerce_to_points(x, "auto")
+      x <- .xy_if_mixed(.pointize_auto(x, "area_of_applicability", arg))
     crd <- sf::st_coordinates(x)
     if (ncol(crd) < 2L || nrow(crd) != nrow(x))
       stop("area_of_applicability(): could not extract one X/Y coordinate ",
            "pair per row.", call. = FALSE)
     m <- cbind(as.numeric(crd[, 1L]), as.numeric(crd[, 2L]))
     colnames(m) <- c("x", "y")
+    # The bound read again, after the move.
+    m[!(is.finite(m[, 1L]) & is.finite(m[, 2L]) &
+        abs(m[, 1L]) <= .POOL_XY_MAX & abs(m[, 2L]) <= .POOL_XY_MAX), ] <- NA_real_
     m
   }
-  list(train = xy(train_sf), new = xy(newdata))
+  list(train = xy(train_sf, "`train_sf`"), new = xy(newdata, "`newdata`"))
 }
 
 
@@ -877,7 +963,7 @@
 #' Line the folds up with a training layer prep_model_data() removed rows from
 #'
 #' A fit's \code{data_sf} is the \code{prep_model_data()} output: rows with a
-#' missing or non-finite modelling value or an empty geometry are gone, and
+#' missing or non-finite modelling value or no location are gone, and
 #' it carries no \code{..row_id} unless its input did.  Folds built on the
 #' layer the model was fitted FROM -- the ones passed to \code{cv_*()} -- name
 #' the input's rows.  The \code{"dropped"} record says which those were, so
@@ -1202,12 +1288,16 @@
 #' categorical predictors out and computes the index on the others; a level
 #' the training data never has then goes unseen.
 #'
-#' Predictors whose variance is negligible \emph{relative
-#' to their own magnitude} (the test is
-#' \code{sd < sqrt(.Machine$double.eps) * max(abs(x))}, so the same variable in
-#' metres and in gigametres is treated identically) are dropped from the
-#' distance. A prediction point taking a value there outside the training
-#' range (with the same relative tolerance) is extrapolation along a direction
+#' Predictors whose training values do not vary beyond their rounding are
+#' dropped from the distance. A predictor is kept when
+#' \code{sd > sqrt(.Machine$double.eps) * max(abs(x))}, and otherwise when its
+#' standard deviation is more than 3 units in the last place of
+#' \code{max(abs(x))}. The same variable in metres and in gigametres is
+#' treated identically, and a predictor at an offset (a timestamp in seconds)
+#' is kept as it is at 0. A prediction point taking a value there outside the
+#' training range by more than 3 units in the last place of
+#' \code{max(abs(x))} (of 1 for a column of zeros) is extrapolation along a
+#' direction
 #' the training data never varied in: its scaled distance along it is
 #' infinite, so it gets \code{DI = Inf}, is outside the AOA, and a warning
 #' gives the count. A point missing that value is judged on the other
@@ -1226,10 +1316,12 @@
 #' \code{coords = "yes"} measures it for any model, or for none.
 #'
 #' \strong{A geographically weighted regression} (\code{gwr_fit}) has
-#' coefficients that vary over the map, and \strong{a Bayesian spatial model}
-#' (\code{bayesian_fit}) has a Gaussian-process term in the coordinates. For
-#' these, and under \code{coords = "yes"}, location gets an index of its own,
-#' built like the predictor index but in map space: \code{DI_location} is the
+#' coefficients that vary over the map, \strong{a Bayesian spatial model}
+#' (\code{bayesian_fit}) has a Gaussian-process term in the coordinates, and
+#' \strong{a forest fitted with \code{include_coords = TRUE}} splits on the
+#' coordinates. For these, and under \code{coords = "yes"}, location gets an
+#' index of its own, built like the predictor index but in map space:
+#' \code{DI_location} is the
 #' distance to the nearest training point over the mean distance between
 #' training points; the training points' own values use the same folds; and
 #' the threshold is the same outlier-removed maximum. A prediction point is
@@ -1264,21 +1356,47 @@
 #' about twice the cut-off; \code{location$threshold * location$normalizer}
 #' is the cut-off in map units, and \code{print()} shows it.
 #'
-#' \strong{A forest fitted with \code{include_coords = TRUE}} splits on the
-#' coordinates like on any other column, so there they join the predictor
-#' index as \code{"..x"} and \code{"..y"} and are centred, scaled and weighted
-#' with the rest.
+#' A forest splits on the coordinates like on any other column, so for a
+#' forest they also stay in the predictor index as \code{"..x"} and
+#' \code{"..y"}, centred, scaled and weighted with the rest. Under
+#' \code{weights = "auto"} that weight is the forest's importance, which is
+#' small for a forest that barely splits on its coordinates: in a test where
+#' half of 50 prediction points lay one half to one and a half extents beyond
+#' the data, 41 read as inside on the predictor index, 16 of them beyond the
+#' extent. The location index counts location whatever weight the
+#' coordinates get, and put none of the 25 inside.
 #'
-#' Either way geometry is needed on both sides, so \code{train_sf} and
+#' Geometry is needed on both sides, so \code{train_sf} and
 #' \code{newdata} must both be \code{sf} objects; a data.frame is refused
 #' rather than quietly measured without location. Non-\code{POINT}
 #' \code{newdata} (grid polygons, say) is reduced to representative points
 #' first, as \code{\link{coerce_to_points}} would. If exactly one side carries
 #' a CRS the other is brought into it: reprojected when its coordinates look
-#' like longitude/latitude, stamped otherwise, with a warning either way. This
+#' like longitude/latitude, stamped otherwise, with a warning either way; a
+#' CRS in longitude and latitude is not stamped on coordinates outside
+#' longitude -180 to 360 and latitude -90 to 90, which is refused. This
 #' is done because degrees fed into a metre-space index silently understate the
 #' distances. The location index is a map distance and refuses training data
-#' in a geographic CRS.
+#' in a geographic CRS. Both layers are read in x and y for the location: a
+#' layer whose geometries mix XY with XYZ or XYM (as \code{rbind()} of an XY
+#' and an XYZ layer gives), or carry M (XYM or XYZM), is read without its Z
+#' and M. Only one change reaches the result: for a forest fitted with
+#' \code{include_coords = TRUE}, \code{newdata} that mixes dimensions and is
+#' reprojected into the training CRS comes back in XY, with a warning of
+#' class \code{"spatialkit_zm_dropped"}, as \code{\link{ensure_projected}()}
+#' returns such a layer; the points that non-\code{POINT} \code{newdata} is
+#' reduced to are in XY when they would mix dimensions or carry M.
+#'
+#' A row without a location (an empty geometry, or a coordinate that is not
+#' finite or lies beyond 1e150) is read as one both as given and after a
+#' move into the other layer's CRS, which can bring a coordinate of 1e200
+#' back finite. Such a row of \code{newdata} gets \code{NA} in
+#' \code{DI_location}, and for a forest fitted with
+#' \code{include_coords = TRUE} in \code{"..x"} and \code{"..y"} and so in
+#' \code{DI}; such a training row is left out of the reference distances,
+#' with a log line. A row of \code{newdata} without a location as given that
+#' is reprojected into the training CRS comes back in \code{aoa} with an
+#' empty geometry.
 #'
 #' @param newdata Prediction locations: an \code{sf} object (typically from
 #'   \code{\link{predict_surface}}) or a data.frame, carrying the predictor
@@ -1293,7 +1411,8 @@
 #'   whether its predictions depend on location. Optional if \code{train_sf}
 #'   and \code{predictor_vars} are given directly, which lets this be used
 #'   with any model.
-#' @param train_sf Training data, if not taken from \code{model}.
+#' @param train_sf Training data, if not taken from \code{model}. When
+#'   location is measured it is read in x and y, as \code{newdata} is.
 #' @param predictor_vars Predictor names, if not taken from \code{model}.
 #' @param weights \code{"auto"} (default), \code{NULL}, or a named numeric
 #'   vector of predictor importances. \code{"auto"} uses
@@ -1304,10 +1423,12 @@
 #'   the explicit request for equal weights. For a vector of your own, any
 #'   positive scale works. When \code{model} was fitted with
 #'   \code{include_coords = TRUE}, the coordinates \code{"..x"} and
-#'   \code{"..y"} are measured as predictors too (see below), and you are not
-#'   expected to supply importances for them: any you leave out default to the
-#'   mean of the weights you did supply, so location counts about as much as a
-#'   typical predictor. Naming them explicitly overrides that. An unnamed
+#'   \code{"..y"} are measured as predictors too, besides the location index,
+#'   which no weight changes (see \emph{Models whose predictions depend on
+#'   location}). You are not expected to supply importances for them: any
+#'   you leave out default to the mean of the weights you did supply, so in
+#'   the predictor index the coordinates count about as much as a typical
+#'   predictor. Naming them explicitly overrides that. An unnamed
 #'   vector may have one value per predictor either with or without the two
 #'   coordinate columns. Weights must be finite and non-negative, so pass
 #'   permutation importance as \code{pmax(importance, 0)}. (A forest with no
@@ -1327,7 +1448,7 @@
 #'   one entry per training row. Default \code{NULL} (plain nearest neighbour).
 #'   The folds you passed to \code{cv_*()}, built on the layer \code{model}
 #'   was fitted from, may name rows that \code{prep_model_data()} removed
-#'   (a missing or non-finite value, an empty geometry): as in \code{cv_*()},
+#'   (a missing or non-finite value, or no location): as in \code{cv_*()},
 #'   they are dropped from the folds, and a label vector with one entry per
 #'   row of that layer loses theirs. Also
 #'   as in \code{cv_*()}, a \code{make_folds()} result built on other data --
@@ -1339,6 +1460,9 @@
 #'   threshold from the rule.
 #' @param normalizer_max_n Subsample the training data to this many points when
 #'   computing the mean pairwise distance, which is quadratic. Default 5000.
+#'   The subsample is drawn from the training rows in a fixed order (by the
+#'   predictors, and for the location index by the coordinates), so it does
+#'   not depend on the row order of the training data.
 #' @param seed Seed for that subsample. Default 123.
 #' @param chunk_size Query rows per distance block on the dense path. Default
 #'   \code{NULL} (chosen from the training size). Otherwise a single number of
@@ -1353,7 +1477,9 @@
 #'   \code{gwr_fit}, a \code{bayesian_fit}, a forest fitted with
 #'   \code{include_coords = TRUE}) and not otherwise; \code{"yes"} measures
 #'   it whatever the model, and with no \code{model}; \code{"no"} never
-#'   does, and logs a caution for a model that depends on it. See
+#'   does, and logs a caution for a model that depends on it (for a forest
+#'   it also leaves \code{"..x"} and \code{"..y"} out of the predictor
+#'   index). See
 #'   \emph{Models whose predictions depend on location}.
 #' @param categorical What to do with factor and character predictors:
 #'   \code{"refuse"} (default) stops with a message naming them and the two
@@ -1368,13 +1494,15 @@
 #'     \item \code{aoa}: \code{newdata} with a numeric \code{DI} column
 #'       and a logical \code{AOA} column added, and between them a numeric
 #'       \code{DI_location} column when location has an index of its own.
-#'       For a forest fitted with \code{include_coords = TRUE} it is the
+#'       For a forest fitted with \code{include_coords = TRUE}, unless
+#'       \code{coords = "no"}, it is the
 #'       object the computation ran on: \code{newdata} after pointizing, CRS
 #'       reconciliation and the addition of the \code{"..x"} and \code{"..y"}
-#'       columns. With a location index it is \code{newdata} as passed. A
-#'       row whose predictors are not all finite gets \code{NA} in \code{DI},
-#'       and a row outside the training range of a predictor in
-#'       \code{dropped_vars}, or on a level no training row has, gets
+#'       columns. In every other case it is \code{newdata} as passed, also
+#'       when location has an index of its own. A row whose predictors are
+#'       not all finite gets \code{NA} in \code{DI}, and a row outside the
+#'       training range of a predictor in \code{dropped_vars}, or on a level
+#'       no training row has, gets
 #'       \code{DI = Inf} and \code{AOA = FALSE} (see \emph{Limitations}).
 #'       \code{AOA} is \code{DI <= threshold}, and with a location index
 #'       also \code{DI_location <= location$threshold}: a row outside on
@@ -1430,7 +1558,9 @@
 #'       passed a vector), \code{weights_source} (\code{"model importance"},
 #'       \code{"supplied"} or \code{"equal"}), \code{weights_note} (the kind
 #'       of importance, or why the weights are equal), \code{coords}
-#'       (\code{"location index"}, \code{"predictors"} or \code{"none"}),
+#'       (\code{"location index"}; \code{"location index and predictors"}
+#'       for a forest fitted with \code{include_coords = TRUE}, whose
+#'       coordinates are also among the predictors; or \code{"none"}),
 #'       \code{categorical} and
 #'       \code{seed}.  \code{folds_method} is the \code{method} of a
 #'       \code{\link{make_folds}()} result (\code{"block_kfold"},
@@ -1513,9 +1643,9 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   # use_fnn = FALSE is a working alternative.  The default is guarded by
   # requireNamespace(); an explicit request needs the same courtesy.
   if (isTRUE(use_fnn) && !requireNamespace("FNN", quietly = TRUE))
-    stop("area_of_applicability(): `use_fnn = TRUE` but package 'FNN' is not ",
-         "installed. Install it with install.packages(\"FNN\"), or pass ",
-         "use_fnn = FALSE to use the dense fallback.", call. = FALSE)
+    stop("area_of_applicability(): `use_fnn = TRUE` but package 'FNN', which installs ",
+         "with spatialkit, could not be loaded. Reinstall it, or pass use_fnn = FALSE to ",
+         "use the dense fallback.", call. = FALSE)
 
   # chunk_size reached seq.int(1, nq, by = chunk_size) unvalidated.  A computed
   # value such as 1e3 / nrow(train) = 12.5 left some rows of each block at the
@@ -1548,67 +1678,103 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   # measured.  Without it, a prediction point far outside the training extent
   # but with ordinary covariate values reads as INSIDE the area of
   # applicability -- exactly the extrapolation the index exists to catch.
-  # There are two kinds of such model, and location enters the index
-  # differently for each:
-  #   "predictors"  a forest fitted with include_coords = TRUE splits on the
-  #                 coordinates like on any column, so they join the
-  #                 predictor index as "..x"/"..y" and take a weight;
-  #   "index"       a GWR's coefficients and a Bayesian fit's Gaussian
-  #                 process are functions of location whatever the
-  #                 covariates are, so location gets an index of its own --
-  #                 distance to the nearest training point in map space --
-  #                 and a point must be inside on both.  As two more
-  #                 equally weighted columns it would be diluted: with 12
-  #                 covariates, 89% of points 200 to 500 units beyond a
-  #                 1000-unit extent still read as inside.
+  # Every such model gets a location index of its own -- distance to the
+  # nearest training point in map space -- and a point must be inside on both
+  # indices:
+  #   "index"  a GWR's coefficients and a Bayesian fit's Gaussian process are
+  #            functions of location whatever the covariates are.  As two
+  #            more equally weighted columns location would be diluted: with
+  #            12 covariates, 89% of points 200 to 500 units beyond a
+  #            1000-unit extent still read as inside.
+  #   "both"   a forest fitted with include_coords = TRUE splits on the
+  #            coordinates like on any column, so they also stay in the
+  #            predictor index as "..x"/"..y", weighted like the rest.  That
+  #            weight is the forest's importance under weights = "auto", and
+  #            a forest that barely splits on its coordinates gives them
+  #            little: in a test where half of 50 points lay one half to
+  #            one and a half extents beyond the data, 41 read as inside on
+  #            that index alone, 16 of them beyond.  The location index
+  #            counts location whatever the weight.
   xy_predictors  <- !is.null(model) && isTRUE(model$info$include_coords)
   location_model <- !is.null(model) &&
-    inherits(model, c("gwr_fit", "bayesian_fit"))
+    (xy_predictors || inherits(model, c("gwr_fit", "bayesian_fit")))
   coord_mode <- switch(coords,
-    auto = if (xy_predictors) "predictors" else if (location_model) "index"
+    auto = if (xy_predictors) "both" else if (location_model) "index"
            else "none",
-    yes  = if (xy_predictors) "predictors" else "index",
+    yes  = if (xy_predictors) "both" else "index",
     no   = "none")
-  if (identical(coords, "no") && (xy_predictors || location_model))
+  loc_model_name <- if (xy_predictors) "a forest fitted with include_coords = TRUE"
+                    else if (location_model) sprintf("a %s", class(model)[1L])
+                    else NULL
+  if (identical(coords, "no") && location_model)
     .log_warn(paste0("area_of_applicability(): coords = \"no\", so location is ",
                      "not measured although this model's predictions depend on ",
                      "it (%s). A point far from every training point reads as ",
                      "inside when its covariates are ordinary."),
-              if (xy_predictors) "a forest fitted with include_coords = TRUE"
-              else sprintf("a %s", class(model)[1L]))
-  coord_model <- identical(coord_mode, "predictors")
+              loc_model_name)
+  coord_model <- identical(coord_mode, "both")
   coord_vars  <- if (coord_model) c("..x", "..y") else character(0)
-  loc_xy <- if (identical(coord_mode, "index"))
-    .aoa_location_coords(train_sf, newdata,
-                         why = if (location_model)
-                           sprintf("this model's predictions depend on location (a %s)",
-                                   class(model)[1L])
-                         else "coords = \"yes\"")
-  else NULL
   if (coord_model) {
     if (!inherits(train_sf, "sf") || !inherits(newdata, "sf"))
       stop("area_of_applicability(): this model uses the coordinates as ",
            "predictors, so both the training data and `newdata` must be sf ",
-           "objects carrying geometry.", call. = FALSE)
+           "objects carrying geometry. Pass coords = \"no\" to measure the ",
+           "other predictors alone.", call. = FALSE)
     # Both directions matter.  st_transform() on CRS-less newdata aborts with
     # sf's bare "cannot transform sfc object with missing crs", and when the
     # TRAINING data has no CRS the guard short-circuited entirely, so degrees
     # were fed into a metre-space index with nothing said (DI 0.13/0.19 for the
     # same points that gave 0.24/0.34 correctly projected).
+    # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y
+    # before it is moved: sf::st_transform() reads it in the dimension of
+    # its first geometry, so an XYZ first row stopped it with "OGR error".
+    # `newdata` moved here is the copy returned as `aoa`, so it comes back
+    # in XY with the warning of class spatialkit_zm_dropped; the training
+    # data is not returned and is flattened without a word.  `newdata`
+    # already in the training CRS, or stamped with it, keeps its Z.
+    # A row without a location as given (an empty geometry, or a coordinate
+    # that is not finite or lies beyond .POOL_XY_MAX) stays without one: a
+    # move between CRSs can bring a coordinate of 1e200 back finite.  The
+    # training rows are emptied before the move (they are not returned); a
+    # row of `newdata` moved here comes back empty in `aoa`, and one not
+    # moved keeps its geometry.  Their ..x and ..y are NA either way
+    # (.aoa_add_coords()).
+    train_sf <- .empty_unlocated(train_sf)
     tr_crs <- sf::st_crs(train_sf)
     if (!is.na(tr_crs)) {
-      if (!identical(sf::st_crs(newdata), tr_crs))
+      if (!identical(sf::st_crs(newdata), tr_crs)) {
+        moves <- !is.na(sf::st_crs(newdata)) ||
+          isTRUE(.looks_like_lonlat(newdata)$lonlat)
+        if (moves)
+          newdata <- .xy_if_mixed_warn(
+            newdata, "area_of_applicability", "newdata",
+            why = paste0("which sf::st_transform() reads wrongly, so Z and M ",
+                         "are dropped and its rows are returned in XY in ",
+                         "`aoa`"))
+        unloc_nw <- which(.unlocated_features(sf::st_geometry(newdata)))
         newdata <- .transform_or_stamp(newdata, tr_crs, what = "newdata",
                                        caller = "area_of_applicability")
+        if (moves) newdata <- .empty_unlocated(newdata, unloc_nw)
+      }
     } else if (!is.na(sf::st_crs(newdata))) {
-      train_sf <- .transform_or_stamp(train_sf, sf::st_crs(newdata),
+      train_sf <- .transform_or_stamp(.xy_if_mixed(train_sf),
+                                      sf::st_crs(newdata),
                                       what = "the training data",
                                       caller = "area_of_applicability")
     }
-    train_sf <- .aoa_add_coords(train_sf)
-    newdata  <- .aoa_add_coords(newdata)
+    train_sf <- .aoa_add_coords(train_sf, "`train_sf`")
+    newdata  <- .aoa_add_coords(newdata, "`newdata`")
     predictor_vars <- unique(c(predictor_vars, "..x", "..y"))
   }
+  # After the block above, so that a CRS reconciled there is not reconciled
+  # (and warned about) a second time.
+  loc_xy <- if (coord_mode %in% c("index", "both"))
+    .aoa_location_coords(train_sf, newdata,
+                         why = if (location_model)
+                           sprintf("this model's predictions depend on location (%s)",
+                                   loc_model_name)
+                         else "coords = \"yes\"")
+  else NULL
 
   des <- .aoa_design(train_sf, newdata, predictor_vars, categorical)
   X_tr_full <- des$X_tr
@@ -1635,16 +1801,22 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   if (!is.null(loc_xy))
     tr_ok <- tr_ok & is.finite(loc_xy$train[, 1L]) & is.finite(loc_xy$train[, 2L])
   if (!all(tr_ok)) {
+    # The texts name a location when one is measured: a training row without
+    # one (an empty point, or a coordinate that is not finite or lies beyond
+    # 1e150) is left out for that reason, whatever its predictors hold.
     if (sum(tr_ok) < 2L)
       stop("area_of_applicability(): fewer than two training rows with finite ",
-           "values for every predictor.", call. = FALSE)
+           "values for every predictor",
+           if (!is.null(loc_xy)) " and a location" else "", ".", call. = FALSE)
     .log_warn("area_of_applicability(): dropping %d training row(s) with missing or non-finite predictor values%s.",
               sum(!tr_ok),
               if (!is.null(loc_xy)) " or no usable location" else "")
     if (!is.null(folds))
-      stop("area_of_applicability(): the training data has missing predictor ",
-           "values, so `folds` row positions can no longer be matched. Remove ",
-           "the incomplete rows before building folds.", call. = FALSE)
+      stop("area_of_applicability(): the training data has rows with missing ",
+           "or non-finite predictor values",
+           if (!is.null(loc_xy)) " or no location" else "",
+           ", so `folds` row positions can no longer be matched. Remove ",
+           "those rows before building folds.", call. = FALSE)
     X_tr_full <- X_tr_full[tr_ok, , drop = FALSE]
     if (!is.null(loc_xy)) loc_xy$train <- loc_xy$train[tr_ok, , drop = FALSE]
     # Unreachable when folds were supplied (the branch above stops), but keeps
@@ -1823,16 +1995,24 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   # training region put 37 of 40 urban rows inside the AOA, while ONE urban
   # training row would have kept the predictor and put 1 inside.  Along that
   # direction the scaled distance is (x - c) / 0, infinite, so that is the DI.
-  # "Different" means outside the training range by more than the relative
-  # tolerance .aoa_scaling() drops the predictor with; a missing value cannot
-  # be compared and leaves the row to the other predictors.
+  # "Different" means outside the training range by more than the rounding of
+  # the column's values, .POOL_ULPS units in the last place of the larger of
+  # |lo| and |hi|, the rounding .aoa_scaling() drops the column within: a
+  # constant timestamp at 1.7e9 is stored to 2.4e-7, and a row 25 seconds
+  # away is a different value.  A column of zeros is given the rounding of a
+  # value of 1, so a land-cover dummy that is 0 throughout reads 1e-17 as 0.
+  # Below about 1e-292 .ulp_of() underflows to 0; the rounding of a value
+  # there is the smallest positive double, 2^-1074.
+  # A missing value cannot be compared and leaves the row to the other
+  # predictors.
   if (length(dropped_cols) > 0L) {
     Xd_tr <- X_tr_full[, dropped_cols, drop = FALSE]
     lo    <- apply(Xd_tr, 2L, min)
     hi    <- apply(Xd_tr, 2L, max)
-    mag   <- pmax(abs(lo), abs(hi))
-    mag[!is.finite(mag) | mag <= 0] <- 1
-    slack <- .Machine$double.eps^0.5 * mag
+    slack <- vapply(seq_along(lo), function(j) {
+      if (!(max(abs(lo[j]), abs(hi[j])) > 0)) return(.POOL_ULPS * .Machine$double.eps)
+      .POOL_ULPS * max(.ulp_of(c(lo[j], hi[j])), 2^-1074)
+    }, numeric(1))
     Xd_nw <- X_nw_full[, dropped_cols, drop = FALSE]
     off   <- sweep(Xd_nw, 2L, lo - slack, "<") | sweep(Xd_nw, 2L, hi + slack, ">")
     off[is.na(off)] <- FALSE
@@ -1952,7 +2132,8 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
         weights_supplied    = w_given,
         weights_source      = w_source,
         weights_note        = w_note,
-        coords              = switch(coord_mode, predictors = "predictors",
+        coords              = switch(coord_mode,
+                                     both  = "location index and predictors",
                                      index = "location index", "none"),
         categorical         = categorical,
         seed                = seed
@@ -2081,6 +2262,8 @@ print.aoa <- function(x, ...) {
       cat(sprintf(paste0("                (%d of %d training rows share a ",
                          "location with a row their fold trains on)\n"),
                   sum(loc$train_DI == 0, na.rm = TRUE), length(loc$train_DI)))
+    if (identical(x$params$coords, "location index and predictors"))
+      cat("                and as the predictors ..x and ..y\n")
   } else if (identical(x$params$coords, "predictors")) {
     cat("  location    : measured as the predictors ..x and ..y\n")
   } else if (!is.null(x$params$coords)) {

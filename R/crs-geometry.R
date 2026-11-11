@@ -38,10 +38,19 @@
 #' \code{quiet}; and with s2 on, a polygon GEOS accepts but s2 rejects (a
 #' repeated vertex, common in real shapefiles) stopped
 #' \code{ensure_projected()} with "Edge 1 is degenerate" although a plain
-#' \code{st_transform()} of it works.  Now s2 is always used; a geometry it
-#' rejects is repaired and tried again; and if that fails too, the centre is
-#' the normalised mean of the vertices' unit vectors (for a point layer
-#' exactly what s2 returns), which needs no valid geometry at all.
+#' \code{st_transform()} of it works.  Now s2 is always used, and a layer s2
+#' rejects is repaired and tried again.  If s2 rejects the repaired layer
+#' too, the features it refuses are repaired one by one (\code{.s2_mend()}:
+#' without their repeated vertices, then with crossing edges split), and the
+#' centre is the centroid of the union of the features s2 then accepts; a
+#' log line names the features s2 still refuses, which are left out.  Only
+#' when s2 accepts none of the features is the centre the normalised mean of
+#' the vertices' unit vectors (for a point layer exactly what s2 returns),
+#' which needs no valid geometry; each ring's closing vertex counts once
+#' there, so the mean does not depend on where a ring starts, and a log
+#' line says it was used.  A row with a coordinate that is not finite or lies
+#' beyond \code{.POOL_XY_MAX} is read as an empty row
+#' (\code{.empty_unlocated()}).
 #'
 #' @param x_ll An sf/sfc object in a geographic CRS.
 #' @return A 1 x 2 matrix (\code{X}, \code{Y}) in degrees, possibly
@@ -49,29 +58,120 @@
 #' @keywords internal
 #' @noRd
 .lonlat_centre <- function(x_ll) {
-  g <- sf::st_geometry(x_ll)
+  # A row without a location places nothing: it is read as an empty row.
+  g <- sf::st_geometry(.empty_unlocated(x_ll))
   centre_of <- function(geom) {
     ctr <- sf::st_coordinates(sf::st_centroid(sf::st_union(geom)))
     if (!is.numeric(ctr) || length(ctr) < 2L) stop("no centroid")
     ctr[1L, 1:2, drop = FALSE]
   }
   ctr <- tryCatch(.with_s2(centre_of(g)), error = function(e) NULL)
-  if (is.null(ctr))
-    ctr <- tryCatch(.with_s2(centre_of(.safe_make_valid(g))), error = function(e) NULL)
-  if (is.null(ctr)) {
-    xy <- tryCatch(sf::st_coordinates(g)[, 1:2, drop = FALSE],
-                   error = function(e) matrix(numeric(0), 0L, 2L))
-    xy <- xy[is.finite(xy[, 1L]) & is.finite(xy[, 2L]), , drop = FALSE]
-    lam <- xy[, 1L] * pi / 180; phi <- xy[, 2L] * pi / 180
-    v   <- c(sum(cos(phi) * cos(lam)), sum(cos(phi) * sin(lam)), sum(sin(phi)))
-    ctr <- matrix(if (nrow(xy) && sqrt(sum(v^2)) > 1e-12)
-                    c(atan2(v[2L], v[1L]), atan2(v[3L], sqrt(v[1L]^2 + v[2L]^2))) * 180 / pi
-                  else c(NA_real_, NA_real_),
-                  1L, 2L, dimnames = list(NULL, c("X", "Y")))
+  if (!is.null(ctr)) return(ctr)
+  ctr <- tryCatch(.with_s2(centre_of(.safe_make_valid(g))), error = function(e) NULL)
+  if (!is.null(ctr)) return(ctr)
+
+  # One feature s2 refuses even repaired (a bowtie: s2's repair leaves it as
+  # it is) sent the whole layer to the mean of its vertices, in silence: on
+  # 100 one-degree squares, one of them drawn with 4,000 vertices, the
+  # centre moved 4 degrees to that square, and ensure_projected() chose an
+  # Albers CRS centred there in place of UTM zone 14.  The features s2
+  # refuses are repaired one by one, and those it refuses even then are
+  # left out of the centre, with a log line.
+  rows_text <- function(r) {
+    k <- length(r)
+    if (k == 1L) sprintf("row %d", r)
+    else if (k <= 6L) sprintf("rows %s and %d", paste(r[-k], collapse = ", "), r[k])
+    else sprintf("rows %s and %d more", paste(r[1:6], collapse = ", "), k - 6L)
   }
+  full <- which(!sf::st_is_empty(g))
+  m    <- tryCatch(.with_s2(.s2_mend(g, split = TRUE)), error = function(e) NULL)
+  keep <- if (is.null(m)) integer(0) else setdiff(full, m$refused)
+  if (length(keep)) {
+    ctr <- tryCatch(.with_s2(centre_of(m$g[keep])), error = function(e) NULL)
+    # Counted over the features that are not empty: an empty row holds no
+    # location, and counted in, the figures did not add up.
+    if (!is.null(ctr) && length(m$refused))
+      .log_info(paste0(".pick_local_projected_crs(): s2 refuses %d of the %s ",
+                       "in longitude and latitude even repaired (%s); ",
+                       "the centre that places the projection is taken over the ",
+                       "other %d."),
+                length(m$refused),
+                if (length(full) < length(g))
+                  sprintf("%d features that are not empty", length(full))
+                else sprintf("%d features", length(g)),
+                rows_text(m$refused), length(keep))
+    if (!is.null(ctr)) return(ctr)
+  }
+
+  # The mean of the vertices' unit vectors, read feature by feature on a
+  # layer of mixed types or of collections, which sf::st_coordinates()
+  # refuses.  Each ring's closing vertex counts once: counted twice, the
+  # mean moved with the vertex a ring starts at (a bowtie listed from each of
+  # its four corners gave four centres and four Albers CRSs).
+  use <- if (length(keep)) keep else full
+  xy  <- tryCatch(.open_ring_xy(g[use]), error = function(e) matrix(numeric(0), 0L, 2L))
+  lam <- xy[, 1L] * pi / 180; phi <- xy[, 2L] * pi / 180
+  v   <- c(sum(cos(phi) * cos(lam)), sum(cos(phi) * sin(lam)), sum(sin(phi)))
+  ctr <- matrix(if (nrow(xy) && sqrt(sum(v^2)) > 1e-12)
+                  c(atan2(v[2L], v[1L]), atan2(v[3L], sqrt(v[1L]^2 + v[2L]^2))) * 180 / pi
+                else c(NA_real_, NA_real_),
+                1L, 2L, dimnames = list(NULL, c("X", "Y")))
+  if (all(is.finite(ctr)))
+    .log_info(paste0(".pick_local_projected_crs(): %s, so the centre that places ",
+                     "the projection is the mean of the vertices of %s."),
+              if (is.null(m)) "s2 stopped while the features it refuses were repaired"
+              else if (length(keep))
+                sprintf("s2 takes no union of the %d features it accepts", length(keep))
+              else "s2 refuses every feature in longitude and latitude, even repaired",
+              if (length(keep)) "those features" else "the layer")
   ctr
 }
 
+
+#' Whether an Albers conic with these standard parallels is a candidate
+#'
+#' The cone constant must be at least 0.05 in absolute value (parallels that
+#' straddle the equator degenerate, and PROJ refuses lat_1 = -lat_2), and
+#' both parallels must lie between -90 and 90: the fallback parallels
+#' \code{lat - 5} and \code{lat + 5} pass a pole when the centre is within 5
+#' degrees of it, and PROJ refuses them.  A conic at a pole is the polar
+#' azimuthal case, which the Lambert azimuthal candidate centred there
+#' covers.
+#'
+#' @param lat1,lat2 Standard parallels in degrees.
+#' @return \code{TRUE} or \code{FALSE}.
+#' @keywords internal
+#' @noRd
+.albers_parallels_ok <- function(lat1, lat2) {
+  cone_n <- (sin(lat1 * pi / 180) + sin(lat2 * pi / 180)) / 2
+  isTRUE(is.finite(cone_n) && abs(cone_n) >= 0.05 &&
+           abs(lat1) <= 90 && abs(lat2) <= 90)
+}
+
+#' The largest offset of a longitude box from a meridian
+#'
+#' The largest distance in longitude, on the circle, from \code{cm} to any
+#' longitude between \code{lon_min} and \code{lon_max}: 180 when the meridian
+#' opposite \code{cm} lies in the box, otherwise the larger of the two ends'
+#' offsets, each wrapped to 0 to 180.  The zone of the CRS chooser comes from
+#' the centre on the sphere, which for a layer across a pole, or one whose
+#' longitudes are given outside -180 to 180, can lie far outside the box, and
+#' the unwrapped difference of the box's ends then came out above 180.
+#'
+#' @param lon_min,lon_max The box's ends in degrees, \code{lon_min <= lon_max}.
+#' @param cm The meridian in degrees.
+#' @return A number from 0 to 180, or a non-finite number when the box or
+#'   \code{cm} is not finite.
+#' @keywords internal
+#' @noRd
+.lon_offset_from <- function(lon_min, lon_max, cm) {
+  wrap <- function(x) { d <- abs(x - cm) %% 360; pmin(d, 360 - d) }
+  off <- max(wrap(lon_min), wrap(lon_max))
+  if (!is.finite(off)) return(off)
+  # The meridian opposite cm lies in the box when, measured eastwards from
+  # lon_min, it comes no later than lon_max.
+  if ((cm + 180 - lon_min) %% 360 <= lon_max - lon_min) 180 else off
+}
 
 #' Pick a sensible local projected CRS for an sf/sfc object
 #'
@@ -105,6 +205,21 @@
 #' projection fits worse -- falls back to Web Mercator (Equal Earth for
 #' \code{purpose = "area"}).
 #'
+#' Rows with a coordinate that is not finite or lies beyond
+#' \code{.POOL_XY_MAX} take no part in the choice: it is made on the layer
+#' with those rows emptied (\code{.empty_unlocated()}).  So do rows with a
+#' vertex at a latitude beyond 90 (\code{.beyond_pole_features()}), read on
+#' the copy in WGS84.
+#'
+#' On the comparison path and the \code{purpose = "area"} path a candidate
+#' is used only if it places every located vertex of the layer
+#' (\code{.places_vertices()}; a vertex at a latitude beyond 90 takes no
+#' part, \code{.located_vertices()}).  One that does not gets
+#' \code{distance_error} \code{NA}, is not chosen, and the log line names
+#' it.  When no candidate places every vertex, the global fallback is used.
+#' The Albers candidate is built only where \code{.albers_parallels_ok()}
+#' holds for its standard parallels.
+#'
 #' @param x An sf or sfc object.
 #' @return A list with \code{crs} (the chosen \code{sf::crs}) and
 #'   \code{candidates}, a data.frame with one row per projection considered:
@@ -125,6 +240,13 @@
   if (!inherits(x, c("sf", "sfc"))) return(list(crs = sf::NA_crs_, candidates = NULL))
   crs <- sf::st_crs(x)
   if (!is.na(crs) && !.is_longlat(x)) return(list(crs = crs, candidates = NULL))
+  # Rows without a location (a coordinate that is not finite or lies beyond
+  # .POOL_XY_MAX) take no part in the choice: the box, the longitudes of the
+  # wrap test, the centre and the scores are read as with those rows empty.
+  # Read, a longitude of 1e200 made a box "across the antimeridian" and a
+  # lon_0 PROJ refuses, and a latitude of 1e200 moved the standard parallels
+  # of every other row's projection.
+  x <- .empty_unlocated(x)
   # The measured candidates travel back with the choice.  On the comparison
   # paths the warning quotes two of the figures and drops the rest; here
   # every candidate's error is kept, since the number that propagates into
@@ -159,6 +281,27 @@
   }
   if (is.na(sf::st_crs(x_ll)) || !.is_longlat(x_ll))
     return(list(crs = global_crs(), candidates = NULL))
+  # A row with a vertex at a latitude beyond 90 has no place on the Earth,
+  # and no CRS places it: it takes no part in the choice either, the whole
+  # row, as a row with a coordinate beyond 1e150.  Read, one station at
+  # (-96, 95) among 39 over the conterminous United States moved the centre
+  # and the Albers parallels (41.2 and 84.2 in place of 32.9 and 43.0), and
+  # a swapped row at (40, -96) put the box 139 degrees from the zone's
+  # central meridian.  Tested in degrees on the WGS84 copy; the layer
+  # returned to the caller is not changed.
+  x_ll <- .empty_unlocated(x_ll, which(.beyond_pole_features(sf::st_geometry(x_ll))))
+  # No row has a location: nothing places a projection.  Read on, the centre
+  # came out as NaN and the log line below quoted "lon = NaN, lat = NaN".
+  # Empty parts are dropped first: sf::st_is_empty() calls a feature empty
+  # when its first part is empty (.drop_empty_parts()).
+  if (all(sf::st_is_empty(.drop_empty_parts(sf::st_geometry(x_ll))))) {
+    .log_warn(paste0(
+      ".pick_local_projected_crs(): no row has a location (each geometry is ",
+      "empty, or has a coordinate that is not finite or lies beyond 1e150, ",
+      "or a latitude beyond 90); falling back to %s."),
+      if (purpose == "area") "Equal Earth" else "EPSG:3857")
+    return(list(crs = global_crs(), candidates = NULL))
+  }
 
   # On the sphere whatever sf_use_s2() says, and without failing on a polygon
   # s2 rejects: see .lonlat_centre().
@@ -214,7 +357,11 @@
   # apart and every distance downstream -- variogram range, block size, GWR
   # bandwidth, GP length-scale -- is destroyed.
   if (is.finite(span_lon) && span_lon > 180) {
-    lons  <- sf::st_coordinates(sf::st_geometry(x_ll))[, 1L]
+    # Read feature by feature on a layer of mixed types or of collections,
+    # which sf::st_coordinates() refuses: the refusal stopped
+    # ensure_projected() on a box across 180 listed as a POLYGON beside a
+    # MULTIPOLYGON.
+    lons  <- .vertex_coords(sf::st_geometry(x_ll))[, 1L]
     lons  <- sort(lons[is.finite(lons)])
     wrapped <- FALSE
     if (length(lons) > 1L) {
@@ -313,9 +460,42 @@
   # dependency on that coercion in the log messages below.
   cand_zone <- as.integer(max(1, min(60, floor((lon + 180) / 6) + 1)))
   cand_cm   <- 6 * cand_zone - 183           # central meridian of that zone
-  lon_off   <- max(abs(lon_min - cand_cm), abs(lon_max - cand_cm))
+  # The largest offset of the box from that meridian, on the circle.
+  lon_off   <- .lon_offset_from(lon_min, lon_max, cand_cm)
 
   utm_epsg <- if (!is.na(lat) && lat < 0) 32700 + cand_zone else 32600 + cand_zone
+
+  # A candidate is used only if it places every located vertex of the layer.
+  # PROJ gives no coordinates for a point a UTM zone cannot place (about 90
+  # degrees or more from its central meridian on the equator), and the
+  # score left such points out: LINESTRING (0 0, 180 0) kept UTM zone 46,
+  # scored without both of its ends, and ensure_projected() returned the
+  # line empty, without a word.  The vertices are read once, and only where
+  # candidates are compared.
+  vtx <- NULL
+  places <- function(cd) {
+    if (is.null(vtx)) vtx <<- .located_vertices(x_ll)
+    .places_vertices(vtx, sf::st_crs(x_ll), cd$crs)
+  }
+  # Named in the log line: the candidates that cannot place the layer.
+  not_placed <- function(cands, placed, verb = "cannot")
+    if (all(placed)) "" else
+      sprintf(" %s %s place every location of the layer, so %s not used.",
+              paste(vapply(cands[!placed], `[[`, character(1), "name"),
+                    collapse = " and "),
+              verb, if (sum(!placed) == 1L) "it is" else "they are")
+  # No candidate places every vertex: the global fallback, as for global
+  # coverage.
+  none_placed <- function(cands) {
+    .log_warn(
+      paste0(".pick_local_projected_crs(): no candidate projection can place ",
+             "every location of the layer (%s cannot). Falling back to %s. ",
+             "Pass target_crs to ensure_projected() to choose a projection ",
+             "suited to your extent."),
+      paste(vapply(cands, `[[`, character(1), "name"), collapse = " and "),
+      if (purpose == "area") "Equal Earth (equal-area)" else "EPSG:3857")
+    list(crs = global_crs(), candidates = NULL)
+  }
 
   if (purpose == "area") {
     # Areas are what matter, so the zone -- conformal, not equal-area -- is
@@ -330,12 +510,11 @@
     if (!is.finite(lat1) || !is.finite(lat2) || isTRUE(all.equal(lat1, lat2))) {
       lat1 <- lat - 5; lat2 <- lat + 5
     }
-    cone_n <- (sin(lat1 * pi / 180) + sin(lat2 * pi / 180)) / 2
     cands <- list(list(
       name = sprintf("Lambert azimuthal equal-area centred on (%.1f, %.1f)", lon, lat),
       crs = sf::st_crs(sprintf(
         "+proj=laea +lat_0=%f +lon_0=%f +datum=WGS84 +units=m +no_defs", lat, lon))))
-    if (is.finite(cone_n) && abs(cone_n) >= 0.05) {
+    if (.albers_parallels_ok(lat1, lat2)) {
       cands <- c(cands, list(list(
         name = sprintf("Albers equal-area (lat_1=%.1f, lat_2=%.1f, lon_0=%.1f)",
                        lat1, lat2, lon),
@@ -344,16 +523,19 @@
                  "+datum=WGS84 +units=m +no_defs"),
           lat1, lat2, lat, lon)))))
     }
-    err  <- vapply(cands, function(cd) .crs_distance_error(x_ll, cd$crs), numeric(1))
+    placed <- vapply(cands, places, logical(1))
+    if (!any(placed)) return(none_placed(cands))
+    err  <- vapply(seq_along(cands), function(i)
+      if (placed[i]) .crs_distance_error(x_ll, cands[[i]]$crs) else NA_real_, numeric(1))
     best <- which.min(ifelse(is.finite(err), err, Inf))
-    if (!length(best) || !is.finite(err[best])) best <- 1L
+    if (!length(best) || !is.finite(err[best])) best <- which(placed)[1L]
     .log_info(
       paste0(".pick_local_projected_crs(): purpose = \"area\": using %s ",
              "(equal-area; worst-case distance error %s over sampled pairs) ",
-             "rather than UTM zone %d."),
+             "rather than UTM zone %d.%s"),
       cands[[best]]$name,
       if (is.finite(err[best])) sprintf("%.2f%%", 100 * err[best]) else "not measurable",
-      cand_zone
+      cand_zone, not_placed(cands, placed)
     )
     return(scored(cands[[best]]$crs, vapply(cands, `[[`, character(1), "name"),
                   lapply(cands, `[[`, "crs"), err, best))
@@ -381,7 +563,6 @@
     if (!is.finite(lat1) || !is.finite(lat2) || isTRUE(all.equal(lat1, lat2))) {
       lat1 <- lat - 5; lat2 <- lat + 5
     }
-    cone_n <- (sin(lat1 * pi / 180) + sin(lat2 * pi / 180)) / 2
 
     cands <- list(
       list(name = sprintf("UTM zone %d", cand_zone), crs = sf::st_crs(utm_epsg)),
@@ -392,9 +573,11 @@
              lat, lon)))
     )
     # A conic whose parallels straddle the equator is not merely poor, it is
-    # degenerate: |lat_1 + lat_2| = 0 is rejected by PROJ outright.  Leave it
-    # out of the comparison rather than letting st_crs() raise.
-    if (is.finite(cone_n) && abs(cone_n) >= 0.05) {
+    # degenerate: |lat_1 + lat_2| = 0 is rejected by PROJ outright.  Fallback
+    # parallels that pass a pole (a centre within 5 degrees of it) are
+    # rejected too.  Leave such a conic out of the comparison rather than
+    # letting st_crs() raise.
+    if (.albers_parallels_ok(lat1, lat2)) {
       cands <- c(cands, list(list(
         name = sprintf("Albers equal-area (lat_1=%.1f, lat_2=%.1f, lon_0=%.1f)",
                        lat1, lat2, lon),
@@ -404,26 +587,37 @@
           lat1, lat2, lat, lon)))))
     }
 
-    err <- vapply(cands, function(cd) .crs_distance_error(x_ll, cd$crs),
-                  numeric(1))
+    # A candidate that cannot place every located vertex is scored NA and
+    # not chosen; the zone is no longer kept by default when it is such a
+    # candidate.
+    placed <- vapply(cands, places, logical(1))
+    if (!any(placed)) return(none_placed(cands))
+    err <- vapply(seq_along(cands), function(i)
+      if (placed[i]) .crs_distance_error(x_ll, cands[[i]]$crs) else NA_real_,
+      numeric(1))
     best <- which.min(ifelse(is.finite(err), err, Inf))
-    if (!length(best) || !is.finite(err[best])) best <- 1L   # UTM fallback
+    # Nothing measured: the zone when it places the layer, else the first
+    # candidate that does.
+    if (!length(best) || !is.finite(err[best])) best <- which(placed)[1L]
 
     if (identical(cands[[best]]$name, cands[[1L]]$name)) {
       # The figures are only quotable when the comparison actually ran; a
       # candidate that could not be scored comes back NA, and a message
       # reporting "NA% vs NA%" asserts a comparison that never happened.
-      measured <- all(is.finite(err))
+      measured <- all(is.finite(err[placed]))
       .log_warn(
         paste0(".pick_local_projected_crs(): extent reaches %.1f deg from the ",
                "central meridian of UTM zone %d (%.1f deg of longitude in ",
-               "total); the zone is kept%s. Pass target_crs to ",
+               "total); the zone is kept%s.%s Pass target_crs to ",
                "ensure_projected() to override."),
         lon_off, cand_zone, span_lon,
-        if (measured)
+        if (!any(placed[-1L]))
+          " because no other candidate can place every location of the layer"
+        else if (measured)
           sprintf(", because on this extent every equal-area candidate distorts distances more than it does (%.2f%% vs %.2f%% worst-case over sampled pairs)",
-                  100 * min(err[-1L]), 100 * err[1L])
-        else " because the candidate projections could not be scored on this layer"
+                  100 * min(err[-1L][placed[-1L]]), 100 * err[1L])
+        else " because the candidate projections could not be scored on this layer",
+        not_placed(cands, placed)
       )
       return(scored(sf::st_crs(utm_epsg), vapply(cands, `[[`, character(1), "name"),
                     lapply(cands, `[[`, "crs"), err, 1L))
@@ -432,13 +626,18 @@
     .log_warn(
       paste0(".pick_local_projected_crs(): extent reaches %.1f deg from the ",
              "central meridian of UTM zone %d (%.1f deg of longitude in ",
-             "total). Using %s instead: measured worst-case distance error ",
-             "%.2f%% against the zone's %.2f%%, and that error propagates into ",
-             "variogram ranges, block sizes, GWR bandwidth and GP ",
-             "length-scales. Pass target_crs to ensure_projected() to ",
-             "override."),
+             "total). Using %s instead: %s%s%s%s Pass target_crs to ",
+             "ensure_projected() to override."),
       lon_off, cand_zone, span_lon, cands[[best]]$name,
-      100 * err[best], 100 * err[1L]
+      if (is.finite(err[best]))
+        sprintf("measured worst-case distance error %.2f%%", 100 * err[best])
+      else "its worst-case distance error could not be measured",
+      if (placed[1L]) sprintf(" against the zone's %.2f%%", 100 * err[1L]) else "",
+      if (is.finite(err[best]))
+        paste0(", and that error propagates into variogram ranges, block sizes, ",
+               "GWR bandwidth and GP length-scales.")
+      else ".",
+      not_placed(cands, placed)
     )
     return(scored(cands[[best]]$crs, vapply(cands, `[[`, character(1), "name"),
                   lapply(cands, `[[`, "crs"), err, best))
@@ -464,53 +663,98 @@
 #'
 #' The sample is taken at even spacing along the points sorted by coordinate
 #' (no RNG, and no dependence on the order of the rows), so the result is
-#' reproducible; \code{max_n} keeps the pairwise work bounded.
+#' reproducible; \code{max_n} keeps the pairwise work bounded.  Copies of one
+#' location count once, and rows without a finite location are left out with
+#' the empty ones, so the sample does not depend on how many rows list a
+#' place.  A detailed outline, more than \code{4 * max_n} distinct vertices,
+#' is thinned the same way first, along its distinct vertices sorted by
+#' coordinate.
 #'
 #' @param x_ll An sf/sfc object in a geographic CRS.  Non-POINT geometry is
 #'   reduced to representative points first, so the two distance vectors are
 #'   the same length (\code{st_coordinates()} yields one row per vertex).
-#'   With fewer than \code{max_n} features the outline's vertices, densified
-#'   along its edges, are added to those points, so that a single study-area
-#'   polygon is measured across its extent rather than not at all.
+#'   With fewer than \code{max_n} distinct points the outline's vertices,
+#'   densified along its edges, are added to those points, so that a single
+#'   study-area polygon is measured across its extent rather than not at
+#'   all, however many rows repeat it.  Each
+#'   edge is filled from the same end whichever way its ring runs, and an
+#'   added point within about 1e-9 degrees of a point listed before it is
+#'   left out, so an edge two features share, or a vertex on another
+#'   feature's edge, adds no pair of points a few bits apart.  A MULTIPOINT
+#'   adds its member points and nothing between them.  The layer is read in
+#'   x and y, and a layer of mixed types or of collections is read feature
+#'   by feature (\code{.vertex_coords()}).
 #' @param crs Candidate \code{sf::crs}.
 #' @param max_n Maximum number of points to sample.  Default 40 (780 pairs).
-#' @return Numeric worst-case \code{|d_planar / d_geodesic - 1|}, or \code{NA}
-#'   when it cannot be computed (which the caller treats as "unusable").
+#' @return Numeric worst-case \code{|d_planar / d_geodesic - 1|} over the
+#'   sampled pairs 1 mm or more apart on the ellipsoid, or \code{NA} when it
+#'   cannot be computed, no pair is that long, or \code{crs} cannot place a
+#'   sampled point that has a location in degrees (which the caller treats
+#'   as "unusable").
 #' @keywords internal
 #' @noRd
 .crs_distance_error <- function(x_ll, crs, max_n = 40L) {
   tryCatch({
-    g <- sf::st_geometry(x_ll)
+    # Empty parts are dropped before empty features: sf::st_is_empty() calls
+    # a GEOMETRYCOLLECTION, MULTIPOLYGON or MULTILINESTRING empty when its
+    # first part is empty, and a box listed after an empty line in one
+    # GEOMETRYCOLLECTION was left out, so every candidate scored NA.  An
+    # empty part inside a line feature also segfaults GEOS below (see
+    # .drop_empty_parts()), and tryCatch() cannot catch a crash, so any
+    # lon/lat line layer with a null part took ensure_projected() down.
+    g <- .drop_empty_parts(sf::st_geometry(x_ll))
     g <- g[!sf::st_is_empty(g)]
+    # Scored in x and y.  With Z or M kept, the ring key read Z and M, so the
+    # edges of a POLYGON Z whose vertices differ in Z were not filled (a box
+    # over the conterminous United States chose another CRS than its XY
+    # copy); the interior point of a LINESTRING Z kept its Z beside XY
+    # vertices, so sf::st_transform() stopped, and GEOS refuses M: every
+    # candidate scored NA and the UTM zone was kept.
+    if (any(.geom_dims(g) != "XY")) g <- sf::st_zm(g, drop = TRUE, what = "ZM")
     # Representative POINTS, not the geometries themselves.  st_coordinates()
     # returns one row per VERTEX, so for a polygon or line layer the projected
     # distance vector was a different length from the geodesic one: the
     # comparison recycled, R raised "longer object length is not a multiple of
     # shorter object length" at the caller, every candidate scored NA, and the
     # selection silently fell back to the UTM zone while the log line reported
-    # "NA% vs NA%".  Every county-polygon layer took that path.  The empty
-    # parts go first: one inside a line feature segfaults GEOS here (see
-    # .drop_empty_parts()), and tryCatch() cannot catch a crash, so any
-    # lon/lat line layer with a null part took ensure_projected() down.
+    # "NA% vs NA%".  Every county-polygon layer took that path.
     if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT")) {
-      g_full <- .drop_empty_parts(g)
+      g_full <- g
       g <- suppressWarnings(sf::st_point_on_surface(g_full))
       # GEOS reads a feature that crosses +-180 the long way round, so its
       # interior point landed on the far side of the globe ((-0.5, -17) for a
       # box around Fiji) and the error reported for a projection accurate to
       # 0.02% on the box was 25%.  Such a feature spans more than 180 degrees
-      # of raw longitude; take its spherical centroid instead.
+      # of raw longitude; take its spherical centroid instead.  When s2
+      # refuses one of these features, the centroids are taken feature by
+      # feature (.s2_centroids()): a feature s2 refuses for a repeated vertex
+      # gets the centroid of the same ring, one with crossing edges that of
+      # its rebuild, and only one s2 refuses after both keeps GEOS's point.
+      # Taken in one call, one refusal kept GEOS's point for every wide
+      # feature, and a box around Fiji with one vertex listed twice scored
+      # 25% where the same box without the repeat scores 0.02%.
       bb_all <- sf::st_bbox(g_full)
       if (isTRUE(sf::st_is_longlat(g_full)) && all(is.finite(bb_all)) &&
           bb_all[["xmax"]] - bb_all[["xmin"]] > 180) {
-        wide <- vapply(g_full, function(s) {
+        wide <- which(vapply(g_full, function(s) {
           b <- sf::st_bbox(s)
           isTRUE(b[["xmax"]] - b[["xmin"]] > 180)
-        }, logical(1))
-        ctr <- if (any(wide))
-          tryCatch(.with_s2(sf::st_centroid(g_full[wide])), error = function(e) NULL)
-        if (!is.null(ctr)) g[wide] <- ctr
+        }, logical(1)))
+        ctr <- if (length(wide))
+          tryCatch(.with_s2(.s2_centroids(g_full[wide], split = TRUE)),
+                   error = function(e) NULL)
+        if (!is.null(ctr)) {
+          took <- setdiff(seq_along(wide), ctr$refused)
+          if (length(took)) g[wide[took]] <- ctr$points[took]
+        }
       }
+      # One point per distinct location.  A long-format layer lists one
+      # polygon over many rows, and each row gave a copy of one point: from
+      # 40 rows no outline was added and every pair had zero length, so every
+      # candidate scored NA and the UTM zone was kept (a box over the
+      # conterminous United States, 1.76% in the Lambert azimuthal CRS on one
+      # row); below that the copies took places in the sample.
+      g <- .distinct_located_points(g)
       # One point per feature is nothing to measure on a study-area outline:
       # a single polygon gave one point, every candidate scored NA, and the
       # selector kept the UTM zone at any extent -- a CONUS outline got zone
@@ -520,31 +764,88 @@
       # where a zone distorts most.  So below `max_n` points, add the
       # outline's own vertices, densified along each edge until there are
       # about `max_n` of them (a box has only its four corners).  Layers with
-      # `max_n` features or more are measured as before, and so is a
-      # GEOMETRYCOLLECTION layer, whose vertices st_coordinates() refuses.
+      # `max_n` distinct points or more are measured on those points.  A
+      # layer of mixed types or of collections is read feature by feature
+      # (.vertex_coords()): sf::st_coordinates() refuses it, and a box listed
+      # as one GEOMETRYCOLLECTION scored NA for every candidate.  Exact
+      # copies of a feature are read once: they add no
+      # vertex, and each copy's ring was densified again, which cost 0.9 s
+      # per candidate on 10,000 copies of a box.
       xy <- if (length(g) < max_n)
-        tryCatch(sf::st_coordinates(g_full), error = function(e) NULL)
+        tryCatch(.vertex_coords(g_full[!duplicated(unclass(g_full))]),
+                 error = function(e) NULL)
       # Only about `max_n` of these points are measured (the evenly spaced
       # subsample below), so thin a detailed outline to a few times that
-      # first, by evenly spaced index.  unique() on the whole vertex matrix,
-      # twice, and a ring key pasted for every vertex made the score cost
-      # 2.8 s per candidate on a 300,000-vertex outline (0.04 s before the
-      # outline was scored), and ensure_projected() 14 s.  Such an outline has
-      # far more than `max_n` vertices, so it is not densified either way.
-      if (!is.null(xy) && nrow(xy) > 4L * max_n)
-        xy <- xy[unique(round(seq(1, nrow(xy), length.out = 4L * max_n))), , drop = FALSE]
+      # first, at even spacing along its distinct vertices sorted by
+      # coordinate.  The rows of st_coordinates() run feature by feature in
+      # the order of the layer, and thinned along them the vertices kept
+      # changed with that order: five detailed outlines over the conterminous
+      # United States got an Albers CRS in three of eight feature orders and
+      # a Lambert azimuthal one in the other five.  A vertex listed twice (a
+      # ring's closing vertex, a border two features share) counts once, so
+      # a ring listed from another vertex is thinned the same.  unique() on
+      # the whole vertex matrix, twice, and a ring key pasted for every
+      # vertex made the score cost 2.8 s per candidate on a 300,000-vertex
+      # outline (0.04 s before the outline was scored), and
+      # ensure_projected() 14 s; one sort costs a few hundredths of a second
+      # there.  A thinned outline is not densified: the rows kept are not
+      # neighbours along a ring, so there is no edge between them to fill.
+      # The outline is thinned when more than `4 * max_n` distinct vertices
+      # remain.  Counted by row, 33 copies of a box listed 165 rows of 4
+      # vertices, and the box was thinned to its corners and not filled.
+      # `%in% TRUE` drops the comparisons that are NA, at non-finite
+      # vertices, which the `ok` filter below would drop anyway.
+      thinned <- FALSE
+      if (!is.null(xy) && nrow(xy) > 0L) {
+        o  <- order(xy[, 1L], xy[, 2L])
+        s  <- xy[o, 1:2, drop = FALSE]
+        o  <- o[c(TRUE, s[-1L, 1L] != s[-nrow(s), 1L] |
+                        s[-1L, 2L] != s[-nrow(s), 2L]) %in% TRUE]
+        thinned <- length(o) > 4L * max_n
+        if (thinned)
+          xy <- xy[sort(o[unique(round(seq(1, length(o), length.out = 4L * max_n)))]), ,
+                   drop = FALSE]
+      }
       if (!is.null(xy)) {
-        ring <- if (ncol(xy) > 2L)
-          do.call(paste, as.data.frame(xy[, -(1:2), drop = FALSE])) else rep("1", nrow(xy))
+        # The ring key is read from the L columns alone, so that no other
+        # coordinate can end an edge.
+        lc   <- grepl("^L[0-9]+$", colnames(xy))
+        ring <- if (any(lc))
+          do.call(paste, as.data.frame(xy[, lc, drop = FALSE])) else rep("1", nrow(xy))
         xy <- xy[, 1:2, drop = FALSE]
         ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L])
         xy <- xy[ok, , drop = FALSE]; ring <- ring[ok]
         if (nrow(xy) > 0L) {
-          per_edge <- max(0L, ceiling(max_n / max(1L, nrow(unique(xy)))) - 1L)
+          # A MULTIPOINT has no edges: its member points are added as they
+          # are, and nothing is filled between them.  st_coordinates() gives
+          # the members of a feature one L1 value, which the ring key read as
+          # a ring, and points were added on the segments between consecutive
+          # members, at places the layer does not have, moving with the order
+          # of the members: two MULTIPOINTs of five points scored 0.75% in
+          # UTM zone 14 in one order and 0.78% in another.  The points of a
+          # POINT or MULTIPOINT inside a layer of mixed types each get a ring
+          # key of their own (.vertex_coords()).
+          per_edge <- if (thinned || inherits(g_full, "sfc_MULTIPOINT")) 0L else
+            max(0L, ceiling(max_n / max(1L, nrow(unique(xy)))) - 1L)
           if (per_edge > 0L && nrow(xy) > 1L) {
             same <- ring[-1L] == ring[-length(ring)]
             a <- xy[-nrow(xy), , drop = FALSE][same, , drop = FALSE]
             b <- xy[-1L, , drop = FALSE][same, , drop = FALSE]
+            # Each edge is filled from the end with the smaller longitude (the
+            # smaller latitude when the two are equal), whichever way its ring
+            # runs.  An edge two features share is listed once by each, from
+            # opposite ends.  Filled from each end in turn, some copies of an
+            # added point differed in their last bits; unique() kept both,
+            # and the pair, about 1e-9 m apart, set every candidate's score.
+            # Two boxes of 12 by 15 degrees, one above the other, scored 76.9%
+            # in UTM zone 13 and 86.8% in EPSG:5070, where their outline as
+            # one box scores 0.5% and 10.9%, and ensure_projected() kept the
+            # zone with "76.92% vs 76.92%".  Filled from the same end, the two
+            # copies are the same point.
+            sw <- a[, 1L] > b[, 1L] | (a[, 1L] == b[, 1L] & a[, 2L] > b[, 2L])
+            ab <- a[sw, , drop = FALSE]
+            a[sw, ] <- b[sw, ]
+            b[sw, ] <- ab
             f <- rep(seq_len(per_edge) / (per_edge + 1), each = nrow(a))
             a <- a[rep(seq_len(nrow(a)), per_edge), , drop = FALSE]
             b <- b[rep(seq_len(nrow(b)), per_edge), , drop = FALSE]
@@ -557,7 +858,31 @@
             dl <- ((dl + 180) %% 360) - 180
             lon <- ((a[, 1L] + f * dl + 180) %% 360) - 180
             lat <- a[, 2L] + f * (b[, 2L] - a[, 2L])
-            xy <- rbind(xy, cbind(lon, lat))
+            # An added point can still fall on a point listed before it, with
+            # other last bits: a vertex of another feature that lies on this
+            # edge (a T-junction, or a corner touching the edge), or a point
+            # added along an edge that overlaps this one in part.  Rounding
+            # the added points alone moved them off such vertices.  An added
+            # point is left out when it shares a cell of 1e-9 degrees (about
+            # 0.1 mm) with an earlier point, the cells taken in each
+            # coordinate from either of two grids half a cell apart.  Two
+            # points less than half a cell apart in both coordinates share a
+            # cell under one of the four pairings of the grids, so copies a
+            # few bits apart are never kept either side of a cell's border;
+            # points 1e-9 degrees or more apart in one coordinate are both
+            # kept.  The vertices stay as they are: two that differ in their
+            # last bits are left to the floor on a pair's length below.  The
+            # added points go in
+            # sorted by coordinate, so the copy kept does not depend on the
+            # order of the features.
+            add <- cbind(lon, lat)
+            add <- add[order(add[, 1L], add[, 2L]), , drop = FALSE]
+            p <- rbind(xy, add)
+            near <- logical(nrow(p))
+            for (kx in list(round(p[, 1L] * 1e9), floor(p[, 1L] * 1e9)))
+              for (ky in list(round(p[, 2L] * 1e9), floor(p[, 2L] * 1e9)))
+                near <- near | duplicated(paste(kx, ky))
+            xy <- rbind(xy, add[!near[-seq_len(nrow(xy))], , drop = FALSE])
           }
           xy <- unique(xy)
           g <- c(sf::st_geometry(g), sf::st_geometry(sf::st_as_sf(
@@ -565,6 +890,14 @@
             crs = sf::st_crs(g))))
         }
       }
+    } else {
+      # One point per distinct location, as for the points of other layers.
+      # The sample of `max_n` was taken over rows: 39 stations with station
+      # 1 listed 1,001 times (repeat visits) sampled 4 of the 39, and the
+      # zone's error read 2.32% where the stations score 5.07%.  A row at a
+      # coordinate that is not finite made .geod_distance() stop, and every
+      # candidate scored NA.
+      g <- .distinct_located_points(g)
     }
     n <- length(g)
     if (n < 2L) return(NA_real_)
@@ -586,12 +919,501 @@
     ij  <- which(lower.tri(matrix(0, nrow(ll), nrow(ll))), arr.ind = TRUE)
     d_geo <- .geod_distance(ll[ij[, 2], 1], ll[ij[, 2], 2],
                             ll[ij[, 1], 1], ll[ij[, 1], 2])
-    d_prj <- as.numeric(stats::dist(
-      sf::st_coordinates(sf::st_transform(g, crs))[, 1:2, drop = FALSE]))
-    keep  <- is.finite(d_geo) & is.finite(d_prj) & d_geo > 0
+    # A point placed in degrees that `crs` cannot place makes the score NA.
+    # Its pairs were left out, so a UTM zone was scored on the points it
+    # can place: on LINESTRING (0 0, 180 0) zone 46 scored without both
+    # ends of the line, and was kept.
+    # A point at a latitude beyond 90 has no place on the Earth, which no
+    # CRS places, and its pairs are left out as before
+    # (.located_vertices()).
+    pp <- sf::st_coordinates(sf::st_transform(g, crs))[, 1:2, drop = FALSE]
+    if (nrow(pp) != nrow(ll) ||
+        any(is.finite(ll[, 1L]) & is.finite(ll[, 2L]) & abs(ll[, 2L]) <= 90 &
+            !(is.finite(pp[, 1L]) & is.finite(pp[, 2L]))))
+      return(NA_real_)
+    d_prj <- as.numeric(stats::dist(pp))
+    # Pairs under 1 mm are left out.  Two listings of one place that are not
+    # the same double (a corner two features share, written -107.2 in one
+    # and -110.6 + 3.4 in the other; a point listed twice a few bits apart;
+    # (180, y) and (-180, y)) made a pair about 1e-9 m long whose planar
+    # length is rounding noise, or 40,075 km in Web Mercator, and that one
+    # ratio set the score of every candidate: two boxes side by side, their
+    # shared corners typed that way, scored 13.7% in UTM zone 13, where
+    # their outline as one box scores 0.26%.  Planar coordinates up to 2e7 m
+    # from the origin carry rounding of a few 1e-9 m, a few parts in 1e6 of
+    # 1 mm.  A layer with no pair 1 mm or longer scores NA, as a layer of
+    # one location does.
+    keep  <- is.finite(d_geo) & is.finite(d_prj) & d_geo >= 1e-3
     if (!any(keep)) return(NA_real_)
     max(abs(d_prj[keep] / d_geo[keep] - 1))
   }, error = function(e) NA_real_)
+}
+
+
+#' The vertices of a layer of any geometry class, with their ring keys
+#'
+#' \code{sf::st_coordinates()} for a layer of one geometry type.  A layer
+#' that mixes types (class \code{sfc_GEOMETRY}) or holds collections
+#' (\code{sfc_GEOMETRYCOLLECTION}), which \code{sf::st_coordinates()}
+#' refuses, is read part by part: each collection is unpacked into its
+#' members, and every part that is not a collection is a leaf, numbered in
+#' the order of the layer.  The leaves are read one geometry type at a time
+#' and put back in that order.  \code{L1} is the leaf, \code{L2} numbers the
+#' points of a POINT or MULTIPOINT leaf (0 for other leaves), so that no two
+#' of them share a ring key and nothing is filled between them, and
+#' \code{L3} and \code{L4} are the leaf's own ring and part (0 where it has
+#' none).  Empty parts and empty leaves are left out, and Z and M are
+#' dropped from such a layer.
+#'
+#' @param g An sfc.
+#' @return A numeric matrix with columns \code{X} and \code{Y} first, then
+#'   the columns of \code{sf::st_coordinates()} or \code{L1} to \code{L4};
+#'   one row per vertex.
+#' @keywords internal
+#' @noRd
+.vertex_coords <- function(g) {
+  if (!inherits(g, c("sfc_GEOMETRY", "sfc_GEOMETRYCOLLECTION")))
+    return(sf::st_coordinates(g))
+  if (any(.geom_dims(g) != "XY")) g <- sf::st_zm(g, drop = TRUE, what = "ZM")
+  # Empty parts first: sf::st_is_empty() calls a MULTIPOLYGON or
+  # MULTILINESTRING leaf empty when its first part is empty.
+  g <- .drop_empty_parts(g)
+  leaves_of <- function(s)
+    if (inherits(s, "GEOMETRYCOLLECTION"))
+      unlist(lapply(unclass(s), leaves_of), recursive = FALSE)
+    else list(s)
+  leaves <- unlist(lapply(unclass(g), leaves_of), recursive = FALSE)
+  leaves <- leaves[!vapply(leaves, sf::st_is_empty, logical(1))]
+  cols   <- c("X", "Y", "L1", "L2", "L3", "L4")
+  if (!length(leaves)) return(matrix(numeric(0), 0L, length(cols), dimnames = list(NULL, cols)))
+  ty   <- vapply(leaves, function(s) class(s)[2L], character(1))
+  out  <- lapply(unique(ty), function(t) {
+    idx <- which(ty == t)
+    cc  <- sf::st_coordinates(sf::st_sfc(leaves[idx]))
+    lc  <- which(grepl("^L[0-9]+$", colnames(cc)))
+    # The last L column numbers the leaves of this type; those before it
+    # are the leaf's own rings and parts.
+    leaf <- if (length(lc)) idx[cc[, lc[length(lc)]]] else idx
+    own  <- cbind(cc[, lc[-length(lc)], drop = FALSE], matrix(0, nrow(cc), 2L))[, 1:2, drop = FALSE]
+    pt   <- if (t %in% c("POINT", "MULTIPOINT")) seq_len(nrow(cc)) else rep(0L, nrow(cc))
+    cbind(cc[, 1L], cc[, 2L], leaf, pt, own)
+  })
+  out <- do.call(rbind, out)
+  out <- out[order(out[, 3L]), , drop = FALSE]
+  dimnames(out) <- list(NULL, cols)
+  out
+}
+
+
+#' One point per distinct location, rows without a finite one left out
+#'
+#' Keyed on exact coordinates through a sort on x and then y, not
+#' \code{unique()} on the coordinate matrix.  The rows kept keep their
+#' order, and of the copies of one location the first is kept.  An object
+#' whose coordinates are not one row per point is returned as it came.
+#'
+#' @param g An sfc of non-empty points.
+#' @return \code{g} without copies and without rows at a coordinate that is
+#'   not finite.
+#' @keywords internal
+#' @noRd
+.distinct_located_points <- function(g) {
+  cc <- tryCatch(sf::st_coordinates(g), error = function(e) NULL)
+  if (is.null(cc) || nrow(cc) != length(g)) return(g)
+  ok <- which(is.finite(cc[, 1L]) & is.finite(cc[, 2L]))
+  if (!length(ok)) return(g[0L])
+  o <- ok[order(cc[ok, 1L], cc[ok, 2L])]
+  s <- cc[o, 1:2, drop = FALSE]
+  keep <- o[c(TRUE, s[-1L, 1L] != s[-nrow(s), 1L] | s[-1L, 2L] != s[-nrow(s), 2L])]
+  if (length(keep) == length(g)) g else g[sort(keep)]
+}
+
+
+#' The distinct located vertices of a layer in longitude and latitude
+#'
+#' Read with \code{.vertex_coords()}, so a layer of mixed types or of
+#' collections is read feature by feature.  A vertex with a coordinate that
+#' is not finite or lies beyond \code{.POOL_XY_MAX} is left out, and so is
+#' one at a latitude beyond 90, which no CRS places; copies of one vertex
+#' count once.  Left in, a swapped row at (40, -96) among 39 stations over
+#' the conterminous United States failed every candidate, and the layer got
+#' Web Mercator, which cannot place that row either.
+#'
+#' @param x An sf or sfc object in longitude and latitude.
+#' @return A two-column matrix of x and y; \code{NULL} when the vertices
+#'   cannot be read.
+#' @keywords internal
+#' @noRd
+.located_vertices <- function(x) {
+  xy <- tryCatch(.vertex_coords(sf::st_geometry(x)), error = function(e) NULL)
+  if (is.null(xy)) return(NULL)
+  xy <- xy[, 1:2, drop = FALSE]
+  ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L]) &
+    abs(xy[, 1L]) <= .POOL_XY_MAX & abs(xy[, 2L]) <= 90
+  xy <- xy[ok, , drop = FALSE]
+  if (nrow(xy) < 2L) return(unname(xy))
+  o <- order(xy[, 1L], xy[, 2L])
+  s <- xy[o, , drop = FALSE]
+  unname(s[c(TRUE, s[-1L, 1L] != s[-nrow(s), 1L] | s[-1L, 2L] != s[-nrow(s), 2L]), ,
+           drop = FALSE])
+}
+
+
+#' Which features have a vertex at a latitude beyond 90
+#'
+#' Such a vertex has no place on the Earth, and no CRS places it.  Read on
+#' the second coordinate of each vertex, in degrees; a coordinate that is
+#' not finite does not count here (\code{.unlocated_features()} reads it).
+#' The features are read one by one only when some finite coordinate of the
+#' layer lies beyond 90.  That test reads the coordinates themselves, not
+#' \code{sf::st_bbox()}: sf keeps the box it stored on the column when a row
+#' is replaced with \code{[[<-}, so a row edited to latitude 95 passed.
+#'
+#' @param g An sfc in longitude and latitude, in degrees.
+#' @return A logical vector, one element per feature.
+#' @keywords internal
+#' @noRd
+.beyond_pole_features <- function(g) {
+  n   <- length(g)
+  out <- logical(n)
+  if (!n) return(out)
+  v <- unlist(unclass(g), use.names = FALSE)
+  if (!length(v) || !any(is.finite(v) & abs(v) > 90)) return(out)
+  far <- function(y) any(is.finite(y) & abs(y) > 90)
+  # A POINT is a vector, a LINESTRING or MULTIPOINT a matrix, and the other
+  # types (collections included) lists of those.
+  bad <- function(s) {
+    if (is.list(s)) return(any(vapply(s, bad, logical(1))))
+    if (is.matrix(s)) return(nrow(s) > 0L && far(s[, 2L]))
+    length(s) >= 2L && far(s[2L])
+  }
+  vapply(unclass(g), bad, logical(1))
+}
+
+#' The rows of a lon/lat layer that only a latitude beyond 90 leaves without
+#' a location
+#'
+#' The rows \code{.unlocated_features(lat = TRUE)} adds to those it marks
+#' by default: rows of a layer in a geographic CRS with a vertex at a
+#' latitude beyond 90 degrees and no coordinate that is not finite or lies
+#' beyond 1e150.  Empty for a layer in any other CRS or none.
+#'
+#' @param x An sf or sfc object.
+#' @return The positions of those rows, possibly none.
+#' @keywords internal
+#' @noRd
+.beyond_pole_rows <- function(x) {
+  g <- sf::st_geometry(x)
+  if (!length(g) || !.is_longlat(g)) return(integer(0))
+  which(.beyond_pole_features(g) & !.unlocated_features(g))
+}
+
+#' Warn that rows of a lon/lat layer have a latitude beyond 90
+#'
+#' @param rows The rows (\code{.beyond_pole_rows()}).
+#' @param n The number of rows of the caller's layer.
+#' @param caller,arg The function and its argument the warning names.
+#' @param done What the call does with such rows, one clause for one row
+#'   and one for several.
+#' @return \code{NULL}, invisibly.  The warning, of class
+#'   \code{"spatialkit_lat_beyond_90"}, carries \code{rows} and \code{n}.
+#' @keywords internal
+#' @noRd
+.warn_beyond_pole <- function(rows, n, caller, arg, done) {
+  if (!length(rows)) return(invisible(NULL))
+  one <- length(rows) == 1L
+  .warn_classed(
+    "spatialkit_lat_beyond_90",
+    paste0("%s(): %s of the %d of `%s` %s a vertex at a latitude beyond 90 ",
+           "degrees, which is no place on the Earth, so %s. Coordinates in ",
+           "metres stamped with a geographic CRS, or x and y swapped, are the ",
+           "usual cause: check the CRS of `%s` (sf::st_crs()) and the order ",
+           "of its coordinates."),
+    caller, .rows_text(rows), n, arg, if (one) "has" else "have",
+    if (one) done[[1L]] else done[[2L]], arg,
+    data = list(rows = rows, n = n))
+  invisible(NULL)
+}
+
+
+#' Whether a CRS places every one of a set of points
+#'
+#' The points are moved from \code{from} to \code{crs} with
+#' \code{sf::st_transform()} as one MULTIPOINT.  GDAL returns a MULTIPOINT
+#' with a member it cannot move as an empty geometry, and drops such a
+#' vertex from a line or a ring; either way the count or a coordinate tells.
+#'
+#' @param xy A two-column matrix (\code{.located_vertices()}); \code{NULL}
+#'   when the vertices could not be read, which places nothing that can be
+#'   tested and gives \code{TRUE}.
+#' @param from The CRS of \code{xy}.
+#' @param crs The candidate CRS.
+#' @return \code{TRUE} when every point comes back with finite coordinates.
+#' @keywords internal
+#' @noRd
+.places_vertices <- function(xy, from, crs) {
+  if (is.null(xy) || !nrow(xy)) return(TRUE)
+  pp <- tryCatch(
+    sf::st_coordinates(sf::st_transform(sf::st_sfc(sf::st_multipoint(xy), crs = from), crs)),
+    error = function(e) NULL)
+  !is.null(pp) && nrow(pp) == nrow(xy) && all(is.finite(pp[, 1:2]))
+}
+
+
+#' The rows of a layer that a move left without some of their location
+#'
+#' Compares a layer before a move between CRSs with the layer after it.  A
+#' row that had a location (not empty, and no coordinate that is not finite
+#' or lies beyond \code{.POOL_XY_MAX}; \code{.unlocated_features()}) and
+#' comes back empty, with fewer vertices, or with an x or y that is no
+#' longer finite was not placed by the move: \code{sf::st_transform()}
+#' returns a point it cannot move as an empty point and drops such a vertex
+#' from a line or a ring.
+#'
+#' @param before,after The layer before and after the move, row for row.
+#' @return The positions of those rows, possibly none.
+#' @keywords internal
+#' @noRd
+.rows_unplaced <- function(before, after) {
+  gb  <- sf::st_geometry(before)
+  ga  <- sf::st_geometry(after)
+  if (length(gb) != length(ga) || !length(gb)) return(integer(0))
+  had <- !sf::st_is_empty(.drop_empty_parts(gb)) & !.unlocated_features(gb)
+  if (!any(had)) return(integer(0))
+  gone <- sf::st_is_empty(.drop_empty_parts(ga)) & had
+  lost <- function(b, a) length(a) != length(b) || any(is.finite(b) & !is.finite(a))
+  # One pass over the whole layer when nothing is lost, which is nearly
+  # always; row by row otherwise.
+  if (!any(gone) && !lost(unlist(unclass(gb)[had]), unlist(unclass(ga)[had])))
+    return(integer(0))
+  # Row by row, the vertices and their x and y are compared: a layer that
+  # mixes XY and XYZ is moved in the dimension of its first geometry, and
+  # an XYZ point among XY points comes back placed, without its Z.  They
+  # are read off the geometry list, which reads a collection as well
+  # (sf::st_coordinates() does not).
+  xy <- function(s) {
+    if (is.matrix(s)) return(s[, 1:2, drop = FALSE])
+    if (is.list(s)) {
+      parts <- lapply(s, xy)
+      return(if (length(parts)) do.call(rbind, parts) else matrix(numeric(0), 0L, 2L))
+    }
+    if (length(s) >= 2L) matrix(s[1:2], 1L) else matrix(numeric(0), 0L, 2L)
+  }
+  lost_xy <- function(b, a) {
+    cb <- xy(b); ca <- xy(a)
+    nrow(cb) != nrow(ca) || any(is.finite(cb) & !is.finite(ca))
+  }
+  rows <- which(had)
+  rows[gone[rows] | vapply(rows, function(i) lost_xy(gb[[i]], ga[[i]]), logical(1))]
+}
+
+
+#' Warn that a move to another CRS left rows unplaced
+#'
+#' Every move of a caller's layer through \code{.transform_keep_unlocated()}
+#' calls this with the layer before and after the move:
+#' \code{ensure_projected()}, \code{harmonize_crs()},
+#' \code{.transform_or_stamp()}, \code{.align_crs()}, \code{.cover_follow()},
+#' the moves of \code{assign_features_to_polygons()} and the free cells of
+#' \code{cell_values_at()}.  The warning names the function the caller
+#' called, the argument it passed and the CRS the layer was in.
+#'
+#' @param before,after As for \code{.rows_unplaced()}.  \code{before} carries
+#'   the CRS the layer was moved from.
+#' @param caller,arg The function and the argument the warning names.
+#' @param label The layer as the message names it; the argument in
+#'   backticks by default.
+#' @param remedy The sentence that ends the message: what the caller can
+#'   change.
+#' @param at,n When \code{before} holds some of the rows of the caller's
+#'   layer: their positions in it, and how many rows it has.
+#' @return \code{NULL}, invisibly.  The warning, of class
+#'   \code{"spatialkit_rows_unplaced"}, carries \code{rows} and \code{n}.
+#'   Inside a span opened by \code{.unplaced_in_words_of()} for \code{arg},
+#'   it names the function and the argument of that span, and its rows.
+#' @keywords internal
+#' @noRd
+.warn_rows_unplaced <- function(before, after, caller = "ensure_projected", arg = "x",
+                                label = sprintf("`%s`", arg),
+                                remedy = "Pass a target_crs that holds every location of the layer.",
+                                at = NULL, n = NULL) {
+  rows <- .rows_unplaced(before, after)
+  if (!length(rows)) return(invisible(NULL))
+  if (!is.null(at)) rows <- at[rows]
+  n <- n %||% length(sf::st_geometry(before))
+  outer <- .unplaced_words$span
+  if (!is.null(outer) && !is.null(outer$args[[arg]])) {
+    a <- outer$args[[arg]]
+    caller <- outer$caller; label <- sprintf("`%s`", a$arg); remedy <- .UNPLACED_REMEDY
+    if (!is.null(a$at)) rows <- a$at[rows]
+    n <- a$n %||% n
+  }
+  .warn_classed("spatialkit_rows_unplaced",
+                paste0("%s(): the move of %s to %s cannot place every vertex of %s ",
+                       "of its %d, which %s a location in %s; ",
+                       "%s back empty or without the vertices it cannot place. %s"),
+                caller, label, .fold_crs_label(after), .rows_text(rows), n,
+                if (length(rows) == 1L) "has" else "have",
+                .crs_of_location(before),
+                if (length(rows) == 1L) "it comes" else "they come",
+                remedy,
+                data = list(rows = rows, n = n))
+  invisible(NULL)
+}
+
+
+#' The CRS a layer's locations are in, as a message names it
+#'
+#' @param x An sf or sfc object.
+#' @return "longitude and latitude" for a geographic CRS; otherwise its EPSG
+#'   code ("EPSG:3857"), else its name, else "its CRS"; "its coordinates"
+#'   for a layer without a CRS.
+#' @keywords internal
+#' @noRd
+.crs_of_location <- function(x) {
+  cr <- sf::st_crs(x)
+  if (is.na(cr)) return("its coordinates")
+  if (isTRUE(sf::st_is_longlat(cr))) return("longitude and latitude")
+  epsg <- cr$epsg
+  if (length(epsg) == 1L && !is.na(epsg)) return(paste0("EPSG:", epsg))
+  nm <- tryCatch(cr$Name, error = function(e) NULL)
+  if (is.character(nm) && length(nm) == 1L && !is.na(nm) && nzchar(nm) &&
+      !identical(nm, "unknown")) return(nm)
+  "its CRS"
+}
+
+
+# A function that hands its layers to another exported function, which
+# moves them, opens a span here so that the warning names the function the
+# user called and the argument the layer came from, and its rows:
+# cell_values_at() gives assign_features_to_polygons() the rows of
+# `newdata` that have a location and the polygons of `values` that carry an
+# ID.
+.unplaced_words <- new.env(parent = emptyenv())
+
+#' A layer without a CRS as harmonize_crs() read it before a move
+#'
+#' harmonize_crs() takes a layer without a CRS whose coordinates look like
+#' longitude and latitude for EPSG:4326 and moves it; one that does not look
+#' so is only given the other layer's CRS, and nothing is moved.  A caller
+#' that compares the layer it passed with the one returned
+#' (\code{.warn_rows_unplaced()}) compares the first as EPSG:4326, so the
+#' warning names longitude and latitude, as harmonize_crs()'s does.
+#'
+#' @param before The layer passed to harmonize_crs().
+#' @param after The layer it returned.
+#' @return \code{before}, given EPSG:4326 when it has no CRS, \code{after}
+#'   has one, and its coordinates look like longitude and latitude.
+#' @keywords internal
+#' @noRd
+.as_harmonize_read <- function(before, after) {
+  if (is.na(sf::st_crs(before)) && !is.na(sf::st_crs(after)) &&
+      isTRUE(.looks_like_lonlat(before)$lonlat))
+    sf::st_set_crs(before, 4326)
+  else before
+}
+
+
+#' Open a span in which the movers' warning speaks for the calling function
+#'
+#' @param caller The function the user called.
+#' @param args Named list, one entry per argument of the inner function to
+#'   translate: \code{arg}, the caller's argument; \code{at}, the rows of it
+#'   the inner layer holds, in order (\code{NULL} for all); \code{n}, its
+#'   number of rows.
+#' @return A function that closes the span.
+#' @keywords internal
+#' @noRd
+.unplaced_in_words_of <- function(caller, args) {
+  outer <- .unplaced_words$span
+  .unplaced_words$span <- list(caller = caller, args = args)
+  function() {
+    .unplaced_words$span <- outer
+    invisible(NULL)
+  }
+}
+
+
+#' The sentence a mover's warning ends with where the caller names no CRS
+#'
+#' The layer goes to a CRS the call takes from its other inputs, so only
+#' the rows can change.
+#' @keywords internal
+#' @noRd
+.UNPLACED_REMEDY <- "Correct or drop those rows."
+
+
+#' Rows named in a message
+#'
+#' @param r Row numbers.
+#' @return "row 3", "rows 2, 5 and 7", or the first six and how many more.
+#' @keywords internal
+#' @noRd
+.rows_text <- function(r) {
+  k <- length(r)
+  if (k == 1L) sprintf("row %d", r)
+  else if (k <= 6L) sprintf("rows %s and %d", paste(r[-k], collapse = ", "), r[k])
+  else sprintf("rows %s and %d more", paste(r[1:6], collapse = ", "), k - 6L)
+}
+
+
+#' Sort keys of polygons, read off their coordinates
+#'
+#' One row per polygon of \code{g}: the bounding box (\code{xmin},
+#' \code{ymin}, \code{xmax}, \code{ymax}), then the means of the vertices'
+#' x, y, x^2, y^2 and x * y.  The means are taken over each ring's vertices
+#' without its closing vertex, so they do not depend on where a ring starts
+#' or which way it runs, and they tell apart polygons that share a bounding
+#' box: the two triangles of a split square, or a square and the diamond
+#' inscribed in it.  Two polygons agree on all nine when they are copies of
+#' one polygon, which measure the same, and otherwise only in constructed
+#' cases, such as a polygon whose vertices average to the centre of its box
+#' and the same polygon turned half a circle about that centre; such a pair
+#' keeps its row order.  The coordinates are read off the geometry lists in
+#' one pass per geometry type, about 2 microseconds a polygon.
+#'
+#' @param g An sfc of POLYGON and MULTIPOLYGON geometries, none empty.
+#' @return A numeric matrix, \code{length(g)} rows and nine columns.
+#' @keywords internal
+#' @noRd
+.polygon_sort_keys <- function(g) {
+  nm    <- c("xmin", "ymin", "xmax", "ymax", "mx", "my", "mxx", "myy", "mxy")
+  out   <- matrix(NA_real_, length(g), length(nm), dimnames = list(NULL, nm))
+  types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
+  for (ty in unique(types)) {
+    w <- which(types == ty)
+    # The rings as one list of coordinate matrices, and the feature each
+    # belongs to.  Read off the lists directly: sf::st_coordinates() alone
+    # costs about 7 microseconds a polygon.
+    gw    <- unclass(g)[w]
+    polys <- if (ty == "MULTIPOLYGON") unlist(gw, recursive = FALSE) else gw
+    feat  <- if (ty == "MULTIPOLYGON") rep(seq_along(w), lengths(gw)) else seq_along(w)
+    rings <- unlist(polys, recursive = FALSE)
+    f_r   <- rep(feat, lengths(polys))
+    d     <- vapply(rings, dim, integer(2))
+    from  <- cumsum(c(1L, d[1L, ] * d[2L, ]))[seq_len(ncol(d))]
+    # A matrix unlists column by column: a ring's x, then its y.  The last
+    # row of each ring is its closing vertex, a repeat of its first.
+    nk <- pmax(d[1L, ] - 1L, 0L)
+    v  <- unlist(rings, use.names = FALSE)
+    x  <- v[sequence(nk, from = from)]
+    y  <- v[sequence(nk, from = from + d[1L, ])]
+    f  <- rep(f_r, nk)
+    s  <- rowsum(cbind(x, y, x * x, y * y, x * y), f)
+    k  <- as.integer(rownames(s))
+    out[w[k], 5:9] <- s / tabulate(f, nbins = length(w))[k]
+    # The box: each feature's first and last vertex in the order of x, then
+    # of y.
+    for (j in 1:2) {
+      z  <- if (j == 1L) x else y
+      o  <- order(f, z)
+      fo <- f[o]
+      lo <- !duplicated(fo); hi <- !duplicated(fo, fromLast = TRUE)
+      out[w[fo[lo]], j]      <- z[o][lo]
+      out[w[fo[hi]], j + 2L] <- z[o][hi]
+    }
+  }
+  out
 }
 
 
@@ -600,9 +1422,17 @@
 #' The counterpart of \code{.crs_distance_error()} for the property a density
 #' or a rate depends on.  Probe polygons are measured twice: their planar
 #' area in \code{crs} and their geodesic area on the globe.  The probes are the
-#' layer's own polygons when it has them (up to \code{max_n}, by evenly spaced
-#' index), otherwise an \code{n x n} grid over its bounding box.  An equal-area
-#' projection makes the ratio of the two the same for every probe (up to the
+#' layer's own polygons when it has them, otherwise an \code{n x n} grid over
+#' its bounding box.  Copies of a polygon are one probe: the probes are the
+#' distinct polygons, the first copy of each kept, so a layer that lists a
+#' polygon once per period, or one cell twice, gives the figure of its
+#' distinct polygons.  Above \code{max_n} polygons, \code{max_n} are taken at
+#' even spacing along the polygons sorted by \code{.polygon_sort_keys()} (the
+#' bounding box in the layer's CRS, then the means of the vertices), and the
+#' polygons with the smallest \code{xmin} and \code{ymin} and the largest
+#' \code{xmax} and \code{ymax} are added, so the figure does not depend on the
+#' order of the rows.  An equal-area projection makes the ratio of the two the
+#' same for every probe (up to the
 #' sphere-versus-ellipsoid factor of the s2 areas, which drifts slowly with
 #' latitude and stays within a few tenths of a percent), so the figure
 #' returned is the spread of that ratio: the largest relative departure from
@@ -613,16 +1443,28 @@
 #' @param x An sf/sfc object with a CRS.
 #' @param crs The projection to score; default the CRS of \code{x}.
 #' @param n Probe grid size when \code{x} has no polygons.
-#' @param max_n Largest number of the layer's own polygons to measure.
+#' @param max_n Number of the layer's own polygons to measure at even spacing
+#'   when it has more; up to three more are added at the extremes.
 #' @param grid Logical; probe with the \code{n x n} grid over the bounding box
 #'   even when \code{x} has polygons.  A single study-area polygon is one
 #'   probe, and one ratio has no spread to measure.
+#' @param one_by_grid Logical; a layer of one distinct polygon whose planar
+#'   and geodesic areas are measured is measured on the \code{n x n} grid
+#'   over its bounding box instead of giving \code{NA}.
 #' @return Numeric worst-case \code{|ratio / median(ratio) - 1|}, or
-#'   \code{NA} when it cannot be computed (no CRS, no area, geodesic areas
-#'   unavailable).
+#'   \code{NA} when it cannot be computed (no CRS, fewer than two probes
+#'   with an area, a probe whose geodesic area is unavailable, a probe
+#'   polygon \code{sf::st_is_valid()} rejects in a projected \code{crs}, a
+#'   probe with a coordinate beyond \code{.LONLAT_MOVE_MAX} in a projected
+#'   \code{crs}).  A probe
+#'   with two vertices that fall on one point in degrees is measured there
+#'   without the repeat; a probe s2 refuses even then makes the figure
+#'   \code{NA}.  With \code{one_by_grid}, a layer of one distinct polygon
+#'   that is measured gets the grid's figure.
 #' @keywords internal
 #' @noRd
-.crs_area_error <- function(x, crs = NULL, n = 6L, max_n = 200L, grid = FALSE) {
+.crs_area_error <- function(x, crs = NULL, n = 6L, max_n = 200L, grid = FALSE,
+                            one_by_grid = FALSE) {
   tryCatch({
     if (is.null(crs)) crs <- sf::st_crs(x)
     if (is.na(crs) || is.na(sf::st_crs(x))) return(NA_real_)
@@ -630,13 +1472,89 @@
     g <- g[!sf::st_is_empty(g)]
     if (!length(g)) return(NA_real_)
     types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
-    probe <- if (!isTRUE(grid) && all(types %in% c("POLYGON", "MULTIPOLYGON"))) {
-      if (length(g) > max_n) g[unique(round(seq(1, length(g), length.out = max_n)))] else g
+    own   <- !isTRUE(grid) && all(types %in% c("POLYGON", "MULTIPOLYGON"))
+    probe <- if (own) {
+      # One probe per distinct polygon.  Counted by row, copies of a polygon
+      # weighted the median by their number, took places in the sample above
+      # `max_n`, and two copies of one polygon passed as two probes: three
+      # 50 km squares of a UTM zone measured 0.93% once each and 1.04% with
+      # the left one listed three times (a warning, and a refused density),
+      # and one Web Mercator box listed twice measured 0 where alone it is
+      # unmeasured.  Copies agree on every sort key, so only polygons whose
+      # keys tie with a neighbour's are compared, exactly, and the first
+      # copy of each is kept; polygons that tie on the keys without being
+      # copies are both kept.  Below `max_n` polygons a failure to read the
+      # keys leaves the layer as it is, as before the keys were read there.
+      k <- if (length(g) > max_n) .polygon_sort_keys(g)
+           else tryCatch(.polygon_sort_keys(g), error = function(e) NULL)
+      tie <- FALSE
+      if (!is.null(k)) {
+        rk <- order(k[, 1L], k[, 2L], k[, 3L], k[, 4L], k[, 5L], k[, 6L], k[, 7L],
+                    k[, 8L], k[, 9L])
+        ks <- k[rk, , drop = FALSE]
+        tie <- c(FALSE, rowSums(ks[-1L, , drop = FALSE] != ks[-nrow(ks), , drop = FALSE]) == 0) %in% TRUE
+      }
+      if (any(tie)) {
+        cand <- which(tie | c(tie[-1L], FALSE))
+        dup  <- logical(length(rk))
+        dup[cand] <- duplicated(unclass(g)[rk[cand]])
+        if (any(dup)) {
+          keep <- sort(rk[!dup])
+          g  <- g[keep]
+          k  <- k[keep, , drop = FALSE]
+          rk <- order(k[, 1L], k[, 2L], k[, 3L], k[, 4L], k[, 5L], k[, 6L], k[, 7L],
+                      k[, 8L], k[, 9L])
+        }
+      }
+      if (length(g) > max_n) {
+        # Evenly spaced along the polygons sorted by their bounding boxes, not
+        # along the rows: by row, which polygons were measured changed with
+        # the order of the layer, and with it the figure and whether
+        # summarize_by_cell(area = TRUE) refused the cells (300 cells of a
+        # UTM zone, one of them 700 km east of its central meridian, were
+        # refused in five of eight row orders).  The keys are read off the
+        # coordinates and never fail, where st_point_on_surface() or
+        # st_centroid() can fail on a polygon GEOS or s2 rejects, and a
+        # failure here would make summarize_by_cell(area = TRUE) refuse the
+        # cells as unmeasurable.  Polygons that share a bounding box are
+        # ordered by the means of their vertices: on the box alone they kept
+        # their row order, and 300 Delaunay triangles of gridded points, each
+        # sharing its box with the other half of its square, were refused in
+        # 2 of 21 row orders and given a density in the other 19.  The
+        # polygons with the smallest xmin and ymin and the largest xmax and
+        # ymax are always measured: even spacing along the sorted polygons
+        # can pass over the one that reaches furthest in y, and under a conic
+        # CRS 300 cells whose ratios spread by 7.5 percent, one of them far
+        # north of the rest, got a density.  The keys cost about 2
+        # microseconds a polygon; sf::st_bbox() on each polygon cost 8.
+        ks <- k[rk, , drop = FALSE]
+        at <- c(round(seq(1, length(g), length.out = max_n)),
+                which.min(ks[, "xmin"]), which.min(ks[, "ymin"]),
+                which.max(ks[, "xmax"]), which.max(ks[, "ymax"]))
+        g[rk[sort(unique(at))]]
+      } else g
     } else {
       bb <- sf::st_bbox(sf::st_transform(g, crs))
       sf::st_make_grid(sf::st_as_sfc(bb), n = c(n, n), what = "polygons")
     }
     probe  <- sf::st_transform(probe, crs)
+    # A polygon GEOS calls invalid in a projected CRS has a planar area that
+    # is not the area it encloses (a hole outside its shell is subtracted,
+    # the lobes of a bowtie cancel), while s2 may measure it in degrees: the
+    # ratio then measures the polygon, not the CRS.  Three 10 km squares of
+    # UTM zone 15 beside a square with a hole outside its shell measured 40
+    # percent, and ensure_projected(purpose = "area") logged it.  Such a
+    # layer is left unmeasured here; ensure_projected() then measures the
+    # grid over the extent, and summarize_by_cell(area = TRUE) refuses the
+    # invalid cells before it gets here.
+    if (own && !isTRUE(sf::st_is_longlat(crs)) &&
+        !all(sf::st_is_valid(probe) %in% TRUE)) return(NA_real_)
+    # A probe of a projected CRS with a coordinate beyond .LONLAT_MOVE_MAX is
+    # not on the Earth and has no geodesic area, so the figure is NA, as for
+    # a probe s2 refuses below.  Moved to EPSG:4326 from Web Mercator at
+    # x = 1e20, it never came back from PROJ.
+    if (!isTRUE(sf::st_is_longlat(crs)) && any(.beyond_lonlat_move(probe)))
+      return(NA_real_)
     # Densify before going to lon/lat: s2 reads each edge as a great circle,
     # and over a continental probe that is not the straight edge the planar
     # area was measured on -- an Equal Earth grid over a near-global extent
@@ -652,12 +1570,361 @@
     # asks lwgeom for them, which is not a dependency, the error became NA
     # here, and summarize_by_cell(area = TRUE) then refused every grid while
     # ensure_projected(purpose = "area") skipped its distortion check.
-    geod   <- .with_s2(as.numeric(sf::st_area(sf::st_transform(probe, 4326))))
+    # When the one call fails, each probe is measured on its own, and a probe
+    # s2 refuses is measured again without the vertices that repeat the one
+    # before them in degrees.  Two corners a fraction of a nanometre apart in
+    # the layer's CRS can fall on one point in degrees, and s2 refuses the
+    # ring ("duplicate vertex"); an exact repeated vertex, which GEOS
+    # accepts, does the same.  4 of 133 k-means cells kept in EPSG:32615 for
+    # rows in degrees did, the one call made the figure NA, and
+    # summarize_by_cell(area = TRUE) refused cells that are valid in their
+    # own CRS.  Dropping a repeat leaves the ring's points in degrees as
+    # they were, so no area moves.  st_make_valid() is not used: it snaps
+    # the vertices to 1e-7 degrees, which moves an area by up to about the
+    # perimeter times a centimetre, and on cells a few metres across moves
+    # the ratio by more than the tolerance.
+    p_ll <- sf::st_transform(probe, 4326)
+    geod <- .with_s2(tryCatch(as.numeric(sf::st_area(p_ll)), error = function(e)
+      vapply(seq_along(p_ll), function(i)
+        tryCatch(as.numeric(sf::st_area(p_ll[i])), error = function(e)
+          tryCatch(as.numeric(sf::st_area(.drop_repeated_vertices(p_ll[i]))),
+                   error = function(e) NA_real_)),
+        numeric(1))))
+    # A probe s2 refuses even then (crossing edges, a spike) leaves the
+    # figure unmeasured.  Leaving it out let the probes that carry the
+    # distortion drop out of the spread: 20 Web Mercator cells from 30N to
+    # 67N, 18 of them with a repeated vertex, measured 7e-15 over the two
+    # left, where all twenty give 1.87.
+    if (anyNA(geod)) return(NA_real_)
     ratio  <- planar / geod
     ok <- is.finite(ratio) & is.finite(geod) & geod > 0
-    if (sum(ok) < 2L) return(NA_real_)
+    if (sum(ok) < 2L) {
+      # One polygon is one ratio, with no spread to measure.  With
+      # one_by_grid, a layer of one distinct polygon whose areas are both
+      # measured is measured on the grid over its bounding box, as a layer
+      # without polygons is; a polygon s2 refuses stays unmeasured above.
+      if (isTRUE(one_by_grid) && own && length(g) == 1L && sum(ok) == 1L)
+        return(.crs_area_error(x, crs = crs, n = n, max_n = max_n, grid = TRUE))
+      return(NA_real_)
+    }
     max(abs(ratio[ok] / stats::median(ratio[ok]) - 1))
   }, error = function(e) NA_real_)
+}
+
+#' A polygon without the vertices that repeat the one before them
+#'
+#' Each ring keeps its first vertex and every vertex whose x or y differs from
+#' the one before it, so the ring's points and the area it encloses are as
+#' they were, and the ring stays closed.  Other coordinates (z, m) are kept
+#' and not compared.  In a GEOMETRYCOLLECTION the rings of each polygon
+#' member are treated so, and the other members are kept as they were.  Used
+#' by \code{.crs_area_error()} on a probe s2 refuses in degrees, and by
+#' \code{.s2_mend()}.
+#'
+#' With \code{tol} above 0 a vertex is also dropped when neither its x nor
+#' its y differs by more than \code{tol} from the last vertex kept, and a
+#' vertex that close to the ring's last vertex is dropped before it; the
+#' last vertex is kept, so the ring stays closed.  No vertex moves, and the
+#' area changes by less than the ring's length times \code{tol}.  A ring
+#' that would keep fewer than four vertices is kept as it was.  Used by
+#' create_grid_polygons() on clipped cells s2 refuses in degrees.
+#'
+#' @param g An sfc of one POLYGON, MULTIPOLYGON or GEOMETRYCOLLECTION.
+#' @param tol How far apart, in the units of the coordinates, two vertices
+#'   are read as one; 0 for exact repeats only.
+#' @return The same sfc with each ring's repeats dropped.
+#' @keywords internal
+#' @noRd
+.drop_repeated_vertices <- function(g, tol = 0) {
+  ring <- function(r) {
+    if (nrow(r) < 2L) return(r)
+    if (!(tol > 0)) {
+      moved <- r[-1L, 1L] != r[-nrow(r), 1L] | r[-1L, 2L] != r[-nrow(r), 2L]
+      return(r[c(TRUE, moved), , drop = FALSE])
+    }
+    n <- nrow(r)
+    apart <- function(i, j) max(abs(r[i, 1:2] - r[j, 1:2])) > tol
+    keep <- 1L
+    for (k in seq_len(max(0L, n - 2L)) + 1L)
+      if (apart(k, keep[length(keep)])) keep <- c(keep, k)
+    while (length(keep) > 1L && !apart(keep[length(keep)], n))
+      keep <- keep[-length(keep)]
+    if (length(keep) + 1L < 4L) return(r)
+    r[c(keep, n), , drop = FALSE]
+  }
+  one <- function(geom) {
+    cls <- class(geom)
+    out <- if (inherits(geom, "GEOMETRYCOLLECTION")) lapply(unclass(geom), one)
+    else if (inherits(geom, "MULTIPOLYGON"))
+      lapply(unclass(geom), function(p) lapply(p, ring))
+    else if (inherits(geom, "POLYGON")) lapply(unclass(geom), ring)
+    else return(geom)
+    class(out) <- cls
+    out
+  }
+  sf::st_sfc(one(g[[1L]]), crs = sf::st_crs(g))
+}
+
+#' Features of a lon/lat layer that s2 refuses, repaired one by one
+#'
+#' The features s2 refuses (\code{.s2_refused()}) are tried again, each on
+#' its own: first without the vertices that repeat the one before them
+#' (\code{.drop_repeated_vertices()}, also for the polygons inside a
+#' collection), which leaves the ring's points in degrees as they were, and
+#' then, with \code{split}, rebuilt with crossing
+#' edges split (\code{.split_crossing_edges()}).  Every feature s2 accepts is
+#' returned as it was.  Run with s2 on (\code{.with_s2()}): the rebuild is
+#' s2's.
+#'
+#' @param g An sfc in a geographic CRS.
+#' @param split Logical; try the rebuild with crossing edges split for a
+#'   feature s2 still refuses without its repeated vertices.
+#' @return A list: \code{g}, the layer with each feature repaired that a
+#'   retry made s2 accept; \code{refused}, the positions s2 refuses after
+#'   every retry (left as they were); \code{mended}, the positions repaired.
+#' @keywords internal
+#' @noRd
+.s2_mend <- function(g, split = TRUE) {
+  bad <- .s2_refused(g)
+  refused <- integer(0)
+  for (i in bad) {
+    polygonal <- inherits(g[[i]], c("POLYGON", "MULTIPOLYGON", "GEOMETRYCOLLECTION"))
+    if (polygonal) {
+      d <- tryCatch(.drop_repeated_vertices(g[i]), error = function(e) NULL)
+      if (!is.null(d) && !length(.s2_refused(d))) {
+        g[i] <- d
+        next
+      }
+    }
+    if (isTRUE(split)) {
+      f <- .split_crossing_edges(g[i])
+      if (!is.null(f)) {
+        g[i] <- f
+        next
+      }
+    }
+    refused <- c(refused, i)
+  }
+  list(g = g, refused = refused, mended = setdiff(bad, refused))
+}
+
+#' Spherical centroids of a lon/lat layer, feature by feature where s2
+#' refuses one
+#'
+#' \code{sf::st_centroid()} of the whole layer, under the engine sf uses in
+#' the session.  When that stops because s2 refuses a feature, the features
+#' are repaired one by one (\code{.s2_mend()}) and the centroids taken again:
+#' a feature s2 accepts as it is keeps the centroid it has, a feature s2
+#' refuses only for a repeated vertex gets the centroid of the same ring, and
+#' with \code{split} a feature with crossing edges gets the centroid of its
+#' rebuild.  A feature s2 refuses after every retry gets an empty point and
+#' its position in \code{refused}; one refusal no longer takes the centroids
+#' of the other features with it.
+#'
+#' @param g An sfc.
+#' @param split As for \code{.s2_mend()}.
+#' @return A list: \code{points}, an sfc of points row for row with \code{g};
+#'   \code{refused}, the positions s2 refuses after every retry; \code{error},
+#'   s2's error for the features still refused (for the whole layer when
+#'   none is), or \code{NULL}.  An error that is not s2's refusal of a
+#'   feature of \code{g} is raised as it came.
+#' @keywords internal
+#' @noRd
+.s2_centroids <- function(g, split = TRUE) {
+  pts <- tryCatch(suppressWarnings(sf::st_centroid(g)), error = function(e) e)
+  if (!inherits(pts, "error"))
+    return(list(points = pts, refused = integer(0), error = NULL))
+  if (!isTRUE(sf::st_is_longlat(g)) || !isTRUE(sf::sf_use_s2()) ||
+      !.is_s2_ring_error(pts))
+    stop(pts)
+  m <- .s2_mend(g, split)
+  if (!length(m$mended) && !length(m$refused)) stop(pts)
+  keep <- setdiff(seq_along(g), m$refused)
+  out  <- rep(list(sf::st_point()), length(g))
+  if (length(keep))
+    out[keep] <- as.list(suppressWarnings(sf::st_centroid(m$g[keep])))
+  # The error quoted is that of the features still refused: s2's error for
+  # the whole layer named the first feature it refused, which may be one a
+  # retry mended (a repeated vertex beside a bowtie).
+  err <- pts
+  if (length(m$refused)) {
+    e2 <- tryCatch(suppressWarnings(sf::st_centroid(m$g[m$refused])),
+                   error = function(e) e)
+    if (inherits(e2, "error")) err <- e2
+  }
+  list(points = sf::st_sfc(out, crs = sf::st_crs(g)), refused = m$refused,
+       error = err)
+}
+
+#' The features whose planar centroid lies outside their bounding box
+#'
+#' GEOS weights each part of a ring by its signed area.  Where a ring's
+#' edges cross (a bowtie), or a hole lies outside its shell, parts of the
+#' feature count with opposite signs, and the point \code{sf::st_centroid()}
+#' gives is not a centroid of the feature: a bowtie 10 km across in a
+#' projected CRS, one corner 1 m off symmetric, got a point over 33,000 km
+#' away.
+#' The centroid of a feature lies in its bounding box, so a point outside
+#' the box of a feature GEOS reports invalid is such a point.  Only the
+#' centroids GEOS takes are read (a projected CRS, no CRS, or degrees with
+#' s2 off): a spherical centroid can lie outside the box of its vertices in
+#' degrees.
+#'
+#' @param g An sfc.
+#' @param pts The centroids \code{sf::st_centroid()} gave, row for row with
+#'   \code{g}.
+#' @return A list: \code{at}, the positions in \code{g} of the features
+#'   whose point lies outside their box, and \code{reasons}, GEOS's reason
+#'   for each (\code{sf::st_is_valid(reason = TRUE)}).
+#' @keywords internal
+#' @noRd
+.centroids_off_box <- function(g, pts) {
+  none <- list(at = integer(0), reasons = character(0))
+  if (!length(g) || (isTRUE(sf::st_is_longlat(g)) && isTRUE(sf::sf_use_s2())))
+    return(none)
+  ok <- tryCatch(suppressWarnings(sf::st_is_valid(g)), error = function(e) NULL)
+  if (length(ok) != length(g)) return(none)
+  bad <- which(!(ok %in% TRUE))
+  if (!length(bad)) return(none)
+  xy <- suppressWarnings(sf::st_coordinates(pts[bad]))
+  if (nrow(xy) != length(bad)) {
+    # An empty point has no coordinates; read the rows one by one.
+    xy <- t(vapply(bad, function(i) {
+      p <- unclass(pts[[i]])
+      if (length(p) >= 2L) as.numeric(p[1:2]) else c(NA_real_, NA_real_)
+    }, numeric(2)))
+  }
+  off <- vapply(seq_along(bad), function(j) {
+    x <- xy[j, 1L]; y <- xy[j, 2L]
+    if (!is.finite(x) || !is.finite(y)) return(FALSE)
+    b <- as.numeric(sf::st_bbox(g[[bad[j]]]))
+    if (!all(is.finite(b))) return(FALSE)
+    tol <- 1e-9 * max(b[3L] - b[1L], b[4L] - b[2L])
+    x < b[1L] - tol || x > b[3L] + tol || y < b[2L] - tol || y > b[4L] + tol
+  }, logical(1))
+  at <- bad[off]
+  if (!length(at)) return(none)
+  why <- tryCatch(suppressWarnings(sf::st_is_valid(g[at], reason = TRUE)),
+                  error = function(e) NULL)
+  if (length(why) != length(at)) why <- rep("invalid geometry", length(at))
+  why[is.na(why)] <- "invalid geometry"
+  list(at = at, reasons = unname(why))
+}
+
+#' Refuse the centroids GEOS puts outside their features
+#'
+#' Raises the error of class \code{"spatialkit_features_degenerate"} for
+#' the features \code{.centroids_off_box()} found, with \code{site =
+#' "geos_centroid"}, so a caller that raises it again in its own words
+#' (\code{.pointize_refused()}) can tell it from s2's refusal.
+#'
+#' @param rows The rows of \code{arg}.
+#' @param reasons GEOS's reason for each.
+#' @param n The number of rows of \code{arg}.
+#' @param caller The function the error names.
+#' @param arg The argument the error names, with its backquotes.
+#' @param remedy The closing sentence.
+#' @return Does not return.  The condition carries \code{rows}, \code{n},
+#'   \code{reasons}, \code{parent} (\code{NULL}) and \code{site}.
+#' @keywords internal
+#' @noRd
+.raise_centroids_off <- function(rows, reasons, n, caller, arg, remedy) {
+  k <- length(rows)
+  shown <- seq_len(min(k, 6L))
+  named <- paste0(paste(sprintf("row %d: \"%s\"", rows[shown], reasons[shown]),
+                        collapse = "; "),
+                  if (k > 6L) sprintf("; and %d more", k - 6L) else "")
+  msg <- sprintf(paste0(
+    "%s(): the %s GEOS takes of %d of the %d features of %s %s outside %s ",
+    "bounding box (%s). GEOS weights each part of a ring by its signed area, so where ",
+    "the edges of a ring cross, or a hole lies outside its shell, parts of the ",
+    "feature count with opposite signs and the point is not a centroid of it. %s"),
+    caller, if (k == 1L) "centroid" else "centroids", k, n, arg,
+    if (k == 1L) "lies" else "lie", if (k == 1L) "the feature's" else "each feature's",
+    named, remedy)
+  stop(errorCondition(msg, class = "spatialkit_features_degenerate", call = NULL,
+                      rows = rows, n = n, reasons = reasons, parent = NULL,
+                      repaired = FALSE, s2_forced = FALSE, site = "geos_centroid"))
+}
+
+#' Refuse the lines the temporary projection cannot place
+#'
+#' Raises the error of class \code{"spatialkit_features_degenerate"} for
+#' the rows of \code{arg} whose line the temporary projection of
+#' \code{coerce_to_points()} returned empty, without some of its vertices,
+#' or with a coordinate that is not finite.  \code{sf::st_line_sample()}
+#' segfaults on an empty line, and a crash cannot be caught, so such a line
+#' is never sampled.  \code{site = "projection"} lets a caller that raises
+#' it again in its own words (\code{.pointize_refused()}) tell it from the
+#' other refusals.
+#'
+#' @param rows The rows of \code{arg}.
+#' @param n The number of rows of \code{arg}.
+#' @param caller The function the error names.
+#' @param arg The argument the error names, with its backquotes.
+#' @param crs_label The CRS of the temporary projection, as
+#'   \code{.fold_crs_label()} gives it.
+#' @param remedy The closing sentence.
+#' @return Does not return.  The condition carries \code{rows}, \code{n},
+#'   \code{reasons}, \code{parent} (\code{NULL}), \code{site} and
+#'   \code{crs} (\code{crs_label}).
+#' @keywords internal
+#' @noRd
+.raise_unplaced_lines <- function(rows, n, caller, arg, crs_label, remedy) {
+  k <- length(rows)
+  msg <- sprintf(paste0(
+    "%s(): the temporary projection to %s, which takes the midpoints of lines, ",
+    "cannot place every vertex of %s of the %d features of %s: %s back empty or ",
+    "without the vertices it cannot place, so no midpoint is taken. %s"),
+    caller, crs_label, .rows_text(rows), n, arg,
+    if (k == 1L) "it comes" else "they come", remedy)
+  stop(errorCondition(msg, class = "spatialkit_features_degenerate", call = NULL,
+                      rows = rows, n = n,
+                      reasons = rep(sprintf("not placed in %s", crs_label), k),
+                      parent = NULL, repaired = FALSE, s2_forced = FALSE,
+                      site = "projection", crs = crs_label))
+}
+
+#' The vertices of a layer with each ring's closing vertex counted once
+#'
+#' Read feature by feature off the geometry lists, for a layer of any type,
+#' mixed types and collections included.  A ring, or a line, whose last
+#' vertex repeats its first gives that vertex once, so a mean of the
+#' vertices does not depend on where a ring starts.  Coordinates beyond x
+#' and y are not read; rows that are not finite are left out.
+#'
+#' @param g An sfc.
+#' @return A two-column matrix of x and y.
+#' @keywords internal
+#' @noRd
+.open_ring_xy <- function(g) {
+  none <- matrix(numeric(0), 0L, 2L)
+  stack <- function(l) do.call(rbind, c(list(none), l))
+  xy2 <- function(m) {
+    m <- unclass(m)
+    if (!is.matrix(m) || ncol(m) < 2L) return(none)
+    m <- m[, 1:2, drop = FALSE]
+    dimnames(m) <- NULL
+    m
+  }
+  open <- function(m) {
+    m <- xy2(m)
+    k <- nrow(m)
+    if (k >= 2L && isTRUE(m[1L, 1L] == m[k, 1L] && m[1L, 2L] == m[k, 2L]))
+      m[-k, , drop = FALSE] else m
+  }
+  leaf <- function(s) {
+    if (inherits(s, "GEOMETRYCOLLECTION")) return(stack(lapply(unclass(s), leaf)))
+    if (inherits(s, "MULTIPOLYGON"))
+      return(stack(lapply(unclass(s), function(p) stack(lapply(p, open)))))
+    if (inherits(s, c("POLYGON", "MULTILINESTRING"))) return(stack(lapply(unclass(s), open)))
+    if (inherits(s, "LINESTRING")) return(open(s))
+    if (inherits(s, "MULTIPOINT")) return(xy2(s))
+    v <- as.numeric(unclass(s))
+    if (length(v) >= 2L) matrix(v[1:2], 1L) else none
+  }
+  xy <- stack(lapply(g, leaf))
+  xy[is.finite(xy[, 1L]) & is.finite(xy[, 2L]), , drop = FALSE]
 }
 
 #' The area-distortion tolerance below which a CRS is taken as equal-area
@@ -734,15 +2001,56 @@
 #' the precision test, and a \code{[0, 1]}-normalised planar layer passes it too.
 #' When the data are planar, set the CRS explicitly, as the warning says.
 #'
+#' The precision test reads the coordinates of a layer that mixes XY and XYZ
+#' (or XYM) geometries in XY: \code{sf::st_coordinates()} reads such a layer
+#' in the dimension of its first geometry and stops on it, which made a
+#' layer in degrees look planar.  It leaves empty geometries out: an empty
+#' polygon stops \code{sf::st_coordinates()} too.  Empty parts go first, as
+#' \code{sf::st_is_empty()} calls a GEOMETRYCOLLECTION, MULTIPOLYGON or
+#' MULTILINESTRING empty when its first part is empty.  A layer that mixes
+#' geometry types or holds collections, which \code{sf::st_coordinates()}
+#' refuses, is read feature by feature (\code{.vertex_coords()}): the
+#' refusal made a layer in degrees that mixes types look planar.
+#'
+#' Both tests read the coordinates that have a location: a coordinate that is
+#' not finite or lies beyond \code{.POOL_XY_MAX} (the test
+#' \code{.values_at_xy()} applies) is left out.  One such row made the
+#' layer's box infinite or put it off the envelope, and the whole layer was
+#' then read as planar.  The coordinates are read for the box only when the
+#' layer's own box is not finite or reaches beyond the bound.
+#'
 #' @param x An sf/sfc object with no CRS.
-#' @return A list: \code{lonlat} (logical) and \code{bb} (the bbox, or
-#'   \code{NULL} if it could not be taken).
+#' @return A list: \code{lonlat} (logical) and \code{bb} (the bounding box
+#'   of the coordinates that have a location, or \code{NULL} when it could
+#'   not be taken or no coordinate has one).
 #' @keywords internal
 #' @noRd
 .looks_like_lonlat <- function(x) {
   bb <- try(sf::st_bbox(x), silent = TRUE)
-  if (inherits(bb, "try-error") || !all(is.finite(bb)))
-    return(list(lonlat = FALSE, bb = NULL))
+  if (inherits(bb, "try-error")) return(list(lonlat = FALSE, bb = NULL))
+  # The coordinates of the layer in XY, without its empty geometries, the
+  # ones without a location left out; NULL when they cannot be read.
+  located_xy <- function() {
+    xc <- x
+    if (inherits(x, c("sf", "sfc"))) {
+      xc <- sf::st_geometry(x)
+      xc <- .drop_empty_parts(xc)
+      xc <- .xy_if_mixed(xc[!sf::st_is_empty(xc)])
+    }
+    cc <- try(.vertex_coords(xc), silent = TRUE)
+    if (inherits(cc, "try-error")) return(NULL)
+    keep <- is.finite(cc[, 1L]) & is.finite(cc[, 2L]) &
+            abs(cc[, 1L]) <= .POOL_XY_MAX & abs(cc[, 2L]) <= .POOL_XY_MAX
+    cc[keep, 1:2, drop = FALSE]
+  }
+  xy <- NULL
+  if (!all(is.finite(bb)) || any(abs(bb) > .POOL_XY_MAX)) {
+    xy <- located_xy()
+    if (is.null(xy) || !nrow(xy)) return(list(lonlat = FALSE, bb = NULL))
+    bb <- sf::st_bbox(c(xmin = min(xy[, 1L]), ymin = min(xy[, 2L]),
+                        xmax = max(xy[, 1L]), ymax = max(xy[, 2L])),
+                      crs = sf::st_crs(bb))
+  }
   in_env <- bb["xmin"] >= -180 && bb["xmax"] <= 180 &&
             bb["ymin"] >= -90  && bb["ymax"] <= 90
   if (!in_env) return(list(lonlat = FALSE, bb = bb))
@@ -752,13 +2060,58 @@
   has_large_extent <- (x_range > 1) || (y_range > 1)
   has_geo_precision <- FALSE
   if (!has_large_extent) {
-    coords_mat <- try(sf::st_coordinates(x), silent = TRUE)
-    if (!inherits(coords_mat, "try-error") && nrow(coords_mat) > 0) {
+    coords_mat <- if (is.null(xy)) located_xy() else xy
+    if (!is.null(coords_mat) && nrow(coords_mat) > 0) {
       frac <- abs(c(coords_mat[, 1], coords_mat[, 2]) %% 1)
       has_geo_precision <- any(frac > 0.001 & frac < 0.999)
     }
   }
   list(lonlat = isTRUE(has_large_extent || has_geo_precision), bb = bb)
+}
+
+#' Refuse a CRS in longitude and latitude for coordinates that cannot be in it
+#'
+#' A layer without a CRS is not stamped with a target CRS in longitude and
+#' latitude when its coordinates lie outside that envelope: an x outside
+#' -180 to 360, or a y beyond \code{lat_max} north or south.  The text is the
+#' one \code{.transform_or_stamp()} gives (R/utils.R), for the stamp paths of
+#' \code{harmonize_crs()}, \code{ensure_projected(target_crs =)},
+#' \code{assign_features_to_polygons()}, \code{.replay_crs_assumption()}
+#' (the predict methods and \code{predict_surface()}) and
+#' \code{cell_values_at()}, which do not go through that helper.
+#'
+#' @param bb The box \code{.looks_like_lonlat()} read: of the coordinates
+#'   that have a location, or \code{NULL} when none has one.
+#' @param crs The target CRS (anything \code{sf::st_crs()} reads).
+#' @param caller,what The function and the argument the refusal names.
+#' @param geo_remedy \code{NULL}, or words added after "Set the CRS of
+#'   `what` with sf::st_crs()".
+#' @param lat_max The largest latitude, north or south, read as possible.
+#' @return \code{invisible(NULL)}; stops when the coordinates cannot be in
+#'   \code{crs}.  A target that is not in longitude and latitude, one
+#'   \code{sf::st_crs()} cannot read, a box inside the envelope and a layer
+#'   with no located coordinate pass.
+#' @keywords internal
+#' @noRd
+.refuse_lonlat_stamp <- function(bb, crs, caller, what, geo_remedy = NULL,
+                                 lat_max = 90) {
+  tcrs <- tryCatch(sf::st_crs(crs), error = function(e) NULL)
+  if (is.null(tcrs) || is.na(tcrs) || !.is_longlat(tcrs)) return(invisible(NULL))
+  if (is.null(bb) || !all(is.finite(bb))) return(invisible(NULL))
+  if (!(bb[["xmin"]] < -180 || bb[["xmax"]] > 360 ||
+        bb[["ymin"]] < -lat_max || bb[["ymax"]] > lat_max))
+    return(invisible(NULL))
+  lbl <- tcrs$input
+  lbl <- if (is.character(lbl) && length(lbl) == 1L && !is.na(lbl) && nzchar(lbl))
+    sprintf("the target CRS ('%s')", lbl) else "the target CRS"
+  stop(sprintf(paste0(
+    "%s(): `%s` has no CRS and its coordinates lie outside longitude -180 ",
+    "to 360 and latitude -90 to 90 (xmin=%.6g, xmax=%.6g, ymin=%.6g, ",
+    "ymax=%.6g), so they cannot be in %s, which is in longitude and ",
+    "latitude. Set the CRS of `%s` with sf::st_crs()%s."),
+    caller, what, bb[["xmin"]], bb[["xmax"]], bb[["ymin"]], bb[["ymax"]],
+    lbl, what, if (is.null(geo_remedy)) "" else paste0(", ", geo_remedy)),
+    call. = FALSE)
 }
 
 
@@ -778,7 +2131,8 @@
 #'   \code{boundary} too, and a message naming \code{newdata} there sends the
 #'   reader looking for an argument they did not pass.
 #' @return \code{newdata}: with a CRS set when a POSITIVE assumption was
-#'   replayed; marked \code{crs_assumed = "none"} when the fit itself had no
+#'   replayed (refused, by \code{.refuse_lonlat_stamp()}, when its coordinates
+#'   lie outside longitude -180 to 360 and latitude -90 to 90); marked \code{crs_assumed = "none"} when the fit itself had no
 #'   CRS, so that \code{ensure_projected()} leaves it in the space the fit used;
 #'   unchanged otherwise.
 #' @keywords internal
@@ -807,6 +2161,13 @@
   }
 
   if (is.null(assumed) || identical(assumed, "none")) return(newdata)
+  # The assumption is not given to coordinates that cannot be in it (x
+  # outside -180 to 360, y beyond 90 north or south): newdata at x 5e5, y
+  # 4e6 after a fit on degrees was labelled EPSG:4326, and every prediction
+  # came back NA with ensure_projected()'s warning that its rows have a
+  # location in longitude and latitude.
+  .refuse_lonlat_stamp(.looks_like_lonlat(newdata)$bb, assumed, caller = caller,
+                       what = what)
   .warn_and_log(paste0("%s(): `%s` has no CRS; interpreting it as %s, the ",
                    "assumption the model was fitted under, so that it is placed ",
                    "where the training data were. Set the CRS explicitly to ",
@@ -814,6 +2175,46 @@
   sf::st_set_crs(newdata, sf::st_crs(assumed))
 }
 
+
+#' Move a layer to another CRS with its rows without a location left empty
+#'
+#' A row with a coordinate that is not finite or lies beyond
+#' \code{.POOL_XY_MAX} (\code{.unlocated_features()}) is read as given,
+#' before the move, and comes back empty, in its own type and dimension
+#' (\code{.empty_unlocated()}).  Moved as it is, a polygon or line with one
+#' such vertex lost that vertex in \code{sf::st_transform()} and came back
+#' as a smaller finite shape: a square with a vertex at longitude 1e200 came
+#' back as a triangle.  From a projected CRS such a vertex can also come
+#' back finite: a northing of 1e200 in EPSG:32616 lands at a finite point in
+#' EPSG:32617.  Every reader that moves a caller's layer moves it here:
+#' \code{ensure_projected()}, \code{harmonize_crs()},
+#' \code{.transform_or_stamp()}, \code{.align_crs()}, \code{.cover_follow()}
+#' (the builders' `cover`), the move of the polygons into a scored record's
+#' CRS in \code{assign_features_to_polygons()}, and
+#' \code{.values_at_free_cells()}.  Each of them compares the rows before
+#' and after the move and warns, in the words of the function the user
+#' called, about a row with a location that the move left empty or without
+#' some of its vertices (\code{.warn_rows_unplaced()}).  The move itself is
+#' \code{.lonlat_of_placed()}: a row of a projected layer with a coordinate
+#' beyond \code{.LONLAT_MOVE_MAX} is emptied before a move to a CRS in
+#' degrees, which from Web Mercator at x = 1e20 never came back from PROJ.
+#' Any other layer whose rows all have a location is moved by
+#' \code{sf::st_transform()} alone.  Points held in a column of the general
+#' class \code{sfc_GEOMETRY} are moved in \code{sfc_POINT}
+#' (\code{.typed_points()}): \code{sf::st_transform()} stops with "Not
+#' compatible with STRSXP" on the column \code{sf::st_cast(x, "GEOMETRY")}
+#' returns, and such a layer comes back in \code{sfc_POINT}.
+#'
+#' @param x An sf or sfc object with a CRS.
+#' @param crs The CRS to move it to.
+#' @return \code{x} in \code{crs}, with those rows empty.
+#' @keywords internal
+#' @noRd
+.transform_keep_unlocated <- function(x, crs) {
+  x <- .typed_points(x)
+  rows <- which(.unlocated_features(sf::st_geometry(x)))
+  .empty_unlocated(.lonlat_of_placed(x, crs), rows)
+}
 
 #' Ensure an object has a projected CRS (with sensible defaults)
 #'
@@ -838,12 +2239,20 @@
 #'     ranges, block sizes, GWR bandwidths and GP length-scales. Which
 #'     projection is actually best is then **measured, not assumed**: the zone,
 #'     a Lambert azimuthal equal-area centred on the data and (where its
-#'     standard parallels do not degenerate) an Albers conic are each scored by
-#'     projecting representative points of the data (a non-POINT layer is
+#'     standard parallels do not degenerate or pass a pole) an Albers conic are
+#'     each scored by projecting representative points of the data (a non-POINT layer is
 #'     reduced to one point per feature, plus the vertices of its outline when
-#'     it has fewer than 40 features, so a single study-area polygon is scored
-#'     too) and comparing planar with geodesic pairwise distances, and the one
-#'     that distorts least is used.
+#'     fewer than 40 distinct points remain, so a single study-area polygon is
+#'     scored too, however many rows repeat it; copies of one location count
+#'     once, and rows without a finite location are left out) and comparing
+#'     planar with geodesic distances over the pairs at least 1 mm apart, and
+#'     the one that distorts least is used. A candidate must place every
+#'     location of the layer to be used: one under which a vertex of the
+#'     layer has no coordinates (a UTM zone about 90 degrees or more from its
+#'     central meridian) gets `distance_error` `NA` and is not chosen, and
+#'     the log line names it. A vertex at a latitude beyond 90, which no CRS
+#'     places, takes no part in this test. When no candidate places every
+#'     vertex, Web Mercator (Equal Earth for `purpose = "area"`) is used.
 #'     The choice, both error figures and this argument are **logged** (see the
 #'     logging note under [spatialkit_quiet()]); they are not R warnings, so
 #'     `tryCatch(warning = )` does not see them.}
@@ -865,13 +2274,47 @@
 #'   \item{Missing CRS}{With no `target_crs`, a bounding box that looks like
 #'     lon/lat means EPSG:4326 is assumed (a real warning) and the rules above
 #'     then apply; coordinates the heuristic declines are left exactly as they
-#'     are. With `target_crs` supplied there is no source CRS to reproject
+#'     are. The box is the one of the coordinates that have a location (see
+#'     the next item). With `target_crs` supplied there is no source CRS to reproject
 #'     from, so the same heuristic decides between two outcomes: lon/lat-looking
 #'     coordinates are read as EPSG:4326 and reprojected to the target (a real
 #'     warning), and anything else has the target **stamped on without
 #'     reprojection**. That is a relabel, logged only, so verify the
 #'     coordinates really are in that CRS. Set the CRS explicitly to suppress
-#'     either.}
+#'     either. A `target_crs` in longitude and latitude is not stamped on
+#'     coordinates that cannot be in it: an x outside -180 to 360 or a y
+#'     beyond 90 north or south, in the box of the coordinates that have a
+#'     location, stops the call with an error that gives the box.}
+#'   \item{Rows without a location}{A coordinate that is not finite or lies
+#'     beyond 1e150 has no location, and nor does a row whose geometry is
+#'     empty. The lon/lat test of a layer without a CRS reads the
+#'     coordinates that have a location, vertex by vertex: a polygon with one
+#'     such vertex is read on its other vertices. The choice of a projection
+#'     reads the rows that have a location: a row with one such coordinate
+#'     takes no part in it, as an empty row would, and a layer in which no
+#'     row has a location gets Web Mercator (Equal Earth for
+#'     `purpose = "area"`). Moved to another CRS, these rows come back
+#'     empty, in their own geometry type;
+#'     [sf::st_transform()] would drop the vertex it cannot move, or put a
+#'     coordinate beyond 1e150 at a finite place, and return the rest of the
+#'     feature. A row that has a location and that a move to another CRS
+#'     cannot place in full comes back empty, or without the vertices the
+#'     CRS cannot place, and a warning of class `spatialkit_rows_unplaced`
+#'     names such rows (`rows` on the condition), from lon/lat or from a
+#'     projected CRS. With the projection chosen
+#'     here that happens only at a coordinate no CRS places, such as a
+#'     latitude beyond 90; with a `target_crs`, wherever that CRS cannot
+#'     place the layer. The choice of a projection does not read a row with
+#'     a vertex at a latitude beyond 90 either: it is made on the other
+#'     rows, and a layer each row of which is empty, has no location or has
+#'     such a vertex gets Web Mercator (Equal Earth for `purpose = "area"`).
+#'     The functions that read a lon/lat data layer row by row
+#'     ([coerce_to_points()], [prep_model_data()] and the fits, the k-means
+#'     seeders' points, the features of [assign_features_to_polygons()], the
+#'     pooled readers of [summarize_by_cell()] and [cell_values_at()], and
+#'     [ensure_stable_poly_id()]) read a row with a vertex at a latitude
+#'     beyond 90 as a row without a location, before anything else reads
+#'     it, and say so in the words they use for such a row.}
 #' }
 #'
 #' `target_crs` overrides all of this. Pass it whenever you need a specific,
@@ -890,12 +2333,22 @@
 #'   per cell are going to be computed, so the CRS must be equal-area.  For
 #'   lon/lat input the choice is then made among equal-area projections only:
 #'   a Lambert azimuthal centred on the data, or an Albers conic where its
-#'   parallels do not degenerate, whichever distorts distances less.  A UTM
-#'   zone (conformal, not equal-area) never enters that comparison, and global
+#'   parallels do not degenerate or pass a pole, whichever distorts distances
+#'   less.  A UTM zone (conformal, not equal-area) never enters that
+#'   comparison, and global
 #'   coverage gets Equal Earth in place of Web Mercator.  Already-projected
 #'   input is still returned untouched, but its area distortion over the
 #'   extent is measured (the spread of planar-to-geodesic area ratios over
-#'   probe polygons) and logged as a warning when it exceeds 1 percent.
+#'   probe polygons) and logged as a warning when it exceeds 1 percent.  The
+#'   probes are the layer's distinct polygons (exact copies of a polygon
+#'   count once), or a 6 by 6 grid over its bounding box for a layer without
+#'   polygons, a layer of one distinct polygon, which gives one ratio and no
+#'   spread, and a layer with a polygon s2 cannot measure in degrees (edges
+#'   that cross, a spike) or that [sf::st_is_valid()] rejects in its CRS (a
+#'   hole outside its shell), whose planar area is not the area it encloses.
+#'   When the grid gives no figure either (a single
+#'   point, a line along one axis), a warning says that the distortion could
+#'   not be measured.
 #'   Measured: a zone's own width edge to edge, 0.25 percent; the
 #'   conterminous United States forced into one zone, 14 percent; Web
 #'   Mercator over 2.5 degrees of latitude at 48N, 4 percent; an equal-area
@@ -923,6 +2376,14 @@
 #'   \code{"none"} is returned untouched, with the heuristic skipped, which is
 #'   how a \code{predict()} method replays a fit's negative decision so that a
 #'   subset of the training rows is not judged differently from the whole.
+#'   A layer that mixes XY and XYZ (or XYM) geometries is returned in XY
+#'   when it is transformed, with a warning of class
+#'   \code{"spatialkit_zm_dropped"}: [sf::st_transform()] reads a layer in
+#'   the dimension of its first geometry and misplaces the others.  The
+#'   projection is then chosen from the layer in XY.  A layer in one
+#'   dimension is transformed with its Z and M, and so is a layer whose
+#'   only geometries of another dimension than the first are empty and not
+#'   points.  A layer that is not transformed is returned with its own geometry.
 #' @family spatial data preparation
 #' @examples
 #' library(sf)
@@ -985,10 +2446,17 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
           tcrs$input %||% "unknown"
         )
         sf::st_crs(x) <- sf::st_crs(4326)
-        x <- sf::st_transform(x, tcrs)
+        x0 <- .xy_if_mixed_warn(x, "ensure_projected", "x")
+        x  <- .transform_keep_unlocated(x0, tcrs)
+        .warn_rows_unplaced(x0, x)
         attr(x, "crs_assumed") <- "EPSG:4326"
         return(x)
       }
+      # A target in longitude and latitude is not stamped on coordinates
+      # that cannot be in it (x outside -180 to 360, y beyond 90 north or
+      # south): x 5e5, y 4e6 came back as EPSG:4326 with a log line only.
+      .refuse_lonlat_stamp(ll$bb, tcrs, caller = "ensure_projected", what = "x",
+                           geo_remedy = "or pass a projected `target_crs`")
       .log_warn(
         "ensure_projected(): input has no CRS; stamping the supplied target CRS ('%s') WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set the input CRS explicitly with sf::st_crs().",
         tcrs$input %||% "unknown"
@@ -996,7 +2464,14 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
       sf::st_crs(x) <- tcrs
       return(x)
     }
-    if (!identical(xcrs, tcrs)) x <- sf::st_transform(x, tcrs)
+    if (!identical(xcrs, tcrs)) {
+      x0 <- .xy_if_mixed_warn(x, "ensure_projected", "x")
+      x  <- .transform_keep_unlocated(x0, tcrs)
+      # A move that leaves a located row empty, or without some of its
+      # vertices, is said, from lon/lat or from a projected CRS: from
+      # EPSG:3857 to UTM zone 46 a line lost its vertex at longitude 10.
+      .warn_rows_unplaced(x0, x)
+    }
     return(x)
   }
 
@@ -1015,8 +2490,13 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
         ll$bb["xmin"], ll$bb["xmax"], ll$bb["ymin"], ll$bb["ymax"]
       )
       sf::st_crs(x) <- sf::st_crs(4326)
+      # A layer that mixes dimensions is read in XY before the CRS is chosen
+      # from it, as below.
+      x <- .xy_if_mixed_warn(x, "ensure_projected", "x")
       tr <- .pick_local_projected_crs(x, purpose = purpose)
-      x <- sf::st_transform(x, tr$crs)
+      x0 <- x
+      x  <- .transform_keep_unlocated(x0, tr$crs)
+      .warn_rows_unplaced(x0, x)
       attr(x, "crs_choice") <- tr$candidates
       # Recorded so a predict() on CRS-less newdata can replay the same
       # interpretation (see .replay_crs_assumption()).
@@ -1042,16 +2522,48 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
     # the result as `crs_choice`: the number the warning above quotes for
     # the winner and the zone is kept for every candidate, and on the
     # ordinary path -- a zone kept without a comparison -- for the zone.
+    # A layer that mixes XY and XYZ (or XYM) geometries is read in XY before
+    # the CRS is chosen from it: sf reads the layer in the dimension of its
+    # first geometry, so the centre and the scores read a mangled ring (a
+    # layer in Missouri got UTM zone 25 South), and the transform returns it.
+    x <- .xy_if_mixed_warn(x, "ensure_projected", "x")
     tr <- .pick_local_projected_crs(x, purpose = purpose)
-    x <- sf::st_transform(x, tr$crs)
+    # Where candidates are compared, one is chosen only if it places every
+    # located vertex.  A located row can still come back empty, or without
+    # some of its vertices, from the paths that compare nothing (a zone on a
+    # local extent, the global fallback) at a coordinate no CRS places, such
+    # as a latitude beyond 90.  sf::st_transform() does that without a
+    # word; it is said here.
+    x0 <- x
+    x  <- .transform_keep_unlocated(x0, tr$crs)
+    .warn_rows_unplaced(x0, x)
     attr(x, "crs_choice") <- tr$candidates
   } else if (purpose == "area") {
     # Projected input is never reprojected, but when areas are what matter
     # the caller should know whether this CRS can deliver them.  Measured, as
     # the distance choice is: the spread of planar-to-geodesic area ratios
     # over probe polygons on the extent.
-    err <- .crs_area_error(x)
-    if (is.finite(err) && err > .area_error_tol)
+    # Measured on the layer in XY when it mixes dimensions; the layer is
+    # returned as it came.  A layer of one distinct polygon gives one ratio
+    # and no spread, and a polygon s2 refuses in degrees (edges that cross,
+    # a spike) leaves the polygons unmeasured; the CRS is then measured on
+    # the grid over the extent, as for a layer without polygons.  So is a
+    # layer with a polygon GEOS calls invalid in its CRS, whose planar area
+    # is not the area it encloses.  The first two were
+    # passed over without a word: a box from 100W to 90W and 30N to 60N in
+    # Web Mercator logged nothing, where split in two it logs 26.2%.
+    xy  <- .xy_if_mixed(x)
+    err <- .crs_area_error(xy)
+    if (!is.finite(err)) err <- .crs_area_error(xy, grid = TRUE)
+    if (!is.finite(err))
+      .log_warn(
+        paste0("ensure_projected(purpose = \"area\"): the area distortion of the ",
+               "input's CRS (%s) across this extent could not be measured: no two ",
+               "probes, among its polygons or the cells of a 6 by 6 grid over its ",
+               "bounding box, have both a planar and a geodesic area. It is ",
+               "returned as it is."),
+        .fold_crs_label(x))
+    else if (err > .area_error_tol)
       .log_warn(
         paste0("ensure_projected(purpose = \"area\"): the input's CRS (%s) ",
                "distorts areas across this extent by up to %.1f%% (planar ",
@@ -1078,7 +2590,11 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
 #' taken as EPSG:4326 and **reprojected** to the other object's CRS (or
 #' `target_crs`); coordinates that do not are *stamped* with
 #' [sf::st_set_crs()], which relabels without moving them.  Either way the
-#' assumption is announced with a warning.
+#' assumption is announced with a warning.  A CRS in longitude and latitude
+#' is not stamped on coordinates that cannot be in it: a layer with an x
+#' outside -180 to 360 or a y beyond 90 north or south, read on the
+#' coordinates that have a location, stops the call with an error that names
+#' `a` or `b`, its box and the target CRS.
 #'
 #' @param a,b Objects of class sf or sfc.
 #' @param prefer Which object's CRS to keep ("a" or "b").
@@ -1090,7 +2606,26 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
 #'   NOT reprojected, only the CRS label is overwritten). The \code{"set_crs"}
 #'   option exists only for rare edge cases where you are certain the
 #'   coordinates already match the target CRS definition.
-#' @return A named list with components a and b.
+#' @return A named list with components a and b.  A layer that is
+#'   transformed and mixes XY and XYZ (or XYM) geometries is returned in XY,
+#'   with a warning of class \code{"spatialkit_zm_dropped"}:
+#'   [sf::st_transform()] reads a layer in the dimension of its first
+#'   geometry and misplaces the others.  A layer in one dimension is
+#'   transformed with its Z and M, and so is a layer whose only geometries
+#'   of another dimension than the first are empty and not points.  A row
+#'   of a transformed layer with a coordinate that is not finite or lies
+#'   beyond 1e150 comes back empty, in its own geometry type: it has no
+#'   location to move, and [sf::st_transform()] would drop that vertex and
+#'   return the rest of the feature, or put the coordinate at a finite
+#'   place.  So does a row of a projected layer moved to a CRS in degrees
+#'   with a coordinate beyond 1e10 in its CRS's own unit, further out than
+#'   any projected CRS places a point of the Earth.  A row that has a
+#'   location and that the target CRS cannot place in full, such as a point
+#'   far outside a UTM zone or a ring with a vertex at a latitude beyond 90,
+#'   comes back empty, or without the vertices the CRS cannot place, and a
+#'   warning of class \code{"spatialkit_rows_unplaced"} names such rows of
+#'   \code{a} or \code{b} (\code{rows} on the condition).  A layer that is
+#'   not transformed is returned as it came.
 #' @family spatial data preparation
 #' @examples
 #' library(sf)
@@ -1117,10 +2652,28 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   crs_a <- sf::st_crs(a)
   crs_b <- sf::st_crs(b)
 
-  .safe_transform <- function(x, to) {
-    tryCatch(
-      sf::st_transform(x, to),
+  # A layer that mixes XY and XYZ (or XYM) geometries is transformed, and
+  # returned, in XY, with a warning: sf reads the layer in the dimension of
+  # its first geometry, so its transform returns an XYZ ring among XY rows
+  # as a ring of other points, or stops with "OGR error".
+  .safe_transform <- function(x, to, which_obj) {
+    x <- .xy_if_mixed_warn(x, "harmonize_crs", which_obj)
+    # A row with a coordinate that is not finite or lies beyond 1e150 comes
+    # back empty (.transform_keep_unlocated()): moved as it is, a polygon
+    # lost that vertex and came back as a smaller finite shape.  A row of a
+    # projected layer with a coordinate beyond .LONLAT_MOVE_MAX comes out
+    # empty when the target is in degrees (.lonlat_of_placed(), which that
+    # helper moves with): moved from Web Mercator at x = 1e20 it never came
+    # back from PROJ.
+    # A row with a location that `to` cannot place in full comes back empty,
+    # or without the vertices it cannot place, and a warning of class
+    # "spatialkit_rows_unplaced" names it; not after the set_crs stamp,
+    # which moves nothing.
+    moved <- TRUE
+    out <- tryCatch(
+      .transform_keep_unlocated(x, to),
       error = function(e) {
+        moved <<- FALSE
         if (identical(on_transform_error, "set_crs")) {
           .warn_and_log(
             "harmonize_crs(): st_transform() failed (%s); falling back to st_set_crs(). WARNING: coordinates are NOT reprojected -- downstream distances, joins, and areas may be wrong. Set on_transform_error='stop' (the default) to surface this error instead.",
@@ -1135,6 +2688,11 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
         }
       }
     )
+    if (moved)
+      .warn_rows_unplaced(x, out, caller = "harmonize_crs", arg = which_obj,
+                          remedy = paste0("Pass a target_crs that holds every location ",
+                                          "of both layers."))
+    out
   }
 
   # st_set_crs() only stamps a label: the coordinates are NOT moved.  Stamping
@@ -1160,8 +2718,15 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
                "explicitly with sf::st_crs() to suppress this."),
         which_obj, ll$bb[["xmin"]], ll$bb[["xmax"]], ll$bb[["ymin"]],
         ll$bb[["ymax"]], lbl)
-      return(.safe_transform(sf::st_set_crs(x, 4326), to))
+      return(.safe_transform(sf::st_set_crs(x, 4326), to, which_obj))
     }
+    # A CRS in longitude and latitude is not stamped on coordinates that
+    # cannot be in it (x outside -180 to 360, y beyond 90 north or south):
+    # x 5e5, y 4e6 came back as EPSG:4326, and sf added its bare "bounding
+    # box has potentially an invalid value range for longlat data" later.
+    .refuse_lonlat_stamp(ll$bb, to, caller = "harmonize_crs", what = which_obj,
+                         geo_remedy = if (!is.null(target_crs))
+                           "or pass a projected `target_crs`")
     .warn_and_log(
       "harmonize_crs(): `%s` has no CRS and its coordinates do not look like lon/lat; stamping '%s' onto it WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set it explicitly with sf::st_crs().",
       which_obj, lbl
@@ -1173,12 +2738,12 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
     if (is.na(crs_a)) {
       a <- .resolve_crsless(a, "a", target_crs)
     } else {
-      a <- .safe_transform(a, target_crs)
+      a <- .safe_transform(a, target_crs, "a")
     }
     if (is.na(crs_b)) {
       b <- .resolve_crsless(b, "b", target_crs)
     } else {
-      b <- .safe_transform(b, target_crs)
+      b <- .safe_transform(b, target_crs, "b")
     }
     return(list(a = a, b = b))
   }
@@ -1197,9 +2762,9 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   if (identical(sf::st_crs(a), sf::st_crs(b))) return(list(a = a, b = b))
 
   if (prefer == "a") {
-    b <- .safe_transform(b, crs_a)
+    b <- .safe_transform(b, crs_a, "b")
   } else {
-    a <- .safe_transform(a, crs_b)
+    a <- .safe_transform(a, crs_b, "a")
   }
   list(a = a, b = b)
 }
@@ -1207,6 +2772,162 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 # -----------------------------------------------------------------------------
 # Geometry Helpers
 # -----------------------------------------------------------------------------
+
+#' The coordinate dimensions of a layer's geometries
+#'
+#' Read from each geometry: sf takes the dimension of a layer from its first
+#' geometry, so its own test cannot tell a layer that mixes XY and XYZ
+#' geometries from one that does not.  An empty geometry has a dimension
+#' too.  \code{.drop_zm()} counts the values of a point layer instead, which
+#' cannot tell a mixed layer from a uniform one either.
+#'
+#' @param x An sf or sfc object.
+#' @return The distinct dimensions, among \code{"XY"}, \code{"XYZ"},
+#'   \code{"XYM"} and \code{"XYZM"}, in the order they first occur.
+#' @keywords internal
+#' @noRd
+.geom_dims <- function(x) {
+  g <- if (inherits(x, "sfc")) x else sf::st_geometry(x)
+  unique(vapply(g, function(s) class(s)[1L], character(1), USE.NAMES = FALSE))
+}
+
+#' Whether a layer mixes geometries of different dimensions
+#' @param x An sf or sfc object.
+#' @return \code{TRUE} when its geometries do not all have one dimension.
+#' @keywords internal
+#' @noRd
+.mixes_zm <- function(x) length(.geom_dims(x)) > 1L
+
+#' A layer read in x and y when it mixes dimensions
+#'
+#' sf reads a layer that mixes XY and XYZ (or XYM) geometries in the
+#' dimension of its first: \code{sf::st_coordinates()} of such a point layer
+#' lays the values out of step or stops on its \code{dimnames}, and
+#' \code{sf::st_transform()} of one with an XYZ point first stops with "OGR
+#' error".  Z and M are then dropped from every geometry.  A layer in one
+#' dimension is returned as it came.
+#'
+#' @param x An sf or sfc object.
+#' @return \code{x}, or its copy in XY when it mixes dimensions.
+#' @keywords internal
+#' @noRd
+.xy_if_mixed <- function(x) {
+  if (.mixes_zm(x)) sf::st_zm(x, drop = TRUE, what = "ZM") else x
+}
+
+#' A layer only read for its x and y, in XY when it mixes dimensions or
+#' carries M
+#'
+#' For the layers a builder or a seeder reads and does not return (the
+#' tessellation builders' \code{boundary}, points and cover, the seeders'
+#' \code{boundary}): the cells and seeds made from them are defined in x and
+#' y.  A layer that mixes dimensions is read in XY, as by
+#' \code{.xy_if_mixed()}, and so is one whose geometries carry M (XYM or
+#' XYZM), which GEOS refuses ("GEOS does not support XYM or XYZM
+#' geometries").  A layer XY or XYZ throughout is returned as it came.
+#'
+#' @param x An sf or sfc object.
+#' @return \code{x}, or its copy in XY.
+#' @keywords internal
+#' @noRd
+.xy_if_mixed_or_m <- function(x) {
+  d <- .geom_dims(x)
+  if (length(d) > 1L || any(d %in% c("XYM", "XYZM")))
+    sf::st_zm(x, drop = TRUE, what = "ZM")
+  else x
+}
+
+#' A layer about to be transformed and returned, read in x and y when it
+#' mixes dimensions, with a warning
+#'
+#' \code{sf::st_transform()} reads a layer in the dimension of its first
+#' geometry: an XYZ ring among XY rows comes back as a ring of other points,
+#' and an XY geometry among XYZ-first rows stops it with "OGR error".  A
+#' function that returns its transformed copy of the caller's layer hands
+#' it over in XY when the layer mixes dimensions, and says so with a warning
+#' of class \code{"spatialkit_zm_dropped"}, which carries the rows that held
+#' Z or M as \code{rows}.  A layer in one dimension is returned as it came,
+#' and is transformed with its Z.  So is a layer whose only geometries of
+#' another dimension than the first are empty and not points: they have no
+#' coordinates to misplace, and sf transforms the rest with their Z.  An
+#' empty point holds \code{NA} coordinates, which sf misreads as any other.
+#'
+#' @param x An sf or sfc object.
+#' @param caller The function whose result it is, for the message.
+#' @param arg The argument that holds the layer, for the message.
+#' @param why The end of the message: what reads the layer wrongly and what
+#'   comes back.
+#' @return \code{x}, or its copy in XY when it mixes dimensions.
+#' @keywords internal
+#' @noRd
+.xy_if_mixed_warn <- function(x, caller, arg,
+                              why = paste0("which sf::st_transform() reads ",
+                                           "wrongly, so Z and M are dropped and ",
+                                           "the layer is returned in XY")) {
+  g <- if (inherits(x, "sfc")) x else sf::st_geometry(x)
+  d <- vapply(g, function(s) class(s)[1L], character(1), USE.NAMES = FALSE)
+  if (length(unique(d)) < 2L) return(x)
+  # sf writes every geometry in the dimension of the first; an empty one
+  # after it has no coordinates to be written wrongly, save an empty point,
+  # whose NA coordinates are written as values.
+  bare <- sf::st_is_empty(g) & !vapply(g, inherits, logical(1), "POINT")
+  if (!any(d[-1L] != d[1L] & !bare[-1L])) return(x)
+  zm <- which(d != "XY")
+  .warn_classed("spatialkit_zm_dropped",
+                paste0("%s(): `%s` mixes geometries with and without Z or M ",
+                       "coordinates (%d of its %d geometries carry them), %s. ",
+                       "Drop them with sf::st_zm() first to silence this."),
+                caller, arg, length(zm), length(d), why, data = list(rows = zm))
+  sf::st_zm(x, drop = TRUE, what = "ZM")
+}
+
+#' A layer about to be reduced to points, in XY when a geometry the mode
+#' reduces carries M
+#'
+#' For \code{coerce_to_points()}, after its flatten of a layer that mixes
+#' dimensions.  GEOS does not read M, so its centroid and interior point
+#' stop on a geometry that carries it.  When the mode reduces such a
+#' geometry to a point (any under \code{"centroid"},
+#' \code{"point_on_surface"} and \code{"line_midpoint"}; any that is not a
+#' POINT under \code{"auto"}), Z and M are dropped from the whole layer
+#' with a warning of class \code{"spatialkit_zm_dropped"}, which carries the
+#' rows whose geometry carries M as \code{rows}.  Empty geometries are not
+#' counted.  When the only geometries the mode reduces that carry M are
+#' empty, Z and M are dropped from those alone, without a warning: they hold
+#' no coordinates, so nothing is lost, and GEOS refuses them all the same.
+#' Any other layer is returned as it came.
+#'
+#' @param x An sf object.
+#' @param mode The mode of \code{coerce_to_points()}, after
+#'   \code{"surface"} is read as \code{"point_on_surface"}.
+#' @return \code{x}, or its copy in XY.
+#' @keywords internal
+#' @noRd
+.xy_if_reduced_m <- function(x, mode) {
+  g <- sf::st_geometry(x)
+  d <- vapply(g, function(s) class(s)[1L], character(1), USE.NAMES = FALSE)
+  has_m <- d %in% c("XYM", "XYZM")
+  if (!any(has_m)) return(x)
+  reduced <- if (identical(mode, "auto"))
+    has_m & !vapply(g, inherits, logical(1), "POINT")
+  else has_m
+  if (!any(reduced)) return(x)
+  has_m <- has_m & !sf::st_is_empty(g)
+  if (!any(reduced & has_m)) {
+    lst <- as.list(g)
+    lst[reduced] <- lapply(lst[reduced], sf::st_zm, drop = TRUE, what = "ZM")
+    return(sf::st_set_geometry(x, sf::st_sfc(lst, crs = sf::st_crs(g),
+                                             precision = sf::st_precision(g))))
+  }
+  rows <- which(has_m)
+  .warn_classed("spatialkit_zm_dropped",
+                paste0("coerce_to_points(): %d of the %d geometries of `x` ",
+                       "carry M coordinates, which GEOS does not read, so Z ",
+                       "and M are dropped and the points are returned in XY. ",
+                       "Drop them with sf::st_zm() first to silence this."),
+                length(rows), length(d), data = list(rows = rows))
+  sf::st_zm(x, drop = TRUE, what = "ZM")
+}
 
 #' Fast center points of per-feature bounding boxes
 #'
@@ -1286,6 +3007,188 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   x
 }
 
+#' Longitudes read across 180
+#'
+#' \code{.lon_span()}: the span of the first coordinate of each geometry,
+#' over its finite values (0 for an empty one).  \code{.unwrap_lon()}: a
+#' geometry with the first coordinates below 0 read from 180 to 360.
+#' \code{.wrap_lon()}: a point brought back into -180 to 180.
+#' \code{.across_180()}: the geometries of a lon/lat layer, or of a layer
+#' without a CRS read as degrees, that span more than 180 degrees of
+#' longitude written as given and no more than 180 with their longitudes
+#' read from 0 to 360, such as a polygon written across longitude 180 from
+#' 179.5 to -179.5; with those geometries read so.  A geometry wider than
+#' 180 degrees in both readings (one around a pole) is not among them.
+#'
+#' @param g An sfc.
+#' @param s A geometry (sfg), or its unclassed list or matrix.
+#' @param p A POINT.
+#' @param assume_ll As for \code{.surface_points()}.
+#' @return \code{.lon_span()}: a numeric vector, one element per geometry.
+#'   \code{.across_180()}: a list with \code{rows}, the positions of those
+#'   geometries in \code{g}, and \code{unwrapped}, an sfc without a CRS
+#'   holding them with the longitudes read from 0 to 360.
+#' @keywords internal
+#' @noRd
+.lon_span <- function(g) {
+  xs <- function(s)
+    if (is.list(s)) unlist(lapply(s, xs), use.names = FALSE)
+    else if (is.matrix(s)) s[, 1L] else s[1L]
+  vapply(unclass(g), function(s) {
+    x <- xs(s)
+    x <- x[is.finite(x)]
+    if (length(x)) max(x) - min(x) else 0
+  }, numeric(1))
+}
+
+.unwrap_lon <- function(s) {
+  if (is.list(s)) return(structure(lapply(unclass(s), .unwrap_lon), class = class(s)))
+  if (is.matrix(s)) { s[, 1L] <- ifelse(s[, 1L] < 0, s[, 1L] + 360, s[, 1L]); return(s) }
+  if (length(s) && isTRUE(s[1L] < 0)) s[1L] <- s[1L] + 360
+  s
+}
+
+.wrap_lon <- function(p) {
+  if (isTRUE(p[1L] > 180)) p[1L] <- p[1L] - 360
+  p
+}
+
+.across_180 <- function(g, assume_ll = NULL) {
+  none <- list(rows = integer(0), unwrapped = NULL)
+  crs_given <- !is.na(sf::st_crs(g))
+  if (!length(g) || (crs_given && !.is_longlat(g)) ||
+      (!crs_given && is.null(assume_ll)))
+    return(none)
+  wide <- which(.lon_span(g) > 180)
+  if (!length(wide)) return(none)
+  if (!crs_given && !isTRUE(assume_ll())) return(none)
+  un <- lapply(unclass(g[wide]), .unwrap_lon)
+  ok <- .lon_span(un) <= 180
+  if (!any(ok)) return(none)
+  list(rows = wide[ok], unwrapped = sf::st_sfc(un[ok]))
+}
+
+#' Warn that rows of a layer without a CRS were read as EPSG:4326 across 180
+#'
+#' @param rows The rows of `x` that reading moves.
+#' @param given What each row is given, for one row and for several.
+#' @keywords internal
+#' @noRd
+.warn_crsless_across_180 <- function(rows, given) {
+  one <- length(rows) == 1L
+  .warn_and_log(
+    paste0("coerce_to_points(): `x` has no CRS and its coordinates look ",
+           "like lon/lat, so %s of `x`, which %s more than 180 degrees ",
+           "of longitude, %s read as EPSG:4326 and given %s. Set the CRS of ",
+           "`x` explicitly to say how to read it."),
+    .rows_text(rows), if (one) "spans" else "span",
+    if (one) "is" else "are", if (one) given[[1L]] else given[[2L]])
+}
+
+#' Points on the surface of geometries, read the same way by every caller
+#'
+#' GEOS's interior point of each geometry, after \code{.drop_empty_parts()}.
+#' GEOS reads a geometry in longitude and latitude on the plane in degrees,
+#' under either s2 setting, and sf warns "st_point_on_surface may not give
+#' correct results for longitude/latitude data" for every such layer.  That
+#' warning is not passed on: the point lies on the geometry read on the
+#' plane in degrees, the reading \code{coerce_to_points()} states (on the
+#' sphere too when its edges are short).  A geometry that spans more than
+#' 180 degrees of longitude (a polygon written across longitude 180, from
+#' 179.5 to -179.5) GEOS reads the long way round the globe, and its point
+#' lay about 12,000 km from it.  For those rows the point is tested on the
+#' geometry read on the sphere with s2.  A point that does not lie on it is
+#' taken again with the longitudes below 0 read from 180 to 360, and brought
+#' back into -180 to 180; a row whose point lies on it neither way, or that
+#' s2 cannot read, keeps GEOS's point and is listed in \code{off}.  Every
+#' other row gets GEOS's point, to the bit.
+#'
+#' A layer without a CRS is read so only when \code{assume_ll()} says its
+#' coordinates are taken for degrees (\code{coerce_to_points()} passes the
+#' test \code{ensure_projected()} applies, \code{.looks_like_lonlat()}); the
+#' test is called only when some row spans more than 180 units.  The rows
+#' are then read as EPSG:4326, and the points keep the layer's missing CRS.
+#'
+#' @param g An sfc.
+#' @param assume_ll \code{NULL}, or a function of no argument that returns
+#'   \code{TRUE} when \code{g} has no CRS and is to be read as EPSG:4326.
+#' @return A list: \code{points}, an sfc of POINTs row for row with
+#'   \code{g}; \code{off}, the rows whose point is not known to lie on
+#'   their geometry; \code{moved}, the rows whose point was taken again with
+#'   the longitudes read from 0 to 360.
+#' @keywords internal
+#' @noRd
+.surface_points <- function(g, assume_ll = NULL) {
+  g   <- .drop_empty_parts(g)
+  pos <- withCallingHandlers(
+    sf::st_point_on_surface(g),
+    warning = function(w)
+      if (grepl("st_point_on_surface may not give correct results",
+                conditionMessage(w), fixed = TRUE))
+        invokeRestart("muffleWarning"))
+  off <- integer(0)
+  none <- list(points = pos, off = off, moved = integer(0))
+  crs_given <- !is.na(sf::st_crs(g))
+  # .is_longlat() reads the CRS alone: sf::st_is_longlat() of the geometries
+  # warns "bounding box has potentially an invalid value range for longlat
+  # data" in sf's words when a latitude lies beyond 90.
+  if (!length(g) || (crs_given && !.is_longlat(g)) ||
+      (!crs_given && is.null(assume_ll)))
+    return(none)
+  wide <- which(.lon_span(g) > 180)
+  if (!length(wide)) return(none)
+  if (!crs_given && !isTRUE(assume_ll())) return(none)
+  # Whether point i of `p` lies on geometry i of `s`, read on the sphere;
+  # NA where s2 cannot read the geometry.  A layer without a CRS is read in
+  # EPSG:4326 (see assume_ll).
+  ll <- function(s) if (crs_given) s else sf::st_set_crs(s, 4326)
+  on_own <- function(p, s) {
+    p <- ll(p); s <- ll(s)
+    vapply(seq_along(s), function(i) tryCatch(
+      .with_s2(suppressMessages(lengths(sf::st_intersects(p[i], s[i])) > 0L)),
+      error = function(e) NA), logical(1))
+  }
+  redo <- wide[!on_own(pos[wide], g[wide]) %in% TRUE]
+  if (!length(redo)) return(none)
+  alt <- sf::st_point_on_surface(sf::st_sfc(lapply(unclass(g[redo]), .unwrap_lon)))
+  alt <- sf::st_sfc(lapply(unclass(alt), .wrap_lon), crs = sf::st_crs(g))
+  took <- on_own(alt, g[redo]) %in% TRUE
+  if (any(took)) pos[redo[took]] <- alt[took]
+  list(points = pos, off = redo[!took], moved = redo[took])
+}
+
+#' Planar lengths and midpoints of lines, in the unit of their CRS
+#'
+#' \code{sf::st_length()} gives a projected line's length in its CRS's unit
+#' when sf can name that unit (\code{st_crs()$ud_unit}), and in metres when
+#' it cannot and the CRS carries a \code{+to_meter} (a unit of 1000 km, or
+#' of 3.28 m).  \code{sf::st_line_sample()} hands that length to GDAL as a
+#' distance along the line in the CRS's unit, so a line in a unit of 2 m got
+#' its "midpoint" at its end, and one in a unit of 0.5 m a quarter of the way
+#' along.  Both are taken here with the CRS set aside, so GEOS measures and
+#' GDAL samples the planar line in the CRS's own unit, and the CRS is put
+#' back on the points.  Lines in metres, in a named unit or with no CRS get
+#' the numbers \code{sf::st_length()} and \code{sf::st_line_sample()} give
+#' them, to the bit.
+#'
+#' @param x An sfc of non-empty LINESTRINGs in a projected CRS or none.
+#' @return \code{.planar_line_lengths()}: a plain numeric vector, one length
+#'   per line.  \code{.planar_line_midpoints()}: an sfc of POINTs in the CRS
+#'   of \code{x}, one per line.
+#' @keywords internal
+#' @noRd
+.planar_line_lengths <- function(x) {
+  if (.is_longlat(x)) stop(".planar_line_lengths(): lines in degrees.", call. = FALSE)
+  as.numeric(sf::st_length(sf::st_set_crs(x, NA)))
+}
+
+# The midpoints of .planar_line_lengths(): see there.
+.planar_line_midpoints <- function(x) {
+  if (.is_longlat(x)) stop(".planar_line_midpoints(): lines in degrees.", call. = FALSE)
+  mp <- sf::st_line_sample(sf::st_set_crs(x, NA), sample = 0.5)
+  sf::st_set_crs(sf::st_cast(mp, "POINT"), sf::st_crs(x))
+}
+
 # -----------------------------------------------------------------------------
 # Point Coercion
 # -----------------------------------------------------------------------------
@@ -1306,6 +3209,122 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' parts give; GEOS's interior point, used by `"point_on_surface"` and by
 #' the temporary projection's choice of CRS, segfaulted on an empty line
 #' part too.
+#'
+#' A geometry of any type with a coordinate that is not finite (`NA`,
+#' `NaN`, `Inf`) or lies beyond 1e150 has no location (see
+#' [ensure_projected()], "Rows without a location"), and gets an EMPTY
+#' POINT in every mode, as an empty geometry does.  So does a geometry of a
+#' layer in a geographic CRS with a vertex at a latitude beyond 90 degrees,
+#' which is no place on the Earth, and a warning of class
+#' `spatialkit_lat_beyond_90` gives its rows of `x` (`rows`).
+#'
+#' Modes `"auto"` (for polygons) and `"point_on_surface"` take the point
+#' with GEOS, which reads a layer in longitude and latitude on the plane in
+#' degrees, under either [sf::sf_use_s2()] setting. sf's warning that such a
+#' point "may not give correct results for longitude/latitude data" is not
+#' passed on. A polygon that spans more than 180 degrees of longitude (one
+#' written across longitude 180, from 179.5 to -179.5) GEOS reads the long
+#' way round the globe, so its point is tested on the polygon read on the
+#' sphere with s2; when it does not lie on it, the point is taken again
+#' with the longitudes below 0 read from 180 to 360, and brought back into
+#' -180 to 180. A polygon whose point lies on it neither way, or that s2
+#' cannot read, keeps GEOS's point, and a warning of class
+#' `spatialkit_surface_point_off` gives its rows of `x` (`rows`). When `x`
+#' has no CRS and the lon/lat heuristic of [ensure_projected()] takes its
+#' coordinates for degrees, its polygons that span more than 180 units are
+#' read so too, as EPSG:4326, and a warning names the rows whose point that
+#' reading moves; the points keep the missing CRS.
+#'
+#' Mode `"bbox_center"`, and mode `"centroid"` (with the centroids
+#' `"line_midpoint"` takes of the rows that are not a LINESTRING, and
+#' `"auto"` of a MULTIPOINT and of the rows that are not points, lines or
+#' polygons, such as geometry collections) where GEOS takes the centroid on
+#' the plane in degrees (a lon/lat layer with s2 off), read a geometry
+#' written across longitude 180 the same way: one that spans more
+#' than 180 degrees of longitude as written, and no more than 180 with the
+#' longitudes below 0 read from 180 to 360, gets the centre of that box, or
+#' GEOS's centroid of the geometry so read, brought back into -180 to 180.
+#' A layer without a CRS that the lon/lat heuristic takes for degrees is
+#' read so too, with the same warning. A geometry wider than 180 degrees in
+#' both readings, such as one around a pole, keeps the centre of its box on
+#' the plane, or GEOS's planar centroid. The centroids s2 takes on the
+#' sphere are not changed.
+#'
+#' In mode `"auto"` a MULTILINESTRING gets the midpoint of its longest part.
+#' When several parts share the greatest length (to one part in ten
+#' million, measured in the projection used), their midpoints are taken
+#' and the one lowest in x, then in y, is kept, so the point does not depend
+#' on the order in which the feature lists its parts.  x values within one
+#' part in ten million of the diagonal of the midpoints' bounding box count
+#' as one, so y decides between midpoints whose x differ only in their last
+#' bits, and the point does not move with the origin of the coordinates.
+#'
+#' A layer whose geometries do not all have the same dimensions (XY beside
+#' XYZ or XYM, as `rbind()` of an XY and an XYZ layer gives) is read in x
+#' and y: sf hands GEOS and s2 every geometry in the dimension of the first,
+#' and the points of such a layer are returned in one dimension.
+#' Z and M are dropped, the points come back in XY, and a warning of class
+#' `spatialkit_zm_dropped` says so, with the rows that carried Z or M as its
+#' `rows`.  Mode `"bbox_center"` reads the box of each geometry and gives XY
+#' points for any layer, with no warning about Z or M.  A layer in one dimension, XY or
+#' XYZ throughout, is read as it is, and so is a layer whose only
+#' geometries of another dimension than the first are empty and not points.
+#'
+#' GEOS does not read M coordinates.  When the mode reduces a geometry that
+#' carries M (XYM or XYZM) to a point (any such geometry under
+#' `"centroid"`, `"point_on_surface"` and `"line_midpoint"`, any that is
+#' not a POINT under `"auto"`), the layer is reduced in x and y: Z and M
+#' are dropped from every geometry, the points come back in XY, and a
+#' warning of class `spatialkit_zm_dropped` says so, with the rows whose
+#' geometry carries M as its `rows`.  Empty geometries are not counted.
+#' A POINT layer that carries M is returned as it is under `"auto"`, and
+#' `"bbox_center"` gives XY points with no warning about M, as for any
+#' layer.
+#'
+#' On a layer in longitude and latitude with [sf::sf_use_s2()] on, sf takes
+#' centroids with s2 (under `"centroid"`, for the rows other than
+#' LINESTRINGs under `"line_midpoint"`, and for collections under
+#' `"auto"`), and s2 refuses some polygons GEOS accepts.  A polygon s2
+#' refuses because a vertex repeats the one before it, on its own or inside
+#' a collection, gets the centroid of the same ring without the repeat; the
+#' ring's points are unchanged.  A
+#' polygon s2 refuses for another reason (edges that cross, a figure eight)
+#' stops the call with an error of class `spatialkit_features_degenerate`
+#' that gives its rows of `x` (`rows` on the condition), quotes s2, and
+#' says to transform `x` to a projected CRS or to use another `mode`.  With
+#' s2 off, the centroids are GEOS's, planar in degrees, as before.
+#'
+#' GEOS, which takes the centroids in a projected CRS, without a CRS, and in
+#' degrees with s2 off, weights each part of a ring by its signed area.
+#' Where the edges of a ring cross (a bowtie), or a hole lies outside its
+#' shell, parts of the feature count with opposite signs, and the point can
+#' lie far outside the feature: a bowtie 10 km across, one corner 1 m off
+#' symmetric, got a point over 33,000 km away.  A centroid outside the bounding
+#' box of a feature GEOS reports invalid stops the call with an error of
+#' the same class, `spatialkit_features_degenerate`, that gives its rows of
+#' `x` (`rows`), quotes GEOS's reason for each (`reasons`), carries
+#' `site = "geos_centroid"`, and says to pass `mode = "point_on_surface"`
+#' or to repair the features with [sf::st_make_valid()].  A centroid
+#' inside the box is returned as GEOS gives it.
+#'
+#' Modes `"auto"` and `"line_midpoint"` take the midpoint of a line in a
+#' temporary projection (`tmp_project`), the one [ensure_projected()]
+#' chooses for the lines.  A line that projection returns empty or without
+#' some of its vertices is never sampled, since [sf::st_line_sample()] ends
+#' the R session on an empty line: the call stops with an error of the
+#' same class, `spatialkit_features_degenerate`, that gives its rows of `x`
+#' (`rows`), carries `site = "projection"`, and says to pass
+#' `mode = "centroid"` or `tmp_project = FALSE`, which take the point in
+#' longitude and latitude, without the projection.
+#'
+#' The functions that reduce a layer they are given to points this way
+#' ([prep_model_data()], [make_folds()], [fold_separation()],
+#' [estimate_sac_range()], [resolution_profile()],
+#' [determine_optimal_levels()], [cell_values_at()], [summarize_by_cell()],
+#' [select_features_forward()], [compare_models_cv()],
+#' [area_of_applicability()], [predict_surface()]) raise each of these
+#' errors in their own name, with the same class and fields, naming their
+#' argument and its rows.
 #'
 #' @param x An sf object.
 #' @param mode One of "auto", "centroid", "point_on_surface", "surface",
@@ -1342,12 +3361,195 @@ coerce_to_points <- function(
   if (identical(mode, "surface")) mode <- "point_on_surface"
   if (nrow(x) == 0L) return(x)
 
-  g   <- sf::st_geometry(x)
   crs <- sf::st_crs(x)
 
+  # A geometry of any type with a coordinate that is not finite (NA, NaN,
+  # Inf) or lies beyond .POOL_XY_MAX has no location, and is emptied before
+  # the mode reads it, so it gets an EMPTY POINT in every mode.  Only lines
+  # were read so: a polygon with such a vertex got a ring vertex under
+  # "auto" and "point_on_surface", (Inf, y) or (5e199, y) under
+  # "bbox_center", and (Inf, y) under "centroid" at 1e200.  So is a
+  # geometry of a layer in a geographic CRS with a vertex at a latitude
+  # beyond 90 degrees, which is no place on the Earth, and the warning of
+  # class spatialkit_lat_beyond_90 names its rows: the box centre of a
+  # square at 35 N with one vertex at 95 was put at 65 N without a word, and
+  # the other modes passed on sf's bare "bounding box has potentially an
+  # invalid value range for longlat data".
+  far <- .beyond_pole_rows(x)
+  x <- .empty_unlocated(x, lat = TRUE)
+  .warn_beyond_pole(far, nrow(x), "coerce_to_points", "x",
+                    c("it has no location and gets an EMPTY POINT",
+                      "they have no location and get an EMPTY POINT"))
+
+  # A layer without a CRS is read as degrees across longitude 180 only when
+  # the test ensure_projected() applies takes it for lon/lat; the test is
+  # run only when some row spans more than 180 units (.across_180()).
+  assume_ll <- if (is.na(crs)) function() isTRUE(.looks_like_lonlat(x)$lonlat)
+
   # -- bbox_center ---
+  # Read geometry by geometry, so a layer that mixes dimensions gives the
+  # boxes of its rows; the points are XY whatever the input.  A geometry
+  # written across longitude 180 (from 179.5 to -179.5) has a box that spans
+  # the globe on the plane, and its centre lay near longitude 0, about
+  # 17,600 km from it at latitude 10, without a word.  Such a row of a
+  # lon/lat layer, or of a layer without a CRS read as degrees, gets the
+  # centre of its box with the longitudes below 0 read from 180 to 360,
+  # brought back into -180 to 180, when that box spans no more than 180
+  # degrees (.across_180()), as the points on the surface are read.
   if (mode == "bbox_center") {
-    return(sf::st_set_geometry(x, .bbox_center_sfc(x)))
+    pts <- .bbox_center_sfc(x)
+    am  <- .across_180(sf::st_geometry(x), assume_ll)
+    if (length(am$rows)) {
+      pts[am$rows] <- sf::st_sfc(lapply(am$unwrapped, function(s) {
+        bb <- sf::st_bbox(s)
+        .wrap_lon(sf::st_point(unname(c((bb[["xmin"]] + bb[["xmax"]]) / 2,
+                                        (bb[["ymin"]] + bb[["ymax"]]) / 2))))
+      }), crs = crs)
+      if (is.na(crs))
+        .warn_crsless_across_180(am$rows,
+                                 c("the centre of its box read across longitude 180",
+                                   "the centres of their boxes read across longitude 180"))
+    }
+    return(sf::st_set_geometry(x, pts))
+  }
+
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y:
+  # sf hands GEOS and s2 every geometry in the dimension of the first, so an
+  # XYZ ring among XY rows (or the reverse) stopped GEOS or was read as a
+  # ring of other points, and st_transform() of the lines stopped with "OGR
+  # error".  The points come back in XY, with the warning of class
+  # spatialkit_zm_dropped.  A layer whose geometry types each keep one
+  # dimension (XY polygons beside a POINT Z) is read in x and y too: the
+  # types are read apart below, but the points would come back mixed.  The
+  # warning therefore says what is done, not that the layer was misread.  A
+  # layer in one dimension takes the path below as it did, and so does one
+  # whose only geometries of another dimension than the first are empty and
+  # not points (see .xy_if_mixed_warn()).
+  x <- .xy_if_mixed_warn(x, "coerce_to_points", "x",
+                         why = paste0("so it is read in x and y: Z and M are ",
+                                      "dropped and the points are returned ",
+                                      "in XY"))
+  # GEOS does not read M: its centroid, interior point and the rest stopped
+  # with sf's "GEOS does not support XYM or XYZM geometries" on a layer whose
+  # geometries carry M.  When the mode reduces such a geometry to a point
+  # (every one under "centroid", "point_on_surface" and "line_midpoint",
+  # every one that is not a POINT under "auto"), Z and M are dropped from
+  # the whole layer and the points come back in XY, with the warning of
+  # class spatialkit_zm_dropped.  GEOS's points of a POLYGON Z are XY too,
+  # so no measure is lost that a point could carry.  POINT rows under
+  # "auto" are returned as they are, with their M.  Empty geometries hold no
+  # coordinates and are not counted; when they are the only ones the mode
+  # reduces that carry M, Z and M are dropped from them alone, without a
+  # word, since GEOS refuses an empty XYM polygon too.
+  x <- .xy_if_reduced_m(x, mode)
+  g <- sf::st_geometry(x)
+
+  # Centroids of the rows `rows` (positions in g; sub is g[rows]).  On
+  # lon/lat input with s2 on, s2 takes them, and a polygon s2 refuses
+  # stopped the call with s2's bare message ("Loop 0 is not valid: Edge 1 is
+  # degenerate (duplicate vertex)"), which names neither the row nor a way
+  # on, even for a polygon GEOS accepts.  A polygon s2 refuses for a vertex
+  # that repeats the one before it, also inside a collection, gets the
+  # centroid of the same ring without the repeat (.s2_centroids()); a
+  # collection was not retried, so under "auto" and "centroid" it stopped
+  # the call.  One s2 refuses even then (crossing
+  # edges, a figure eight) stops the call with the features' class, naming
+  # its rows of `x`.  It is not repaired: its centroid would be that of
+  # another shape.  The message offers mode "auto" only when every row
+  # refused is a POLYGON or MULTIPOLYGON, which "auto" reduces with a point
+  # on the surface; "auto" takes the centroid of a collection, through this
+  # function, and refuses the same row again.  The case is kept on the
+  # condition (auto_helps) for the callers that raise it again.
+  centroids_of <- function(sub, rows) {
+    sc <- .s2_centroids(sub, split = FALSE)
+    if (length(sc$refused)) {
+      bad  <- rows[sc$refused]
+      why  <- .s2_refused_rows(sub[sc$refused])
+      auto_helps <- all(as.character(sf::st_geometry_type(
+        sub[sc$refused], by_geometry = TRUE)) %in% c("POLYGON", "MULTIPOLYGON"))
+      .raise_cells_degenerate(
+        sc$error, bad,
+        if (!is.null(why) && length(why$reasons) == length(bad)) why$reasons
+        else rep(conditionMessage(sc$error), length(bad)),
+        length(g), "coerce_to_points", "`x`", "sf::st_centroid()",
+        "call coerce_to_points() again; the centroids are then taken in that CRS",
+        of = sprintf("the %d features of `x`", length(g)), kind = "features",
+        more = if (mode == "auto" || !auto_helps)
+          "Or pass mode = \"point_on_surface\", which takes a point on each geometry with GEOS."
+        else
+          "Or pass mode = \"auto\", which takes a point on the surface of each polygon with GEOS.",
+        auto_helps = auto_helps)
+    }
+    # A centroid GEOS puts outside its feature (a ring whose edges cross,
+    # a hole outside its shell) is refused, naming its rows of `x`; it was
+    # returned without a word, for a bowtie over 33,000 km away.
+    off <- .centroids_off_box(sub, sc$points)
+    if (length(off$at))
+      .raise_centroids_off(
+        rows[off$at], off$reasons, length(g), "coerce_to_points", "`x`",
+        paste0("Pass mode = \"point_on_surface\", which takes a point on each geometry ",
+               "with GEOS, or repair the features with sf::st_make_valid() and call ",
+               "coerce_to_points() again."))
+    # GEOS takes the centroid on the plane in degrees (a lon/lat layer with
+    # s2 off, a layer without a CRS read as degrees), so a geometry written
+    # across longitude 180 got its centroid near longitude 0, about 17,600
+    # km from it at latitude 10, without a word.  Such a row gets GEOS's
+    # centroid of the geometry with the longitudes below 0 read from 180 to
+    # 360, brought back into -180 to 180, when it spans no more than 180
+    # degrees so (.across_180()).  s2 takes the centroid on the sphere, and
+    # its points are kept.
+    pts <- sc$points
+    if (is.na(crs) || !isTRUE(sf::sf_use_s2())) {
+      am <- .across_180(sub, assume_ll)
+      if (length(am$rows)) {
+        pts[am$rows] <- sf::st_sfc(lapply(unclass(sf::st_centroid(am$unwrapped)), .wrap_lon),
+                                   crs = crs)
+        if (is.na(crs))
+          .warn_crsless_across_180(rows[am$rows],
+                                   c("its centroid read across longitude 180",
+                                     "their centroids read across longitude 180"))
+      }
+    }
+    pts
+  }
+
+  # Points on the surface of the rows `rows` (positions in g; sub is
+  # g[rows]), with GEOS, planar in degrees on lon/lat input under either s2
+  # setting.  sf's warning that such a point "may not give correct results
+  # for longitude/latitude data" is not passed on: it reached the caller in
+  # sf's words from every function but the summaries, which muffled it.  A
+  # row that spans more than 180 degrees of longitude, whose point GEOS
+  # took on the far side of the globe, gets the point of its ring with the
+  # longitudes read from 0 to 360 (.surface_points()); one whose point lies
+  # on it neither way is said, naming its rows of `x`.  A layer without a
+  # CRS whose coordinates ensure_projected() takes for degrees is read the
+  # same way, as EPSG:4326, and the rows that reading moves are said: the
+  # callers that project such a layer read it as EPSG:4326, and a polygon
+  # across 180 kept GEOS's point on the far side of the globe.
+  surface_of <- function(sub, rows) {
+    no_crs <- is.na(crs)
+    sp <- .surface_points(sub, assume_ll = assume_ll)
+    if (no_crs && length(sp$moved))
+      .warn_crsless_across_180(rows[sp$moved],
+                               c("a point on it read on the sphere",
+                                 "a point on them read on the sphere"))
+    if (length(sp$off)) {
+      one <- length(sp$off) == 1L
+      .warn_classed(
+        "spatialkit_surface_point_off",
+        paste0("coerce_to_points(): %s of `x` %s more than 180 degrees of ",
+               "longitude, and the point GEOS takes on %s surface in degrees ",
+               "does not lie on %s read on the sphere, or s2 cannot read %s to ",
+               "tell. %s a projected CRS that holds %s and call ",
+               "coerce_to_points() again."),
+        .rows_text(rows[sp$off]), if (one) "spans" else "span",
+        if (one) "its" else "their", if (one) "it" else "them",
+        if (one) "it" else "them",
+        if (no_crs) "Set the CRS of `x`, transform it to" else "Transform `x` to",
+        if (one) "it" else "them",
+        data = list(rows = rows[sp$off]))
+    }
+    sp$points
   }
 
   # -- direct ops ---
@@ -1355,14 +3557,14 @@ coerce_to_points <- function(
   # st_centroid() is spherical only while sf_use_s2() is TRUE: with it FALSE
   # it is planar in degrees (a box -120..-60 x 50..75 got a centre 155 km
   # from the s2 one) and its warning is suppressed here.  st_point_on_surface()
-  # is GEOS, planar in degrees under either setting.
+  # is GEOS, planar in degrees under either setting (see surface_of()).
   if (mode == "centroid") {
-    return(sf::st_set_geometry(x, suppressWarnings(sf::st_centroid(g))))
+    return(sf::st_set_geometry(x, centroids_of(g, seq_along(g))))
   }
   if (mode == "point_on_surface") {
     # Empty parts dropped first: GEOS segfaults on an empty line inside a
     # non-empty feature (see .drop_empty_parts()).
-    return(sf::st_set_geometry(x, sf::st_point_on_surface(.drop_empty_parts(g))))
+    return(sf::st_set_geometry(x, surface_of(g, seq_along(g))))
   }
 
   is_ll <- .is_longlat(x)
@@ -1388,14 +3590,36 @@ coerce_to_points <- function(
   # and prep_model_data() and make_folds() drop them like any empty geometry.
   # This used to be an error, which made a line layer with one null geometry
   # the only kind of layer those "drop empty rows" paths could not clean.
+  # The temporary projection of the lines whose midpoints are taken, rows
+  # `rows` of `x`.  A line it returns empty, without some of its vertices,
+  # or with a coordinate that is not finite is refused, naming its rows of
+  # `x`: st_line_sample() segfaults on an empty line, and a crash cannot be
+  # caught.  LINESTRING (0 0, 180 0) in UTM zone 46 ended the R session.
+  # ensure_projected()'s warning about such rows would name the rows of this
+  # subset, so it is not given; the refusal names them.
+  projected_lines <- function(lines_sf, rows) {
+    done <- .answer_for_classed("spatialkit_rows_unplaced")
+    proj <- tryCatch(ensure_projected(lines_sf), finally = done())
+    bad  <- .rows_unplaced(lines_sf, proj)
+    if (length(bad))
+      .raise_unplaced_lines(
+        rows[bad], length(g), "coerce_to_points", "`x`", .fold_crs_label(proj),
+        paste0("Pass mode = \"centroid\", or tmp_project = FALSE, which take the ",
+               "point in longitude and latitude, without the projection."))
+    proj
+  }
+
+  # A line with a coordinate that is not finite or lies beyond .POOL_XY_MAX
+  # has no location: it is read as an empty line, as elsewhere.  In lon/lat
+  # the temporary projection emptied it, and st_line_sample() segfaulted on
+  # the empty copy.
   .line_midpoints <- function(idx_ls) {
     res  <- rep(list(sf::st_point()), length(idx_ls))
-    full <- which(!sf::st_is_empty(g[idx_ls]))
+    full <- which(!sf::st_is_empty(g[idx_ls]) & !.unlocated_features(g[idx_ls]))
     if (!length(full)) return(res)
     g_ls_sf   <- sf::st_sf(geometry = g[idx_ls[full]])
-    g_ls_proj <- if (tmp_project) ensure_projected(g_ls_sf) else g_ls_sf
-    midps     <- sf::st_line_sample(sf::st_geometry(g_ls_proj), sample = 0.5)
-    midps     <- sf::st_cast(midps, "POINT")
+    g_ls_proj <- if (tmp_project) projected_lines(g_ls_sf, idx_ls[full]) else g_ls_sf
+    midps     <- .planar_line_midpoints(sf::st_geometry(g_ls_proj))
     midps     <- .back_to_input_crs(midps, g_ls_proj, crs)
     .check_midpoint_alignment(midps, full)
     res[full] <- as.list(midps)
@@ -1421,7 +3645,7 @@ coerce_to_points <- function(
     }
     # Non-LINESTRING fallback to centroid
     if (length(idx_other)) {
-      ctr <- suppressWarnings(sf::st_centroid(g[idx_other]))
+      ctr <- centroids_of(g[idx_other], idx_other)
       out[idx_other] <- as.list(ctr)
     }
     return(sf::st_set_geometry(x, sf::st_sfc(out, crs = crs)))
@@ -1443,12 +3667,26 @@ coerce_to_points <- function(
     for (i in idx_mpt) {
       out[[i]] <- suppressWarnings(sf::st_centroid(g[i]))[[1L]]
     }
+    # Where GEOS takes the centroid on the plane in degrees, a MULTIPOINT
+    # written across longitude 180 is read as centroids_of() reads such a
+    # row: its two points at 179.5 and -179.5 got a centroid at longitude
+    # 0, about 17,700 km from either, without a word.
+    if (is.na(crs) || !isTRUE(sf::sf_use_s2())) {
+      am <- .across_180(g[idx_mpt], assume_ll)
+      if (length(am$rows)) {
+        out[idx_mpt[am$rows]] <- lapply(unclass(sf::st_centroid(am$unwrapped)), .wrap_lon)
+        if (is.na(crs))
+          .warn_crsless_across_180(idx_mpt[am$rows],
+                                   c("its centroid read across longitude 180",
+                                     "their centroids read across longitude 180"))
+      }
+    }
   }
 
   # --- POLYGON / MULTIPOLYGON: vectorized point_on_surface ---
   idx_poly <- which(gtypes %in% c("POLYGON", "MULTIPOLYGON"))
   if (length(idx_poly)) {
-    pos <- sf::st_point_on_surface(.drop_empty_parts(g[idx_poly]))
+    pos <- surface_of(g[idx_poly], idx_poly)
     out[idx_poly] <- as.list(pos)
   }
 
@@ -1476,7 +3714,11 @@ coerce_to_points <- function(
       # feature holding one came back EMPTY as a whole, losing its real part.
       g_mls     <- .drop_empty_parts(g[idx_mls])
       g_mls_sf  <- sf::st_sf(geometry = g_mls)
-      g_mls_proj <- if (tmp_project) ensure_projected(g_mls_sf) else g_mls_sf
+      # A located row the projection cannot place is refused, as for a
+      # LINESTRING; it came back as an empty point.  A row without a
+      # location comes back empty from the projection and gets an empty
+      # point below.
+      g_mls_proj <- if (tmp_project) projected_lines(g_mls_sf, idx_mls) else g_mls_sf
       proj_geom  <- sf::st_geometry(g_mls_proj)
       proj_crs   <- sf::st_crs(g_mls_proj)
       for (j in seq_along(idx_mls)) {
@@ -1496,11 +3738,27 @@ coerce_to_points <- function(
           out[[idx_mls[j]]] <- sf::st_point()
         } else {
           parts <- sf::st_sfc(lapply(mats, sf::st_linestring), crs = proj_crs)
-          lens <- as.numeric(sf::st_length(parts))
+          lens <- .planar_line_lengths(parts)
           k    <- if (length(lens)) which.max(lens) else 1L
-          mp   <- sf::st_line_sample(parts[k], sample = 0.5)
-          mp   <- sf::st_cast(mp, "POINT")
+          # Parts of equal greatest length are all sampled, and the midpoint
+          # lowest in x, then in y, is kept: which.max() alone took the first
+          # in the feature's part order, so the same geometry with its parts
+          # listed the other way round got another point.  Lengths within
+          # .TIE_TOL of the greatest are equal: congruent parts differ in
+          # their last bits after a shift of the origin.  So do midpoints of
+          # one x reached from other coordinates, and x values within
+          # .TIE_TOL of the diagonal of the midpoints' box are one column
+          # (.near_columns()), so y decides between them.
+          k    <- if (length(k)) which(lens >= lens[k] * (1 - .TIE_TOL)) else k
+          mp   <- .planar_line_midpoints(parts[k])
           mp   <- .back_to_input_crs(mp, g_mls_proj, crs)
+          if (length(mp) > 1L) {
+            # The column of x, then y, then Z or M where the parts carry
+            # them, then x.
+            xy <- unname(as.data.frame(sf::st_coordinates(mp)))
+            mp <- mp[do.call(order, c(list(.near_columns(xy[[1L]], xy[[2L]])),
+                                      xy[-1L], xy[1L]))[1L]]
+          }
           out[[idx_mls[j]]] <- mp[[1]]
         }
       }
@@ -1511,7 +3769,7 @@ coerce_to_points <- function(
   idx_other <- which(!gtypes %in% c("POINT", "MULTIPOINT", "POLYGON",
                                      "MULTIPOLYGON", "LINESTRING", "MULTILINESTRING"))
   if (length(idx_other)) {
-    ctr <- suppressWarnings(sf::st_centroid(g[idx_other]))
+    ctr <- centroids_of(g[idx_other], idx_other)
     out[idx_other] <- as.list(ctr)
   }
 

@@ -45,9 +45,9 @@ of observations each once there are more cells than dense places.
 per cell gives, 4.5 by default, by the leave-one-out error of the cell
 values, and `select_resolution()` sets it; given a ladder of counts the
 profile scores every one against the spatial structure of the
-observations, and `determine_optimal_levels()` reads one off their
-clustering when they have any. `build_tessellation()` produces Voronoi,
-hex, square or Delaunay cells clipped to your study area, with IDs that
+observations, and `determine_optimal_levels()` reads one off the elbow
+of their clustering when there is one. `build_tessellation()` produces
+Voronoi, hex, square or Delaunay cells clipped to your study area, with IDs that
 stay stable when the input row order changes. `summarize_by_cell()`
 aggregates onto them with a count and a standard error for every cell
 mean, and beside each mean a pooled value, the mean pulled toward the
@@ -59,8 +59,10 @@ Redrawing boundaries is easy. Knowing whether the result means anything
 is the hard part, so the second half of the package is the evidence
 layer. Three model backends sit behind one `spatial_fit` class so they
 can be scored on identical folds. Cross-validation holds out whole
-regions sized to the data’s own autocorrelation range. An
-area-of-applicability estimate marks where the resulting score applies.
+regions, blocks of a grid by default, which can be sized from the data’s
+own autocorrelation range or matched to the locations a map will predict
+at. An area-of-applicability estimate marks where the resulting score
+applies.
 All of it is built on [`sf`](https://r-spatial.github.io/sf/), with CRS
 handling that will not hand metres to a function expecting degrees.
 
@@ -219,9 +221,10 @@ cells, from their earlier numbers of starts. `NEWS.md` says what each of
 these changes in a result.
 
 Now score a model. The learner below is a cubic trend surface in the
-coordinates, which is a realistic thing to fit and also the leakage
-mechanism this package warns about: given `x` and `y`, a flexible model
-can reproduce the training surface by memorising location.
+coordinates, which is a realistic thing to fit and also the case this
+package warns about: given `x` and `y`, a flexible model can reproduce
+the training surface by memorising location, so its error grows quickly
+with the distance from the data.
 
 ``` r
 trend_fit <- function(train_sf, ...) {
@@ -265,8 +268,10 @@ c(random  = random$overall$RMSE,
 
 Same 400 observations, same model, one number more than half again the
 other. The difference is entirely in which rows were allowed to train on
-which, and the blocked figure is the one that answers the question a map
-is used for: what happens where there is no observation nearby.
+which: the random figure is the error of predicting among the samples,
+the blocked one the error of predicting into gaps a block wide. Which
+one a map has depends on where it predicts, and `fold_separation()`
+compares the folds’ distances from the data with the map’s.
 
 Is there structure the model missed?
 
@@ -293,7 +298,7 @@ approximate.
 | get my data into a projected CRS                                        | `ensure_projected()`, `coerce_to_points()`, `harmonize_crs()`                                               |
 | cut my study area into cells                                            | `build_tessellation()` (`"voronoi"`, `"hex"`, `"square"`, `"triangles"`)                                    |
 | place the seeds a Voronoi grows from                                    | `get_voronoi_seeds()`                                                                                       |
-| choose how many cells, quickly (coordinates only, no optional packages) | `determine_optimal_levels()`                                                                                |
+| read a cell count off the elbow of the clustering of my points (coordinates only; `NA` when there is none) | `determine_optimal_levels()`                                                                                |
 | set the cell count from a number of observations per cell              | `resolution_profile()`, then `select_resolution()` (by default 4.5 per cell, for pooled values)             |
 | see what every cell count costs                                         | `resolution_profile(n_levels = )`, then `summary()` on it for every criterion’s pick, or `select_resolution(criterion = )` for one criterion’s pick |
 | read a cell’s value and interval at other locations                     | `cell_values_at()`                                                                                          |
@@ -301,16 +306,17 @@ approximate.
 | check whether a cell mean is the best estimate of that cell             | `kriging_adequacy()`                                                                                        |
 | draw the result                                                         | `plot_tessellation_map()`                                                                                   |
 | know how far spatial correlation reaches                                | `estimate_sac_range()`, and `sac_nugget()` for its nugget                                                   |
-| build honest CV folds                                                   | `make_folds()` (`random_kfold`, `block_kfold`, `buffered_loo`, `leave_location_out`, `nndm`, `knndm`)       |
+| build CV folds                                                          | `make_folds()` (`random_kfold`, `block_kfold`, `buffered_loo`, `leave_location_out`, `nndm`, `knndm`)       |
 | see whether my folds actually separate                                  | `plot_folds()`                                                                                              |
-| size the blocks by measurement                                          | `cv_block_size_sweep()`, and `plot()` on the result                                                         |
+| check which way a CV score errs for my map                              | `fold_separation(prediction_points = )`                                                                     |
+| see the CV error at each block size                                     | `cv_block_size_sweep()`, and `plot()` on the result                                                         |
 | fit a model                                                             | `fit_gwr_model()`, `fit_bayesian_spatial_model()`, `fit_rf_model()`                                         |
 | score it out of sample                                                  | `cv_gwr()`, `cv_bayes()`, `cv_rf()`                                                                         |
 | score *my own* learner on the same folds                                | `cv_spatial()` + `new_spatial_fit()`                                                                        |
 | score it in sample                                                      | `model_metrics()`, `evaluate_insample()`, `compare_models()`                                                |
 | see the fold-to-fold spread of a CV score                               | `plot_cv_metrics()`                                                                                         |
 | check whether predicted intervals are the width they claim              | `plot_calibration()`                                                                                        |
-| pick predictors without leaking                                         | `select_features_forward()` (`gwr_model_selection()` for the AICc counterpart)                              |
+| pick predictors inside the cross-validation                             | `select_features_forward()` (`gwr_model_selection()` for the AICc counterpart)                              |
 | compare backends head to head                                           | `compare_models_cv()`                                                                                       |
 | check for leftover spatial structure                                    | `residual_morans_i()`, `plot(fit, type = "variogram")`                                                      |
 | turn a fit into a map                                                   | `predict_surface()`                                                                                         |
@@ -329,8 +335,9 @@ by pipeline step.
 
 `compare_models_cv()` scores all three on identical folds and is the
 right answer when you can afford it. It is not always cheap. On one
-recorded run (one machine, 4-fold CV, 2 chains × 1,000 iterations) the
-Bayesian GP took **1,186 s** at n = 2,000 against **109 s** for
+recorded run (one machine, 4-fold CV, 2 chains × 1,000 iterations, while
+the default `adapt_delta` was 0.9; the present 0.99 samples more slowly)
+the Bayesian GP took **1,186 s** at n = 2,000 against **109 s** for
 `cv_gwr()` on the same data. At n = 300 it was 142 s against 0.8 s, so
 the ratio is not fixed either. A `cv_rf()` of the same shape is seconds.
 So it is worth knowing what each backend is *for* before you spend an
@@ -360,7 +367,7 @@ in them is computed on the spot.
 | `vignette("getting-started")`          | installing, getting your data in, what the coordinates are in, and the pipeline from points to a scored model and a map |
 | `vignette("resolution")`               | choosing a cell count, the criteria, and why they disagree                                                              |
 | `vignette("spatial-cross-validation")` | the six fold schemes, block sizing, and reading a CV result down to the last row                                        |
-| `vignette("diagnostics")`              | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability, and two ways to leak    |
+| `vignette("diagnostics")`              | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability, coordinates as predictors, and selection inside the folds |
 | `vignette("spatialkit_nc_demo")`       | the whole pipeline end to end on real boundaries, with maps                                                             |
 | `vignette("reporting")`                | grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report                  |
 
@@ -501,14 +508,19 @@ you to decide about the block size.
 around the elbow sat at nine cells or fewer, where Moran’s I is
 arithmetically degenerate, so the call fell back to the geometric
 ranking. On points with no cluster structure that is the usual outcome
-below about `max_levels = 40`; `resolution_profile()` scores Moran’s z
-at every level of its ladder. See `vignette("resolution")`.
+below about `max_levels = 40` under `on_no_elbow = "warn"` (at the
+default such points return `NA` before any window is placed);
+`resolution_profile()` scores Moran’s z at every level of its ladder.
+See `vignette("resolution")`.
 
 **`determine_optimal_levels(): Moran's I could not be computed at any k from ... to ... in the elbow's neighbourhood`**
 The candidates did pass nine cells, but too few of the cells hold a row
 with a response and every predictor, or the regression of the cell
 means on the predictors is singular (a predictor constant or collinear
-across cells). Check for missing values first.
+across cells). Check for missing values first. Under
+`criterion = "morans_i"` the call then falls back to the geometric
+ranking; under `"combined"` it ranks the counts as usual, with `moran_i`
+and `moran_z` `NA` in the diagnostics.
 
 **Distances, bandwidths or block sizes look absurd.** Check the working
 CRS first: `st_crs(x)$units_gdal`. A block size that made sense in

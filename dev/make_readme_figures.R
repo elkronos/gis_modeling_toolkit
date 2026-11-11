@@ -146,10 +146,11 @@ ggsave("man/figures/readme-spatial-cv.png", p2,
 # The middle count is read off resolution_profile() by the reliability of the
 # cell means, and the label names that criterion.  determine_optimal_levels()
 # used to supply it, but these sites are spread evenly: its WSS curve has no
-# elbow, and it warns that the count it returns (4 at max_levels = 15) was set
-# by the ladder rather than by the data.  Reliability's flat region on this
-# field is wide (within 2 percent of the optimum from 2 to 15 cells), and the
-# README says so rather than presenting the count as the answer.  The
+# elbow, so it returns NA with a warning that the count the ladder gives (4 at
+# max_levels = 15, which on_no_elbow = "warn" returns) was set by the ladder
+# rather than by the data.  Reliability's flat region on this field is wide (within 2
+# percent of the optimum from 2 to 15 cells), and the README says so rather
+# than presenting the count as the answer.  The
 # profile's warning about a zero nugget concerns Cp, which is not read here.
 # With a predictor the profile scores no cell value, so n_levels gives the
 # ladder of counts whatever obs_per_cell would; its cells, and the seeds

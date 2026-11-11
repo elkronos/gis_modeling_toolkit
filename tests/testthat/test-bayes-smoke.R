@@ -140,8 +140,9 @@ test_that("a supplied control list keeps the package's adapt_delta default", {
   skip_if_not_installed("brms")
 
   # Regression: control = list(...) used to replace the defaults wholesale,
-  # silently dropping adapt_delta = 0.9 back to Stan's 0.8 -- which is exactly
-  # the setting the divergence warning then tells the user to raise.
+  # silently dropping the package's adapt_delta (0.9 then, 0.99 now) back to
+  # Stan's 0.8 -- which is exactly the setting the divergence warning then
+  # tells the user to raise.
   pts <- bayes_smoke_points()
   fit <- fit_smoke_model(pts, control = list(max_treedepth = 11))
 
@@ -153,7 +154,7 @@ test_that("a supplied control list keeps the package's adapt_delta default", {
   if (is.null(ctl$adapt_delta))
     skip("this Stan backend does not expose the merged control list")
 
-  expect_equal(ctl$adapt_delta, 0.9)   # package default survived the merge
+  expect_equal(ctl$adapt_delta, 0.99)  # package default survived the merge
   expect_equal(ctl$max_treedepth, 11)  # user value applied
 })
 

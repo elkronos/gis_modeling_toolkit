@@ -28,7 +28,26 @@ option exists only for rare edge cases where you are certain the
 coordinates already match the target CRS definition.}
 }
 \value{
-A named list with components a and b.
+A named list with components a and b.  A layer that is
+transformed and mixes XY and XYZ (or XYM) geometries is returned in XY,
+with a warning of class \code{"spatialkit_zm_dropped"}:
+\code{\link[sf:st_transform]{sf::st_transform()}} reads a layer in the dimension of its first
+geometry and misplaces the others.  A layer in one dimension is
+transformed with its Z and M, and so is a layer whose only geometries
+of another dimension than the first are empty and not points.  A row
+of a transformed layer with a coordinate that is not finite or lies
+beyond 1e150 comes back empty, in its own geometry type: it has no
+location to move, and \code{\link[sf:st_transform]{sf::st_transform()}} would drop that vertex and
+return the rest of the feature, or put the coordinate at a finite
+place.  So does a row of a projected layer moved to a CRS in degrees
+with a coordinate beyond 1e10 in its CRS's own unit, further out than
+any projected CRS places a point of the Earth.  A row that has a
+location and that the target CRS cannot place in full, such as a point
+far outside a UTM zone or a ring with a vertex at a latitude beyond 90,
+comes back empty, or without the vertices the CRS cannot place, and a
+warning of class \code{"spatialkit_rows_unplaced"} names such rows of
+\code{a} or \code{b} (\code{rows} on the condition).  A layer that is
+not transformed is returned as it came.
 }
 \description{
 Aligns two sf objects to a common CRS.
@@ -40,7 +59,11 @@ identical data in the same place: coordinates that look like degrees are
 taken as EPSG:4326 and \strong{reprojected} to the other object's CRS (or
 \code{target_crs}); coordinates that do not are \emph{stamped} with
 \code{\link[sf:st_set_crs]{sf::st_set_crs()}}, which relabels without moving them.  Either way the
-assumption is announced with a warning.
+assumption is announced with a warning.  A CRS in longitude and latitude
+is not stamped on coordinates that cannot be in it: a layer with an x
+outside -180 to 360 or a y beyond 90 north or south, read on the
+coordinates that have a location, stops the call with an error that names
+\code{a} or \code{b}, its box and the target CRS.
 }
 \examples{
 library(sf)

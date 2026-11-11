@@ -173,7 +173,7 @@ test_that("a nugget at its lower bound is marked, not handed on bare", {
   r2 <- estimate_sac_range(fvl_uniform(4202, nug = 0.5), "z")
   expect_gt(sac_nugget(r2), 0.1)
   expect_identical(attr(r2, "nugget_at_bound"), FALSE)
-  # A REML nugget stops short of exactly 0; within 1e-4 of the sill counts.
+  # A REML nugget stops short of exactly 0; at most 1e-4 of the sill counts.
   hand <- gstat::vgm(psill = 0.99, model = "Exp", range = 100, nugget = 6e-7)
   expect_lte(spatialkit:::.vgm_nugget_of(hand), 1e-4 * sum(hand$psill))
 })
@@ -199,7 +199,7 @@ test_that("every fitted nugget of zero is marked as the bound it is", {
   nug  <- vapply(res, sac_nugget, numeric(1))
   sill <- vapply(res, function(r) sum(attr(r, "variogram_model")$psill), numeric(1))
   expect_true(all(vapply(res, is.finite, logical(1))))
-  # The mark is exactly "at or within 1e-4 of the sill of zero".
+  # The mark is exactly "0, or at most 1e-4 of the sill".
   expect_identical(at_bound, nug <= 1e-4 * sill)
   expect_true(any(at_bound)); expect_true(any(!at_bound))
   expect_true(all(nug[at_bound] == 0))
@@ -378,7 +378,11 @@ test_that("a long range at the edge of the search marks the two-structure model 
   # model, and resolution_profile() takes nothing from a model without a
   # minimum.
   out <- suppressWarnings(resolution_profile(pts, "z", sac = r, n_levels = 4, nstart = 2))
-  expect_identical(attr(out, "cp_noise")$source, "finest-level residual mean square")
+  # The residual mean square of the finest level, or the semivariance of
+  # nearest-neighbour pairs that holds it (BUG-02): never the nugget.
+  cn <- attr(out, "cp_noise")
+  expect_identical(if (identical(cn$source, "short-lag semivariance")) cn$uncapped$source
+                   else cn$source, "finest-level residual mean square")
   # The helper passes the flag through, and defaults to a minimum.
   f <- spatialkit:::.sac_fit_nested
   vg <- attr(r, "variogram")

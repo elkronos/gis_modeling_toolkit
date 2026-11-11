@@ -197,6 +197,27 @@
 }
 
 
+#' A GWR bandwidth, for a message
+#'
+#' An adaptive bandwidth is a count of neighbours and prints as a whole
+#' number; a fixed one is a length in CRS units and prints with four
+#' significant digits (.fmt_len()), as the coefficient plot's caption does.
+#' "%.4f" printed a fixed fallback of 4.6e-05 (a 100 m layer in units of
+#' 1000 km) as 0.0000.
+#'
+#' @param bw Numeric scalar bandwidth.
+#' @param adaptive Logical; whether it is a count of neighbours.
+#' @return Character scalar.
+#' @keywords internal
+#' @noRd
+.fmt_bw <- function(bw, adaptive) {
+  bw <- suppressWarnings(as.numeric(bw)[1L])
+  if (isTRUE(adaptive) && is.finite(bw) && bw == round(bw))
+    format(bw, scientific = FALSE)
+  else .fmt_len(bw)
+}
+
+
 #' Extract fitted or predicted values from a GWR engine object
 #'
 #' Used by \code{fitted.gwr_fit()} (in-sample evaluation,
@@ -432,7 +453,19 @@
 #'   observations is capped at it, with a warning (a distance meant for
 #'   \code{adaptive = FALSE}, most often).
 #' @param kernel Kernel function type. One of "bisquare" (default),
-#'   "gaussian", "tricube", "boxcar", "exponential".
+#'   "gaussian", "tricube", "boxcar", "exponential".  The boxcar gives weight
+#'   1 to every observation within the bandwidth's distance (with an adaptive
+#'   bandwidth, the distance to the \code{bandwidth}-th nearest neighbour)
+#'   and 0 to the others; an observation whose squared distance is within
+#'   one part in ten million of the edge counts as at the edge, and inside,
+#'   so on a regular grid every neighbour tied with the last one is in the
+#'   window in any unit and at any origin where the doubles hold the
+#'   coordinates to better than about one part in 1e8 of the distances
+#'   between neighbours.  Farther from the origin the doubles round the
+#'   coordinates more coarsely, and where a neighbour lies past the edge by
+#'   less than that rounding the call warns, with class
+#'   \code{"spatialkit_xy_imprecise"}; the windows are those the
+#'   coordinates as stored give.
 #' @param .already_prepped Logical (internal). If \code{TRUE}, skip the
 #'   \code{prep_model_data()} call because the caller has already projected,
 #'   coerced, and filtered the data.  Used by the CV internals to avoid a
@@ -449,6 +482,43 @@
 #' whole data and centred in the window, so nothing below depends on a
 #' predictor's origin or units: an indicator coded 0/1 and one coded
 #' 288.7/289.3 give the same fit.
+#'
+#' A predictor whose centre is more than 1000 times its spread (a timestamp
+#' in seconds, a northing, 1e8 plus a spread of 1) is taken less its centre
+#' first.  So is a response whose centre is more than 1000 times its spread
+#' (1e8 plus a spread of 1), whose raw values lose their spread to rounding
+#' (1e15 plus a spread of 1, stored to an eighth), or whose least-squares
+#' residuals on the predictors do.  The bandwidth search, the
+#' local regressions, the global least-squares fit and the centred condition
+#' indices (\code{info$condition_index}, \code{cn_slopes}) then work on the
+#' spread and not on the rounding of the offset, and the centres are added
+#' back only to what is returned in the data's units: the fitted values, the
+#' local intercepts, the intercept and fitted values of \code{$engine$lm},
+#' and \code{predict()}'s values, which take a new row's predictors about the
+#' same centres.  Residuals, slopes and their standard errors, AICc and the
+#' bandwidth are those of the same values at 0, to rounding; the fitted
+#' values and predictions of a response at 1e15 are held to the eighth a
+#' double holds there.  \code{model_metrics()}, \code{summary()} and the
+#' cross-validations score the fit on the response, the fitted values and
+#' the predictions less the response's centre, so their RMSE, MAE and
+#' R-squared are those of the same values at 0 too.  Every other predictor
+#' and response is used as it is.
+#'
+#' A response whose values, less any centre, reach beyond 1e100, or whose
+#' spread is below 1e-100, is divided by a power of two, which rounds
+#' nothing: the residual sum of squares, AICc and the bandwidth search
+#' square the residuals, and at 1e160 those squares overflow and at 1e-160
+#' they lose their bits.  The bandwidth is then that of the same values in
+#' ordinary units, and the fitted values, the residuals, the coefficients,
+#' their standard errors and \code{$engine$lm} are those of the same values
+#' times the factor; AICc, the AICc of \code{info$bandwidth_search} among
+#' them, gains \eqn{2 n \log} of the factor, and a cross-validation score
+#' of the search is multiplied by its square.  The residual sum of
+#' squares, \code{info$sigma2} and such a score are in the response's units
+#' squared, and are \code{NA}, with a warning, where a double cannot hold
+#' them there;
+#' \code{predict(se.fit = TRUE)} then takes its standard errors from the
+#' residual standard deviation, which it can hold.
 #'
 #' One tolerance, \code{1e-7}, decides what a window can estimate:
 #' \itemize{
@@ -729,7 +799,21 @@
 #'   standard errors \code{<term>_SE}, the t values \code{<term>_TV} and
 #'   \code{Local_R2}), \code{GW.diagnostic}, \code{GW.arguments} and
 #'   \code{lm} (the global least-squares fit).  It is a plain list, not a
-#'   \code{gwrm} object.
+#'   \code{gwrm} object.  Where a predictor or the response was taken less
+#'   its centre (see \strong{The local solve}), \code{lm} is solved on the
+#'   centred columns and returned as the fit at the data's origin: its
+#'   coefficients, fitted values, \code{qr} and \code{effects} are those of
+#'   the raw columns, so \code{summary()}, \code{vcov()}, \code{confint()}
+#'   and \code{predict()} on it give the intercept at the data's 0 and its
+#'   standard error, and the slopes and residuals are those of the centred
+#'   fit.  With a predictor more than about 1e7 times its spread from 0,
+#'   \code{predict(se.fit = TRUE)} on it stops with "singular matrix":
+#'   \code{qr.solve()} reads the triangular factor at the data's origin as
+#'   singular.  \code{predict()} on the fit itself has no such limit.
+#'   \code{centres} holds what was taken off: \code{predictors}, the centre
+#'   of each column of the design (\code{Intercept} first, 0 for a column
+#'   used as it is), \code{NULL} where none was, and \code{response}, 0
+#'   where none was.
 #' @family model fitting
 #' @examples
 #' if (requireNamespace("sp", quietly = TRUE)) {
@@ -755,6 +839,10 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
                           kernel = c("bisquare", "gaussian", "tricube",
                                      "boxcar", "exponential"),
                           .already_prepped = FALSE) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("fit_gwr_model", "data_sf")
+  on.exit(tie_end(returnValue(tie_end), data_sf), add = TRUE)
   if (!inherits(data_sf, "sf"))
     stop("fit_gwr_model(): `data_sf` must be an sf object.")
   # GWmodel is not needed: the local regressions, the bandwidth search and
@@ -960,9 +1048,17 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 
   pred_df <- sf::st_drop_geometry(dat)[, predictor_vars, drop = FALSE]
   for (pv in predictor_vars) {
-    if (is.numeric(pred_df[[pv]]) && stats::sd(pred_df[[pv]], na.rm = TRUE) < .Machine$double.eps * 100) {
-      .log_warn("fit_gwr_model(): predictor '%s' has near-zero variance; GWR may be unstable.", pv)
-    }
+    v <- pred_df[[pv]]
+    if (!is.numeric(v)) next
+    s_pv <- stats::sd(v, na.rm = TRUE)
+    # The floor reads the column's unit: w * 2^-60 has a standard deviation
+    # under it and the spread of w.  Where the raw test finds no spread, the
+    # column is read again on its own scale (.constant_column()), and the
+    # note is logged only when that reading finds none either.
+    if (is.finite(s_pv) && s_pv >= .Machine$double.eps * 100) next
+    f <- v[is.finite(v)]
+    if (length(f) >= 2L && !.constant_column(f)) next
+    .log_warn("fit_gwr_model(): predictor '%s' has near-zero variance; GWR may be unstable.", pv)
   }
   local_collinearity <- NULL
   # One numeric predictor is enough to survey.  The design is cbind(1, xmat),
@@ -987,7 +1083,13 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       # predictor constant over the whole data set is a zero column here
       # (Inf).  Collinearity with the intercept INSIDE a window is the local
       # survey's job.
-      cn <- .condition_index(cbind(1, sweep(xmat, 2L, colMeans(xmat))))
+      # A predictor at a large offset (1e15 plus a spread of 1) is taken
+      # less its centre first (.centre_columns()), as the fit takes it: its
+      # mean at that size is held to the rounding of the offset, and the
+      # column less that mean would read it.
+      xmat_c <- .centre_columns(xmat)
+      attr(xmat_c, "centres") <- NULL
+      cn <- .condition_index(cbind(1, sweep(xmat_c, 2L, colMeans(xmat_c))))
       # A non-finite condition number is an EXACTLY singular design -- the worst
       # case there is -- and `is.finite(cn) && ...` silently let it through.
       if (!is.finite(cn) || cn > 30) {
@@ -1005,7 +1107,8 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       # documented warning simply never fired: identical data warned when the
       # bandwidth was passed explicitly and stayed silent when the same value
       # was selected automatically.
-      local_collinearity <- list(xmat = xmat, num_preds = num_preds, cn = cn)
+      local_collinearity <- list(xmat = xmat, xmat_c = xmat_c,
+                                 num_preds = num_preds, cn = cn)
     }
   }
   
@@ -1027,19 +1130,26 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # The local regressions are solved here (.gwr_local_solve()), on the model
   # matrix and the two coordinates GWmodel's functions were handed.
   dsn    <- .gwr_design(fml, sp_dat@data)
-  X      <- dsn$X
-  y      <- dsn$y
+  # A predictor or a response at a large offset is taken about its centre
+  # for the bandwidth search, the local solves and the global regression
+  # (.gwr_centre()); every other design and response is used as it is.
+  # A response whose squares overflow or lose their bits is divided by a
+  # power of two as well, and the scale is put back on what is returned.
+  cen    <- .gwr_centre(dsn$X, dsn$y)
+  X      <- cen$X
+  y      <- cen$y
   coords <- sp::coordinates(sp_dat)
   # The locations of the layer.  Rows that share one are weighted alike at
   # every regression point; see "Observations that share a location" in the
   # documentation for what follows from that.
   loc        <- .gwr_locations(coords)
-  n_distinct <- if (loc$n < n_obs) .gwr_n_distinct(X, loc$id) else n_obs
+  n_distinct <- if (loc$n < n_obs) .gwr_n_distinct(dsn$X, loc$id) else n_obs
 
   # --- Bandwidth selection ---
   bandwidth_is_fallback <- FALSE
   bw_fallback_raw       <- NA_real_
   bw_search             <- NULL
+  bw_search_fit         <- NULL
   bw_none_defined       <- FALSE
   # A fixed bandwidth is a length in the CRS the fit runs in, and that is not
   # necessarily the CRS the caller was looking at: prep_model_data() projects
@@ -1062,6 +1172,10 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
         NULL
       }
     )
+    # What the search scored, put back in the response's units where the
+    # response was divided by a power of two (.gwr_centre()).
+    bw_search_fit <- bw_search
+    bw_search <- .gwr_bw_search_unscaled(bw_search, cen$y_scale, length(y))
     bw <- if (is.null(bw_search)) NA_real_ else bw_search$bandwidth
 
     # Anything that is not one usable positive number takes the fallback.
@@ -1175,14 +1289,14 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     warning(
       sprintf(
         paste0("fit_gwr_model(): automatic bandwidth selection failed; using ",
-               "arbitrary fallback bandwidth = %.4f%s. This fallback has no ",
+               "arbitrary fallback bandwidth = %s%s. This fallback has no ",
                "relationship to the data's spatial structure and may produce ",
                "a poor fit. Consider supplying an explicit `bandwidth` ",
                "argument."),
-        bw_used,
+        .fmt_bw(bw_used, adaptive),
         if (isTRUE(bw_used == bw_fallback_raw)) ""
-        else sprintf(" (derived as %.4f, then clamped for %d observation(s) and %d parameter(s))",
-                     bw_fallback_raw, n_obs, n_params)
+        else sprintf(" (derived as %s, then clamped for %d observation(s) and %d parameter(s))",
+                     .fmt_bw(bw_fallback_raw, adaptive), n_obs, n_params)
       ),
       call. = FALSE
     )
@@ -1197,7 +1311,8 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   if (!is.null(local_collinearity)) {
     local_cn_df <- .gwr_local_collinearity(sf::st_coordinates(dat),
                                            local_collinearity$xmat,
-                                           adaptive, bw, kernel)
+                                           adaptive, bw, kernel,
+                                           xmat_c = local_collinearity$xmat_c)
     .gwr_local_collinearity_warn(local_cn_df)
   }
 
@@ -1207,8 +1322,12 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # estimate are NA, and its fitted value is returned when it is estimable,
   # which at a training point it always is.
   sv <- .gwr_local_solve(X, y, coords, bw, kernel, adaptive, what = "fit")
-  dg <- .gwr_diagnostics(y, sv$fitted, sv$leverage, sv$var_fit)
-  fit <- .gwr_engine(sv, dg, fml, sp_dat, X, y, bw, kernel, adaptive)
+  # The diagnostics of the response as fitted (`dg_fit`), which the engine
+  # reads, and in the response's units (`dg`), which are reported.
+  dg_fit <- .gwr_diagnostics(y, sv$fitted, sv$leverage, sv$var_fit)
+  fit <- .gwr_engine(sv, dg_fit, fml, sp_dat, dsn$X, dsn$y, bw, kernel,
+                     adaptive, cen = cen)
+  dg <- .gwr_diagnostics_unscaled(dg_fit, cen$y_scale, n_obs)
 
   # The per-row, per-term mask of local coefficients that are not estimates
   # (`info$nonfinite_coef`), not only its row count: the count says how many
@@ -1359,14 +1478,45 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # same rows, scored by the same AICc formula (its hat-matrix trace is its
   # rank).  A GWR whose AICc is no lower has not shown that its coefficients
   # vary.
-  ols_rss  <- sum(stats::residuals(fit$lm)^2)
+  # Read on the response as fitted, divided by the power of two of
+  # .gwr_centre() where there is one, and put back in the response's units.
+  ys       <- cen$y_scale
+  ols_res  <- stats::residuals(fit$lm)
+  if (ys != 1) ols_res <- ols_res / ys
+  ols_rss  <- sum(ols_res^2)
   ols_rank <- fit$lm$rank
   global_ols <- list(
-    RSS  = ols_rss,
+    RSS  = .gwr_unscale_ss(ols_rss, ys),
     RMSE = sqrt(ols_rss / n_obs),
     AICc = if (isTRUE(ols_rss > 0) && n_obs - 2 - ols_rank > 0)
       n_obs * log(ols_rss / n_obs) + n_obs * log(2 * pi) +
         n_obs * ((n_obs + ols_rank) / (n_obs - 2 - ols_rank)) else NA_real_)
+  if (ys != 1) {
+    global_ols$RMSE <- global_ols$RMSE * ys
+    global_ols$AICc <- global_ols$AICc + 2 * n_obs * log(ys)
+  }
+  # The sums of squares a double cannot hold in the response's units.
+  lost <- c(`the residual sum of squares (engine$GW.diagnostic$RSS.gw)` =
+              is.na(dg$RSS) && !is.na(dg_fit$RSS),
+            `the residual variance (info$sigma2)` =
+              is.na(dg$sigma2) && !is.na(dg_fit$sigma2),
+            `the global regression's residual sum of squares (info$global_ols$RSS)` =
+              is.na(global_ols$RSS) && !is.na(ols_rss),
+            `the cross-validation scores of the bandwidth search (info$bandwidth_search)` =
+              .gwr_bw_search_lost(bw_search_fit, bw_search))
+  if (any(lost)) {
+    nm  <- names(lost)[lost]
+    msg <- .gwr_ss_range_msg(
+      "fit_gwr_model", ys,
+      sprintf("So %s, in the response's units squared, %s",
+              if (length(nm) == 1L) nm
+              else paste(paste(nm[-length(nm)], collapse = ", "), "and",
+                         nm[length(nm)]),
+              if (length(nm) == 1L) "is" else "are"))
+    # A fold of a cross-validation reports none of them; the trace has it.
+    if (isTRUE(.already_prepped)) .log_info("%s", msg)
+    else .warn_and_log("%s", msg)
+  }
 
   # The survey and the solve, side by side for each window: the condition
   # indices, then the rank the solve found and the leverage of the window's
@@ -1464,18 +1614,30 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 #' The same definitions, written the same way, as \code{GWmodel::gw.weight()}
 #' (its C++ \code{gw_weight_*()}), so a window of the local solve, and of the
 #' collinearity survey, is the window \code{GWmodel::gwr.basic()} would
-#' weight.  For an adaptive bandwidth \code{bw}
+#' weight, except at the boxcar's edge, which follows the package's tie rule
+#' (below).  For an adaptive bandwidth \code{bw}
 #' is a neighbour count and the kernel's distance parameter is the distance to
 #' the \code{bw}-th nearest point; a count above \code{length(d)} widens the
 #' kernel to \code{bw / length(d)} times the largest distance, as GWmodel does.
 #'
-#' Two details are GWmodel's and matter.  The truncated kernels test
-#' \code{d > h}, so a point exactly at the kernel's edge is inside a boxcar
-#' window (weight 1) and on the rim of a bisquare or tricube one (weight 0).
+#' Two details are GWmodel's and matter.  The bisquare and tricube kernels
+#' test \code{d > h}, so a point exactly at the kernel's edge is on the rim
+#' of their window (weight 0); a point there is inside a boxcar window
+#' (weight 1).
 #' And a zero-width kernel (\code{h = 0}: the \code{bw} nearest points share
 #' one location) is not an indicator of those points: every kernel but the
 #' boxcar gives them \code{0/0 = NaN}, and a window whose weights are
 #' undefined has no weighted row and no local regression.
+#'
+#' The boxcar's edge is read with the package's one tie rule: a point whose
+#' squared distance is within \code{.TIE_TOL} of \code{h^2} is at the edge,
+#' and inside (\code{.gw_boxcar_inside()}).  On a regular grid many points
+#' tie with the \code{bw}-th neighbour; computed from coordinates in another
+#' unit (US survey feet, a millionth of a metre) their distances and
+#' \code{h} round apart by a unit in the last place, and \code{d > h} put
+#' some of them outside.  The other kernels give a point at their edge
+#' weight 0 (bisquare, tricube) or are continuous there (Gaussian,
+#' exponential), so their weights move with that rounding by no more than it.
 #'
 #' @param d Numeric vector of distances from the regression point.
 #' @param bw Bandwidth: a distance, or a neighbour count when adaptive.
@@ -1495,9 +1657,31 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
          gaussian    = exp(d^2 / (-2 * h^2)),
          exponential = exp(-d / h),
          tricube     = ifelse(d > h, 0, (1 - d^3 / h^3)^3),
-         boxcar      = ifelse(d > h, 0, 1),
+         boxcar      = ifelse(.gw_boxcar_inside(d, h), 1, 0),
          ifelse(d > h, 0, (1 - d^2 / h^2)^2))       # bisquare
 }
+
+
+#' Whether a point is inside a boxcar window
+#'
+#' \code{d^2 <= h^2 (1 + .TIE_TOL)}: a squared distance within one part in
+#' ten million of the kernel's edge is at the edge, the tie rule of the
+#' package's other nearest-point searches, so the points tied with the
+#' \code{bw}-th neighbour on a regular grid are all inside in any unit and
+#' at any origin where the doubles hold the coordinates to better than about
+#' one part in 1e8 of the distances; farther out \code{.gwr_local_solve()}
+#' notes a point past the edge by less than their rounding
+#' (\code{.tie_note()}).  Compared as \code{d <= h sqrt(1 +
+#' .TIE_TOL)}, the same test, so that no square overflows or vanishes.  A
+#' zero-width kernel (\code{h = 0}) keeps the points at distance 0, as
+#' \code{!(d > h)} does.
+#'
+#' @param d Numeric vector of distances from the regression point.
+#' @param h The kernel's distance parameter.
+#' @return Logical vector, \code{NA} where \code{d} or \code{h} is.
+#' @keywords internal
+#' @noRd
+.gw_boxcar_inside <- function(d, h) d <= h * sqrt(1 + .TIE_TOL)
 
 
 #' The rows of a window and their kernel weights
@@ -1523,7 +1707,8 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     rows <- which(w > 0)
     return(list(rows = rows, w = w[rows]))
   }
-  inside <- which(!(d > h))
+  inside <- if (kernel == "boxcar") which(.gw_boxcar_inside(d, h))
+            else which(!(d > h))
   di <- d[inside]
   w <- switch(kernel,
               tricube = (1 - di^3 / h^3)^3,
@@ -1569,7 +1754,12 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 #' in the window.  The centred columns are orthogonal to the intercept, so
 #' neither the rank nor any result depends on a predictor's origin or units:
 #' a temperature in kelvin and in degrees C, an indicator coded 0/1 and
-#' 288.7/289.3, give the same ranks, fitted values and slopes.
+#' 288.7/289.3, give the same ranks, fitted values and slopes.  The division
+#' comes before the centring, so a predictor whose values lose their spread
+#' to the rounding of its offset (1e10 plus a spread of 1) has to arrive
+#' centred: \code{.gwr_centre()} takes it less its centre, and
+#' \code{attr(X, "centres")} then carries the centres, which the intercept
+#' takes back out so that it is the one at the data's origin.
 #'
 #' \strong{The rank rule.}  With column pivoting the diagonal of the
 #' triangular factor does not increase, and each entry is the length of what
@@ -1614,7 +1804,8 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 #'
 #' @param X Training design matrix, the intercept (a column of ones) first.
 #'   A design without an intercept is scaled by each column's root mean
-#'   square and not centred.
+#'   square and not centred.  \code{attr(X, "centres")}, where present, is
+#'   the centre \code{.gwr_centre()} took off each column.
 #' @param y Response, one value per row of \code{X}.
 #' @param coords Two-column matrix of the training coordinates.
 #' @param bw,kernel,adaptive The bandwidth settings; see
@@ -1672,6 +1863,12 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     s[!is.finite(s) | s <= 0] <- 1
   }
   inv_s <- 1 / s
+  # The centre .gwr_centre() took off each predictor, in units of its
+  # standard deviation, so that the intercept is returned in the data's
+  # units; NULL where none was taken.
+  cs <- attr(X, "centres")
+  cs <- if (icpt && p && length(cs) == kk && any(cs[jp] != 0)) cs[jp] / s
+        else NULL
   Xs    <- sweep(X[, jp, drop = FALSE], 2L, s, "/")
   Xs_rp <- sweep(X_rp[, jp, drop = FALSE], 2L, s, "/")
   cx <- coords[, 1L]; cy <- coords[, 2L]; rx <- rp[, 1L]; ry <- rp[, 2L]
@@ -1710,13 +1907,24 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # Each original coefficient as a function of the centred, scaled ones: a
   # slope is its scaled slope over the predictor's standard deviation, and
   # the intercept takes every centring back out.
+  # Where the predictors were taken about centres, the intercept is the one
+  # at the data's origin, which takes them back out as well.
   back <- function(xf, mu)
     if (!p) matrix(1, 1L, 1L)
+    else if (icpt && !is.null(cs))
+      rbind(c(1, -(xf + mu + cs)), cbind(0, diag(inv_s, p, p)),
+            deparse.level = 0L)
     else if (icpt) rbind(c(1, -(xf + mu)), cbind(0, diag(inv_s, p, p)),
                          deparse.level = 0L)
     else diag(inv_s, p, p)
 
   todo <- which(usable)
+  # The boxcar's edge is a tie (.gw_boxcar_inside()): where the rounding of
+  # the coordinates at their offset can have parted a point from it, the
+  # window's edge and the least squared distance past it are noted for the
+  # caller's warning (.tie_note()).  The other kernels weigh a point at
+  # their edge 0, or are continuous there.
+  rnd <- if (kernel == "boxcar") .tie_rounding(c(cx, cy, rx[usable], ry[usable])) else NULL
   # A kernel that weights every row: the score of the windows that are far
   # from rank deficient comes from their cross-products, a block at a time
   # (.gwr_score_dense()); the loop below takes the others.
@@ -1745,6 +1953,10 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     # rows, rank 0 and nothing estimable.
     win  <- .gw_window(d, h, kernel)
     rows <- win$rows
+    if (!is.null(rnd) && is.finite(h)) {
+      past <- d[which(!.gw_boxcar_inside(d, h))]
+      if (length(past)) .tie_note(h^2, min(past)^2, rnd)
+    }
     mk <- length(rows)
     nw[i] <- mk
     if (!mk) next
@@ -2093,6 +2305,248 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 }
 
 
+#' The design and response of a GWR taken about their centres where the raw
+#' values lose their spread
+#'
+#' A predictor at a large offset (1e8 plus a spread of 1, a timestamp in
+#' seconds) is collinear with the intercept to the global regression's QR,
+#' which drops it, and the local solve divides it by its standard deviation
+#' before it centres it in the window, so from about 1e10 the slopes read
+#' the rounding of the offset.  A response at a large offset (1e15 plus a
+#' spread of 1) is stored to an eighth, and every regression on its raw
+#' values works on that rounding.  A GWR's fitted values, residuals and
+#' slopes do not change under a shift of a predictor or of the response, so
+#' both are taken about a centre before the bandwidth search, the local
+#' solves and the global regression:
+#' \itemize{
+#'   \item each predictor column through \code{.centre_columns()}, only where
+#'     its centre is more than \code{.PRED_CENTRE_RATIO} times its spread;
+#'   \item the response less \code{.regression_centre()}, 0 unless its raw
+#'     values lose their spread; where that is 0, less the centre of
+#'     \code{.spread_scaled()} where that centre is more than
+#'     \code{.PRED_CENTRE_RATIO} times its spread, the predictors' gate; and
+#'     where both leave it at 0 and the residuals of an
+#'     OLS fit of the raw values on the design show no spread (a standard
+#'     deviation of at most 1e-12 of the largest absolute value, as in
+#'     \code{estimate_sac_range()}), less \code{.residual_centre()}.
+#' }
+#' Then the response, less its centre, is divided by the power of two
+#' \code{.spread_scaled()} gives where its spread is below \code{.GWR_Y_MIN}
+#' or its largest absolute value above \code{.GWR_Y_MAX}: the residual sum
+#' of squares, the bandwidth search and AICc square the residuals, and at
+#' 1e160 those squares overflow and at 1e-160 they lose their bits.  The
+#' local regressions are linear in the response, so the division changes no
+#' fitted value but by its factor.
+#'
+#' Every other design and response is returned as it is, so a fit on them
+#' gives what it gave to the last bit.  The centres and the scale are put
+#' back only on returned values (\code{.gwr_engine()},
+#' \code{.gwr_predict_at()}, \code{.gwr_ms_engine()}).
+#'
+#' @param X The design matrix, the intercept's column of ones first.
+#' @param y The response, one value per row of \code{X}.
+#' @return A list: \code{X}, the design as fitted, which carries
+#'   \code{attr(, "centres")} (the centre taken off each column, 0 for the
+#'   intercept and for a column left as it is) where a column is centred,
+#'   for the local solve's intercept; \code{y}, the response as fitted,
+#'   \code{(y - y_centre) / y_scale}; \code{x_centres}, those centres or
+#'   \code{NULL}; \code{y_centre}, the response's centre or 0;
+#'   \code{y_scale}, the power of two it was divided by, or 1.
+#' @keywords internal
+#' @noRd
+.gwr_centre <- function(X, y) {
+  xc <- NULL
+  if (ncol(X) >= 2L && all(X[, 1L] == 1)) {
+    P <- .centre_columns(X[, -1L, drop = FALSE])
+    if (!is.null(attr(P, "centres"))) {
+      xc <- c(0, attr(P, "centres"))
+      attr(P, "centres") <- NULL
+      X[, -1L] <- P
+      attr(X, "centres") <- xc
+    }
+  }
+  yc <- .regression_centre(y, bounded = FALSE)
+  # A response whose centre is more than .PRED_CENTRE_RATIO times its
+  # spread (1e8 plus a spread of 1) keeps its spread, but the local solves'
+  # rounding grows with that ratio, as a predictor's does, and with the
+  # rows: a GWR at a global window on 6000 rows then misses the OLS
+  # residuals.  It is taken about the same centre.
+  if (yc == 0) {
+    fy <- y[is.finite(y)]
+    if (length(fy) >= 2L && max(abs(fy)) > 0) {
+      sy <- .spread_scaled(fy)
+      if (sy$spread > 0 && abs(sy$centre) > .PRED_CENTRE_RATIO * sy$spread)
+        yc <- sy$centre
+    }
+  }
+  # A response whose raw values show their spread through a trend the
+  # predictors explain (1e15 plus 1e5 times a predictor plus a spread of 1)
+  # is regressed about its centre too where the raw values' OLS residuals
+  # show no spread.
+  if (yc == 0 && ncol(X) >= 2L) {
+    f0 <- try(stats::lm.fit(X, y), silent = TRUE)
+    if (!inherits(f0, "try-error")) {
+      e0 <- f0$residuals
+      a0 <- max(abs(y))
+      if (all(is.finite(e0)) && is.finite(a0) && a0 > 0 &&
+          !isTRUE(stats::sd(e0 / a0) > 1e-12))
+        yc <- .residual_centre(y, bounded = FALSE)
+    }
+  }
+  if (yc != 0) y <- y - yc
+  # A response whose squares overflow or lose their bits (1e160 or 1e-160
+  # times a spread of 1) is divided by a power of two, which rounds nothing.
+  ys <- 1
+  fy <- y[is.finite(y)]
+  if (length(fy) >= 2L && max(abs(fy)) > 0) {
+    sy <- .spread_scaled(fy)
+    if (sy$spread > 0 && is.finite(sy$scale) && sy$scale > 0 &&
+        (sy$spread < .GWR_Y_MIN || max(abs(fy)) > .GWR_Y_MAX))
+      ys <- sy$scale
+  }
+  if (ys != 1) y <- y / ys
+  list(X = X, y = y, x_centres = xc, y_centre = yc, y_scale = ys)
+}
+
+
+# Bounds of a response (less its centre) that the bandwidth search, the
+# local regressions and the diagnostics read as it is given.  They square
+# the residuals and sum the squares: values up to 1e100 square far below the
+# largest double on any number of rows, and a spread down to 1e-100 leaves
+# the squares of residuals many orders of magnitude below it well above the
+# smallest normal double.  Beyond them the response is divided by a power
+# of two (.gwr_centre()).  The bounds of fit_rf_model()'s response.
+.GWR_Y_MAX <- 1e100
+.GWR_Y_MIN <- 1e-100
+
+
+#' A sum of squares of the scaled response, in the response's units squared
+#'
+#' \code{s^2 ss}, where \code{.gwr_centre()} divided the response by
+#' \code{s}.  Taken as \code{s * (s * ss)}, since \code{s^2} alone can
+#' overflow or vanish where the product does not.  A double cannot hold the
+#' product where it overflows or falls below the smallest normal double,
+#' where it keeps only some of its bits: it is \code{NA} there.  0 stays 0,
+#' and with \code{s = 1} \code{ss} is returned as it is.
+#'
+#' @param ss Numeric vector of sums of squares (or variances) of the scaled
+#'   response.
+#' @param s The scale, a power of two.
+#' @return Numeric vector like \code{ss}.
+#' @keywords internal
+#' @noRd
+.gwr_unscale_ss <- function(ss, s) {
+  if (s == 1) return(ss)
+  v <- s * (s * ss)
+  held <- is.finite(v) & (v >= .Machine$double.xmin | (!is.na(ss) & ss == 0))
+  v[!held] <- NA_real_
+  v
+}
+
+
+#' The diagnostics of a fit to the scaled response, in the response's units
+#'
+#' What \code{.gwr_diagnostics()} returned for the response divided by
+#' \code{s}: the residual sum of squares and variance are multiplied by
+#' \code{s^2} (\code{.gwr_unscale_ss()}, \code{NA} where a double cannot
+#' hold them), and AIC, AICc and BIC, which hold \code{n log(RSS / n)}, gain
+#' \code{2 n log(s)}.  The traces, the degrees of freedom and R-squared do
+#' not depend on the unit.
+#'
+#' @param dg What \code{.gwr_diagnostics()} returned.
+#' @param s The scale, a power of two.
+#' @param n The number of observations.
+#' @return \code{dg} in the response's units.
+#' @keywords internal
+#' @noRd
+.gwr_diagnostics_unscaled <- function(dg, s, n) {
+  if (is.null(s) || s == 1) return(dg)
+  shift <- 2 * n * log(s)
+  dg$RSS    <- .gwr_unscale_ss(dg$RSS, s)
+  dg$sigma2 <- .gwr_unscale_ss(dg$sigma2, s)
+  dg$AIC    <- dg$AIC + shift
+  dg$AICc   <- dg$AICc + shift
+  dg$BIC    <- dg$BIC + shift
+  dg
+}
+
+
+#' What a bandwidth search scored, in the response's units
+#'
+#' \code{.gwr_bw_search()} ran on the response divided by \code{s}
+#' (\code{.gwr_centre()}).  Its AICc, \code{$criterion} and
+#' \code{$curve$criterion}, gains \code{2 n log(s)}; its cross-validation
+#' score, a sum of squares, is multiplied by \code{s^2}
+#' (\code{.gwr_unscale_ss()}), and is \code{NA} where a double cannot hold
+#' that.  A bandwidth without a criterion keeps \code{Inf}.  The margins of
+#' \code{within}, \code{flat} and \code{near_global} (2 for AICc, 1
+#' percent for the score) and everything else in the list do not depend on
+#' the unit.
+#'
+#' @param bs What \code{.gwr_bw_search()} returned, or \code{NULL}.
+#' @param s The scale, a power of two.
+#' @param n The number of observations.
+#' @return \code{bs} in the response's units.
+#' @keywords internal
+#' @noRd
+.gwr_bw_search_unscaled <- function(bs, s, n) {
+  if (is.null(bs) || is.null(s) || s == 1) return(bs)
+  put <- function(v) {
+    if (is.null(v)) return(v)
+    fin <- is.finite(v)
+    if (identical(bs$approach, "CV")) v[fin] <- .gwr_unscale_ss(v[fin], s)
+    else v[fin] <- v[fin] + 2 * n * log(s)
+    v
+  }
+  bs$criterion <- put(bs$criterion)
+  if (is.data.frame(bs$curve)) bs$curve$criterion <- put(bs$curve$criterion)
+  bs
+}
+
+
+#' Whether putting a search's scores in the response's units lost any
+#'
+#' @param fit,out A bandwidth search before and after
+#'   \code{.gwr_bw_search_unscaled()}.
+#' @return \code{TRUE} where a finite score became \code{NA}.
+#' @keywords internal
+#' @noRd
+.gwr_bw_search_lost <- function(fit, out) {
+  if (is.null(fit) || is.null(out)) return(FALSE)
+  a <- c(fit$criterion, if (is.data.frame(fit$curve)) fit$curve$criterion)
+  b <- c(out$criterion, if (is.data.frame(out$curve)) out$curve$criterion)
+  length(a) == length(b) && any(is.finite(a) & is.na(b))
+}
+
+
+#' The warning for sums of squares a double cannot hold
+#'
+#' Raised where \code{.gwr_unscale_ss()} returns \code{NA} for a sum of
+#' squares that is finite on the scaled response.
+#'
+#' @param caller Name of the function the message is from.
+#' @param s The scale the response was divided by.
+#' @param what What is \code{NA}, as the sentence names it, up to its verb.
+#' @param kept What is computed on the scaled response and returned in the
+#'   response's units, as the sentence names it.
+#' @return The message.
+#' @keywords internal
+#' @noRd
+.gwr_ss_range_msg <- function(caller, s, what,
+                              kept = paste0("The bandwidth search, AICc, the ",
+                                            "fitted values, the residuals ",
+                                            "and the standard errors are")) {
+  k <- as.integer(round(log2(s)))
+  sprintf(paste0("%s(): the spread of the response about its median is of ",
+                 "the order of 2^%d, so the squares of its residuals lie ",
+                 "beyond what a double holds (they overflow or lose their ",
+                 "precision). %s NA. %s computed on ",
+                 "the response divided by 2^%d, which rounds nothing, and ",
+                 "are not affected."),
+          caller, k, what, kept, k)
+}
+
+
 #' Assemble the fit's engine object in the layout GWmodel uses
 #'
 #' \code{fit$engine} was the object \code{GWmodel::gwr.basic()} returned, and
@@ -2108,23 +2562,58 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 #' \code{gwr.basic()} leaves it unless asked for it.  A coefficient a window
 #' cannot estimate is \code{NA}, with its standard error and t value.
 #'
+#' Where \code{.gwr_centre()} took the response about a centre, the local
+#' solve's fitted values and intercepts are about it: the centre is added to
+#' them here, and the residuals are those of the centred response.  Where it
+#' took a predictor or the response about a centre, \code{lm} is fitted on
+#' the centred columns and put back at the data's origin as one fit: its
+#' intercept is the intercept less each centre times its slope, plus the
+#' response's centre, its fitted values carry the response's centre, its QR
+#' factor and first effect are those of the raw design and response, and
+#' its \code{model} is the raw model frame.
+#'
 #' @param sv What \code{.gwr_local_solve(what = "fit")} returned.
 #' @param dg What \code{.gwr_diagnostics()} returned for it.
 #' @param formula,sp_dat,X,y The model formula, the training layer as a
-#'   Spatial object, the design matrix and the response.
+#'   Spatial object, the design matrix and the response, as given.
 #' @param bw,kernel,adaptive The bandwidth settings.
+#' @param cen What \code{.gwr_centre()} returned for \code{X} and \code{y},
+#'   or \code{NULL} for no centring.
 #' @return A list: \code{GW.arguments}, \code{GW.diagnostic}, \code{lm},
 #'   \code{SDF}, \code{fitted} (the fitted values, \code{NA} where not
-#'   estimable) and \code{solver} (the method and its tolerance).
+#'   estimable), \code{solver} (the method and its tolerance) and
+#'   \code{centres} (\code{predictors}, the centre taken off each column of
+#'   the design or \code{NULL}, and \code{response}, the response's or 0).
 #' @keywords internal
 #' @noRd
-.gwr_engine <- function(sv, dg, formula, sp_dat, X, y, bw, kernel, adaptive) {
+.gwr_engine <- function(sv, dg, formula, sp_dat, X, y, bw, kernel, adaptive,
+                        cen = NULL) {
   n     <- length(y)
   betas <- sv$coef
   yhat  <- sv$fitted
   residual <- y - yhat
+  xc <- if (is.null(cen)) NULL else cen$x_centres
+  yc <- if (is.null(cen)) 0 else cen$y_centre
+  # The power of two the response less its centre was divided by; `sv` and
+  # `dg` are those of the response so divided.
+  ys <- if (is.null(cen) || is.null(cen$y_scale)) 1 else cen$y_scale
+  # Both about the centre, so the residuals keep the spread the raw values
+  # round away; the centre goes back on what is returned in the data's
+  # units.
+  if (yc != 0 || ys != 1) residual <- cen$y - yhat
   stud  <- residual / sqrt(dg$sigma2 * sv$q_diag)
   se    <- sqrt(dg$sigma2 * sv$coef_var)
+  if (ys != 1) {
+    residual <- residual * ys
+    yhat     <- yhat * ys
+    betas    <- betas * ys
+    se       <- se * ys
+  }
+  if (yc != 0) {
+    yhat <- yhat + yc
+    if (ncol(betas) >= 1L && identical(colnames(betas)[1L], "Intercept"))
+      betas[, 1L] <- betas[, 1L] + yc
+  }
   tv    <- betas / se
   gwres <- data.frame(betas, y, yhat, residual, numeric(n), stud, se, tv,
                       sv$local_r2)
@@ -2139,22 +2628,91 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   sdf <- sp::SpatialPointsDataFrame(coords = crd, data = gwres,
                                     proj4string = sp_dat@proj4string,
                                     match.ID = FALSE)
+  vars <- all.vars(formula)
+  # The centre of each term's column, the intercept's (0) first.
+  xl <- if (!is.null(xc) && length(xc) == length(vars)) xc else NULL
+  centred <- !is.null(xl) || yc != 0 || ys != 1
+  if (centred) {
+    # The global regression on the columns as the local solves have them:
+    # on the raw columns a predictor at an offset is dropped as collinear
+    # with the intercept, and a response at an offset is fitted on its
+    # rounding.  Each term of the formula is one numeric predictor, in the
+    # order of the design's columns.
+    raw_data <- sp_dat@data
+    if (!is.null(xl))
+      for (j in seq_along(vars)[-1L])
+        if (xl[j] != 0) sp_dat@data[[vars[j]]] <- sp_dat@data[[vars[j]]] - xl[j]
+    if (yc != 0) sp_dat@data[[vars[1L]]] <- sp_dat@data[[vars[1L]]] - yc
+    if (ys != 1) sp_dat@data[[vars[1L]]] <- sp_dat@data[[vars[1L]]] / ys
+  }
   lms <- stats::lm(formula, data = sp_dat@data)
+  if (centred) {
+    # A fit to the response over `ys` is the fit to the response with its
+    # coefficients, fitted values, residuals and effects times `ys`.
+    if (ys != 1) {
+      lms$coefficients  <- lms$coefficients * ys
+      lms$fitted.values <- lms$fitted.values * ys
+      lms$residuals     <- lms$residuals * ys
+      lms$effects       <- lms$effects * ys
+    }
+    # The fit put back at the data's origin as one least-squares fit, so
+    # that summary(), vcov(), confint(), anova() and predict() on it agree
+    # with its coefficients.  The raw design is the centred one times T,
+    # the identity with the centres in its first row, so the coefficients
+    # at the origin are T^-1 b (the intercept less each centre times its
+    # slope; an aliased slope counts 0), the QR factor is R T with the
+    # same Q, and the response's centre adds to the first effect its
+    # centre times R[1, 1] (Q'1 is the intercept's column of R).
+    b <- lms$coefficients
+    k <- length(b)
+    xk <- if (is.null(xl)) numeric(k) else xl
+    if (!is.null(xl)) {
+      bs <- b[-1L]
+      bs[!is.finite(bs)] <- 0
+      b[1L] <- b[1L] - sum(xk[-1L] * bs)
+    }
+    b[1L] <- b[1L] + yc
+    piv <- lms$qr$pivot
+    if (k >= 1L && identical(piv[1L], 1L)) {
+      R <- qr.R(lms$qr)
+      if (any(xk != 0)) {
+        Tm <- diag(k)
+        Tm[1L, -1L] <- xk[-1L]
+        Rn <- R %*% Tm[piv, piv, drop = FALSE]
+        ut <- row(Rn) <= col(Rn)
+        rr <- seq_len(nrow(Rn))
+        qq <- lms$qr$qr[rr, , drop = FALSE]
+        qq[ut] <- Rn[ut]
+        lms$qr$qr[rr, ] <- qq
+      }
+      if (yc != 0) lms$effects[1L] <- lms$effects[1L] + yc * R[1L, 1L]
+    }
+    lms$coefficients <- b
+    lms$fitted.values <- lms$fitted.values + yc
+    lms$model <- stats::model.frame(formula, data = raw_data)
+  }
   lms$x <- X
   lms$y <- y
+  # The diagnostics in the response's units.
+  du <- .gwr_diagnostics_unscaled(dg, ys, n)
   list(
     GW.arguments = list(formula = formula, rp.given = FALSE, hatmatrix = TRUE,
                         bw = bw, kernel = kernel, adaptive = adaptive, p = 2,
                         theta = 0, longlat = FALSE, DM.given = FALSE,
                         F123.test = FALSE),
-    GW.diagnostic = list(RSS.gw = dg$RSS, AIC = dg$AIC, AICc = dg$AICc,
-                         enp = dg$enp, edf = dg$edf, gw.R2 = dg$R2,
-                         gwR2.adj = dg$R2_adj, BIC = dg$BIC),
+    GW.diagnostic = list(RSS.gw = du$RSS, AIC = du$AIC, AICc = du$AICc,
+                         enp = du$enp, edf = du$edf, gw.R2 = du$R2,
+                         gwR2.adj = du$R2_adj, BIC = du$BIC),
     lm = lms,
     SDF = sdf,
     fitted = yhat,
     solver = list(method = "pivoted Householder QR per window (LAPACK dgeqp3)",
-                  tolerance = .gwr_rank_tol())
+                  tolerance = .gwr_rank_tol()),
+    # What .gwr_centre() took off: the centre of each column of the design
+    # (NULL where none was) and of the response (0 where none was), and the
+    # power of two the response less its centre was divided by (1 where it
+    # was not).
+    centres = list(predictors = xc, response = yc, scale = ys)
   )
 }
 
@@ -3065,13 +3623,19 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 #' @param adaptive Logical; TRUE when the bandwidth counts neighbours.
 #' @param bw The bandwidth the model is fitted with.
 #' @param kernel The kernel name.
+#' @param xmat_c \code{xmat} with each column at a large offset taken less
+#'   its centre (\code{.centre_columns()}), for \code{cn_slopes}: its
+#'   centring in the window and the spread over the whole data then read the
+#'   column's spread, not the rounding of its offset.  \code{cn} reads
+#'   \code{xmat}, since it depends on the predictors' origin by design.
 #' @return A data.frame with one row per observation: \code{row}, \code{x},
 #'   \code{y}, \code{n_window} (points with non-negligible weight), \code{cn}
 #'   (the uncentred scaled condition index with the intercept) and
 #'   \code{cn_slopes} (the slope index), each \code{Inf} when singular.
 #' @keywords internal
 #' @noRd
-.gwr_local_collinearity <- function(coords, xmat, adaptive, bw, kernel) {
+.gwr_local_collinearity <- function(coords, xmat, adaptive, bw, kernel,
+                                    xmat_c = xmat) {
   n_obs <- nrow(coords)
   out <- data.frame(row = seq_len(n_obs), x = coords[, 1], y = coords[, 2],
                     n_window = NA_integer_, cn = NA_real_, cn_slopes = NA_real_)
@@ -3082,7 +3646,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   X <- cbind(1, xmat)
   # The slope index's reference scale: each predictor's spread over the
   # whole data.  A predictor with none has no slope to estimate anywhere.
-  s_glob <- apply(xmat, 2L, stats::sd)
+  s_glob <- apply(xmat_c, 2L, stats::sd)
   s_ok   <- all(is.finite(s_glob) & s_glob > 0)
   for (i in seq_len(n_obs)) {
     d <- sqrt((coords[, 1] - coords[i, 1])^2 + (coords[, 2] - coords[i, 2])^2)
@@ -3095,7 +3659,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       next
     }
     out$cn[i] <- .condition_index(sqrt(w[keep]) * X[keep, , drop = FALSE])
-    out$cn_slopes[i] <- .gwr_slope_index(w[keep], xmat[keep, , drop = FALSE],
+    out$cn_slopes[i] <- .gwr_slope_index(w[keep], xmat_c[keep, , drop = FALSE],
                                          s_glob, s_ok)
   }
   out
@@ -3244,17 +3808,58 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 #' @noRd
 .gwr_predict_at <- function(formula, sp_train, newdata_df, rp, bw, kernel,
                             adaptive, se = FALSE) {
+  sv <- .gwr_predict_centred_at(formula, sp_train, newdata_df, rp, bw, kernel,
+                                adaptive, se = se)
+  yc <- sv$centre
+  sv$centre <- NULL
+  sv$fitted <- sv$fitted + yc
+  sv$fitted[!is.finite(sv$fitted)] <- NA_real_
+  sv
+}
+
+
+#' GWR predictions at new locations, less the response's centre
+#'
+#' What \code{.gwr_predict_at()} computes before it adds the response's
+#' centre (\code{.gwr_centre()}) back: the predictions of the response as
+#' the local regressions fitted it.  At a response of 1e15 plus a spread of
+#' 1, a double holds a prediction in the response's units only to an
+#' eighth, and these keep the spread; the scores of a fit
+#' (\code{.scored_predictions()}) read them.
+#'
+#' @inheritParams .gwr_predict_at
+#' @return What \code{.gwr_predict_at()} returns, with \code{fitted} less
+#'   the centre (\code{NA} where not finite), and \code{centre}, the
+#'   response's centre or 0.
+#' @keywords internal
+#' @noRd
+.gwr_predict_centred_at <- function(formula, sp_train, newdata_df, rp, bw,
+                                    kernel, adaptive, se = FALSE) {
   dsn <- .gwr_design(formula, sp_train@data, newdata_df)
   k   <- ncol(dsn$X)
   if (nrow(dsn$X_new) != nrow(rp) || ncol(dsn$X_new) != k)
     stop(sprintf(paste0("the design matrix for newdata is %d x %d, but the ",
                         "model has %d term(s) for %d location(s)."),
                  nrow(dsn$X_new), ncol(dsn$X_new), k, nrow(rp)), call. = FALSE)
-  sv <- .gwr_local_solve(dsn$X, dsn$y, sp::coordinates(sp_train), bw, kernel,
-                         adaptive, rp = rp, X_rp = dsn$X_new,
+  # The training rows' centres, as fit_gwr_model() takes them
+  # (.gwr_centre()): the same design and response give the same centres, so
+  # a prediction at a training point is the fitted value there.  The new
+  # rows' predictors are taken about the same centres, and the response's
+  # centre goes back on the predictions.
+  cen   <- .gwr_centre(dsn$X, dsn$y)
+  X_new <- dsn$X_new
+  if (!is.null(cen$x_centres))
+    for (j in which(cen$x_centres != 0))
+      X_new[, j] <- X_new[, j] - cen$x_centres[j]
+  sv <- .gwr_local_solve(cen$X, cen$y, sp::coordinates(sp_train), bw, kernel,
+                         adaptive, rp = rp, X_rp = X_new,
                          what = "predict", se = se)
   sv$fitted <- unname(sv$fitted)
+  # In the response's units, less its centre, where the response was
+  # divided by a power of two.
+  if (cen$y_scale != 1) sv$fitted <- sv$fitted * cen$y_scale
   sv$fitted[!is.finite(sv$fitted)] <- NA_real_
+  sv$centre <- cen$y_centre
   sv
 }
 

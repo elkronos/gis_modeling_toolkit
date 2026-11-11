@@ -129,7 +129,8 @@ test_that("supplied folds are honoured and inputs are validated", {
   ka_lab <- kriging_adequacy(asg, "z", cells, sac = ka_true_sac(), folds = lab)
   expect_equal(attr(ka_lab, "cv")$k, 4L)
   expect_error(kriging_adequacy(asg, "z", cells, sac = ka_true_sac(), folds = 1:5),
-               "vector of fold labels with one entry per row")
+               paste0("`folds` has 5 labels; give one per row of `assigned_points_sf` (",
+                      nrow(asg), "), or a make_folds() result."), fixed = TRUE)
   expect_error(kriging_adequacy(asg, "nope", cells), "`response_var` must name a column")
   expect_error(kriging_adequacy(sf::st_drop_geometry(asg), "z", cells), "must be an sf object")
   expect_error(kriging_adequacy(asg, "z", pts), "POLYGON, MULTIPOLYGON")

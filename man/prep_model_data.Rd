@@ -26,13 +26,19 @@ one; the GWR and random-forest backends do not and reject it themselves).}
 \item{boundary}{Optional sf/sfc whose CRS the data are projected to.  It
 is not a clip: rows that fall outside it are kept.  Subset
 \code{data_sf} yourself (for example with \code{sf::st_filter()}) to
-restrict the rows.}
+restrict the rows.  One that mixes XY and XYZ (or XYM) geometries is
+read in x and y, since sf reads a layer in the dimension of its first
+geometry.}
 
 \item{pointize}{Strategy for non-point geometry coercion, passed to
 \code{\link{coerce_to_points}}.  One of \code{"auto"} (default),
 \code{"centroid"}, \code{"point_on_surface"}, \code{"surface"} (an alias
 for \code{"point_on_surface"}), \code{"line_midpoint"} or
-\code{"bbox_center"}.}
+\code{"bbox_center"}.  In longitude and latitude with s2 on, a polygon
+whose centroid s2 cannot take even without its repeated vertices (edges
+that cross) stops the call with the error of class
+\code{"spatialkit_features_degenerate"}, which gives its rows of
+\code{data_sf}; see \code{\link{coerce_to_points}}.}
 
 \item{require_response}{Logical; if FALSE the response column is not
 required to be present (useful for out-of-sample prediction where the
@@ -40,11 +46,13 @@ response is unknown).  Default TRUE.}
 }
 \value{
 An sf object with 2-D (XY) POINT geometry, cleaned of rows
-carrying missing or non-finite values in the modelling columns or in the
-coordinates.  What
+carrying missing or non-finite values in the modelling columns and of
+rows without a location.  What
 was removed is recorded on the attribute \code{"dropped"}, a list with
-\code{n} (rows dropped), \code{n_geometry} (how many of them for an
-empty or non-finite geometry), \code{which} (their positions in
+\code{n} (rows dropped), \code{n_geometry} (how many of them for no
+location: an empty point, a coordinate that is not finite or lies
+beyond 1e150, or a latitude beyond 90 degrees in a geographic CRS),
+\code{which} (their positions in
 \code{data_sf}), \code{row_id} (their \code{..row_id} values when the
 layer carries that column, else \code{NULL}) and \code{reason} (one per
 dropped row: \code{"geometry"}, \code{"missing"} or
@@ -54,8 +62,9 @@ dropped row: \code{"geometry"}, \code{"missing"} or
 non-finite in; a row can count under several),
 \code{response_std_diff} (the mean response of the dropped rows minus
 that of the kept rows, in standard deviations of the response over both;
-\code{NA} when the response is not numeric, or is itself missing in
-every dropped row),
+\code{NA} when the response is not numeric, is itself missing in
+every dropped row, or takes one value up to the rounding of its
+values),
 plus \code{n_rows}, the number of rows returned, which the record was
 made for.  The same record carries two marks on the rows that were
 kept: \code{constant_predictors}, the names of the predictors that take
@@ -82,10 +91,16 @@ data are planar.
 }
 \description{
 Ensures point geometry, projected CRS, and removes rows with missing or
-non-finite values in modeling columns, \emph{including} rows whose
-geometry is empty or whose coordinates are not finite, which no model
-backend can use.  All non-POINT geometries (including MULTIPOINT) are
-coerced to representative points via \code{coerce_to_points()}, so
+non-finite values in modeling columns, \emph{including} rows without a
+location: an empty geometry, or a coordinate that is not finite or lies
+beyond 1e150, which no model backend can use, and in a layer with a
+geographic CRS a vertex at a latitude beyond 90 degrees, which is no place
+on the Earth.  The bound is read on the
+coordinates as given, before the projection, and again after it: a move
+between CRSs can bring a coordinate beyond it back finite, and that point
+is not a place the caller gave.  All non-POINT geometries (including
+MULTIPOINT) are coerced to representative points via
+\code{coerce_to_points()}, so
 downstream coordinate extraction always aligns one row per observation.
 Any Z or M coordinate (POINT Z from a GPS, a GeoPackage or KML) is
 dropped, because every backend works in 2-D map distance.
@@ -106,7 +121,7 @@ fit object still recorded the name you asked for: \code{"B5-B4"} is
 }
 \section{Warnings}{
 
-When preparing data for a fit (\code{require_response = TRUE}) two
+When preparing data for a fit (\code{require_response = TRUE}) three
 conditions are raised as R warnings, each with a class so it can be caught
 by name with \code{tryCatch()} or \code{withCallingHandlers()}:
 \describe{
@@ -117,6 +132,13 @@ the dropped rows sits from that of the kept rows.  A fit on the rows
 that remain describes those rows only; when the difference is large
 the rows are not missing at random and the fit is biased towards the
 complete ones.}
+\item{\code{spatialkit_response_imprecise}}{The response lies so far
+from zero that doubles there are spaced more than a millionth of its
+standard deviation apart (a standard deviation of 1 at about 1e10,
+\eqn{2^{33}}, or beyond).  Its values are rounded to that spacing, and so is every
+mean and prediction computed at that size: the fit, its scores and
+any choice made on them read that rounding.  The rows are kept;
+subtract a constant from the response first.}
 \item{\code{spatialkit_constant_predictor}}{A predictor takes a single
 value in every row that remains.  Its coefficient cannot be told from
 the intercept: a GWR window is rank-deficient, a Bayesian slope is
@@ -127,11 +149,15 @@ Every fitter and every \code{cv_*()} function prepares its data here and
 passes these on.  \code{\link{compare_models_cv}()},
 \code{\link{cv_block_size_sweep}()} and
 \code{\link{select_features_forward}()} run several cross-validations
-of one layer, each of which prepares it, and raise a warning of either
-class once per distinct text for the run.
+of one layer, each of which prepares it, and raise
+\code{spatialkit_rows_dropped} and \code{spatialkit_constant_predictor}
+once per distinct text for the run and
+\code{spatialkit_response_imprecise} once per response column;
+\code{\link{cv_spatial}()} raises the last once as well when its
+\code{fit_fn} prepares each fold's rows again.
 
 With \code{require_response = FALSE} (how every \code{predict()} method
-prepares \code{newdata}) neither is raised: the dropped rows are written
+prepares \code{newdata}) none is raised: the dropped rows are written
 to the log and to the record, and the prediction for each comes back
 \code{NA}, so nothing is lost without a trace.  Repeated locations are
 legitimate (repeat visits to one site) and are counted in the record and

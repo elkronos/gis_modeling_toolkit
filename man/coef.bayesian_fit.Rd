@@ -14,7 +14,13 @@
 \value{
 A matrix of fixed-effect posterior summaries, as returned by
 \code{brms::fixef()}, on the fitted scale (per standard deviation of each
-predictor under \code{standardize_predictors = TRUE}; see above).  Never
+predictor under \code{standardize_predictors = TRUE}; see above), in the
+units of the response: where the response was handed to brms less a
+centre or divided by a scale, the intercept has the centre added back
+and every column is multiplied by the scale (see "The response's centre
+and scale" in \code{\link{fit_bayesian_spatial_model}}).  Read on
+\code{object$engine}, \code{brms::fixef()} answers on the scale brms was
+given.  Never
 \code{NULL}: a missing 'brms' or a failing
 \code{fixef()} call errors, following the \code{coef()} contract described
 in \code{\link{new_spatial_fit}}.

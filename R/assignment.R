@@ -12,13 +12,82 @@
 #'
 #' The join runs in the CRS of `polygons_sf` whenever that CRS is projected,
 #' so cell edges are the straight lines the cells were drawn with and overlap
-#' areas are planar. A copy of `features_sf` is transformed for it, and the
-#' features come back with the coordinates they arrived with. Otherwise (the
-#' polygons are in lon/lat, or carry no CRS) the join runs in the CRS of
-#' `features_sf`.
+#' areas are planar. Cells in lon/lat whose record of their count says they
+#' are the cells a profile scored, and holds its centres in a projected CRS
+#' (the Voronoi cells [build_tessellation()] builds on the centres a profile
+#' scored and returns in a geographic `crs`; see Value), were drawn in the
+#' record's CRS, and the join runs there. A copy of `features_sf` is
+#' transformed for it, and the features come back with the coordinates they
+#' arrived with. Otherwise (other polygons in lon/lat, such as a hex or
+#' square lattice sized by a selection or the cells of centres refitted to
+#' every point, or polygons without a CRS) the join runs in the CRS of
+#' `features_sf`. In longitude and latitude, with s2 on (`sf::sf_use_s2()`,
+#' sf's default), sf joins on the sphere with s2, which refuses a polygon
+#' that is not valid there, such as one with two corners it reads as one
+#' point or with edges that cross; cells returned in lon/lat can hold two
+#' corners that differ only by rounding and fall on one point in degrees
+#' (see `crs` in [create_voronoi_polygons()]). A join by `predicate` then
+#' stops with an error of class `"spatialkit_cells_degenerate"` that gives
+#' the rows of the polygons s2 refuses (the condition carries them as
+#' `rows`), names the cause and says to transform `polygons_sf` to a
+#' projected CRS, where the join runs. The largest-overlap join repairs such
+#' polygons first (see `largest`), and stops with that error when s2 still
+#' refuses a polygon it repaired, such as one whose hole crosses its outer
+#' ring.
+#' A polygon of `features_sf` that s2 refuses stops the join by `predicate`
+#' with an error of class `"spatialkit_features_degenerate"`, with the same
+#' fields, that gives its rows, quotes s2's reason and says to transform
+#' `features_sf` to a projected CRS, where the join runs; so does one s2
+#' refuses even after the repair of the largest-overlap join. When that
+#' repair makes s2 accept the polygons of both layers and s2 then refuses a
+#' piece of an overlap of the two layers (a figure eight, one vertex listed
+#' twice, is repaired into two parts that touch at a point, and the piece can
+#' hold that point twice), the join stops with the error for the layer whose
+#' polygons s2 refused as they arrived; with s2 on (sf's default), the join
+#' by `predicate` meets those polygons too. When s2 refused no polygon of
+#' either layer as it arrived, the error says to pass `largest = FALSE` or to
+#' project both layers. Whether s2 refuses such a piece follows the last bits
+#' of the vertices s2 computes for it, which differ between platforms and s2
+#' versions: a figure eight pinched on the edge of a polygon of the other
+#' layer can give a piece that s2 refuses on macOS on arm64 and accepts on
+#' Linux on x86-64. Where s2 accepts the piece, the join runs and gives each
+#' feature the polygon of its largest overlap.
+#' In longitude and latitude the largest-overlap join
+#' runs on s2, and the areas `tie_break` compares are measured on the sphere
+#' with s2, whatever [sf::sf_use_s2()] says, as the package's other areas in
+#' degrees are; the join by `predicate` runs with the engine the session
+#' names. With s2 off that engine is GEOS, which reads these polygons in
+#' degrees, so the largest-overlap join's error for a polygon s2 refuses also
+#' offers `largest = FALSE`.
 #'
-#' @param features_sf An sf object containing features to assign.
-#' @param polygons_sf An sf or sfc polygonal layer.
+#' sf reads a layer in the dimension of its first geometry, so s2, GEOS and
+#' [sf::st_transform()] read a layer that mixes XY and XYZ (or XYM)
+#' geometries wrongly; `rbind()` of an XY and an XYZ layer gives one. When
+#' either layer mixes dimensions, the join runs on a copy of it without Z and
+#' M, and the rows come back with the geometry they arrived with, Z and M
+#' included. The same holds, with no warning, for a layer whose geometries
+#' carry M (XYM or XYZM), which GEOS does not read: the join is defined in
+#' x and y. Features without a CRS that mix dimensions and are moved from
+#' lon/lat into the polygons' CRS come back moved and in XY, with a warning
+#' of class `"spatialkit_zm_dropped"`, unless their only geometries of
+#' another dimension than the first are empty and not points. Features
+#' without a CRS in one dimension that carry M come back with their own
+#' geometry: with the CRS they were given, or moved from lon/lat with
+#' [sf::st_transform()], which keeps their M.
+#'
+#' Layers so far from the origin of their coordinates that doubles there are
+#' spaced more than a millionth of the extent of the two layers apart (0.125
+#' at 1e15, beside a layer a few kilometres across) are joined with their
+#' edges and points held to that spacing, so a point that lies within it of
+#' an edge near the origin can fall in the polygon beside it. The join runs,
+#' and a warning of class `"spatialkit_xy_imprecise"` gives the spacing and
+#' the extent (the condition carries them as `spacing` and `extent`).
+#'
+#' @param features_sf An sf object containing features to assign. A layer
+#'   whose geometries mix dimensions or carry M (XYM or XYZM) is joined in x
+#'   and y, and the rows returned keep their Z and M (see Details).
+#' @param polygons_sf An sf or sfc polygonal layer. Polygons whose
+#'   geometries mix dimensions or carry M (XYM or XYZM) are read in x and y.
 #' @param polygon_id_col Name of the polygon identifier column: the column of
 #'   `polygons_sf` the IDs are read from, and the name they are returned
 #'   under. Default "poly_id". When `polygons_sf` has no column of that name,
@@ -37,10 +106,22 @@
 #' @param keep_unassigned Logical; retain features that fall inside no
 #'   polygon, carrying \code{NA} in the ID column. Default FALSE, which drops
 #'   them with a warning of class \code{"spatialkit_unassigned"} that gives
-#'   their number.
+#'   their number. Features that \code{tie_break} gives no polygon (see
+#'   there) are kept or dropped with them.
 #' @param predicate Binary spatial predicate function. Default sf::st_intersects.
 #'   Not used when \code{largest} applies: sf then assigns polygon features by
-#'   overlap area and never calls the predicate.
+#'   overlap area and never calls the predicate. With \code{sf::st_intersects}
+#'   a POINT or MULTIPOINT feature with a point within a margin of a
+#'   polygon is in it: one part in 1e10
+#'   of the largest coordinate of the polygons, 0.44 mm at a UTM northing of
+#'   4,400 km, at most a millionth of the diagonal of their bounding box
+#'   and at least four times the spacing of doubles at that coordinate (in
+#'   longitude and latitude, that many degrees of arc on the
+#'   sphere while \code{sf::sf_use_s2()} is on, and no margin while it is
+#'   off). A point on the edge two polygons share is then in both in any
+#'   unit and origin of the coordinates, and \code{tie_break} decides it,
+#'   where the last bits of its coordinates put it inside one polygon or the
+#'   other.
 #' @param largest Logical; when \code{features_sf} is itself polygonal, keep
 #'   the polygon with the largest overlap. Default TRUE. Ignored for point and
 #'   line features. A feature that only touches the polygon layer (shares an
@@ -49,21 +130,55 @@
 #'   \code{st_intersects} counts touching, so such a feature is assigned.
 #'   A feature that overlaps two or more polygons by exactly the same area
 #'   (to 9 significant digits; a square split evenly across a cell edge) is
-#'   given to one of them by \code{tie_break} and counted in \code{"ties"},
-#'   so the choice does not depend on the order of the polygon rows.
+#'   counted in \code{"ties"} and given to the one \code{tie_break} names,
+#'   so the choice does not depend on the order of the polygon rows; where
+#'   \code{"smallest_area"} names none, the feature is given no polygon (see
+#'   \code{tie_break}).
 #'   Invalid geometries (usually a self-intersecting ring),
 #'   whose overlap is undefined, are repaired with \code{sf::st_make_valid()}
 #'   for the join, with a warning, and returned as they arrived. If the
 #'   overlap still cannot be computed the function stops: falling back to
 #'   \code{predicate} and \code{tie_break} would change the rule for every
 #'   feature in the layer, so pass \code{largest = FALSE} to ask for that.
+#'   In longitude and latitude with s2 on (sf's default), where s2 refuses
+#'   a polygon of either layer as it arrived, the join by \code{predicate}
+#'   meets that refusal too, and the error names the polygons and the
+#'   transform instead (see Details).
+#'   In longitude and latitude the validity check, the repair and the
+#'   overlaps run on s2 whatever \code{sf::sf_use_s2()} says; with s2 off
+#'   the join by \code{predicate} runs with GEOS, and the error that names
+#'   the polygons also offers \code{largest = FALSE}.
 #' @param tie_break Strategy for resolving features that match multiple
 #'   polygons (with \code{largest}, that overlap several polygons equally):
 #'   \code{"smallest_area"} (default) keeps the polygon with the
 #'   smallest area and, among polygons of equal area (a point on the shared
 #'   edge of two grid cells), the one whose bounding-box centre is lowest,
-#'   then leftmost, so the choice does not depend on the order of the rows;
-#'   \code{"first"} keeps the first match (original order-dependent
+#'   then leftmost, then the one whose vertices' mean is lowest, then
+#'   leftmost (the two triangles of a split square share a bounding box),
+#'   so the choice does not depend on the order of the rows. Areas are
+#'   compared to 9 significant digits, and centres and means within one part
+#'   in 1e10 of the largest coordinate of the polygons, at most a
+#'   millionth of the diagonal of their bounding box and at least four
+#'   times the spacing of doubles at that coordinate (with any
+#'   \code{predicate}, and in longitude and latitude whatever
+#'   \code{sf::sf_use_s2()} says), so the choice does not depend on the unit
+#'   or the origin of the coordinates either. Where polygons equal on every
+#'   key are left (one polygon under two IDs, or a square and a rhombus of
+#'   its area about its centre), the rule names no polygon: the feature is
+#'   given none, \code{NA} in the ID column, counted in \code{"ties"} and
+#'   listed in its \code{unresolved}, and a warning of class
+#'   \code{"spatialkit_ties_unresolved"} gives how many such features there
+#'   are (the condition carries \code{n} and \code{total}); it is kept or
+#'   dropped as \code{keep_unassigned} says.
+#'   Areas in longitude and latitude are measured on the sphere with s2,
+#'   whatever \code{sf::sf_use_s2()} says. A polygon among those compared
+#'   whose geometry is invalid (a ring whose edges cross, whose lobes GEOS
+#'   measures as cancelling) is measured on a copy repaired with
+#'   \code{sf::st_make_valid()}, with a warning, and returned as it arrived;
+#'   in degrees, one s2 refuses even repaired (a bowtie) stops the call with
+#'   the error of class \code{"spatialkit_cells_degenerate"} (see Details).
+#'   \code{"first"} keeps the first match, the polygon that comes first
+#'   in the rows of \code{polygons_sf} (original order-dependent
 #'   behavior). On cells built from the centres a profile scored, a point on
 #'   the edge between two of them is placed by the profile's rule whichever
 #'   is given (see Value).
@@ -71,7 +186,8 @@
 #'   naming a fallback ID column). It does not silence R warnings. Default
 #'   \code{FALSE}.
 #' @return An sf object with `polygon_id_col` attached, one row per input
-#'   feature (fewer if `keep_unassigned = FALSE` dropped unmatched ones), in
+#'   feature (fewer if `keep_unassigned = FALSE` dropped unmatched ones, and
+#'   features `tie_break` gives no polygon), in
 #'   the CRS `features_sf` arrived in. A column of `features_sf` already
 #'   called `polygon_id_col` is dropped before the spatial join (with a
 #'   warning), so re-assigning an already-assigned layer replaces the old IDs
@@ -81,7 +197,12 @@
 #'   falls inside any polygon
 #'   the result is empty (or all-`NA` with `keep_unassigned = TRUE`) and a
 #'   warning is raised, since the usual cause is two layers in different
-#'   places (a CRS that could only be stamped, not reprojected).
+#'   places (a CRS that could only be stamped, not reprojected). A layer
+#'   without a CRS is brought into the other layer's CRS as
+#'   [harmonize_crs()] does; beside a layer in longitude and latitude, one
+#'   with an x outside -180 to 360 or a y beyond 90 north or south cannot be
+#'   in degrees, and the call stops with an error that names `features_sf`
+#'   or `polygons_sf` and gives its box.
 #'
 #'   Features that fall inside no polygon are counted on the attribute
 #'   `"unassigned"`: a list with `n`, `which` (their row positions in
@@ -92,8 +213,16 @@
 #'   causes are a polygon layer that stops short of the data (a coastline
 #'   drawn at another scale, a tessellation of seeds built without a
 #'   `boundary` or `cover`; see [build_tessellation()]) and points outside
-#'   the study area. With `keep_unassigned = TRUE` they are kept with an
+#'   the study area. A feature with empty geometry, or with a coordinate
+#'   that is not finite or lies beyond 1e150, or in a geographic CRS a
+#'   vertex at a latitude beyond 90 degrees (read as given, before any
+#'   move into the polygons' CRS), has no location to assign: it matches no
+#'   polygon, and the warning says how many of them there are. With
+#'   `keep_unassigned = TRUE` they are kept with an
 #'   `NA` ID and no warning is raised, unless every feature is unassigned.
+#'   A polygon of `polygons_sf` with a coordinate that is not finite or lies
+#'   beyond 1e150 (read as given) has no location either: it takes no
+#'   feature, and the features inside the rest of its ring are unassigned.
 #'
 #'   The
 #'   attribute `"ties"` records how many features matched more than one
@@ -101,8 +230,10 @@
 #'   and had the `tie_break` rule decide for them (on cells built from the
 #'   centres a profile scored, the profile's rule then places the points
 #'   among them, as the last paragraph says): a list with `n`,
-#'   `which` (their row positions in `features_sf`), `rule` and `n_rows`
-#'   (the number of rows returned, which the record was made for). A large
+#'   `which` (their row positions in `features_sf`), `rule`, `n_rows`
+#'   (the number of rows returned, which the record was made for) and, when
+#'   the rule gave some of them no polygon (see `tie_break`), `unresolved`,
+#'   the row positions of those among `which`. A large
 #'   `n` means the polygon layer overlaps, and per-cell counts built from the
 #'   result depend on the rule. The record describes the rows this call
 #'   returned and does not survive subsetting: `joined[i, ]`, like
@@ -137,21 +268,43 @@
 #'   on the edge between two or more of those cells is given the cell
 #'   [resolution_profile()] scored it in: that of its nearest centre,
 #'   measured in the CRS the record names, and of centres the same distance
-#'   away the lower-numbered one. Such points occur on gridded locations
-#'   (raster cell centres, a regular sampling grid), where a row can lie the
-#'   same distance from two centres and the polygons hold it in either cell
-#'   or in both. The rows each cell holds are then the rows its count was
-#'   scored on, and [summarize_by_cell()]'s check of them reads `"match"`.
-#'   A point counts as on the edge when it lies within a margin of both
-#'   cells: one part in 1e10 of the largest coordinate of the cells, 0.44 mm
-#'   at a UTM northing of 4,400 km. [build_tessellation()] draws such cells
-#'   in the CRS the record names, around the centres as the record holds
-#'   them, whatever CRS the seeds came back in (unless its `crs` names
-#'   another projected CRS), so their corners carry only the rounding of
-#'   that computation, far less than the margin. A point
-#'   farther from its nearest centre's cell keeps the polygon that holds it,
-#'   and so do features that are not points, points without a CRS beside a
-#'   record with one, and a join in longitude and latitude. A centre's cell
+#'   away the lower-numbered one (a distance counts as the same as the least
+#'   when its square is no more than the square of the least distance
+#'   lengthened by a margin, plus one part in ten million of the least
+#'   squared distance; the margin is one part in 1e10 of the largest
+#'   coordinate of the centres, at most a millionth of the diagonal of their
+#'   bounding box and at least four times the spacing of doubles at that
+#'   coordinate). Such points occur on
+#'   gridded locations (raster cell centres, a regular sampling grid), where
+#'   a row can lie the same distance from two centres and the polygons hold
+#'   it in either cell or in both. The rows each cell holds are then the rows
+#'   its count was scored on, and [summarize_by_cell()]'s check of them reads
+#'   `"match"`. A point counts as on the edge when it lies within a margin of
+#'   both cells: one part in 1e10 of the largest coordinate of the cells,
+#'   0.44 mm at a UTM northing of 4,400 km, at most a millionth of the
+#'   diagonal of their bounding box and at least four times the spacing of
+#'   doubles at that coordinate. For a point that two centres tie
+#'   for while the cell holding it is that of the strictly nearer one, the
+#'   margin also takes in the point's distance from the boundary between the
+#'   two, measured in the CRS the record names: midway between centres far
+#'   apart the tie reaches about 1.25e-8 of their distance from the boundary,
+#'   which can exceed that margin.
+#'   [build_tessellation()] draws such cells in the CRS the record names,
+#'   around the centres as the record holds them, whatever CRS the seeds came
+#'   back in (unless its `crs` names another projected CRS), so their corners
+#'   carry only the rounding of that computation, far less than the margin.
+#'   Cells it returns in a
+#'   geographic `crs` are moved back into the record's CRS for the join (see
+#'   Details). In a UTM zone the round trip through degrees moves a corner by
+#'   about 2e-9 m; in the equal-area CRS the profile works in for a layer
+#'   wider than a zone it can move one by more than the margin (how far
+#'   depends on the PROJ build), so a point on such an edge can keep the
+#'   polygon that holds it, and the summary's check then reads `"differ"`. A
+#'   point farther from its nearest centre's cell keeps the polygon that
+#'   holds it, and so do features that are not points, points without a CRS
+#'   beside a record with one or with a CRS beside a record without one, and
+#'   a join in longitude and latitude (polygons
+#'   in degrees beside a record in degrees). A centre's cell
 #'   is the one cell that holds it and no other centre; a centre outside a
 #'   boundary that clipped its cell away from it has the cell, among those
 #'   that hold no centre, whose inside is nearest it. Cells built from other
@@ -210,13 +363,132 @@ assign_features_to_polygons <- function(
   # ended up outside their largest-overlap cell.
   crs_p <- sf::st_crs(polygons_sf)
   join_in_p <- !is.na(crs_p) && !isTRUE(sf::st_is_longlat(crs_p))
-  hh <- harmonize_crs(features_sf, polygons_sf,
-                      prefer = if (join_in_p) "b" else "a")
+  # A layer that mixes XY and XYZ (or XYM) geometries is joined in XY.  sf
+  # reads a layer in the dimension of its first geometry: s2 drops Z and M
+  # only when the first geometry carries them, and GEOS and the transform
+  # read an XYZ ring among XY rows as XY pairs.  With a clean XYZ square in
+  # row 3 of six XY squares, the point in it fell in no polygon and three
+  # others in two; in a projected CRS GEOS stopped on the ring.  So is a
+  # layer whose geometries carry M (XYM or XYZM): GEOS does not read M and
+  # stopped the join, the overlap and the validity check with "GEOS does not
+  # support XYM or XYZM geometries".  The join is defined in x and y and
+  # reads M nowhere.  Every geometric step of the join below reads these
+  # copies; a layer XY or XYZ throughout is read as it came.
+  features_dims <- .geom_dims(features_sf)
+  features_flat <- length(features_dims) > 1L || any(features_dims %in% c("XYM", "XYZM"))
+  features_xy <- if (features_flat) sf::st_zm(features_sf, drop = TRUE, what = "ZM")
+                 else features_sf
+  # Points in an sfc_GEOMETRY column are joined as the same points in
+  # sfc_POINT (.typed_points()): on the column sf::st_cast() returns, the
+  # join stopped in sf::st_dimension() with "Not compatible with STRSXP".
+  features_xy <- .typed_points(features_xy)
+  # A feature with a coordinate that is not finite or lies beyond 1e150 has
+  # no location.  It is read as given, before any move, and the join's copy
+  # of it is emptied below, so it matches no polygon and is counted with the
+  # empty features: moved into the polygons' CRS, a northing of 1e200 in
+  # EPSG:32616 came back finite in EPSG:32617 and was joined there.
+  # A feature of a layer in a geographic CRS with a vertex at a latitude
+  # beyond 90 degrees has no location either (lat = TRUE).  Its copy is
+  # emptied here, before the move and the join read it: it fell in no
+  # polygon, but sf's bare "bounding box has potentially an invalid value
+  # range for longlat data" came with it, and the texts below called it a
+  # feature the polygons miss.
+  features_ll <- .is_longlat(features_xy)
+  unlocated_f <- .unlocated_features(sf::st_geometry(features_xy), lat = TRUE)
+  features_xy <- .empty_unlocated(features_xy, .beyond_pole_rows(features_xy), lat = TRUE)
+  # A polygon with a vertex that is not finite or lies beyond 1e150, read as
+  # given, has no location either, and its copy is emptied before the join:
+  # read as it was, one with an NA or Inf vertex caught the points inside the
+  # rest of its ring (and some of its neighbours'), and one at 1e200 stopped
+  # GEOS ("orientationIndex encountered NaN/Inf numbers").  It takes no
+  # point, and the points in it are counted with the other unassigned ones.
+  polygons_xy <- .empty_unlocated(.xy_if_mixed_or_m(polygons_sf))
+  # A row with a location that the move cannot place in full comes back
+  # empty, or without the vertices it cannot place, and is said in this
+  # function's words, naming `features_sf` or `polygons_sf`, in place of
+  # harmonize_crs()'s, which names `a` or `b`.
+  # A layer without a CRS beside one in longitude and latitude is not given
+  # that CRS when its coordinates cannot be in it (x outside -180 to 360, y
+  # beyond 90 north or south), and the refusal names `features_sf` or
+  # `polygons_sf`, not harmonize_crs()'s `a` or `b`.  Stamped, features in
+  # metres fell in no polygon, and polygons in metres stopped on an s2
+  # refusal that blamed the lon/lat reading the stamp had made.
+  if (is.na(sf::st_crs(features_xy)) && .is_longlat(polygons_xy))
+    .refuse_lonlat_stamp(.looks_like_lonlat(features_xy)$bb, sf::st_crs(polygons_xy),
+                         caller = "assign_features_to_polygons", what = "features_sf")
+  if (is.na(sf::st_crs(polygons_xy)) && .is_longlat(features_xy))
+    .refuse_lonlat_stamp(.looks_like_lonlat(polygons_xy)$bb, sf::st_crs(features_xy),
+                         caller = "assign_features_to_polygons", what = "polygons_sf")
+  done <- .answer_for_classed("spatialkit_rows_unplaced")
+  hh <- tryCatch(harmonize_crs(features_xy, polygons_xy,
+                               prefer = if (join_in_p) "b" else "a"),
+                 finally = done())
   f <- hh$a; p <- hh$b
+  # A layer without a CRS that harmonize_crs() read as lon/lat and moved is
+  # compared as EPSG:4326, so the warning names longitude and latitude.
+  .warn_rows_unplaced(.as_harmonize_read(features_xy, f), f,
+                      caller = "assign_features_to_polygons",
+                      arg = "features_sf", remedy = .UNPLACED_REMEDY)
   # `f` is only the join's copy.  The rows returned keep the geometry the
-  # features arrived with; a CRS-less layer is resolved into the polygons'
-  # CRS and returned there, as before.
+  # features arrived with, Z and M included; a CRS-less layer is resolved
+  # into the polygons' CRS and returned there, as before.  A CRS-less layer
+  # read in XY for the join keeps its Z and M when it was only given a CRS.
+  # When it was moved from lon/lat, a layer in one dimension (M throughout)
+  # comes back moved with its M, since sf transforms such a layer right; one
+  # that mixes dimensions comes back moved, in XY, and a warning says so,
+  # unless sf transforms the layer right (below).
   f_geom <- if (is.na(orig_crs)) sf::st_geometry(f) else sf::st_geometry(features_sf)
+  if (is.na(orig_crs) && features_flat) {
+    if (identical(f_geom, sf::st_set_crs(sf::st_geometry(features_xy), sf::st_crs(f))))
+      f_geom <- sf::st_set_crs(sf::st_geometry(features_sf), sf::st_crs(f))
+    else if (identical(.xy_if_mixed_warn(features_sf, "assign_features_to_polygons",
+                                         "features_sf"), features_sf))
+      # A layer in one dimension (M throughout), or one whose only geometries
+      # of another dimension than the first are empty and not points, which
+      # sf transforms right: the rows are moved with their Z and M, from
+      # EPSG:4326 as harmonize_crs() took them.
+      f_geom <- .transform_keep_unlocated(
+        sf::st_set_crs(sf::st_geometry(features_sf), 4326), sf::st_crs(f))
+  }
+  # The join's copy of a feature without a location is an empty geometry of
+  # its own type and dimension; the row returned keeps `f_geom`.
+  f <- .empty_unlocated(f, which(unlocated_f))
+  # Cells in longitude and latitude whose record says a profile scored them
+  # (the Voronoi cells of the scored centres that build_tessellation()
+  # returns in a geographic `crs`) were drawn in the record's projected CRS,
+  # and are joined there: their edges are straight in it, and the profile
+  # measured the rows in it.  The join's copy of the features is moved there
+  # from whatever CRS it is in; the rows returned keep `f_geom`, set above.
+  # On the sphere s2 refused some of these cells: where four centres stand
+  # the same distance from one point, two cells meet at two corners a
+  # fraction of a nanometre apart, which the transform to degrees puts at
+  # one point ("duplicate vertex"), and the join of rows in degrees stopped.
+  # The polygons are moved from `polygons_xy`, not from `p`, which holds
+  # them in the features' CRS when that is projected.  Projected cells are
+  # joined in their own CRS whatever CRS their record names, and cells
+  # without a CRS have none to be moved from.  A polygon with a vertex that
+  # is not finite or lies beyond 1e150, read as given, comes back empty
+  # (.transform_keep_unlocated()), as harmonize_crs() returns it: moved as
+  # it was, it came back as a smaller shape that took points.
+  # The features are moved with .transform_keep_unlocated() as well, and a
+  # row either move cannot place in full is said, as above.  The polygons
+  # are said for the move whose copy is joined.
+  crs_s <- if (!join_in_p && !is.na(crs_p)) .scored_crs(count_rule) else NULL
+  if (is.null(crs_s)) {
+    .warn_rows_unplaced(.as_harmonize_read(polygons_xy, p), p,
+                        caller = "assign_features_to_polygons",
+                        arg = "polygons_sf", remedy = .UNPLACED_REMEDY)
+  } else {
+    if (!isTRUE(sf::st_crs(f) == crs_s)) {
+      f0 <- f
+      f  <- .transform_keep_unlocated(f0, crs_s)
+      .warn_rows_unplaced(f0, f, caller = "assign_features_to_polygons",
+                          arg = "features_sf", remedy = .UNPLACED_REMEDY)
+    }
+    p <- .transform_keep_unlocated(polygons_xy, crs_s)
+    .warn_rows_unplaced(polygons_xy, p, caller = "assign_features_to_polygons",
+                        arg = "polygons_sf", remedy = .UNPLACED_REMEDY)
+  }
 
   id_candidates <- unique(c(polygon_id_col, "poly_id", "polygon_id", "id", "cell_id", "grid_id"))
   id_col <- id_candidates[id_candidates %in% names(p)][1]
@@ -308,7 +580,39 @@ assign_features_to_polygons <- function(
   use_largest <- isTRUE(largest) &&
     all(f_gtypes %in% c("POLYGON", "MULTIPOLYGON"))
 
-  if (use_largest) {
+  # In longitude and latitude the overlaps and the areas the join compares
+  # are measured on the sphere with s2, whatever sf::sf_use_s2() says, as the
+  # package's other areas in degrees are (.with_s2()).  With s2 off sf hands
+  # st_area() to lwgeom, which the package does not depend on: the
+  # tie-break and the largest-overlap join stopped with "package lwgeom
+  # required, please install it first", and the latter advised `largest =
+  # FALSE`, which stopped the same way.  The join by `predicate` keeps the
+  # session's engine.
+  on_sphere <- isTRUE(sf::st_is_longlat(sf::st_crs(p_sel)))
+  s2_if_sphere <- function(expr) if (on_sphere) .with_s2(expr) else expr
+  # The session's engine, read before any step is put on s2: with s2 off the
+  # join by `predicate` runs with GEOS, which reads in degrees polygons s2
+  # refuses, so the largest-overlap join's error still offers it.
+  s2_session <- isTRUE(sf::sf_use_s2())
+
+  # The layers as they arrived at the join, before the largest-overlap
+  # join's repair: s2's refusal of a piece of an overlap is traced to the
+  # polygons it refused as they arrived (.stop_join_degenerate()).
+  f_in <- f
+  p_in <- p_sel
+  # The edges of the polygons, and the points read against them, are held
+  # to the spacing of doubles at the coordinates' size; where that is more
+  # than a millionth of the layers' extent it is said (.warn_xy_imprecise()).
+  .warn_xy_imprecise(list(f, p_sel), "assign_features_to_polygons",
+                     c("features_sf", "polygons_sf"))
+  # The margin within which a point lies on a polygon's edge, and within
+  # which the tie-break's bounding-box centres and vertex means count as
+  # equal: one part in 1e10 of the largest coordinate of the polygons, at
+  # most a millionth of their diagonal (.edge_tol()), the margin of the
+  # edge rule of cells a profile scored.
+  bb_p    <- sf::st_bbox(p_sel)
+  tie_tol <- .edge_tol(bb_p)
+  if (use_largest) s2_if_sphere({
     # sf measures the overlap with st_intersection(), which GEOS cannot do on
     # an invalid ring: one bow-tie parcel threw a TopologyException, and a
     # catch-all retry without `largest` used to swallow it and reassign EVERY
@@ -338,10 +642,13 @@ assign_features_to_polygons <- function(
         p_sel <- sf::st_set_geometry(p_sel, g)
       }
     }
-  }
+  })
 
   join_args <- list(x = f, y = p_sel, join = predicate, left = TRUE)
   largest_ties <- integer(0)
+  # Features the smallest-area rule leaves between polygons it cannot tell
+  # apart, by their row in `features_sf`: given no polygon.
+  unresolved_rows <- integer(0)
   if (use_largest) {
     # With `largest = TRUE` sf never calls `predicate` (it intersects the
     # layers and keeps the biggest piece), so no predicate can reject it: an
@@ -355,7 +662,9 @@ assign_features_to_polygons <- function(
     # st_agr() on the inputs does not help).  Keeping one cell per feature is
     # exactly that assumption, so the warning says nothing about the data;
     # it alone is muffled.
-    joined <- tryCatch(
+    # In degrees the join runs on s2 whatever the session says (above), and
+    # so does its handler, which asks s2 which polygons it refuses.
+    joined <- s2_if_sphere(tryCatch(
       withCallingHandlers(
         do.call(sf::st_join, c(join_args, largest = TRUE)),
         warning = function(w) {
@@ -363,22 +672,42 @@ assign_features_to_polygons <- function(
                     conditionMessage(w), fixed = TRUE))
             invokeRestart("muffleWarning")
         }),
-      error = function(e) stop(sprintf(paste0(
-        "assign_features_to_polygons(): the largest-overlap join failed (%s). ",
-        "Pass largest = FALSE to assign every feature by `predicate` and ",
-        "`tie_break` instead%s."),
-        conditionMessage(e),
-        if (isTRUE(sf::st_is_longlat(f)))
-          ", or project both layers first (see ensure_projected())" else ""),
-        call. = FALSE))
+      error = function(e) {
+        # The polygons s2 refuses were repaired above, and s2 accepts most
+        # of them then.  It still refuses some (a hole that crosses its
+        # outer ring stays two rings whose edges cross), and `largest =
+        # FALSE` would meet the same refusal, so the error names the cause
+        # and the transform that helps instead of advising it.  So it does
+        # where the repair made s2 accept a polygon and s2 then refused a
+        # piece of its overlap with the other layer (a figure eight,
+        # repaired into two parts that touch at a point): the join by
+        # `predicate` meets that polygon as it arrived, where the session
+        # has s2 on; with s2 off it runs with GEOS, and the error offers it.
+        .stop_join_degenerate(e, f_in, p_in, f, p_sel, is.na(orig_crs), is.na(crs_p),
+                              predicate_on_s2 = s2_session)
+        # `largest = FALSE` is advised only where that join does not meet
+        # the same error: an engine sf lacks (lwgeom) stops it too.
+        in_degrees <- isTRUE(sf::st_is_longlat(f))
+        advice <- if (!grepl("lwgeom", conditionMessage(e), fixed = TRUE))
+          paste0(" Pass largest = FALSE to assign every feature by `predicate` and ",
+                 "`tie_break` instead",
+                 if (in_degrees) ", or project both layers first (see ensure_projected())",
+                 ".")
+        else if (in_degrees) " Project both layers first (see ensure_projected())."
+        else ""
+        stop(sprintf("assign_features_to_polygons(): the largest-overlap join failed (%s).%s",
+                     conditionMessage(e), advice),
+             call. = FALSE)
+      }))
     # sf keeps the largest intersection piece without asking whether it has
     # any area, so under GEOS a feature that only shares an edge or a corner
     # with the cells was assigned to one of them with zero overlap, while
     # under s2 (lon/lat, s2 on) the same feature had no piece and came back
     # unassigned: sf's 100 nc counties against 50 of them as cells gave 70
     # rows projected and 50 in lon/lat.  A feature with no overlap has no largest
-    # overlap, so it is unassigned whatever the CRS.  s2 already does this.
-    if (!(isTRUE(sf::st_is_longlat(f)) && isTRUE(sf::sf_use_s2()))) {
+    # overlap, so it is unassigned whatever the CRS.  s2 already does this,
+    # and joins every layer in degrees here.
+    if (!on_sphere) {
       hit <- which(!is.na(joined[[join_id]]))
       if (length(hit)) {
         # "2********": the interiors meet in an area.
@@ -402,17 +731,41 @@ assign_features_to_polygons <- function(
     # overlapping two or more cells are measured again, and an exact tie
     # (areas equal to 9 significant digits, as for the cell areas below) is
     # decided by `tie_break` among the equally largest cells.
-    lt <- .largest_overlap_ties(f, p_sel, joined, join_id, tie_break)
+    lt <- s2_if_sphere(.largest_overlap_ties(f, p_sel, joined, join_id, tie_break,
+                                             tie_tol))
     if (length(lt$rows)) {
       joined[[join_id]][lt$rows] <- lt$ids
       largest_ties <- joined[["..pre_join_row_id"]][lt$rows]
+      unresolved_rows <- largest_ties[is.na(lt$ids)]
       .log_info(paste0("assign_features_to_polygons(): %d of %d polygon ",
                        "feature(s) overlap two or more polygons by exactly the ",
                        "same area; the '%s' rule chose one for each."),
                 length(lt$rows), nrow(f), tie_break)
     }
   } else {
-    joined <- do.call(sf::st_join, join_args)
+    # In longitude and latitude sf joins with s2, which refuses a polygon
+    # with two corners it reads as one point.  Cells returned in degrees hold
+    # such corners on gridded locations, and the join stopped with s2's
+    # "Loop 0 is not valid: Edge 20 is degenerate (duplicate vertex)", which
+    # names neither the polygon nor a way on: the k-means cells of a 30 by 20
+    # lattice at 30 m returned in EPSG:4326 stopped it once they had lost
+    # their record or their CRS.  Such a refusal, and every other refusal
+    # of a polygon of either layer by s2, now stops with the cause and the
+    # remedy; every other error passes as it was raised.
+    # A point on the edge two polygons share lies in both, and the default
+    # predicate found both only while the edge passed through it exactly: a
+    # change of unit or a shift of the origin moves the last bits of the
+    # coordinates, which put a lattice point a hair inside one cell or the
+    # other (25 of 925 points of a 37 x 25 lattice changed cell in US feet,
+    # 11 with the false origin moved by 0.1 m).  With sf::st_intersects() a
+    # point within `tie_tol` of a polygon is in it, so an edge point is a tie
+    # in every frame and `tie_break` decides it (.intersects_margin()).
+    if (identical(predicate, sf::st_intersects))
+      join_args$join <- function(x, y, ...) .intersects_margin(x, y, bb_p)
+    joined <- withCallingHandlers(
+      do.call(sf::st_join, join_args),
+      error = function(e)
+        .stop_join_degenerate(e, f, p_sel, f, p_sel, is.na(orig_crs), is.na(crs_p)))
   }
   # The join ran on copies (moved into the polygons' CRS, repaired); hand
   # back the geometry the caller passed, in the CRS it arrived in, rather
@@ -450,10 +803,17 @@ assign_features_to_polygons <- function(
     # For each duplicated feature, keep the polygon with the smallest area
     # (the most specific / tightest-fitting polygon).  Areas are compared to
     # 9 significant digits, so equal cells whose computed areas differ in the
-    # last bits count as equal.
-    poly_areas <- suppressWarnings(as.numeric(sf::st_area(p)))
+    # last bits count as equal.  Only the polygons the tied features fall in
+    # are measured, those whose areas the rule compares.
+    tie_ids <- unique(as.character(
+      joined[[polygon_id_col]][joined[["..pre_join_row_id"]] %in% tie_rows]))
+    tie_ids <- tie_ids[!is.na(tie_ids)]
+    tie_at  <- match(tie_ids, as.character(p[[id_col]]))
+    p_tie   <- sf::st_geometry(p)[tie_at]
+    poly_areas <- s2_if_sphere(.tie_break_areas(p_tie, tie_at, nrow(p), is.na(crs_p),
+                                                s2_session))
     poly_areas[!is.finite(poly_areas)] <- Inf
-    names(poly_areas) <- as.character(p[[id_col]])
+    names(poly_areas) <- tie_ids
 
     joined$`..poly_area` <- signif(poly_areas[as.character(joined[[polygon_id_col]])], 9L)
     joined$`..poly_area`[is.na(joined$`..poly_area`)] <- Inf
@@ -464,25 +824,31 @@ assign_features_to_polygons <- function(
     # to cells 1, 4, 7, or to 2, 5, 8 with the rows reversed.  The candidate
     # whose bounding-box centre is lowest, then leftmost, wins instead.  On
     # a create_grid_polygons() grid, which is numbered from the lower left a
-    # row at a time, that is the cell the row order picked.
-    tie_ids <- unique(as.character(
-      joined[[polygon_id_col]][joined[["..pre_join_row_id"]] %in% tie_rows]))
-    tie_ids <- tie_ids[!is.na(tie_ids)]
-    p_tie   <- sf::st_geometry(p)[match(tie_ids, as.character(p[[id_col]]))]
+    # row at a time, that is the cell the row order picked.  The centres are
+    # compared within `tie_tol`: in another unit or origin the centres of a
+    # row of cells differ in their last bits, which chose the cell of an edge
+    # point.  Candidates that share a bounding box (the two triangles of a
+    # split square) are told apart by the mean of their vertices, lowest,
+    # then leftmost; candidates equal on every key (one polygon under two
+    # IDs, a square and a rhombus that share its centre) went to the first
+    # in the row order of `polygons_sf`, and are now given no polygon
+    # (.tie_rule_rows()).
     ctr     <- vapply(p_tie, function(g) {
       bb <- sf::st_bbox(g)
       c((bb[["xmin"]] + bb[["xmax"]]) / 2, (bb[["ymin"]] + bb[["ymax"]]) / 2)
     }, numeric(2))
-    ctr_x <- stats::setNames(ctr[1, ], tie_ids)
-    ctr_y <- stats::setNames(ctr[2, ], tie_ids)
-    ids_j <- as.character(joined[[polygon_id_col]])
-    key_y <- unname(ctr_y[ids_j]); key_y[!is.finite(key_y)] <- Inf
-    key_x <- unname(ctr_x[ids_j]); key_x[!is.finite(key_x)] <- Inf
-
-    # Within each group of duplicates, keep the row with smallest area
-    joined <- joined[order(joined[["..pre_join_row_id"]], joined[["..poly_area"]],
-                           key_y, key_x), , drop = FALSE]
-    joined <- joined[!duplicated(joined[["..pre_join_row_id"]]), , drop = FALSE]
+    vm    <- .vertex_means(p_tie)
+    at_j  <- match(as.character(joined[[polygon_id_col]]), tie_ids)
+    key   <- cbind(joined[["..poly_area"]], ctr[2, at_j], ctr[1, at_j],
+                   vm[at_j, 2L], vm[at_j, 1L])
+    grp   <- joined[["..pre_join_row_id"]]
+    keep  <- .tie_rule_rows(key, grp, tie_tol)
+    joined <- joined[keep, , drop = FALSE]
+    many  <- duplicated(joined[["..pre_join_row_id"]])
+    open  <- unique(joined[["..pre_join_row_id"]][many])
+    joined <- joined[!many, , drop = FALSE]
+    joined[[polygon_id_col]][joined[["..pre_join_row_id"]] %in% open] <- NA
+    unresolved_rows <- c(unresolved_rows, open)
     joined[["..poly_area"]] <- NULL
   } else {
     joined <- joined[!duplicated(joined[["..pre_join_row_id"]]), , drop = FALSE]
@@ -494,7 +860,7 @@ assign_features_to_polygons <- function(
   # holds are the rows its count was scored on.
   if (!is.null(count_rule)) {
     on_edge <- .scored_edge_cells(f, p, id_col, joined, polygon_id_col, count_rule,
-                                  features_sf)
+                                  features_xy)
     if (length(on_edge$rows)) {
       joined[[polygon_id_col]][on_edge$rows] <- on_edge$ids
       .log_info(paste0("assign_features_to_polygons(): %d point(s) on the edge between two ",
@@ -504,12 +870,32 @@ assign_features_to_polygons <- function(
     }
   }
   # Which features matched no polygon, by their row in `features_sf`, read
-  # before the row key goes.
-  unassigned_rows <- sort(joined[["..pre_join_row_id"]][is.na(joined[[polygon_id_col]])])
+  # before the row key goes.  A feature the tie-break left between polygons
+  # it cannot tell apart matched some, and is reported with the ties.
+  unresolved_rows <- sort(unique(unresolved_rows))
+  unassigned_rows <- sort(setdiff(
+    joined[["..pre_join_row_id"]][is.na(joined[[polygon_id_col]])], unresolved_rows))
   joined[["..pre_join_row_id"]] <- NULL
+  if (length(unresolved_rows))
+    .warn_classed("spatialkit_ties_unresolved",
+                  paste0("assign_features_to_polygons(): %d of %d feature(s) match two or ",
+                         "more polygons that the smallest-area rule of `tie_break` cannot ",
+                         "tell apart (equal in area, in bounding-box centre and in the mean ",
+                         "of their vertices, such as one polygon under two IDs), so they ",
+                         "are given no polygon and %s; attr(, \"ties\")$unresolved gives ",
+                         "their rows in `features_sf`."),
+                  length(unresolved_rows), nrow(joined),
+                  if (keep_unassigned) "kept with an NA ID" else "left out of the result",
+                  data = list(n = length(unresolved_rows), total = nrow(joined)))
 
   n_unassigned <- length(unassigned_rows)
   n_features   <- nrow(joined)
+  # A feature without a location (an empty geometry, or a coordinate that is
+  # not finite or lies beyond 1e150, read as given) is in no polygon too, but
+  # for want of a location, not because the polygons miss it: the texts say
+  # so, as build_tessellation() does, and keep their advice for the rest.
+  no_loc  <- sf::st_is_empty(f_geom) | unlocated_f
+  n_empty <- if (n_unassigned) sum(no_loc[unassigned_rows]) else 0L
   # Zero matches is almost never what the caller meant, and it is silent: the
   # function returns an empty sf and every downstream step reports zero rows
   # without saying why.  The usual cause is a CRS mismatch that could only be
@@ -518,11 +904,20 @@ assign_features_to_polygons <- function(
   if (n_unassigned == n_features && n_features > 0L)
     .warn_classed("spatialkit_unassigned",
                   paste0("assign_features_to_polygons(): none of the %d ",
-                         "feature(s) fall inside any polygon. Check that the ",
-                         "two layers cover the same ground -- a CRS that had to ",
-                         "be stamped rather than reprojected is the usual ",
-                         "cause -- or pass a different `predicate`."),
-                  n_features, data = list(n = n_unassigned, total = n_features))
+                         "feature(s) fall inside any polygon. %s"),
+                  n_features,
+                  if (n_empty == n_features)
+                    sprintf("They have no location (%s), so there is nothing to assign.",
+                            .unlocated_what(features_ll))
+                  else paste0(
+                    if (n_empty > 0L)
+                      sprintf("%d of them %s no location (%s); for the rest, check", n_empty,
+                              if (n_empty == 1L) "has" else "have", .unlocated_what(features_ll))
+                    else "Check",
+                    " that the two layers cover the same ground -- a CRS that had to ",
+                    "be stamped rather than reprojected is the usual ",
+                    "cause -- or pass a different `predicate`."),
+                  data = list(n = n_unassigned, total = n_features))
   else if (n_unassigned > 0L && !keep_unassigned)
     # Rows removed from the result are data dropped, which the caller has to
     # be able to catch: this was one INFO line in the temp log, and a
@@ -533,15 +928,28 @@ assign_features_to_polygons <- function(
                   paste0("assign_features_to_polygons(): %d of %d feature(s) ",
                          "(%.1f%%) fall inside no polygon and are left out of ",
                          "the result; attr(, \"unassigned\")$which gives their ",
-                         "rows in `features_sf`. Check that the polygons cover ",
-                         "the features (cells built from seeds need a ",
-                         "`boundary` or a `cover`; see build_tessellation()), or ",
-                         "pass keep_unassigned = TRUE to keep them with an NA ID."),
+                         "rows in `features_sf`. %s"),
                   n_unassigned, n_features, 100 * n_unassigned / n_features,
+                  if (n_empty == n_unassigned)
+                    sprintf(paste0("They have no location (%s), so there is nothing ",
+                                   "to assign; pass keep_unassigned = TRUE to keep them ",
+                                   "with an NA ID."), .unlocated_what(features_ll))
+                  else paste0(
+                    if (n_empty > 0L)
+                      sprintf("%d of them %s no location (%s); for the rest, check", n_empty,
+                              if (n_empty == 1L) "has" else "have", .unlocated_what(features_ll))
+                    else "Check",
+                    " that the polygons cover ",
+                    "the features (cells built from seeds need a ",
+                    "`boundary` or a `cover`; see build_tessellation()), or ",
+                    "pass keep_unassigned = TRUE to keep them with an NA ID."),
                   data = list(n = n_unassigned, total = n_features))
   else if (n_unassigned > 0L)
-    .log_info("assign_features_to_polygons(): %d of %d feature(s) fall inside no polygon and are kept with an NA ID.",
-              n_unassigned, n_features)
+    .log_info("assign_features_to_polygons(): %d of %d feature(s) fall inside no polygon and are kept with an NA ID%s.",
+              n_unassigned, n_features,
+              if (n_empty > 0L) sprintf(" (%d of them %s no location: %s)", n_empty,
+                                        if (n_empty == 1L) "has" else "have",
+                                        .unlocated_what(features_ll)) else "")
 
   if (!keep_unassigned) {
     joined <- joined[!is.na(joined[[polygon_id_col]]), , drop = FALSE]
@@ -551,9 +959,12 @@ assign_features_to_polygons <- function(
   # survive a subset that renumbers or removes them.
   tie_rows <- sort(unique(c(tie_rows, largest_ties)))
   joined <- .set_row_record(joined, "ties",
-                            list(n = length(tie_rows),
-                                 which = as.integer(tie_rows),
-                                 rule = tie_break))
+                            c(list(n = length(tie_rows),
+                                   which = as.integer(tie_rows),
+                                   rule = tie_break),
+                              # Only when the rule gave some feature no polygon.
+                              if (length(unresolved_rows))
+                                list(unresolved = as.integer(unresolved_rows))))
   # The features no polygon holds, beside the ties: the count used to exist
   # only in a log line.  Stamped the same way, and removed by a subset with
   # the other records named in .row_record_attrs (R/utils.R).
@@ -564,16 +975,450 @@ assign_features_to_polygons <- function(
 }
 
 
+# What the caller of a join does once the polygons are transformed.
+.JOIN_AGAIN <- "assign again; the join then runs in that CRS"
+
+#' Stop with the cause when s2 refuses a polygon of a layer in degrees
+#'
+#' sf measures geometry in longitude and latitude with s2, which refuses a
+#' polygon that is not valid on the sphere: a ring with two corners it reads
+#' as one point ("Loop 0 is not valid: Edge 20 is degenerate (duplicate
+#' vertex)") or with edges that cross; a hole that crosses its outer ring
+#' ("Loop 0 edge 1 crosses loop 1 edge 0"); two rings that share an edge
+#' ("Loop 1 edge 2 has duplicate near loop 2 edge 3").  Its error names
+#' neither the polygon nor a way on.  Cells built in a projected CRS and
+#' returned in degrees hold such corners where four seeds stand the same
+#' distance from one point: two cells meet there at two corners that differ
+#' only by rounding, which the transform puts at one point.  Called from an
+#' error handler around an sf call on \code{polygons}.
+#'
+#' @param e The error caught.  s2's refusals of a polygon all name a ring
+#'   ("Loop N ...", "... crosses loop N ...", "Inconsistent loop orientations
+#'   detected" for oriented polygons), so an error that names none is not
+#'   one; sf's own check of the polygons below then tells s2's refusal of
+#'   these polygons from that of another layer's.
+#' @param polygons The polygons as the failed call had them (sf or sfc).
+#' @param caller Name of the exported function, for the message.
+#' @param layer The argument the polygons came in, as the message names it.
+#' @param task What cannot run, as in "so \code{task} cannot run in degrees".
+#' @param again What to do once the polygons are transformed.
+#' @param no_crs Whether the polygons came without a CRS and were read as
+#'   longitude and latitude.
+#' @param pick The projected CRS the remedy names after the one the cells
+#'   were built in, as in "or \code{pick}".
+#' @param ... Passed to \code{.raise_cells_degenerate()} (\code{of},
+#'   \code{source}, \code{remedy}, \code{site}, \code{s2_forced}).
+#' @return \code{NULL}, invisibly, when \code{e} is not s2's refusal of a
+#'   polygon or s2 refuses no polygon of \code{polygons} (the refusal is
+#'   another layer's, or of a piece the call made): the caller then raises
+#'   \code{e} as it would.  Otherwise it stops with the error
+#'   \code{.raise_cells_degenerate()} builds.
+#' @keywords internal
+#' @noRd
+.stop_cells_degenerate <- function(e, polygons, caller, layer, task, again,
+                                   no_crs = FALSE,
+                                   pick = "the one ensure_projected() picks for it",
+                                   ...) {
+  if (!.is_s2_ring_error(e)) return(invisible(NULL))
+  g <- sf::st_geometry(polygons)
+  if (!isTRUE(sf::st_is_longlat(g)) || !isTRUE(sf::sf_use_s2())) return(invisible(NULL))
+  bad <- .s2_refused_rows(g)
+  if (is.null(bad) || !length(bad$rows)) return(invisible(NULL))
+  .raise_cells_degenerate(e, bad$rows, bad$reasons, length(g), caller, layer, task,
+                          again, no_crs, pick = pick, ...)
+}
+
+# The ID columns summarize_by_cell() looks for, in order: among the rows'
+# columns (`.sbc_id_candidates()`), and, with the one found there as
+# `id_col`, among the cells' columns (`.cells_id_candidates()`), in the order
+# assign_features_to_polygons() reads the polygons' IDs from.
+.sbc_id_candidates <- function(id_col)
+  unique(c(id_col, "poly_id", "polygon_id", "cell_id"))
+.cells_id_candidates <- function(id_col)
+  unique(c(id_col, "poly_id", "polygon_id", "id", "cell_id", "grid_id"))
+
+#' Refuse projected cells GEOS calls invalid, before a density is taken
+#'
+#' \code{summarize_by_cell(area = TRUE)} divides by each cell's planar area,
+#' which GEOS takes on the cell's rings as they are: a ring whose edges cross
+#' gets the signed sum of its lobes, and parts that overlap are counted
+#' twice.  Every non-empty cell is checked with \code{sf::st_is_valid()} in
+#' its CRS (\code{NA} counts as invalid), and the request is refused when
+#' one is invalid, naming the first six such cells by the ID column the
+#' summaries are joined on (by row when there is none), GEOS's reason for
+#' the first, and the remedy, \code{sf::st_make_valid()}.
+#'
+#' @param cells The cells as they are measured (in XY when they mix
+#'   dimensions or carry M), row for row with \code{cells_sf}.
+#' @param cells_sf The cells as passed, for their ID column.
+#' @param id_col,assigned_points_sf As passed to \code{summarize_by_cell()}:
+#'   the ID column is found as the join finds it.
+#' @return \code{NULL}, invisibly, when every non-empty cell is valid;
+#'   otherwise it stops.
+#' @keywords internal
+#' @noRd
+.stop_cells_invalid <- function(cells, cells_sf, id_col, assigned_points_sf) {
+  g    <- sf::st_geometry(cells)
+  keep <- which(!sf::st_is_empty(g))
+  if (!length(keep)) return(invisible(NULL))
+  bad <- keep[!(suppressWarnings(sf::st_is_valid(g[keep])) %in% TRUE)]
+  if (!length(bad)) return(invisible(NULL))
+  why <- tryCatch(suppressWarnings(sf::st_is_valid(g[bad[1L]], reason = TRUE)),
+                  error = function(e) NA_character_)
+  # The ID column of the join, found as the join finds it; by row when the
+  # cells have none (the join then refuses the request with its own text).
+  idc <- tryCatch({
+    pid <- .sbc_id_candidates(id_col)
+    pid <- pid[pid %in% names(assigned_points_sf)]
+    cid <- .cells_id_candidates(if (length(pid)) pid[[1L]] else id_col)
+    cid <- cid[cid %in% names(cells_sf)]
+    if (length(cid)) cid[[1L]] else NULL
+  }, error = function(e) NULL)
+  label <- if (is.null(idc)) as.character(bad)
+           else as.character(sf::st_drop_geometry(cells_sf)[[idc]][bad])
+  k     <- length(bad)
+  what  <- if (is.null(idc)) "row" else idc
+  whats <- if (is.null(idc) && k > 1L) "rows" else what
+  named <- if (k == 1L) sprintf("%s %s", whats, label)
+           else if (k <= 6L) sprintf("%s %s and %s", whats,
+                                     paste(label[-k], collapse = ", "), label[k])
+           else sprintf("%s %s and %d more", whats, paste(label[1:6], collapse = ", "), k - 6L)
+  on   <- if (k == 1L) "" else sprintf(" for %s %s", what, label[1L])
+  geos <- if (length(why) == 1L && !is.na(why) && nzchar(why))
+    sprintf("GEOS's reason%s: \"%s\"", on, why)
+  else sprintf("GEOS gives no reason%s", on)
+  of <- if (length(g) == 1L) "the one cell of `cells_sf`"
+        else sprintf("%d of the %d cells of `cells_sf`", k, length(g))
+  stop(sprintf(paste0(
+    "summarize_by_cell(): `area = TRUE` refused: %s %s in its CRS (%s; %s), so %s ",
+    "planar area, and a density over it, cannot be vouched for. Repair the cells ",
+    "with sf::st_make_valid() and pass them again."),
+    of, if (k == 1L) "is not a valid polygon" else "are not valid polygons",
+    named, geos, if (k == 1L) "its" else "each one's"), call. = FALSE)
+}
+
+# s2's refusals of a polygon all name a ring ("Loop N ...", "... crosses
+# loop N ...", "Inconsistent loop orientations detected").
+.is_s2_ring_error <- function(e)
+  grepl("[Ll]oop [0-9]+|loop orientations", conditionMessage(e))
+
+# The rows of `x` (sf or sfc) that sf's validity check refuses, with its
+# reason for each, as a list of `rows` and `reasons`; NULL when the check
+# cannot say.  With `polygonal`, only polygons count: a ring error is not a
+# point's or a line's.  Run it under the engine whose refusal is asked about.
+.s2_refused_rows <- function(x, polygonal = FALSE) {
+  g <- sf::st_geometry(x)
+  check <- function(...) tryCatch(suppressWarnings(sf::st_is_valid(g, ...)),
+                                  error = function(err) NULL)
+  ok  <- check()
+  why <- check(reason = TRUE)
+  if (length(ok) != length(g) || length(why) != length(g)) return(NULL)
+  bad <- ok %in% FALSE
+  if (polygonal) bad <- bad & (sf::st_dimension(g) %in% 2L)
+  list(rows = which(bad), reasons = unname(why[bad]))
+}
+
+#' Stop with the cause when s2 refuses a polygon of either layer of the join
+#'
+#' The handler of both joins of \code{assign_features_to_polygons()}.  s2
+#' can refuse a polygon of \code{polygons_sf} or of \code{features_sf}, and
+#' on the largest-overlap join, which repairs the polygons it refuses first,
+#' a piece of an overlap of two polygons it accepts: a figure eight, one
+#' vertex listed twice, is repaired into two parts that touch at a point, and
+#' a piece of its overlap with the other layer can hold that point twice.
+#' The layers the join used are examined first, the polygons before the
+#' features, then the layers as they arrived, in the same order; the first
+#' layer s2 refuses a polygon of is named.  So a polygon s2 refuses even
+#' repaired is named before one the repair made s2 accept.  When s2 refuses
+#' no polygon of either layer as it arrived, the join by \code{predicate}
+#' runs, and the caller's message, which advises it, stands.
+#'
+#' @param e The error caught.
+#' @param f_in,p_in The features and polygons as they arrived at the join.
+#' @param f_used,p_used The features and polygons the join used (repaired on
+#'   the largest-overlap join; the same as \code{f_in} and \code{p_in} on the
+#'   join by \code{predicate}).
+#' @param no_crs_f,no_crs_p Whether the features or the polygons came without
+#'   a CRS and were read as longitude and latitude.
+#' @param predicate_on_s2 Whether the join by \code{predicate} runs on s2:
+#'   the session's \code{sf::sf_use_s2()}, read before the largest-overlap
+#'   join was put on s2.  When it is \code{FALSE}, that join runs with GEOS,
+#'   so the error names the largest-overlap join and offers
+#'   \code{largest = FALSE}.
+#' @return \code{NULL}, invisibly, when \code{e} is not s2's refusal of a
+#'   ring or s2 refuses no polygon of either layer; otherwise it stops with
+#'   the error \code{.raise_cells_degenerate()} builds, of class
+#'   \code{"spatialkit_cells_degenerate"} for the polygons and
+#'   \code{"spatialkit_features_degenerate"} for the features.
+#' @keywords internal
+#' @noRd
+.stop_join_degenerate <- function(e, f_in, p_in, f_used, p_used, no_crs_f = FALSE,
+                                  no_crs_p = FALSE, predicate_on_s2 = TRUE) {
+  if (!.is_s2_ring_error(e)) return(invisible(NULL))
+  if (!isTRUE(sf::st_is_longlat(sf::st_geometry(p_used))) || !isTRUE(sf::sf_use_s2()))
+    return(invisible(NULL))
+  same <- identical(f_in, f_used) && identical(p_in, p_used)
+  pa <- .s2_refused_rows(p_used)
+  pb <- if (same) pa else .s2_refused_rows(p_in)
+  fa <- .s2_refused_rows(f_used, polygonal = TRUE)
+  fb <- if (same) fa else .s2_refused_rows(f_in, polygonal = TRUE)
+  if (is.null(pa) || is.null(pb) || is.null(fa) || is.null(fb)) return(invisible(NULL))
+  n_p <- nrow(p_used); n_f <- nrow(f_used)
+  task <- if (predicate_on_s2) "the join" else "the largest-overlap join"
+  forced <- !isTRUE(predicate_on_s2)
+  cells <- function(bad, repaired)
+    .raise_cells_degenerate(e, bad$rows, bad$reasons, n_p, "assign_features_to_polygons",
+                            "`polygons_sf`", task, .JOIN_AGAIN, no_crs_p,
+                            repaired = repaired,
+                            also = list(rows = fb$rows, reasons = fb$reasons, n = n_f),
+                            s2_forced = forced, advise_predicate = forced)
+  features <- function(bad, repaired) {
+    # The join by `predicate` repairs nothing: the caller's repair helps
+    # where it makes s2 accept every row named, which depends on the ring
+    # (s2 accepts a repeated vertex and a figure eight repaired, not a
+    # bowtie or a hole that crosses its outer ring).
+    fixable <- !repaired && same && isTRUE(tryCatch(
+      all(sf::st_is_valid(.safe_make_valid(sf::st_geometry(f_in)[bad$rows])) %in% TRUE),
+      error = function(err) FALSE))
+    .raise_cells_degenerate(e, bad$rows, bad$reasons, n_f, "assign_features_to_polygons",
+                            "`features_sf`", task, .JOIN_AGAIN, no_crs_f,
+                            of = sprintf("the %d features of `features_sf`", n_f),
+                            kind = "features", repaired = repaired, fixable = fixable,
+                            s2_forced = forced, advise_predicate = forced)
+  }
+  # A polygon s2 refuses as the join had it is what the join failed on; the
+  # layers as they arrived are asked about only when s2 accepts both
+  # repaired.  Asked the other way round, a figure-eight cell beside a
+  # feature s2 refuses even repaired (a bowtie) was named as the cause, with
+  # the feature's reason quoted as that of a piece of an overlap.
+  if (length(pa$rows)) cells(pa, FALSE)
+  if (length(fa$rows)) features(fa, FALSE)
+  if (length(pb$rows)) cells(pb, TRUE)
+  if (length(fb$rows)) features(fb, TRUE)
+  invisible(NULL)
+}
+
+#' The errors of class "spatialkit_cells_degenerate" and
+#' "spatialkit_features_degenerate"
+#'
+#' Builds and raises the error \code{.stop_cells_degenerate()} or
+#' \code{.stop_join_degenerate()} found the cause of.  A function that hands
+#' its polygons to another that raised this error calls it again with the
+#' fields of that condition and its own words, so the message names the
+#' argument the caller passed.
+#'
+#' @param parent s2's error, quoted in the message.
+#' @param rows The rows of \code{layer} s2 refuses.
+#' @param reasons s2's reason for each of \code{rows}
+#'   (\code{sf::st_is_valid(reason = TRUE)}).
+#' @param n The number of polygons s2 was handed.
+#' @param caller,layer,task,again,no_crs As for \code{.stop_cells_degenerate()}.
+#' @param of The polygons counted, as in "refuses 2 of \code{of}"; \code{NULL}
+#'   for "the \code{n} polygons of \code{layer}".
+#' @param kind \code{"cells"} for the polygons a call places or measures
+#'   things in (the cells' class, with the sentence on corners that differ by
+#'   rounding where s2 reads two corners as one point), or \code{"features"}
+#'   for the features a join places (the features' class, without it).
+#' @param repaired Whether the largest-overlap join repaired these rows into
+#'   polygons s2 accepts, and s2 then refused a piece of an overlap.
+#' @param also The rows of \code{features_sf} s2 refuses too, as a list of
+#'   \code{rows}, \code{reasons} and \code{n}, or \code{NULL}.
+#' @param fixable Whether \code{sf::st_make_valid()} makes s2 accept every
+#'   row named (features only), so the message offers it.
+#' @param s2_forced Whether the call ran on s2 although the session has
+#'   \code{sf::sf_use_s2(FALSE)}: the message then does not call s2 the
+#'   engine sf uses in degrees.
+#' @param advise_predicate Whether the join by \code{predicate} runs on these
+#'   layers (with GEOS, s2 off): the message then offers
+#'   \code{largest = FALSE} and does not say that join meets the refusal.
+#' @param more A sentence added after the remedy, or \code{NULL}: another way
+#'   on that the caller offers.
+#' @param pick As for \code{.stop_cells_degenerate()}; read for the cells of a
+#'   layer with a CRS.
+#' @param source Where the cells' corners that s2 reads as one point come
+#'   from, the sentence after the one that names them; \code{NULL} for cells
+#'   built in a projected CRS and returned in degrees.  \code{""} leaves out
+#'   both sentences, for polygons that are not cells (a boundary).
+#' @param remedy The remedy sentence, in place of the one built from
+#'   \code{layer}, \code{again} and \code{pick}; \code{NULL} for that one.
+#'   \code{more} is still added after it.
+#' @param site A word stored on the condition as \code{site}, which tells a
+#'   caller that raises it again in its own words which polygons were
+#'   refused; \code{NULL} for none.
+#' @param auto_helps Whether every row refused is a POLYGON or MULTIPOLYGON,
+#'   which mode \code{"auto"} of \code{coerce_to_points()} reduces with a
+#'   point on the surface, so a caller that raises the error again offers
+#'   \code{"auto"}; \code{FALSE} when a row is another type (a collection),
+#'   which \code{"auto"} takes the centroid of and refuses again.  Stored on
+#'   the condition as \code{auto_helps}; \code{NULL} stores nothing.
+#' @return Does not return.  The condition carries \code{rows}, \code{n},
+#'   \code{reasons}, \code{parent}, \code{repaired} and \code{s2_forced},
+#'   \code{features_rows} when \code{also} is given, \code{site} when
+#'   \code{site} is given, and \code{auto_helps} when \code{auto_helps} is
+#'   given.
+#' @keywords internal
+#' @noRd
+.raise_cells_degenerate <- function(parent, rows, reasons, n, caller, layer, task, again,
+                                    no_crs = FALSE, of = NULL,
+                                    kind = c("cells", "features"), repaired = FALSE,
+                                    also = NULL, fixable = FALSE, s2_forced = FALSE,
+                                    advise_predicate = FALSE, more = NULL,
+                                    pick = "the one ensure_projected() picks for it",
+                                    source = NULL, remedy = NULL, site = NULL,
+                                    auto_helps = NULL) {
+  kind <- match.arg(kind)
+  said <- trimws(strsplit(conditionMessage(parent), "\n", fixed = TRUE)[[1L]][1L])
+  rows_text <- function(r) {
+    k <- length(r)
+    if (k == 1L) sprintf("row %d", r)
+    else if (k <= 6L) sprintf("rows %s and %d", paste(r[-k], collapse = ", "), r[k])
+    else sprintf("rows %s and %d more", paste(r[1:6], collapse = ", "), k - 6L)
+  }
+  # Each row with its own reason, for the rows rows_text() names.
+  rows_why <- function(r, why) {
+    k <- length(r); shown <- seq_len(min(k, 6L))
+    paste0(paste(sprintf("row %d: \"%s\"", r[shown], why[shown]), collapse = "; "),
+           if (k > 6L) sprintf("; and %d more", k - 6L) else "")
+  }
+  k <- length(rows)
+  # s2's message for the call is quoted as the rows' own when it is one of
+  # their reasons.  It can be another layer's (a feature s2 met first) or a
+  # piece of an overlap the call made; each row's own reason is quoted then.
+  own <- !isTRUE(repaired) && any(vapply(sub("^Loop [0-9]+: ", "", reasons), function(r)
+    nzchar(r) && grepl(r, said, fixed = TRUE), logical(1)))
+  named <- if (own) sprintf("%s; \"%s\"", rows_text(rows), said) else rows_why(rows, reasons)
+  them <- if (k == 1L) c("it", "it", "it") else c("them", "them", "they")
+  told <- if (isTRUE(repaired))
+    paste0(sprintf(paste0("The largest-overlap join repaired %s with sf::st_make_valid(), ",
+                          "which s2 accepts, and s2 then refused a piece of an overlap of the ",
+                          "two layers (\"%s\")"), them[1L], said),
+           if (isTRUE(advise_predicate)) ". "
+           else sprintf("; the join by `predicate`, which repairs nothing, meets %s as %s arrived. ",
+                        them[2L], them[3L]))
+  else ""
+  other_said <- if (!isTRUE(repaired) && !own) sprintf("s2's error reads \"%s\". ", said)
+                else ""
+  # s2 gives "duplicate vertex" for two corners it reads as one point; the
+  # cause and its usual source are named for those polygons only.
+  dup <- kind == "cells" & !identical(source, "") &
+    grepl("duplicate vertex", reasons, fixed = TRUE)
+  other <- which(!dup)
+  cause <- if (!any(dup)) "" else paste0(
+    if (!length(other)) {
+      if (k == 1L) "It has two corners that s2 reads as one point. "
+      else "Each has two corners that s2 reads as one point. "
+    } else sprintf(paste0("%d of them %s two corners that s2 reads as one point, and ",
+                          "s2 refuses the other %d for another reason (%s: \"%s\"). "),
+                   sum(dup), if (sum(dup) == 1L) "has" else "have", length(other),
+                   rows_text(rows[other[1L]]), reasons[other[1L]]),
+    if (!is.null(source)) source else paste0(
+    "Cells built in a projected CRS and returned in longitude and latitude (by ",
+    "build_tessellation() or create_voronoi_polygons() with a geographic `crs`) can ",
+    "hold such corners: where four seeds stand the same distance from one point, two ",
+    "cells meet there at two corners that differ only by rounding, which the ",
+    "transform to degrees puts at one point. "))
+  also_text <- if (length(also$rows))
+    sprintf("s2 also refuses %d of the %d features of `features_sf` (%s). ",
+            length(also$rows), also$n, rows_why(also$rows, also$reasons))
+  else ""
+  fix <- if (!is.null(remedy)) remedy
+  else if (kind == "features") paste0(
+    if (isTRUE(no_crs))
+      sprintf(paste0("%s has no CRS and was read as longitude and latitude: give it its ",
+                     "CRS with sf::st_set_crs(), transform it to a projected CRS with ",
+                     "sf::st_transform(), and %s."), layer, again)
+    else
+      sprintf(paste0("Transform %s to a projected CRS, such as the one ensure_projected() ",
+                     "picks for it (sf::st_transform()), and %s."), layer, again),
+    if (isTRUE(fixable) && !isTRUE(no_crs))
+      sprintf(" Or repair %s with sf::st_make_valid(), which s2 accepts, and assign again.",
+              them[1L]))
+  else if (isTRUE(no_crs))
+    sprintf(paste0("%s has no CRS and was read as longitude and latitude: give it its ",
+                   "CRS with sf::st_set_crs(), transform it to a projected CRS, such as ",
+                   "the one its cells were built in, with sf::st_transform(), and %s."),
+            layer, again)
+  else
+    sprintf(paste0("Transform %s to a projected CRS, such as the one its cells were ",
+                   "built in (sf::st_transform()) or %s, and %s."), layer, pick, again)
+  # With s2 off the join by `predicate` runs with GEOS, which reads these
+  # polygons in degrees.
+  if (isTRUE(advise_predicate))
+    fix <- paste0(fix, " Or pass largest = FALSE to assign every feature by ",
+                  "`predicate` and `tie_break` instead; with sf::sf_use_s2(FALSE), as in ",
+                  "this session, that join runs with GEOS.")
+  if (length(more)) fix <- paste(fix, more)
+  engine <- if (isTRUE(s2_forced))
+    "s2, which the package uses here in longitude and latitude whatever sf::sf_use_s2() says,"
+  else "s2, the engine sf uses for geometry in longitude and latitude,"
+  if (is.null(of)) of <- sprintf("the %d polygons of %s", n, layer)
+  msg <- sprintf(paste0(
+    "%s(): %s refuses %d ",
+    "of %s (%s), so %s cannot run in degrees. %s%s%s%s%s"),
+    caller, engine, k, of, named, task, told, cause, other_said, also_text, fix)
+  fields <- list(rows = rows, n = n, reasons = reasons, parent = parent,
+                 repaired = isTRUE(repaired), s2_forced = isTRUE(s2_forced))
+  if (!is.null(also)) fields$features_rows <- also$rows
+  if (!is.null(site)) fields$site <- site
+  if (!is.null(auto_helps)) fields$auto_helps <- isTRUE(auto_helps)
+  stop(do.call(errorCondition, c(list(msg, class = paste0("spatialkit_", kind, "_degenerate"),
+                                      call = NULL), fields)))
+}
+
+
+# The areas the smallest-area tie-break compares: `g`, the polygons the tied
+# features fall in, rows `rows` of the `n` polygons of `polygons_sf`.  GEOS
+# gives a ring whose edges cross the signed area of its lobes, which cancel
+# (a bowtie of two 90,000 m^2 lobes measured 0 m^2), so a point in a valid
+# cell and in a bowtie went to the bowtie as the smaller, without a word.
+# Polygons the validity check refuses are measured on repaired copies, with
+# the largest-overlap join's warning, and returned as they arrived.  Called
+# under the engine of the join (s2 in degrees); a polygon s2 refuses even
+# repaired (a bowtie in degrees) has no area there, and stops the call with
+# the error that names it and the transform.  `s2_session` is the session's
+# sf::sf_use_s2(), which the error reads to name the engine.
+.tie_break_areas <- function(g, rows, n, no_crs = FALSE, s2_session = TRUE) {
+  if (!length(g)) return(numeric(0))
+  ok  <- tryCatch(suppressWarnings(sf::st_is_valid(g)), error = function(e) NULL)
+  bad <- if (length(ok) == length(g)) which(!(ok %in% TRUE)) else seq_along(g)
+  if (length(bad)) {
+    .warn_and_log(paste0(
+      "assign_features_to_polygons(): %d of the %d polygon(s) whose areas the ",
+      "smallest-area tie-break compares have invalid geometry (usually a ",
+      "self-intersecting ring), so their areas are undefined; they were repaired ",
+      "with sf::st_make_valid() to measure them for the tie-break. The polygons are ",
+      "not changed and the features are returned with the geometry they arrived ",
+      "with; repair them yourself to silence this."),
+      length(bad), length(g))
+    g[bad] <- .safe_make_valid(g[bad])
+  }
+  withCallingHandlers(
+    suppressWarnings(as.numeric(sf::st_area(g))),
+    error = function(e) {
+      if (!.is_s2_ring_error(e) || !isTRUE(sf::st_is_longlat(g)) ||
+          !isTRUE(sf::sf_use_s2())) return()
+      still <- .s2_refused_rows(g)
+      if (is.null(still) || !length(still$rows)) return()
+      .raise_cells_degenerate(e, rows[still$rows], still$reasons, n,
+                              "assign_features_to_polygons", "`polygons_sf`",
+                              "the smallest-area tie-break", .JOIN_AGAIN, no_crs,
+                              s2_forced = !isTRUE(s2_session))
+    })
+}
+
+
 # Exact ties in a largest-overlap join.  `joined` is st_join(largest = TRUE)
 # of `f` onto `p_sel`, the polygons' ID in column `join_id`.  The features
 # assigned there that overlap two or more polygons are intersected with them
 # again; where the largest overlap is shared (areas equal to 9 significant
 # digits) the polygon is picked among the equally largest by `tie_break`:
 # "smallest_area" takes the smallest polygon, then the one whose bounding-box
-# centre is lowest, then leftmost, as for the predicate join; "first" takes
-# the first by polygon row.  Returns the rows of `joined` that had a tie and
-# the ID each gets.
-.largest_overlap_ties <- function(f, p_sel, joined, join_id, tie_break) {
+# centre is lowest, then leftmost, then the one whose vertices' mean is
+# lowest, then leftmost, centres and means within `tol` equal, as for the
+# predicate join (.tie_rule_rows()), and gives NA where polygons equal on
+# every key are left; "first" takes the first by polygon row.  Returns the
+# rows of `joined` that had a tie and the ID each gets (NA for none).
+.largest_overlap_ties <- function(f, p_sel, joined, join_id, tie_break, tol = 0) {
   none <- list(rows = integer(0), ids = NULL)
   rows <- which(!is.na(joined[[join_id]]))
   if (!length(rows)) return(none)
@@ -602,7 +1447,10 @@ assign_features_to_polygons <- function(
         bb <- sf::st_bbox(g)
         c((bb[["xmin"]] + bb[["xmax"]]) / 2, (bb[["ymin"]] + bb[["ymax"]]) / 2)
       }, numeric(2))
-      tied[order(ga, ctr[2, ], ctr[1, ])[1L]]
+      vm <- .vertex_means(gp[tied])
+      won <- tied[.tie_rule_rows(cbind(ga, ctr[2, ], ctr[1, ], vm[, 2L], vm[, 1L]),
+                                 rep(1L, length(tied)), tol)]
+      if (length(won) == 1L) won else NA_integer_
     }
     out_rows <- c(out_rows, rows[multi[idx[s[1L], 1L]]])
     out_ids  <- c(out_ids, p_sel[[join_id]][pick])
@@ -611,19 +1459,103 @@ assign_features_to_polygons <- function(
 }
 
 
+#' The candidates the smallest-area rule keeps
+#'
+#' Each feature's candidates are a group of rows of \code{key}: the area of
+#' the polygon (rounded to 9 significant digits by the caller), the
+#' bounding-box centre's y and x, and the mean of the vertices' y and x
+#' (\code{.vertex_means()}).  The candidates of least area are kept; then,
+#' key by key, those within \code{tol} of the least among them.  A key that
+#' is not finite counts as \code{Inf}.  A group left with more than one row
+#' holds polygons the rule cannot tell apart: copies of one polygon, or
+#' polygons that share an area, a bounding-box centre and a vertex mean (a
+#' square and a rhombus about its centre).
+#'
+#' @param key Numeric matrix, one row per candidate, the five keys in order.
+#' @param grp The feature of each row.
+#' @param tol The margin for the centres and the means (\code{.edge_tol()}).
+#' @return Logical vector, one per row: whether the rule keeps it.
+#' @keywords internal
+#' @noRd
+.tie_rule_rows <- function(key, grp, tol = 0) {
+  keep <- rep(TRUE, nrow(key))
+  for (j in seq_len(ncol(key))) {
+    k <- key[, j]
+    k[!is.finite(k)] <- Inf
+    lo <- stats::ave(ifelse(keep, k, Inf), grp, FUN = min)
+    keep <- keep & if (j == 1L) k == lo else k <= lo + tol
+  }
+  keep
+}
+
+
+#' The mean of the vertices of polygons, as \code{.polygon_sort_keys()} takes it
+#'
+#' @param g An sfc.
+#' @return A matrix, one row per geometry: the mean x and the mean y of its
+#'   vertices, each ring's closing vertex left out; \code{Inf} for a
+#'   geometry that is empty or not a POLYGON or MULTIPOLYGON.
+#' @keywords internal
+#' @noRd
+.vertex_means <- function(g) {
+  out <- matrix(Inf, length(g), 2L)
+  ok  <- as.character(sf::st_geometry_type(g, by_geometry = TRUE)) %in%
+    c("POLYGON", "MULTIPOLYGON") & !sf::st_is_empty(g)
+  if (any(ok)) out[ok, ] <- .polygon_sort_keys(g[ok])[, c("mx", "my"), drop = FALSE]
+  out
+}
+
+
+#' The default predicate of the join, with a point on an edge in both polygons
+#'
+#' \code{sf::st_intersects()}, and for each point feature (POINT or
+#' MULTIPOINT) also the polygons it lies within \code{.edge_tol(bb)} of
+#' (\code{.edge_join()}; a MULTIPOINT is within the margin of a polygon when
+#' one of its points is), so a point on the edge two polygons share is in
+#' both whichever side of it rounding puts the point.  Other geometries are
+#' joined by \code{sf::st_intersects()} alone.
+#'
+#' @param x The features (sf).
+#' @param y The polygons (sf), in the CRS of \code{x}.
+#' @param bb The bounding box the margin is taken from: the polygons'.
+#' @return A list, one integer vector of polygon rows per feature, as
+#'   \code{sf::st_join()} takes from its \code{join}.
+#' @keywords internal
+#' @noRd
+.intersects_margin <- function(x, y, bb) {
+  hits <- unclass(sf::st_intersects(x, y))
+  gx   <- sf::st_geometry(x)
+  pt   <- which(as.character(sf::st_geometry_type(gx, by_geometry = TRUE)) %in%
+                  c("POINT", "MULTIPOINT") & !sf::st_is_empty(gx))
+  if (length(pt)) {
+    near <- attr(.edge_join(gx[pt], y, bb), "hits")
+    hits[pt] <- lapply(seq_along(pt), function(k)
+      sort(unique(c(hits[[pt[k]]], as.integer(near[[k]])))))
+  }
+  lapply(hits, as.integer)
+}
+
+
 #' Points on the edge between cells a profile scored, placed as it placed them
 #'
 #' On cells whose record of their count sits beside the centres the profile
 #' scored (\code{.scored_centres()}), \code{resolution_profile()} gave each
-#' row to its nearest centre in the record's CRS, a tie to the lower-numbered
+#' row to its nearest centre in the record's CRS, squared distances within
+#' \code{.TIE_TOL} of the least, plus the margin \code{.centres_tol()} on
+#' the distance (\code{.tie_bound()}), a tie and a tie to the lower-numbered
 #' centre (\code{.nearest_centre()}), and the polygons hold a row that is the
 #' same distance from two centres in either cell, or in both.  A point the
-#' join placed in a cell, that lies within \code{.edge_tol()} of the edge of
-#' that cell and of the cell of the centre the profile's rule gives it, is
-#' given that cell.  A point farther from that cell than the margin keeps
-#' the cell it has: it is not on their shared edge, so the cells are not the
-#' ones scored there (built in another CRS, say), and the summary's check
-#' says so.
+#' join placed in a cell, that lies within the margin of the edge of that
+#' cell and of the cell of the centre the profile's rule gives it, is given
+#' that cell.  The margin is \code{.edge_tol()}, plus, for a point the rule
+#' gives to another centre than that of the cell it is in, the point's
+#' distance from the bisector of the two centres in the join's CRS: a point
+#' whose squared distances to two centres tie by that rule can lie
+#' farther from their shared edge than \code{.edge_tol()} when the centres
+#' are far apart (by about \code{1.25e-8} of their distance midway between
+#' them).  A point farther from that cell than the margin keeps the cell it
+#' has: it is not on their shared edge, so the cells are not the ones scored
+#' there (built in another CRS, say), and the summary's check says so.
 #'
 #' The cell of a centre is the one cell that holds it, when it holds no
 #' other centre: a Voronoi cell holds its own centre and no other, so cells
@@ -634,9 +1566,11 @@ assign_features_to_polygons <- function(
 #' surface has it as its nearest centre, when no other such cell has.
 #'
 #' Edges are measured in the CRS of the join: a projected one, or none on
-#' either side when the record names none.  Polygons in longitude and
-#' latitude, features without a CRS beside a record with one, or the
-#' reverse, are left as the join placed them.
+#' either side when the record names none.  Cells in longitude and latitude
+#' beside a record in a projected CRS arrive here in that CRS, where
+#' \code{assign_features_to_polygons()} joins them.  Polygons in longitude
+#' and latitude (beside a record in degrees), features without a CRS beside
+#' a record with one, or the reverse, are left as the join placed them.
 #'
 #' @param f The join's copy of the features, in the join's CRS, one row per
 #'   row of \code{features}.
@@ -671,22 +1605,20 @@ assign_features_to_polygons <- function(
   rows  <- which(!is.na(at) & point[src])
   if (!length(rows)) return(none)
 
-  # Those within the margin of their own cell's edge.  The others lie inside
-  # it, away from every other cell.
+  # Their distance from their own cell's edge.
   gp  <- sf::st_geometry(p)
   tol <- .edge_tol(sf::st_bbox(gp))
   edge <- suppressWarnings(sf::st_boundary(gp))
   d    <- as.numeric(sf::st_distance(gf[src[rows]], edge[at[rows]], by_element = TRUE))
-  rows <- rows[which(d <= tol)]
-  if (!length(rows)) return(none)
 
   # Their nearest centre, from their coordinates in the record's CRS, as the
-  # profile measured them.
+  # profile measured them.  Every point is searched: one inside the band
+  # where two centres tie can lie farther from the edge than `tol`.
   pts <- features[src[rows], , drop = FALSE]
   if (!is.na(crs_r) && !isTRUE(crs_f == crs_r)) pts <- sf::st_transform(pts, crs_r)
   xy <- unname(sf::st_coordinates(pts)[, 1:2, drop = FALSE])
-  ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L])
-  rows <- rows[ok]
+  ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L]) & is.finite(d)
+  rows <- rows[ok]; d <- d[ok]
   if (!length(rows)) return(none)
   g <- .nearest_centre(xy[ok, 1L], xy[ok, 2L], cen[, 1L], cen[, 2L],
                        use_fnn = .has_backend("FNN"))
@@ -720,12 +1652,34 @@ assign_features_to_polygons <- function(
     }
   }
 
-  # A point goes to its centre's cell when it lies on that cell's edge too.
+  # A point goes to its centre's cell when it lies on the edge of both
+  # cells.  The margin is `tol`, and for a point the rule gives to a centre
+  # that ties with a strictly nearer one, the centre of the cell it is in,
+  # also the point's distance from the bisector of the two: how far inside
+  # that cell the tie reaches.  It is measured in the record's CRS, where
+  # the two tie, and put in the units of the join's CRS by the ratio of the
+  # centres' distance apart in the two.  For any other point it is `tol`
+  # alone, so a point placed in another cell by cells drawn in another CRS
+  # is not moved.
   to   <- cell[g]
   move <- which(!is.na(to) & to != at[rows])
   if (!length(move)) return(none)
+  h    <- match(at[rows[move]], cell)
+  gm   <- g[move]
+  pxy  <- xy[ok, , drop = FALSE][move, , drop = FALSE]
+  d2g  <- (pxy[, 1L] - cen[gm, 1L])^2 + (pxy[, 2L] - cen[gm, 2L])^2
+  d2h  <- (pxy[, 1L] - cen[h, 1L])^2 + (pxy[, 2L] - cen[h, 2L])^2
+  c_r  <- sqrt((cen[gm, 1L] - cen[h, 1L])^2 + (cen[gm, 2L] - cen[h, 2L])^2)
+  wxy  <- unname(sf::st_coordinates(where)[, 1:2, drop = FALSE])
+  c_j  <- sqrt((wxy[gm, 1L] - wxy[h, 1L])^2 + (wxy[gm, 2L] - wxy[h, 2L])^2)
+  band <- (d2g - d2h) / (2 * c_r) * (c_j / c_r)
+  band[!(!is.na(h) & is.finite(band) & d2h < d2g)] <- 0
+  margin <- tol + band
+  keep <- which(d[move] <= margin)
+  move <- move[keep]; margin <- margin[keep]
+  if (!length(move)) return(none)
   d_to <- as.numeric(sf::st_distance(gf[src[rows[move]]], gp[to[move]], by_element = TRUE))
-  move <- move[which(d_to <= tol)]
+  move <- move[which(d_to <= margin)]
   list(rows = rows[move], ids = ids_p[to[move]])
 }
 
@@ -879,13 +1833,18 @@ assign_features_to_polygons <- function(
 #'
 #' @param s Within-cell standard deviation.
 #' @param n Number of non-missing observations in the cell.
-#' @param deff Design effect for that cell, \eqn{\geq 1}.
+#' @param deff Design effect for that cell, \eqn{\geq 1}, or \code{NA} when
+#'   it is unknown (a Kish ICC that cannot be estimated).
 #' @return The standard error, or \code{NA_real_} when the cell carries no
-#'   information about \eqn{\sigma} (\code{deff >= n}: complete redundancy).
+#'   information about \eqn{\sigma} (\code{deff >= n}: complete redundancy)
+#'   or the design effect is unknown.
 #' @keywords internal
 #' @noRd
 .se_with_deff <- function(s, n, deff, correct_s2 = TRUE) {
   if (!is.finite(s) || !is.finite(n) || n <= 1L) return(NA_real_)
+  # An unknown design effect is not a design effect of 1: the uncorrected SE
+  # returned here would read as an estimate the data do not support.
+  if (is.na(deff)) return(NA_real_)
   if (!is.finite(deff) || deff <= 1) return(s / sqrt(n))
   # correct_s2 = FALSE for a design effect the CALLER supplied as a constant.
   # The E[s^2] = sigma^2 (n - deff)/(n - 1) correction below is derived from a
@@ -900,6 +1859,33 @@ assign_features_to_polygons <- function(
   # carries none about sigma, so there is no standard error to report.
   if (deff >= n) return(NA_real_)
   s * sqrt(deff / n) * sqrt((n - 1) / (n - deff))
+}
+
+
+#' Standard deviation of a cell's values, in any unit
+#'
+#' \code{sd()} squares the deviations from the mean.  The squares overflow
+#' for values above about 1e154, where \code{sd()} is \code{Inf} (or
+#' \code{NaN} where the mean overflows too), and fall below the smallest
+#' normal double for a spread below about 1e-154, where they lose their bits
+#' and \code{sd()} is 0 or off.  Where the raw standard deviation is not
+#' finite or is below \code{.POOL_Y_MIN}, it is taken on
+#' \code{.spread_scaled()} of the values and multiplied by its scale, a
+#' power of two; elsewhere it is \code{sd()} of the values as they stand.
+#' It is \code{Inf} only where the standard deviation is beyond the largest
+#' double.  The raw reading is \code{sd(x, na.rm = TRUE)} even where
+#' \code{x} has no \code{NA}: \code{sd(x)} takes another path through
+#' \code{cov()} and can differ from it in the last bit.
+#'
+#' @param x Finite values or \code{NA}, at least two that are not \code{NA}.
+#' @return The standard deviation of the values that are not \code{NA}.
+#' @keywords internal
+#' @noRd
+.cell_sd <- function(x) {
+  s <- sd(x, na.rm = TRUE)
+  if (is.finite(s) && s >= .POOL_Y_MIN) return(s)
+  sc <- .spread_scaled(x[!is.na(x)])
+  sd(sc$y) * sc$scale
 }
 
 
@@ -1051,7 +2037,8 @@ assign_features_to_polygons <- function(
 #' pairwise-distance distribution is the cell's, so the ratio transfers where
 #' the raw df would not.
 #'
-#' Rows with a non-finite coordinate (an empty point) have no location to
+#' Rows with a coordinate that is not finite or lies beyond
+#' \code{.POOL_XY_MAX} (an empty point among them) have no location to
 #' correlate, so they are left out: the statistics describe the located
 #' points.  An anisotropic model is evaluated through its \code{"cor_xy"}
 #' attribute (see \code{.vgm_correlation_fn()}).
@@ -1064,16 +2051,24 @@ assign_features_to_polygons <- function(
   # An empty point's NA coordinates put NA in R and stopped the df test
   # below with "missing value where TRUE/FALSE needed".
   if (!is.null(xy) && length(dim(xy)) == 2L && nrow(xy) > 0L) {
-    located <- is.finite(xy[, 1]) & is.finite(xy[, 2])
+    located <- is.finite(xy[, 1]) & is.finite(xy[, 2]) &
+      abs(xy[, 1]) <= .POOL_XY_MAX & abs(xy[, 2]) <= .POOL_XY_MAX
     if (!all(located)) xy <- xy[located, , drop = FALSE]
   }
   n_i <- nrow(xy)
   if (is.null(cor_fn) || is.null(n_i) || n_i <= 1L)
     return(c(rbar = 0, df_ratio = 1))
   if (n_i > max_n) {
+    # Drawn from the rows in coordinate order (.canonical_order()), so the
+    # subsample is the same for the cell's rows in any order.  Drawn from the
+    # rows as given, the same 1500-point cell got a standard error of 0.261
+    # with its rows as given and 0.255 with them reversed.  Rows at one
+    # location are interchangeable for the correlation, so the coordinates
+    # are the only keys.
+    ord <- .canonical_order(xy[, 1], xy[, 2], xy[, 1], xy[, 2])
     cleanup <- .with_seed(seed)
     on.exit(cleanup(), add = TRUE)
-    xy <- xy[sample.int(n_i, max_n), , drop = FALSE]
+    xy <- xy[ord[sample.int(n_i, max_n)], , drop = FALSE]
   }
   # Rebuild explicitly rather than relying on cor_fn() to preserve `dim`.
   # A correlation function written as, say, rep(1, length(h)) returns a bare
@@ -1101,7 +2096,7 @@ assign_features_to_polygons <- function(
 #' Warn that a requested design effect was not the one applied
 #'
 #' The classed warning for a design effect that fell back: to 1 for a refused
-#' number, and to \code{"kish"} (or, when its ICCs are 0, to nothing) for a
+#' number, and to \code{"kish"} (or, when no ICC is positive, to nothing) for a
 #' \code{"variogram"} request with no usable model.  The class is
 #' \code{"spatialkit_deff_fallback"} in both cases.
 #'
@@ -1110,6 +2105,12 @@ assign_features_to_polygons <- function(
 .warn_deff_fallback <- function(fmt, ..., data = list()) {
   .warn_classed("spatialkit_deff_fallback", fmt, ..., data = data)
 }
+
+
+# The reason .estimate_icc() gives for a column that does not vary.  Its ICC
+# is NA (the between and within variances are both 0), and its standard
+# errors are 0 whatever the correlation, so no number is withheld for it.
+.icc_reason_constant <- "the column does not vary"
 
 
 #' Summarize features by polygon/cell ID
@@ -1159,6 +2160,16 @@ assign_features_to_polygons <- function(
 #' therefore never sees an infinite value: `max` returns the largest finite
 #' value, and infinities cannot be counted through `agg_funs`.
 #'
+#' `..sd_*` is the standard deviation of the cell's values in the units of
+#' the column, at any size. Where the raw squares overflow or lose their bits
+#' (a standard deviation that is not finite or is below 1e-150), it is taken
+#' on the values centred on their median and divided by powers of two,
+#' which keeps their spread. A cell whose
+#' standard deviation is beyond the largest double (about 1.8e308) has
+#' `..sd_*` of `Inf` and standard errors and interval of `NA`, with a warning
+#' of class `"spatialkit_sd_overflow"` (the condition carries `columns` and
+#' `cells`, the number of such cells of each column).
+#'
 #' # Spatial autocorrelation and standard-error bias
 #'
 #' By default (`deff = 1`), the `..se_*` columns are computed as
@@ -1182,7 +2193,9 @@ assign_features_to_polygons <- function(
 #' is used for that column's SE adjustment, and each cell's effective sample
 #' size is reduced to `n_i / (1 + (n_i - 1) * rho)`. This is a first-order
 #' correction that does not require a full spatial covariance model but does
-#' require enough cells and observations for a stable ICC estimate.
+#' require enough cells and observations for a stable ICC estimate. A column
+#' whose ICC cannot be estimated at all gets `NA` standard errors (see
+#' `deff`).
 #'
 #' A design effect estimated from the data (`"kish"` or `"variogram"`) comes
 #' with a second, small-sample correction. The within-cell correlation that
@@ -1257,6 +2270,12 @@ assign_features_to_polygons <- function(
 #' because a variogram is a property of the field being modelled rather than of
 #' a variable type; a predictor whose spatial structure differs markedly from
 #' the response's will have its SE corrected by the response's correlation.
+#' When that variogram finds no spatial structure (the pure nugget
+#' [estimate_sac_range()] returns with that verdict), every column gets a
+#' design effect of 1, the predictors included, and a warning of class
+#' `"spatialkit_deff_no_structure"` names the predictor columns: the verdict
+#' is about the variable the variogram was fitted to, not about them.
+#' `deff = "kish"` gives each predictor its own ICC.
 #' The internally estimated variogram is fitted to the **response itself**,
 #' never to OLS residuals, whatever `predictor_vars` holds: the `..se_resp_*`
 #' columns estimate the grand mean of the response, so the correlation to
@@ -1388,14 +2407,34 @@ assign_features_to_polygons <- function(
 #' every own weight is 0 and each pooled value is its target; with two
 #' cells that is the other cell's mean, so the two values change places.
 #'
-#' A tie between two candidate neighbours goes to the centroid with the
-#' lower x, then the lower y, and the centroids are summed with the rows in
-#' coordinate order, so a cell's neighbours do not depend on the order of the
-#' rows. The values then agree to rounding: a cell's sums are taken in the
-#' order of its rows.
-#' The tie is between distances computed from the coordinates in the CRS the
-#' distances are measured in (see `estimate`), so on gridded locations the
-#' same layer in another CRS or unit can give a cell another neighbour.
+#' Two candidate neighbours are a tie when their squared distances differ by
+#' no more than one part in ten million. A tie goes to the centroid with the
+#' lower x, then the lower y, coordinates within that part of the distance
+#' counting as equal, and then to the cell whose ID sorts first. The
+#' centroids are summed with the rows in coordinate order, so a cell's
+#' neighbours do not depend on the order of the rows, and on gridded
+#' locations they do not depend on the unit or the origin of the coordinates
+#' either. The values agree to rounding under another order of the rows,
+#' since a cell's sums are taken in the order of its rows, and under another
+#' unit or origin where three to eight cells' centroids coincide, since the
+#' rounding then sets the order in which a cell's neighbours on that point
+#' are summed. A cell whose centroid shares its point with as many other
+#' cells as it has neighbours, or more, takes its neighbours from them, the
+#' first by ID, without a search. Centroids count as one point there when
+#' they are equal, or when they lie within a ten-millionth of the largest
+#' coordinate of one another, in x and in y. Where other centroids that close
+#' to them chain on further than that, the chain is taken again at half that
+#' reach, and so on, until its parts span no more than the reach they were
+#' taken at. So those cells keep their neighbours and their values in another
+#' unit, and with the origin moved by little against the coordinates. On such
+#' a point, cells whose centroids lie that close without coinciding take each
+#' other by ID as well, not by distance. The reach follows the largest
+#' coordinate, so with the origin moved far, to the corner of the data say,
+#' such centroids can lie beyond it, and their cells then take the nearest.
+#' Distances are measured in the CRS named under `estimate`, so the same
+#' layer in another projection can still give a cell other neighbours, and
+#' so can a lattice whose spacing is below about a ten-millionth of its
+#' coordinates.
 #'
 #' The figures on this page that describe pooled values and the two
 #' intervals come from one simulation, `dev/sim-pooled-values.R` in the
@@ -1554,22 +2593,30 @@ assign_features_to_polygons <- function(
 #'   `reason` is `"no coordinates"` (a layer without geometry),
 #'   `"no located value"` (no row with a value, a cell and a location),
 #'   `"no cell holds two values"` (the condition also carries `n` and
-#'   `cells` by column) or `"work limit"`. The last is the case of many
-#'   cells without the 'FNN' package: the neighbour search then compares
-#'   every pair of cells and is not made above
+#'   `cells` by column), `"values out of range"` (values so large, or so
+#'   close to their median, that the squares of many such values can
+#'   overflow or lose their precision; the message gives the bounds, and the
+#'   column rescaled by a power of ten is pooled) or `"work limit"`. The last
+#'   is the case of many cells without the 'FNN' package: the neighbour
+#'   search then compares every pair of cells and is not made above
 #'   `getOption("spatialkit.exact_pairs_max", 2e9)` pairs, which is about
 #'   44,700 cells (the condition also carries `work`, `limit`, and `cells`
 #'   by column). With 'FNN' there is no such limit, and the result is the
 #'   same.
 #' * `"spatialkit_pool_degenerate"`: the pooled values were computed and
 #'   carry no pooling. `reason` is `"one cell"` (the pooled value is the
-#'   plain mean; also `n` by column), `"no spread inside any cell"` (every
-#'   own weight is 1; also `constant` by column) or `"no signal between
+#'   plain mean; also `n` by column), `"no spread inside any cell"` (the
+#'   values do not vary inside any cell to their precision, so every own
+#'   weight is 1; also `constant` by column) or `"no signal between
 #'   cells"` (`tau2` is 0 and every own weight is 0; also `sigma2` by
 #'   column).
 #' * `"spatialkit_pool_few_cells"`: 2 to 9 cells, so each target is the mean
-#'   of all the other cells (`cells`, and `own_weight`, the smallest, by
-#'   column).
+#'   of all the other cells, and a cell whose own weight is below its share
+#'   of the column's rows gets a pooled value on the far side of the overall
+#'   mean from its plain mean (`cells`, and `own_weight`, the smallest, by
+#'   column). The text also names each column with two cells and `tau2` at
+#'   0, which has `cells` 2 and `own_weight` 0: each cell's pooled value is
+#'   then the other cell's mean, so the two values change places.
 #' * `"spatialkit_pool_few_df"`: `sigma2` rests on fewer than 30 values
 #'   beyond one per cell (`needed`, and `df`, `n` and `cells` by column).
 #' * `"spatialkit_no_structure"`: `structured` is `FALSE` (see "Pooled
@@ -1578,9 +2625,12 @@ assign_features_to_polygons <- function(
 #'   does not tell the cell means from one mean (also `criterion = "loo"`,
 #'   `estimate = "pooled"`, and by column `n`, the cells, `one_cell`, `loo`
 #'   and `structure_p`).
-#' * `"spatialkit_pool_rows_skipped"`: rows with a value and a cell have
-#'   empty or non-finite coordinates. They count in `n` and the plain
-#'   columns and take no part in the pooled ones (`n`, `cells`).
+#' * `"spatialkit_pool_rows_skipped"`: rows with a value and a cell have no
+#'   location: an empty point, a coordinate that is not finite or lies
+#'   beyond 1e150, as given or in the CRS the distances are measured in, or
+#'   in a geographic CRS a vertex at a latitude beyond 90 degrees.
+#'   They count in `n` and the plain columns and take no part in the pooled
+#'   ones (`n`, `cells`).
 #' * `"spatialkit_repeated_locations"`, with `obs_level`: rows with a value
 #'   share a location. A residual leaves one row out and keeps the others at
 #'   its location, so the interval then describes a further observation at a
@@ -1644,7 +2694,10 @@ assign_features_to_polygons <- function(
 #'       lets correlation decay with distance, which matters increasingly as
 #'       cells get larger and Kish's single-`rho` assumption degrades. Supply
 #'       the fit via `sac`, or it is estimated when `response_var` is given and
-#'       'gstat' is available. Exponential, spherical and Gaussian models are
+#'       'gstat' is available. The distances are taken in x and y: a layer
+#'       whose features, or the points taken from them, do not all have the
+#'       same dimensions (some with a Z or M coordinate) is read without its
+#'       Z and M. Exponential, spherical and Gaussian models are
 #'       supported, with a nugget and with several structured components
 #'       (each weighted by its partial sill) and with gstat's 2-D geometric
 #'       anisotropy (`vgm(..., anis = c(angle, ratio))`), applied as gstat
@@ -1654,10 +2707,13 @@ assign_features_to_polygons <- function(
 #'       warning), or no usable model (none supplied and none could be
 #'       estimated, or a rejected fit that could not be replaced by an
 #'       estimate). The standard errors, intervals and `cell_weight` are then
-#'       Kish's, and the uncorrected ones only where Kish's own ICC is 0; the
+#'       Kish's, the uncorrected ones where Kish's own ICC is 0 and `NA`
+#'       where it cannot be estimated; the
 #'       `deff_method` column says which on every row (see "Value"). The
 #'       variogram route needs an identified range, which a layer does not
-#'       always have, so read `deff_method` for the fallback. A model with
+#'       always have, so read `deff_method` for the fallback. A layer whose
+#'       geometries carry M (XYM or XYZM), which GEOS does not read, is
+#'       read in x and y too. A model with
 #'       no structured component (a pure
 #'       nugget) implies that distinct observations are uncorrelated, so it
 #'       is applied as a design effect of 1 in every cell, not treated as a
@@ -1665,7 +2721,10 @@ assign_features_to_polygons <- function(
 #'       when it finds no spatial structure (an `NA` range whose
 #'       `rejected_reason` says so): the answer is then a design effect of
 #'       1, `deff_method` reads `"variogram"`, and no fallback warning is
-#'       raised. Points with empty
+#'       raised. Predictor columns summarised under that verdict get the same
+#'       design effect of 1, and a warning of class
+#'       `"spatialkit_deff_no_structure"` names them (fields `columns` and
+#'       `reason`). Points with empty
 #'       geometry count towards their cells' values but not towards the
 #'       correlation, with a warning.}
 #'     \item{`"kish"`}{Estimate an intra-class correlation (ICC) for each
@@ -1683,12 +2742,29 @@ assign_features_to_polygons <- function(
 #'       applied to a predictor, nor one predictor's to another. It is the
 #'       response's ICC that sets `cell_weight` whenever a response was
 #'       given, and the first predictor's own ICC otherwise.
-#'       Requires at least 2 cells with 2+ observations and at least 2 residual
-#'       degrees of freedom (`N - k >= 2`); the ICC is taken as 0 (no
-#'       correction for that column) otherwise, and likewise when the
-#'       estimate itself comes out at or below 0. The `"deff_applied"`
-#'       attribute is attached when any ICC is positive, so when all are
-#'       0 there is none.}
+#'       An ICC needs at least 2 cells with 2+ observations of the column and
+#'       at least 2 residual degrees of freedom (`N - k >= 2`). Where a column
+#'       has fewer (all its values in one cell, say), its ICC cannot be
+#'       estimated: it is `NA`, `attr(, "icc")$reason` says why, and the
+#'       column's standard errors, `..neff_*` and `..ci_*` are `NA` in every
+#'       cell of two or more observations (`..df_*` stays `n - 1`), as is
+#'       `cell_weight` when that column sets it, with a warning of class
+#'       `"spatialkit_icc_unavailable"` (fields `columns` and `reason`). Rows
+#'       with no cell id (kept by `keep_unassigned = TRUE` in
+#'       [assign_features_to_polygons()]) give a summary row of their own but
+#'       no cell to the ICC, so a column whose values all fall in them, or
+#'       differ only there, has an ICC that cannot be estimated. An
+#'       estimate at or below 0 is another case: the ICC is 0 and the
+#'       column's standard errors are the uncorrected ones. A column that
+#'       does not vary (all its values equal, those of rows with no cell id
+#'       included) has an ICC of `NA` and standard errors of 0, with no
+#'       warning: its mean has no error whatever the correlation. A column
+#'       whose values differ only by their rounding (0.1 beside 0.3 / 3) is
+#'       read the same way, as one that does not vary, at any size of its
+#'       values; its standard errors are 0 in a cell whose values are equal
+#'       and of the size of that rounding in one whose values differ. The
+#'       `"deff_applied"` attribute is attached when any ICC is positive, so
+#'       when all are 0 or `NA` there is none.}
 #'     \item{A positive number}{Applied as a uniform design effect to every
 #'       cell, as `sd * sqrt(deff / n)`, exactly `sqrt(deff)` times the
 #'       naive SE. Use when you have an external estimate of the design
@@ -1716,7 +2792,11 @@ assign_features_to_polygons <- function(
 #' @param deff_max_n Cells with more than this many points are subsampled
 #'   before forming the `n x n` correlation matrix used by
 #'   `deff = "variogram"`. Default 500. It must be a single number of at
-#'   least 2 when `deff = "variogram"`; anything else is an error.
+#'   least 2 when `deff = "variogram"`; anything else is an error. The
+#'   subsample is drawn with a fixed seed from the cell's points in
+#'   coordinate order, so it does not depend on the row order of
+#'   `assigned_points_sf`, and the caller's random-number stream is left
+#'   where it was.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{TRUE},
@@ -1728,19 +2808,51 @@ assign_features_to_polygons <- function(
 #'   is that thing's `agg_funs` sum over `cell_area`).  The request is
 #'   **refused** with an error, not answered with a number, when the cells'
 #'   CRS distorts areas across them by more than 1 percent, measured as the
-#'   spread of planar-to-geodesic area ratios over the cells: a density is a
+#'   spread of planar-to-geodesic area ratios over the cells (over 200 of
+#'   them when there are more, taken at even spacing along the cells sorted
+#'   by their bounding boxes in that CRS and then by the means of their
+#'   vertices, together with the cells that reach furthest along x and y
+#'   either way, so the order of the rows does not matter): a density is a
 #'   comparison between cells and is meaningless where the map scale differs
 #'   from one cell to the next.  Inside a UTM zone the spread is under 0.3
 #'   percent and the request goes through; the conterminous United States
 #'   forced into one zone (14 percent), or a few degrees of latitude in Web
-#'   Mercator (4 percent at 48N), does not.  [ensure_projected()] with
+#'   Mercator (4 percent at 48N), does not.  Exact copies of one cell count
+#'   once.  A layer of one distinct cell gives one ratio and no spread, so its
+#'   distortion is measured on a 6 by 6 grid over the cell's bounding box.
+#'   Projected cells are first checked with `sf::st_is_valid()` in their
+#'   CRS, every non-empty cell before any summary: a cell GEOS calls invalid
+#'   (edges that cross, a spike, parts that overlap) has no planar area to
+#'   vouch for, and the request is refused with an error that names the
+#'   first such cells and GEOS's reason and says to repair the cells with
+#'   `sf::st_make_valid()`.  A valid projected cell with two vertices that
+#'   fall on one point once in degrees, where s2 refuses it, is measured
+#'   there without the repeat, which moves no area; when s2 refuses a valid
+#'   cell it measures for another reason, the spread cannot be measured and
+#'   the request is refused.
+#'   [ensure_projected()] with
 #'   `purpose = "area"` chooses an equal-area CRS for lon/lat input; build the
 #'   cells in it.  Lon/lat cells are measured geodesically instead: their
 #'   `cell_area` is `sf::st_area()`'s area in square metres (on the sphere
-#'   with s2, sf's default), not a planar area in squared degrees, and the
-#'   distortion check passes by construction; with s2 switched off, sf needs
-#'   the lwgeom package for that area and the request is refused without
-#'   it.  The measured spread is attached as `attr(, "area_error")`.
+#'   with s2, sf's default), not a planar area in squared degrees, and on
+#'   the cells s2 measures the distortion check passes by construction.
+#'   Every cell's area is taken before any summary, and when s2 refuses a
+#'   cell that is not valid on the sphere, such as one with two corners it
+#'   reads as one point (cells returned in lon/lat can hold them; see `crs`
+#'   in [create_voronoi_polygons()]), the request stops with an error of
+#'   class `"spatialkit_cells_degenerate"` that gives the rows of `cells_sf`
+#'   s2 refuses (`rows` on the condition) and says to transform the cells to
+#'   a projected CRS, such as the one they were built in or the equal-area
+#'   one `ensure_projected(purpose = "area")` picks.  With s2 switched off,
+#'   sf needs the lwgeom package for that area and the request is refused
+#'   without it.  The measured spread is attached as `attr(, "area_error")`.
+#'   Cells that mix XY and XYZ (or XYM) geometries are measured, and their
+#'   spread taken, without Z and M, since sf reads a layer in the dimension
+#'   of its first geometry; so are cells that carry M throughout, which GEOS
+#'   does not read.  The cells are returned with their own geometry.  In a
+#'   projected CRS whose unit sf has no name for (a `+to_meter` such as
+#'   1e6), `sf::st_area()` gives square metres; `cell_area` is the planar
+#'   area in that CRS's unit squared all the same.
 #' @param conf_level Optional confidence level in (0, 1), such as `0.95`.
 #'   When given, every numeric response and predictor column also gets
 #'   `..neff_*`, `..df_*`, `..ci_lo_*` and `..ci_hi_*` (see "Confidence
@@ -1768,7 +2880,10 @@ assign_features_to_polygons <- function(
 #'   own CRS. When the input carries the record of its cells' count (see
 #'   "Value") and that record names a projected CRS, the one the profile
 #'   worked in, the distances are measured in it, whatever CRS the layer is
-#'   in. The value is matched as [match.arg()] matches a choice, so an
+#'   in. The distances are taken in x and y: a layer whose features, or the
+#'   points taken from them, do not all have the same dimensions (some with a
+#'   Z or M coordinate) is read without its Z and M. So is a layer whose
+#'   geometries carry M (XYM or XYZM), which GEOS does not read. The value is matched as [match.arg()] matches a choice, so an
 #'   abbreviation (`"m"`) is accepted and `NULL` is the default. See "Pooled
 #'   values" for what the pooled value estimates and what its numbers rest
 #'   on, "Value" for the columns and the attributes, and "Conditions" for
@@ -1797,14 +2912,16 @@ assign_features_to_polygons <- function(
 #'   `deff_applied` is `TRUE` on every row when a design-effect correction
 #'   was applied (exactly when the `"deff_applied"` attribute below is
 #'   attached; under `"kish"`, when any standard-error column was corrected)
-#'   and `FALSE` when the standard errors are the uncorrected ones: a
-#'   refused `deff`, or `"kish"` ICCs of 0 for every column (and `NA` on a
-#'   `cells_sf` row no point fell in). `deff_method` names the correction
+#'   and `FALSE` when none was: a refused `deff`, or `"kish"` ICCs of 0 or
+#'   `NA` for every column (the standard errors are then the uncorrected
+#'   ones, or `NA` where an ICC cannot be estimated). It is `NA` on a
+#'   `cells_sf` row no point fell in. `deff_method` names the correction
 #'   the standard errors carry, since their column names do not change with
 #'   it: `"variogram"`, `"kish"` or `"fixed"` when the one requested was
 #'   applied, `"none"` when none was, and `"kish (variogram fallback)"` or
 #'   `"none (variogram fallback)"` when a `"variogram"` request could not be
-#'   met and Kish stood in for it (the second when Kish's ICCs were 0 too).
+#'   met and Kish stood in for it (the second when Kish's ICCs were 0 or
+#'   `NA` too).
 #'   So `deff_applied` is `TRUE` on a Kish fallback row: test
 #'   `deff_method == "variogram"` to keep only rows the variogram corrected.
 #'   Unlike the attribute, both columns survive `rbind()` and
@@ -1815,13 +2932,20 @@ assign_features_to_polygons <- function(
 #'   message. It is raised when the correction requested was not the one
 #'   applied: a refused number (the standard errors are then the uncorrected
 #'   ones) or a `"variogram"` request that fell back to Kish; the condition
-#'   of the second carries `requested` and `used`.
+#'   of the second carries `requested` and `used`. Two more classes say what
+#'   a design effect could not do: `"spatialkit_icc_unavailable"` names the
+#'   columns whose Kish ICC cannot be estimated, and
+#'   `"spatialkit_deff_no_structure"` the predictor columns given a design
+#'   effect of 1 by a variogram that found no spatial structure.
 #'
 #'   When a correction was actually applied, an attribute `"deff_applied"` is
 #'   attached recording it: `method` plus `icc_resp`/`icc_pred` and `deff`
 #'   for `"kish"` (`icc_pred` is a vector named by predictor column, one ICC
 #'   each; `deff` is the primary variable's per-cell design effect,
-#'   all 1 when only a predictor's ICC was positive; `requested` and
+#'   all 1 when only a predictor's ICC was positive, except that it is `NA`
+#'   in each cell of two or more of the primary variable's values when that
+#'   variable's ICC cannot be estimated, and its entry in `icc_resp` or
+#'   `icc_pred` is then `NA` too; `requested` and
 #'   `fallback_reason` are added when a `"variogram"` request fell back to
 #'   it),
 #'   `deff`/`deff_rows`/`rbar`/`crs`/`max_n` for `"variogram"` (`deff` is
@@ -1833,11 +2957,13 @@ assign_features_to_polygons <- function(
 #'   order, so `deff[i]` and `rbar[i]` still describe row `i`; cells with no
 #'   observations carry `NA`. No attribute is attached when no correction was
 #'   applied: `deff = 1`, or a `deff = "kish"` request (or Kish fallback)
-#'   whose ICCs are all 0. A `deff = "kish"` request, and a `"variogram"`
+#'   whose ICCs are all 0 or `NA`. A `deff = "kish"` request, and a `"variogram"`
 #'   request that fell back to it, always
 #'   records the ICCs it estimated on an attribute `"icc"` (`resp`, and
 #'   `pred`, a vector named by predictor column; `NA` for a variable type
-#'   with no numeric column), whether or not
+#'   with no numeric column and for a column whose ICC cannot be estimated;
+#'   `reason`, a character vector named by column, is then added and says
+#'   why), whether or not
 #'   they were positive enough to apply, so a result with no `"deff_applied"`
 #'   still says what the ICCs came out as.
 #'
@@ -1923,22 +3049,44 @@ assign_features_to_polygons <- function(
 #'
 #'   A row that is the same distance from two centres lies on the boundary
 #'   between their cells, which happens on gridded locations.
-#'   [resolution_profile()] scores such a row in the cell of the
-#'   lower-numbered centre, and [assign_features_to_polygons()], on cells
-#'   built from the centres the profile scored, gives a point on that
-#'   boundary the same cell, measured in the CRS the record names, so the
-#'   comparison reads `"match"` on gridded locations too.
+#'   [resolution_profile()] scores such a row in the cell of the lower-numbered
+#'   centre (a distance counts as the same as the least when its square is no
+#'   more than the square of the least distance lengthened by a margin, plus
+#'   one part in ten million of the least squared distance; the margin is one
+#'   part in 1e10 of the largest coordinate of the centres, at most a
+#'   millionth of the diagonal of their bounding box and at least four times
+#'   the spacing of doubles at that coordinate), and [assign_features_to_polygons()], on cells
+#'   built from the centres the profile scored, gives a point on that boundary
+#'   the same cell, measured in the CRS the record names, so the comparison
+#'   reads `"match"` on gridded locations too. It does so on cells that carry
+#'   the record, for rows that have a CRS exactly when the record names one.
+#'   Rows without a CRS beside a record that names one, rows with a CRS beside
+#'   a record that names none, rows assigned to the cells after they lost the
+#'   record (written to a file and read back, say) and summarised with
+#'   `cells_sf` set to the cells that carry it, and rows given their cells by
+#'   another join are placed by the polygons alone, so a row on a boundary can
+#'   sit in either cell.
 #'   [build_tessellation()] draws those cells in the CRS the record names,
 #'   whatever CRS the seeds arrive in, unless its `crs` names another
 #'   projected CRS. Cells built in another projected CRS are the
-#'   nearest-centre cells of that CRS, so a row near a boundary, on it or
-#'   not, can sit in another cell than the profile put it in. So can a row
-#'   joined in longitude and latitude (rows and cells both in degrees), and
-#'   a row that reached the record's CRS by another transformation than the
-#'   profile's, which can settle a tie the other way. The comparison then
-#'   reports `"differ"`, with `what = "loo"` when it finds the same rows in
-#'   the same number of cells with another leave-one-out error. The
-#'   summary's own numbers describe the cells as assigned.
+#'   nearest-centre cells of that CRS, and cells transformed to another
+#'   projected CRS are joined there, so a row near a boundary, on it or not,
+#'   can sit in another cell than the profile put it in. So can a row joined
+#'   in longitude and latitude, as rows and cells in degrees are when the
+#'   cells do not carry the record or carry one in degrees (the Voronoi
+#'   cells of the scored centres that [build_tessellation()] returns in a
+#'   geographic `crs` are joined in the record's CRS while they carry it), a
+#'   row in cells that carry the record but are not the Voronoi cells of its
+#'   centres (seeds moved, or cells edited, after the selection), and a row
+#'   that reached the record's CRS by another transformation than the
+#'   profile's, which can settle a tie the other way. Cells returned in a
+#'   geographic `crs` are moved back to the record's CRS for that join, and
+#'   for a layer wider than a UTM zone the round trip can move a corner by
+#'   more than the margin of [assign_features_to_polygons()], so a row on an
+#'   edge there can sit in another cell too. The comparison then reports
+#'   `"differ"`, with `what = "loo"` when it finds the same rows in the same
+#'   number of cells with another leave-one-out error, and the warning names
+#'   these cases. The summary's own numbers describe the cells as assigned.
 #'
 #'   The comparison uses the fit of the pooled columns when that is a fit of
 #'   the estimate the profile scored, and fits the response once more
@@ -2042,6 +3190,10 @@ summarize_by_cell <- function(assigned_points_sf,
                               area           = FALSE,
                               estimate       = c("pooled", "mean"),
                               obs_level      = NULL) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("summarize_by_cell", "assigned_points_sf")
+  on.exit(tie_end(returnValue(tie_end), assigned_points_sf), add = TRUE)
   .msg <- function(...) if (!quiet) message(...)
   estimate <- match.arg(estimate)
   if (!is.null(conf_level) &&
@@ -2098,7 +3250,44 @@ summarize_by_cell <- function(assigned_points_sf,
       stop("summarize_by_cell(): `area = TRUE` needs `cells_sf` to carry a CRS: ",
            "without one there is no way to tell whether its areas are ",
            "comparable between cells. Set it with sf::st_crs().", call. = FALSE)
-    area_err <- .crs_area_error(cells_sf)
+    # Measured on the cells in XY when they mix XY and XYZ (or XYM)
+    # geometries: GEOS and s2 read such a layer in the dimension of its first
+    # geometry, and the area of an XYZ cell among XY ones came out wrong or
+    # could not be taken.  So are cells that carry M throughout, which GEOS
+    # does not read: the validity check stopped on them with GEOS's message.
+    cells_xy <- .xy_if_mixed_or_m(cells_sf)
+    if (isTRUE(sf::st_is_longlat(cells_sf))) {
+      # Lon/lat cells: their cell_area below is s2's area of every cell, and
+      # the check that follows takes s2's area for the planar one too.  s2
+      # refuses a cell that is not valid on the sphere, such as one with two
+      # corners it reads as one point, which cells returned in lon/lat hold
+      # on gridded locations.  The check measures up to 200 of the cells: a
+      # refused one among them made the request refused as unmeasurable, and
+      # one outside them stopped the request after the summary with s2's
+      # bare message.  Every cell is measured here, before any summary.  With
+      # s2 off the areas are lwgeom's, and the check below refuses the
+      # request without it, as the help says.
+      if (isTRUE(sf::sf_use_s2()))
+        tryCatch(invisible(sf::st_area(sf::st_geometry(cells_xy))), error = function(e)
+          .stop_cells_degenerate(
+            e, cells_xy, "summarize_by_cell", "`cells_sf`",
+            "the measurement of the cells' areas (`area = TRUE`)",
+            "call summarize_by_cell() again; the cells' areas are then planar areas in that CRS",
+            pick = "the equal-area one ensure_projected(purpose = \"area\") picks for it"))
+    } else {
+      # A cell GEOS calls invalid has no planar area to vouch for: a ring
+      # whose edges cross gets the signed sum of its lobes (a bowtie of
+      # 4.25e7 m^2 got 2e7), and parts that overlap are counted twice.  The
+      # distortion check measures up to 200 cells, so such a cell among them
+      # made the request refused and one outside them got a density over
+      # that area.  Every non-empty cell is checked, so the outcome does not
+      # turn on the sample.  Lon/lat cells are s2's to judge, above.
+      .stop_cells_invalid(cells_xy, cells_sf, id_col, assigned_points_sf)
+    }
+    # One distinct cell gives one ratio and no spread: it is measured on the
+    # grid over its bounding box.  A single cell was refused as unmeasured,
+    # though it has both areas.
+    area_err <- .crs_area_error(cells_xy, one_by_grid = TRUE)
     if (!is.finite(area_err))
       stop("summarize_by_cell(): `area = TRUE`: the area distortion of `cells_sf`'s ",
            "CRS could not be measured (no polygon areas, or geodesic areas ",
@@ -2127,7 +3316,7 @@ summarize_by_cell <- function(assigned_points_sf,
   df <- sf::st_drop_geometry(assigned_points_sf)
 
   # --- locate ID column ---
-  id_candidates <- unique(c(id_col, "poly_id", "polygon_id", "cell_id"))
+  id_candidates <- .sbc_id_candidates(id_col)
   id_found <- id_candidates[id_candidates %in% names(df)]
   if (length(id_found) == 0L) {
     stop("summarize_by_cell(): could not find an ID column. Looked for: ",
@@ -2201,7 +3390,12 @@ summarize_by_cell <- function(assigned_points_sf,
   }
 
   # Helper: estimate intra-class correlation via one-way random-effects ANOVA.
-  # Returns a single rho in [0, 1] or 0 if estimation fails.
+  # Returns a single rho in [0, 1], 0 for an estimate at or below 0, or NA
+  # with a `reason` attribute when the data cannot give an estimate at all
+  # (the values in one cell or in none, too few cells with two or more
+  # values, or a column that does not vary).  The two used to be one 0, so
+  # a column whose ICC was unidentified got the uncorrected standard error
+  # under the label of an ICC of 0.
   #
   # Called with ONE column at a time (see .kish_iccs() below): an ICC is a
   # property of a variable, and one pooled value for several predictors was
@@ -2224,18 +3418,61 @@ summarize_by_cell <- function(assigned_points_sf,
     # predictor SE was 44% too small.  Grouping by (variable, cell) is the
     # ordinary pooled one-way ANOVA across the m*k variable-cell groups, and
     # recovers 0.49 on the same data.
+    na_icc <- function(why) structure(NA_real_, reason = why)
     vals <- numeric(0)
     grps <- character(0)
+    n_const <- 0L
+    n_all <- 0L  # non-missing values, with a cell id or without one
+    n_id  <- 0L  # those of them with a cell id
     for (v in var_cols) {
+      # Whether the column varies is read from all its values, those of rows
+      # with no cell id included: they form a summary row of their own, and
+      # its standard error is 0 whatever the correlation only when they are
+      # equal too.  Read from the rows with a cell id alone, a column equal
+      # on them and varying on the others was taken for one that does not
+      # vary, and its no-id row kept the uncorrected standard error.
+      # A standard deviation below .Machine$double.eps is not by itself no
+      # spread: a column in small units has one, and a column near 1e200 has
+      # one that overflows.  One above it is not by itself spread either: a
+      # column of one value up to rounding has a standard deviation of a unit
+      # in the last place of its values, above eps for values above about 4.
+      # So the column is read again by the pool's test (.constant_column())
+      # where its standard deviation is below the floor or not finite, or
+      # its sum of squares shows no spread on the scale of its values
+      # (.no_spread()), and it does not vary only where neither its raw
+      # values nor its values centred and scaled show spread beyond their
+      # rounding.  A column with spread fails .no_spread() and is read as
+      # before, to the last bit.
+      x_all <- df[[v]][!is.na(df[[v]])]
+      n_all <- n_all + length(x_all)
+      s_all <- sd(x_all)
+      if (!is.na(s_all) &&
+          (!(s_all >= .Machine$double.eps && is.finite(s_all)) ||
+           .no_spread(sum((x_all - mean(x_all))^2), x_all)) &&
+          .constant_column(x_all)) {
+        # No spread: the column adds no variance information.
+        n_const <- n_const + 1L
+        next
+      }
       # A row with no cell id belongs to no group: keep_unassigned = TRUE
       # output carries NA ids, and an NA level makes group_means[grps] NA
       # downstream ("missing value where TRUE/FALSE needed").
       ok <- !is.na(df[[v]]) & !is.na(df[[id_col]])
+      n_id <- n_id + sum(ok)
       raw <- df[[v]][ok]
       s <- sd(raw)
-      if (is.na(s) || s < .Machine$double.eps) {
-        # Constant column — skip, contributes no variance information
-        next
+      if (is.na(s)) next
+      # The same reading on the rows with a cell id.  A column with spread
+      # there is z-scored from .spread_scaled(), which divides by powers of
+      # two, since its raw squares can underflow or overflow, or its raw
+      # values lose their spread to rounding; the ICC does not change under
+      # a shift and a scale.  Elsewhere the raw values are z-scored as they
+      # stand.
+      if (!(s >= .Machine$double.eps && is.finite(s)) ||
+          .no_spread(sum((raw - mean(raw))^2), raw)) {
+        if (.constant_column(raw)) next
+        raw <- .spread_scaled(raw)$y
+        s <- sd(raw)
       }
       vals <- c(vals, (raw - mean(raw)) / s)
       grps <- c(grps, paste(v, as.character(df[[id_col]][ok]), sep = "\r"))
@@ -2243,18 +3480,27 @@ summarize_by_cell <- function(assigned_points_sf,
     grps <- factor(grps)
     k <- nlevels(grps)
     N <- length(vals)
-    if (k < 2L || N < 4L) return(0)
+    if (k == 0L)
+      return(na_icc(
+        if (n_const > 0L) .icc_reason_constant
+        else if (n_all > 0L && n_id == 0L) "its values fall in no cell"
+        else if (n_id >= 2L) "its values differ only on rows that fall in no cell"
+        else if (n_all >= 4L) "only one of its values falls in a cell"
+        else "it has fewer than four values"))
+    if (k < 2L) return(na_icc("its values fall in one cell"))
+    if (N < 4L) return(na_icc("it has fewer than four values"))
 
     ni <- tabulate(grps)
     ni <- ni[ni > 0L]
-    # The documentation promises "at least 2 cells with 2+ observations; falls
-    # back to deff = 1 otherwise", and the k >= 2 / N >= 4 test above does not
-    # deliver it.  All-singleton groups give SSW = 0, MSW = 0 and therefore an
-    # ICC of exactly 1 -- a design effect of n from data carrying no
-    # within-cell information at all.  A single group with two members gives an
-    # ICC from one within-group degree of freedom, which is then applied to
-    # every cell.  Both are noise dressed as a measurement.
-    if (sum(ni >= 2L) < 2L || (N - k) < 2L) return(0)
+    # An ICC needs at least 2 cells with 2+ observations, and the k >= 2 /
+    # N >= 4 test above does not deliver it.  All-singleton groups give SSW =
+    # 0, MSW = 0 and therefore an ICC of exactly 1 -- a design effect of n from
+    # data carrying no within-cell information at all.  A single group with
+    # two members gives an ICC from one within-group degree of freedom, which
+    # is then applied to every cell.  Both are noise dressed as a measurement,
+    # so the ICC is NA: not estimated, which is not an estimate of 0.
+    if (sum(ni >= 2L) < 2L || (N - k) < 2L)
+      return(na_icc("fewer than two cells hold two or more of its values"))
     grand_mean <- mean(vals)
     group_means <- tapply(vals, grps, mean)
 
@@ -2267,9 +3513,12 @@ summarize_by_cell <- function(assigned_points_sf,
 
     # Unbalanced n0 (Donner 1986)
     n0 <- (N - sum(ni^2) / N) / (k - 1)
-    if (n0 < 1) return(0)
+    if (n0 < 1) return(na_icc("its cell sizes give an n0 below 1"))
 
     rho <- (MSB - MSW) / (MSB + (n0 - 1) * MSW)
+    # Not reached after the guards above; kept so that a 0/0 can never pass
+    # for an estimate.
+    if (!is.finite(rho)) return(na_icc("the variance decomposition is undefined"))
     # Clamp to [0, 1] — negative ICC implies no positive autocorrelation
     max(0, min(1, rho))
   }
@@ -2352,14 +3601,27 @@ summarize_by_cell <- function(assigned_points_sf,
   # One ICC per summarised column, the response's and each predictor's own.
   # Called here for deff = "kish", and from the variogram block below when a
   # "variogram" request cannot be met and falls back to Kish.
+  # An ICC that cannot be estimated is NA, and `icc_reason` (a character
+  # vector named by column) says why for each such column.
   resp_rho <- NULL
   pred_rho <- NULL
+  icc_reason <- character(0)
   .kish_iccs <- function() {
     resp <- NULL
     pred <- NULL
+    reason <- character(0)
+    # vapply() drops the `reason` attribute, so it is collected here.
+    one <- function(v) {
+      r <- .estimate_icc(df, id_col, v)
+      if (is.na(r)) reason[[v]] <<- attr(r, "reason")
+      as.numeric(r)
+    }
     if (length(resp_num) > 0L) {
-      resp <- .estimate_icc(df, id_col, resp_num)
-      if (resp > 0) {
+      resp <- one(resp_num)
+      if (is.na(resp)) {
+        .msg(sprintf("summarize_by_cell(): the response ICC cannot be estimated (%s).",
+                     reason[[resp_num]]))
+      } else if (resp > 0) {
         .msg(sprintf(
           "summarize_by_cell(): Kish deff using response ICC = %.4f", resp
         ))
@@ -2369,11 +3631,13 @@ summarize_by_cell <- function(assigned_points_sf,
     }
     if (length(pred_num) > 0L) {
       # Named by column; the SE closures look their own column up.
-      pred <- vapply(pred_num, function(v) .estimate_icc(df, id_col, v),
-                     numeric(1))
+      pred <- vapply(pred_num, one, numeric(1))
       names(pred) <- pred_num
       for (v in pred_num) {
-        if (pred[[v]] > 0) {
+        if (is.na(pred[[v]])) {
+          .msg(sprintf(paste0("summarize_by_cell(): the ICC of predictor '%s' ",
+                              "cannot be estimated (%s)."), v, reason[[v]]))
+        } else if (pred[[v]] > 0) {
           .msg(sprintf(
             "summarize_by_cell(): Kish deff using predictor ICC = %.4f for '%s'",
             pred[[v]], v
@@ -2388,12 +3652,27 @@ summarize_by_cell <- function(assigned_points_sf,
       .msg("summarize_by_cell(): no numeric columns for ICC estimation; deff = 1.")
     # Zero for the type that has no columns
     list(resp = if (is.null(resp)) 0 else resp,
-         pred = if (is.null(pred)) 0 else pred)
+         pred = if (is.null(pred)) 0 else pred,
+         reason = reason)
+  }
+  # The columns whose ICC is NA because they do not vary: their standard
+  # errors are 0 whatever the correlation, so they keep a design effect of 1.
+  icc_const_cols <- function() names(icc_reason)[icc_reason == .icc_reason_constant]
+  # The columns whose ICC cannot be estimated and whose numbers that leaves
+  # unknown: not a column that does not vary, and only one with a cell of
+  # two or more values (a cell of one value has no standard error to
+  # withhold).  The group of rows with no cell id is a summary row too.
+  icc_withheld <- function() {
+    v <- setdiff(names(icc_reason), icc_const_cols())
+    v[vapply(v, function(col)
+      any(tapply(!is.na(df[[col]]), factor(df[[id_col]], exclude = NULL), sum) >= 2L),
+      logical(1))]
   }
   if (use_kish) {
     icc_est  <- .kish_iccs()
     resp_rho <- icc_est$resp
     pred_rho <- icc_est$pred
+    icc_reason <- icc_est$reason
   }
   # Set when a "variogram" request fell back to Kish: why, for the record.
   vgm_fallback <- NULL
@@ -2412,8 +3691,11 @@ summarize_by_cell <- function(assigned_points_sf,
         f <- fn; function(x) f(x)
       })
     }
+    # .cell_sd(), not sd(): the raw squares overflow for values near 1e200
+    # and underflow for a spread near 1e-170, which gave standard errors of
+    # NA or 0 in every cell, with no warning.
     fns[[paste0("..sd_", prefix)]] <- function(x) {
-      if (sum(!is.na(x)) > 1L) sd(x, na.rm = TRUE) else NA_real_
+      if (sum(!is.na(x)) > 1L) .cell_sd(x) else NA_real_
     }
     # The per-column, per-cell quantities behind the SE and (when asked for)
     # the interval: the column's own non-missing count, sd, design effect and
@@ -2426,6 +3708,7 @@ summarize_by_cell <- function(assigned_points_sf,
       .dfr  <- vgm$df_ratio  # per-cell df ratio over ALL rows, same path
       .vgm  <- vgm         # list(coords, cor_fn, max_n): per-column exact path
       .kish <- use_kish
+      .const <- icc_const_cols()
       .id   <- id_col
       # The ..se_, ..neff_, ..df_ and ..ci_ closures each call this for the
       # same column in the same cell (summarise() runs each of them over
@@ -2440,7 +3723,7 @@ summarize_by_cell <- function(assigned_points_sf,
         if (n_valid <= 1L)
           return(list(n_valid = n_valid, s = NA_real_, deff = NA_real_,
                       df = NA_real_))
-        s <- sd(x, na.rm = TRUE)
+        s <- .cell_sd(x)
         # The df of s^2.  Exactly n_valid - 1 under independence, under a
         # caller-supplied constant deff (a uniform inflation of the SE says
         # nothing about the variance estimate) and under Kish's exchangeable
@@ -2456,7 +3739,13 @@ summarize_by_cell <- function(assigned_points_sf,
           # column takes its own.  across() runs one closure list over all
           # the predictor columns, so the column is asked for here.
           rho_i  <- if (!is.null(names(.rho))) .rho[[dplyr::cur_column()]] else .rho
-          deff_i <- max(1, 1 + (n_valid - 1) * rho_i)
+          # An ICC that cannot be estimated leaves the design effect unknown,
+          # so the SE, effective n and interval are NA (the df of s^2 does
+          # not depend on rho and stays n - 1).  A column that does not vary
+          # has an SE of 0 whatever the correlation, so it keeps 1.
+          deff_i <- if (!is.na(rho_i)) max(1, 1 + (n_valid - 1) * rho_i)
+                    else if (dplyr::cur_column() %in% .const) 1
+                    else NA_real_
         } else if (!is.null(.rbar)) {
           # Variogram path.  The mean pairwise correlation is over the
           # locations of the observations that ENTER this column's mean, so
@@ -2578,8 +3867,10 @@ summarize_by_cell <- function(assigned_points_sf,
     no_structure <- function(s)
       .sac_no_structure(s) && .vgm_is_pure_nugget(attr(s, "variogram_model"))
     structure_note <- NULL  # the refusal that gave the pure nugget, for the log
+    structure_from <- NULL  # whose verdict it is, for the predictors' warning
     if (no_structure(sac)) {
       structure_note <- as.character(attr(sac, "rejected_reason"))[1L]
+      structure_from <- "of the supplied `sac`"
     } else if (!is.null(sac) && is.na(suppressWarnings(as.numeric(sac))[1L]) &&
         !is.null(attr(sac, "rejected_reason"))) {
       set_aside <- sprintf("the supplied `sac` reports no usable range (%s)",
@@ -2634,6 +3925,7 @@ summarize_by_cell <- function(assigned_points_sf,
         } else if (no_structure(est)) {
           # No structure in the response: the pure nugget is the model.
           structure_note <- as.character(attr(est, "rejected_reason"))[1L]
+          structure_from <- "estimated from `response_var`"
           vgm_model <- attr(est, "variogram_model")
           vgm_crs   <- attr(est, "crs")
         } else if (is.na(suppressWarnings(as.numeric(est))[1L]) &&
@@ -2661,6 +3953,32 @@ summarize_by_cell <- function(assigned_points_sf,
                 if (is.null(structure_note)) ""
                 else sprintf(" (the variogram's verdict: %s)", structure_note))
       cor_fn <- function(h) 0 * h
+      # That verdict is about the variable the variogram was fitted to, and
+      # the design effect of 1 it gives is the answer for that variable.  A
+      # predictor summarised beside it gets the same 1 whatever structure it
+      # has of its own: beside a white-noise response, a predictor with a
+      # range of its own kept the uncorrected standard errors without a word.
+      # The predictors are named; nothing is changed.  A pure nugget the
+      # caller built, with no verdict behind it, is applied as given.
+      under <- setdiff(pred_num, resp_num)
+      if (!is.null(structure_note) && length(under)) {
+        several <- length(under) > 1L
+        named <- sprintf("the predictor column%s %s", if (several) "s" else "",
+                         .cols_text(under))
+        .warn_classed("spatialkit_deff_no_structure", paste0(
+          "summarize_by_cell(): the variogram %s finds no spatial structure (%s), ",
+          "so %s. That verdict is about the variable the variogram was fitted ",
+          "to: the standard errors%s of %s are the uncorrected ones, whatever ",
+          "spatial structure %s of %s own. deff = \"kish\" estimates an ICC for ",
+          "each column on its own."),
+          structure_from, structure_note,
+          if (length(resp_num)) sprintf("every column gets a design effect of 1, %s included", named)
+          else sprintf("%s get%s a design effect of 1", named, if (several) "" else "s"),
+          if (is.null(conf_level)) "" else ", effective n and intervals",
+          if (several) "those columns" else "that column",
+          if (several) "they have" else "it has", if (several) "their" else "its",
+          data = list(columns = under, reason = structure_note))
+      }
     }
     if (is.null(cor_fn)) {
       # Name the family when that is the reason: a user-built Matern or power
@@ -2686,8 +4004,8 @@ summarize_by_cell <- function(assigned_points_sf,
       # no correction at all for a caller who asked for one.  A range goes
       # unidentified often enough that this is an ordinary case, not a
       # corner.  Kish needs no variogram, so it is the fallback; the
-      # uncorrected SE is returned only when Kish's own ICC is 0, and either
-      # way the rows say which.
+      # uncorrected SE is returned only when Kish's own ICC is 0 (NA when it
+      # cannot be estimated), and either way the rows say which.
       use_vgm  <- FALSE
       use_kish <- TRUE
       deff     <- 1
@@ -2695,17 +4013,42 @@ summarize_by_cell <- function(assigned_points_sf,
       icc_est  <- .kish_iccs()
       resp_rho <- icc_est$resp
       pred_rho <- icc_est$pred
+      icc_reason <- icc_est$reason
       icc_txt <- paste(c(
         if (length(resp_num)) sprintf("response '%s' %.3f", resp_num[[1L]], resp_rho),
         if (length(pred_num)) sprintf("predictor '%s' %.3f", pred_num, pred_rho)),
         collapse = ", ")
-      if (max(resp_rho, pred_rho, 0) > 0)
+      # The columns whose standard errors are NA for want of an ICC.  The
+      # texts of the two cases with none are as they were.
+      withheld <- icc_withheld()
+      withheld_txt <- if (length(withheld))
+        sprintf("NA for %s, whose ICC cannot be estimated", .cols_text(withheld))
+      else ""
+      if (max(resp_rho, pred_rho, 0, na.rm = TRUE) > 0)
         .warn_deff_fallback(paste0(
           "summarize_by_cell(): %s Falling back to deff = \"kish\" (ICC: %s): ",
           "the standard errors carry Kish's correction in place of the ",
-          "variogram's, and `deff_method` reads \"kish (variogram fallback)\" ",
+          "variogram's%s, and `deff_method` reads \"kish (variogram fallback)\" ",
           "on every row."),
-          why, icc_txt, data = list(requested = "variogram", used = "kish"))
+          why, icc_txt, if (nzchar(withheld_txt)) sprintf(" (%s)", withheld_txt) else "",
+          data = list(requested = "variogram", used = "kish"))
+      else if (anyNA(c(resp_rho, pred_rho))) {
+        # "The uncorrected ones" is said only of columns that have them: one
+        # whose ICC is 0, or one that does not vary.  When every other column
+        # is withheld, the text names the NA alone.
+        kept <- setdiff(unique(c(resp_num, pred_num)),
+                        setdiff(names(icc_reason), icc_const_cols()))
+        .warn_deff_fallback(paste0(
+          "summarize_by_cell(): %s Falling back to deff = \"kish\", whose ICC ",
+          "is 0 or cannot be estimated (%s), so no column carries a correction: ",
+          "the standard errors are %s; `deff_method` reads ",
+          "\"none (variogram fallback)\" on every row."),
+          why, icc_txt,
+          if (!nzchar(withheld_txt)) "the uncorrected ones"
+          else if (length(kept)) paste0("the uncorrected ones, and ", withheld_txt)
+          else withheld_txt,
+          data = list(requested = "variogram", used = "none"))
+      }
       else
         .warn_deff_fallback(paste0(
           "summarize_by_cell(): %s Falling back to deff = \"kish\", whose ICC ",
@@ -2735,9 +4078,27 @@ summarize_by_cell <- function(assigned_points_sf,
       # coords_mat with `df` and feed the wrong points into every cell.
       # coerce_to_points() takes representative points, matching the guard in
       # estimate_sac_range().
-      pts_for_deff <- assigned_points_sf
+      # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y
+      # (.xy_if_mixed()), before the coerce and the move into the variogram's
+      # CRS and again after the coerce, whose points can mix dimensions: sf
+      # reads such a layer in the dimension of its first geometry, so the
+      # move stopped with "OGR error" or st_coordinates() below read other
+      # coordinates.  So is a layer whose geometries carry M, which GEOS
+      # does not read (.xy_if_mixed_or_m()): the coerce stopped on its
+      # polygons.  These points are not returned, so nothing is said.  A
+      # polygon s2 cannot take a centroid of in degrees is refused in this
+      # function's words, naming `assigned_points_sf` (.pointize_auto()).
+      pts_for_deff <- .xy_if_mixed_or_m(assigned_points_sf)
+      # A row with a coordinate that is not finite or lies beyond 1e150 has
+      # no location.  It is read as given, before the reduction to points
+      # and the move, and emptied (.empty_unlocated()), as .pooled_xy()
+      # reads the pooled path's rows: moved into the variogram's CRS, a
+      # northing of 1e200 in EPSG:32616 came back finite and was correlated,
+      # and in that CRS it was correlated at 1e200, with nothing said.
+      pts_for_deff <- .empty_unlocated(pts_for_deff)
       if (!all(sf::st_geometry_type(pts_for_deff, by_geometry = TRUE) == "POINT"))
-        pts_for_deff <- coerce_to_points(pts_for_deff, "auto")
+        pts_for_deff <- .xy_if_mixed(.pointize_auto(pts_for_deff, "summarize_by_cell",
+                                                    "`assigned_points_sf`"))
 
       # The variogram range is a LENGTH in the CRS the variogram was fitted in
       # -- estimate_sac_range() always fits in a projected CRS, in metres.
@@ -2754,20 +4115,21 @@ summarize_by_cell <- function(assigned_points_sf,
       } else {
         ensure_projected(pts_for_deff)
       }
-      coords_mat <- sf::st_coordinates(pts_for_deff)[, 1:2, drop = FALSE]
-      # An empty point has no location to correlate.  It still counts towards
-      # its cell's values, and .cor_stats_from_coords() leaves it out of the
-      # correlation; it used to stop the call with "missing value where
-      # TRUE/FALSE needed", while deff = "kish" took the same layer.
-      unlocated <- !(is.finite(coords_mat[, 1]) & is.finite(coords_mat[, 2])) &
-        !is.na(df[[id_col]])
+      # The bound is read again after the move (.values_at_xy()): NA for an
+      # empty point and for a coordinate that is not finite or lies beyond
+      # 1e150.
+      coords_mat <- .values_at_xy(pts_for_deff)
+      # A point without a location has nothing to correlate.  It still counts
+      # towards its cell's values, and .cor_stats_from_coords() leaves it out
+      # of the correlation; it used to stop the call with "missing value
+      # where TRUE/FALSE needed", while deff = "kish" took the same layer.
+      unlocated <- is.na(coords_mat[, 1]) & !is.na(df[[id_col]])
       if (any(unlocated))
-        .warn_and_log(paste0("summarize_by_cell(): %d point(s) have empty or ",
-                             "non-finite coordinates; their values are ",
-                             "summarised, but the variogram design effect of ",
-                             "their cells is computed from the located points ",
-                             "only."),
-                      sum(unlocated))
+        .warn_and_log(paste0("summarize_by_cell(): %d point(s) have no location ",
+                             "(%s); their values are summarised, but the ",
+                             "variogram design effect of their cells is ",
+                             "computed from the located points only."),
+                      sum(unlocated), .UNLOCATED_WHAT)
 
       # Per-cell mean off-diagonal correlation, NOT a per-cell deff: the design
       # effect each column needs is 1 + (n_valid - 1) * rbar for ITS non-missing
@@ -2786,11 +4148,34 @@ summarize_by_cell <- function(assigned_points_sf,
     }
   }
 
-  # --- single grouped summarise for all columns ---
-  grouped <- df |> dplyr::group_by(.data[[id_col]])
-
   has_resp <- length(resp_num) > 0L
   has_pred <- length(pred_num) > 0L
+
+  # --- an ICC that cannot be estimated withholds that column's numbers ---
+  # Raised only where a number is withheld: a column that does not vary keeps
+  # its standard errors of 0, and a column with no cell of two or more values
+  # had no standard error to give.  Both still carry their reason on
+  # attr(, "icc").
+  if (use_kish && length(icc_reason)) {
+    withheld <- icc_withheld()
+    if (length(withheld)) {
+      several <- length(withheld) > 1L
+      primary <- if (has_resp) resp_num[[1L]] else if (has_pred) pred_num[[1L]]
+      .warn_classed("spatialkit_icc_unavailable", paste0(
+        "summarize_by_cell(): Kish's ICC cannot be estimated for %s, so the design ",
+        "effect of %s is unknown: %s standard errors%s are NA in every cell with ",
+        "two or more values%s. deff = 1 gives the uncorrected standard errors, ",
+        "those of each cell's own mean."),
+        paste(sprintf("'%s' (%s)", withheld, icc_reason[withheld]), collapse = ", "),
+        if (several) "those columns" else "that column", if (several) "their" else "its",
+        if (is.null(conf_level)) "" else ", effective n and intervals",
+        if (!is.null(primary) && primary %in% withheld) ", and so is cell_weight" else "",
+        data = list(columns = withheld, reason = icc_reason[withheld]))
+    }
+  }
+
+  # --- single grouped summarise for all columns ---
+  grouped <- df |> dplyr::group_by(.data[[id_col]])
 
   if (has_resp && has_pred) {
     out <- grouped |>
@@ -2830,6 +4215,30 @@ summarize_by_cell <- function(assigned_points_sf,
   # name and rename once nothing can shadow it.
   names(out)[names(out) == "..n_rows"] <- "n"
 
+  # --- a standard deviation beyond the largest double ---
+  # .cell_sd() gives Inf only where the spread inside the cell is of order
+  # 1e308; .se_with_deff() then returns NA, and that is said here.
+  sd_over <- integer(0)
+  for (sd_col in grep("^\\.\\.sd_(resp|pred)_", names(out), value = TRUE)) {
+    k_inf <- sum(is.infinite(out[[sd_col]]))
+    v <- sub("^\\.\\.sd_(resp|pred)_", "", sd_col)
+    if (k_inf > 0L && !(v %in% names(sd_over))) sd_over[[v]] <- k_inf
+  }
+  if (length(sd_over)) {
+    several <- length(sd_over) > 1L
+    .warn_classed("spatialkit_sd_overflow", paste0(
+      "summarize_by_cell(): the standard deviation of %s is beyond the largest ",
+      "double (about 1.8e308), so `..sd_*` is Inf in %s and the standard errors%s ",
+      "are NA there. Divide %s by a power of ten to summarise %s."),
+      paste(sprintf("'%s' (%d %s)", names(sd_over), sd_over,
+                    ifelse(sd_over == 1L, "cell", "cells")), collapse = ", "),
+      if (sum(sd_over) == 1L) "that cell" else "those cells",
+      if (is.null(conf_level)) "" else " and intervals",
+      if (several) "those columns" else "the column",
+      if (several) "them" else "it",
+      data = list(columns = names(sd_over), cells = unname(sd_over)))
+  }
+
   # cell_weight is the EFFECTIVE sample size of the primary variable -- the
   # response when there is one, else the first predictor -- so it is built from
   # that variable's non-missing count per cell, not from the row count: a cell
@@ -2862,17 +4271,30 @@ summarize_by_cell <- function(assigned_points_sf,
     # weight is built from that predictor's own ICC.  From an ICC pooled over
     # every predictor listed, an unclustered primary predictor's weight fell
     # from 12 to 2.12 when a clustered one was listed after it.
-    primary_rho <- if (has_resp) max(resp_rho, 0)
-                   else if (has_pred) max(pred_rho[[1L]], 0)
+    primary_rho <- if (has_resp) resp_rho
+                   else if (has_pred) pred_rho[[1L]]
                    else 0
-    deff_per_cell <- pmax(1, 1 + (n_valid_primary - 1) * primary_rho)
-    if (primary_rho > 0)
-      out$cell_weight <- n_valid_primary / deff_per_cell
+    if (is.na(primary_rho) && !(primary_col %in% icc_const_cols())) {
+      # The primary variable's ICC cannot be estimated, so its effective n is
+      # unknown in every cell of two or more values, as its ..neff_ is.  A
+      # cell of one value has a design effect of 1 whatever the ICC, and a
+      # cell of none a weight of 0.
+      deff_per_cell <- ifelse(n_valid_primary <= 1, 1, NA_real_)
+      out$cell_weight <- ifelse(n_valid_primary <= 1, n_valid_primary, NA_real_)
+    } else {
+      # A column that does not vary has an NA ICC and a design effect of 1.
+      primary_rho <- if (is.na(primary_rho)) 0 else max(primary_rho, 0)
+      deff_per_cell <- pmax(1, 1 + (n_valid_primary - 1) * primary_rho)
+      if (primary_rho > 0)
+        out$cell_weight <- n_valid_primary / deff_per_cell
+    }
     # Recorded whenever ANY ICC corrected its column.  Keyed on the
     # primary variable alone, a clustered predictor beside an unclustered
     # response had its SEs inflated 11x on rows marked deff_applied = FALSE,
-    # with no attribute.  `deff` stays the primary variable's (all 1 then).
-    if (max(resp_rho, pred_rho, 0) > 0) {
+    # with no attribute.  `deff` stays the primary variable's (all 1 then,
+    # or NA in its cells of two or more values when its ICC cannot be
+    # estimated).
+    if (max(resp_rho, pred_rho, 0, na.rm = TRUE) > 0) {
       attr(out, "deff_applied") <- c(list(
         method   = "kish",
         icc_resp = if (has_resp) resp_rho else NA_real_,
@@ -2935,11 +4357,15 @@ summarize_by_cell <- function(assigned_points_sf,
   # enough to apply: `deff_applied` is absent exactly when nothing was
   # applied, which is when a user most wants to see what the ICC came out
   # as.  NA for a variable type that had no numeric column.
+  # An ICC that cannot be estimated is NA, and `reason`, named by column,
+  # says why; the field is there only then, so every other result keeps the
+  # two fields it had.
   if (use_kish)
-    attr(out, "icc") <- list(
+    attr(out, "icc") <- c(list(
       resp = if (has_resp) as.numeric(resp_rho) else NA_real_,
       # Named by predictor column: each has its own.
-      pred = if (has_pred) pred_rho else NA_real_)
+      pred = if (has_pred) pred_rho else NA_real_),
+      if (length(icc_reason)) list(reason = icc_reason))
   # The same fact per row.  The attribute does not survive rbind(),
   # dplyr::bind_rows() or most dplyr verbs, so results combined across calls
   # (a simulation, a benchmark over many layers) could not tell a row whose
@@ -2971,7 +4397,8 @@ summarize_by_cell <- function(assigned_points_sf,
     # The design effect the t interval carries is the one recorded above as
     # applied, not the one asked for: a refused number, and Kish ICCs of 0 for
     # every column, leave the default's numbers, and the table of intervals
-    # then describes them as the default's.
+    # then describes them as the default's.  A column whose ICC cannot be
+    # estimated is named in either case: its intervals are NA.
     deff_carried <- attr(out, "deff_applied")
     pooled <- .pooled_columns(
       assigned_points_sf, df, id_col, out[[id_col]], resp_num, pred_num,
@@ -2981,8 +4408,10 @@ summarize_by_cell <- function(assigned_points_sf,
         # Under Kish each column has its own ICC, and one of 0 leaves that
         # column's standard error as it is.
         kish_zero = if (use_kish)
-          unique(c(if (has_resp && resp_rho <= 0) resp_num,
-                   if (has_pred) pred_num[pred_rho <= 0]))),
+          unique(c(if (has_resp && isTRUE(resp_rho <= 0)) resp_num,
+                   if (has_pred) pred_num[!is.na(pred_rho) & pred_rho <= 0])),
+        # and one that cannot be estimated leaves it NA.
+        kish_na = if (use_kish) icc_withheld() else character(0)),
       crs = count_crs)
     for (nm in names(pooled$columns)) out[[nm]] <- pooled$columns[[nm]]
     attr(out, "pooled")    <- pooled$record
@@ -3005,7 +4434,9 @@ summarize_by_cell <- function(assigned_points_sf,
         r <- pooled$record$columns[[paste0("resp_", response_var)]]
         return(list(n = r$n, cells = r$cells, loo = r$loo, status = r$status))
       }
-      loc <- if (!is.null(pooled)) pooled$loc else .pooled_xy(assigned_points_sf, count_crs)
+      loc <- if (!is.null(pooled)) pooled$loc
+             else .pooled_xy(assigned_points_sf, count_crs, "summarize_by_cell",
+                             "`assigned_points_sf`")
       res <- .pool_column(df[[response_var]], df[[id_col]], loc$xy, NULL, want = est,
                           use_fnn = .has_backend("FNN"))
       list(n = res$record$n, cells = res$record$cells,
@@ -3033,8 +4464,7 @@ summarize_by_cell <- function(assigned_points_sf,
       # with no geometry, and cells with 'id' and a differently numbered
       # 'cell_id' were joined on 'cell_id', putting most summaries on the
       # wrong polygons.
-      cells_id_candidates <- unique(c(id_col, "poly_id", "polygon_id", "id",
-                                      "cell_id", "grid_id"))
+      cells_id_candidates <- .cells_id_candidates(id_col)
       cells_id_found <- cells_id_candidates[cells_id_candidates %in% names(cells_sf)]
       if (length(cells_id_found) == 0L) {
         msg <- sprintf(paste0("`cells_sf` has none of the ID columns %s, so the ",
@@ -3128,7 +4558,15 @@ summarize_by_cell <- function(assigned_points_sf,
           # unit area.  Cells with no observations have n = NA after the
           # join and get a density of NA, not 0: no point was counted there
           # because the layer had none, which is not the same finding.
-          cell_area <- suppressWarnings(as.numeric(sf::st_area(sf::st_geometry(out))))
+          # Taken on the cells in XY when they mix dimensions (an XYZ cell
+          # among XY ones measured 1.6e14 square metres for 95 square km)
+          # or carry M, which GEOS does not read and stopped on; `out` keeps
+          # the cells' own geometry.  .planar_area() keeps the CRS's unit
+          # where sf has no name for it: sf::st_area() gave square metres
+          # there (1e6 for a square of 1000 m, which is 1e-6 in units of
+          # 1000 km).
+          cell_area <- suppressWarnings(
+            .planar_area(.xy_if_mixed_or_m(sf::st_geometry(out))))
           cell_area[!is.finite(cell_area) | cell_area <= 0] <- NA_real_
           out$cell_area  <- cell_area
           out$n_per_area <- as.numeric(out$n) / cell_area
@@ -3186,6 +4624,130 @@ summarize_by_cell <- function(assigned_points_sf,
 # searches then stop or disagree.
 .POOL_XY_MAX <- 1e150
 
+#' The features that have a coordinate without a location
+#'
+#' The test \code{.values_at_xy()} applies to a point, read on the x and y of
+#' every vertex: a coordinate that is not finite or lies beyond
+#' \code{.POOL_XY_MAX} is not a location.  A feature with one such vertex has
+#' no location as a whole, since no centre, area or transform of it can be
+#' taken.  Empty features are not counted: they are empty already.  The
+#' features are read one by one only when some coordinate of the layer is
+#' \code{NA}, not finite or beyond the bound; otherwise no feature can have
+#' such a vertex.  That test reads the coordinates themselves, not
+#' \code{sf::st_bbox()}: the box skips \code{NA}, so a ring with a vertex at
+#' \code{(NA, y)} passed as located, and sf keeps the box it stored on the
+#' column when a row is replaced with \code{[[<-}, so a row edited to
+#' \code{Inf} or \code{1e200} passed too.
+#'
+#' With \code{lat = TRUE}, a feature of a layer in a geographic CRS with a
+#' vertex at a latitude beyond 90 degrees (\code{.beyond_pole_features()})
+#' has no location either: no place on the Earth is there.  The readers of a
+#' caller's layer that empty its rows without a location before anything
+#' else reads them pass it (\code{.empty_unlocated(lat = TRUE)}).  The
+#' default reads the coordinates as numbers only, so the movers still
+#' compare such a row before and after a move and say the move cannot place
+#' it (\code{.rows_unplaced()}).
+#'
+#' @param g An sfc.
+#' @param lat \code{TRUE} to read a latitude beyond 90 degrees, in a layer
+#'   whose CRS is geographic, as no location.
+#' @return A logical vector, one element per feature.
+#' @keywords internal
+#' @noRd
+.unlocated_features <- function(g, lat = FALSE) {
+  n   <- length(g)
+  out <- logical(n)
+  if (!n) return(out)
+  if (isTRUE(lat) && .is_longlat(g))
+    return(.unlocated_features(g) | .beyond_pole_features(g))
+  # Empty polygons and lines hold no coordinate at all: v is then NULL.
+  v <- unlist(unclass(g), use.names = FALSE)
+  if (!length(v) || (!anyNA(v) && all(abs(v) <= .POOL_XY_MAX))) return(out)
+  off <- function(v) any(!is.finite(v) | abs(v) > .POOL_XY_MAX)
+  if (inherits(g, "sfc_POINT")) {
+    # x and y of each point, read point by point: sf::st_coordinates() of a
+    # layer of XY and XYZ points stops ("length of 'dimnames' [2] not equal
+    # to array extent").
+    xy <- matrix(unlist(lapply(unclass(g), `[`, 1:2), use.names = FALSE),
+                 ncol = 2L, byrow = TRUE)
+    empty <- is.na(xy[, 1L]) & is.na(xy[, 2L])
+    return(!empty & (!is.finite(xy[, 1L]) | !is.finite(xy[, 2L]) |
+                     abs(xy[, 1L]) > .POOL_XY_MAX | abs(xy[, 2L]) > .POOL_XY_MAX))
+  }
+  # A POINT is a vector, a LINESTRING or MULTIPOINT a matrix, and the other
+  # types (collections included) lists of those.
+  bad <- function(s) {
+    if (is.list(s)) return(any(vapply(s, bad, logical(1))))
+    if (is.matrix(s)) return(nrow(s) > 0L && off(s[, 1:2]))
+    length(s) >= 2L && !all(is.na(s)) && off(s[1:2])
+  }
+  vapply(unclass(g), bad, logical(1))
+}
+
+#' Give rows an empty geometry of their own type and dimension
+#'
+#' A row without a location (\code{.unlocated_features()}) is emptied before a
+#' reading it would otherwise shape: the bounding box a projection or a
+#' lon/lat test is read from, a centre, a distance score.  The empty geometry
+#' keeps the type and the dimensions of the feature, since sf needs one
+#' dimension per layer; an empty POINT holds \code{NA} coordinates.  The
+#' layer read with these rows emptied is read as the same layer with those
+#' rows empty to begin with.
+#'
+#' sf warns "bounding box has potentially an invalid value range for longlat
+#' data" whenever it reads the box of a lon/lat layer that holds a latitude
+#' beyond 90; with \code{lat = TRUE} that text is not passed on while the
+#' rows are emptied, and the layer returned no longer holds such a vertex,
+#' so sf has no reason to say it again.
+#'
+#' @param x An sf or sfc object.
+#' @param rows The rows to empty; \code{NULL} for the rows
+#'   \code{.unlocated_features()} finds.
+#' @param lat Passed to \code{.unlocated_features()}: \code{TRUE} empties
+#'   the rows of a lon/lat layer with a latitude beyond 90 degrees too.
+#' @return \code{x}, with those rows emptied; \code{x} itself when there are
+#'   none.
+#' @keywords internal
+#' @noRd
+.empty_unlocated <- function(x, rows = NULL, lat = FALSE) {
+  if (isTRUE(lat))
+    return(.muffle_lonlat_box(.empty_unlocated(
+      x, rows %||% which(.unlocated_features(sf::st_geometry(x), lat = TRUE)))))
+  g <- sf::st_geometry(x)
+  if (is.null(rows)) rows <- which(.unlocated_features(g))
+  if (!length(rows)) return(x)
+  g[rows] <- sf::st_sfc(lapply(rows, function(i) {
+    s   <- g[[i]]
+    cls <- class(s)
+    if (inherits(s, "POINT"))
+      sf::st_point(rep(NA_real_, nchar(cls[1L])), dim = cls[1L])
+    else if (is.matrix(s))
+      structure(unclass(s)[0L, , drop = FALSE], class = cls)
+    else structure(list(), class = cls)
+  }), crs = sf::st_crs(g))
+  if (inherits(x, "sf")) sf::st_set_geometry(x, g) else g
+}
+
+# sf's text for a lon/lat box that reaches beyond the poles or past
+# longitude 360 (sf::st_is_longlat()).
+.LONLAT_BOX_TEXT <- "bounding box has potentially an invalid value range for longlat data"
+
+#' Evaluate an expression without passing on sf's lon/lat box warning
+#'
+#' Only that text is muffled; every other condition passes as it comes.
+#' Used where the rows sf warns about are read as rows without a location
+#' (\code{.empty_unlocated(lat = TRUE)}), so the caller says it in its own
+#' words.
+#'
+#' @param expr The expression.
+#' @return The value of \code{expr}.
+#' @keywords internal
+#' @noRd
+.muffle_lonlat_box <- function(expr) {
+  withCallingHandlers(expr, warning = function(w)
+    if (identical(conditionMessage(w), .LONLAT_BOX_TEXT)) invokeRestart("muffleWarning"))
+}
+
 #' The coordinates the pooled values are computed from
 #'
 #' One row per row of the layer, in a projected CRS.  Features that are not
@@ -3198,35 +4760,79 @@ summarize_by_cell <- function(assigned_points_sf,
 #'
 #' A feature with an empty geometry has \code{NA} coordinates, and so has one
 #' with a coordinate beyond \code{.POOL_XY_MAX}: both are rows without a
-#' location to the caller.  The warning sf raises when it takes a point on
-#' the surface of a lon/lat polygon is not passed on: the point is one of the
-#' polygon's, and it is projected before any distance is taken.
+#' location to the caller.  The bound is read on the coordinates as given,
+#' before the projection, and again after it: a move between CRSs can bring
+#' a coordinate beyond the bound back finite (a northing of 1e200 in
+#' EPSG:32616 lands at a finite point in EPSG:32617), and a transform of it
+#' is not a place the caller gave.  The rows beyond it as given are emptied
+#' before the projection, so they take no part in choosing it: the layer is
+#' read as it is read with those rows empty.  The points on the surface of
+#' lon/lat polygons are \code{coerce_to_points()}'s, read as every other
+#' caller reads them: sf's warning about them is not passed on, and a
+#' polygon written across longitude 180 gets a point on it (or the warning
+#' of class \code{spatialkit_surface_point_off}).
+#' A layer that mixes XY and XYZ (or XYM) geometries is read in XY, since sf
+#' reads a layer in the dimension of its first geometry, and so is a layer
+#' whose geometries carry M, which GEOS does not read
+#' (\code{.xy_if_mixed_or_m()}); so are the points reduced from a layer whose
+#' points do not all have one dimension.  No geometry is returned, so the
+#' caller's keep their Z and M.
 #'
 #' @param layer The assigned layer.
 #' @param crs \code{NULL}, or the projected CRS to measure in: the one the
 #'   record of the cells' count names, in which the profile measured.  The
 #'   points are then put in that CRS, and no other is chosen.
+#' @param caller,arg The function and its argument that \code{layer} is,
+#'   which a refusal of a polygon s2 cannot take a centroid of in degrees,
+#'   or of a centroid GEOS puts outside its feature, names
+#'   (\code{.pointize_auto()}); \code{NULL} raises the refusal of
+#'   \code{coerce_to_points()} as it comes.
 #' @return \code{NULL} when the layer has no geometry (a plain data frame);
 #'   otherwise a list with \code{xy}, a two-column matrix, and \code{crs},
 #'   the CRS its distances are measured in.
 #' @keywords internal
 #' @noRd
-.pooled_xy <- function(layer, crs = NULL) {
+.pooled_xy <- function(layer, crs = NULL, caller = NULL, arg = NULL) {
   if (!inherits(layer, "sf")) return(NULL)
   if (nrow(layer) == 0L)
     return(list(xy = matrix(numeric(0), 0L, 2L), crs = sf::st_crs(layer)))
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in XY: sf reads
+  # a layer in the dimension of its first geometry.  So is a layer whose
+  # geometries carry M, which GEOS does not read (.xy_if_mixed_or_m()).  The
+  # points reduced from a layer in one dimension can mix them (the point on
+  # the surface of a POLYGON Z is XY beside the POINT Z rows kept), so they
+  # are tested again.  Points in an sfc_GEOMETRY column are read as the same
+  # points in sfc_POINT (.typed_points()): sf::st_coordinates() refuses that
+  # class.
+  layer <- .xy_if_mixed_or_m(.typed_points(layer))
+  # A row of a layer in a geographic CRS with a vertex at a latitude beyond
+  # 90 degrees has no location (.unlocated_features(lat = TRUE)), and is
+  # emptied before the reduction to points: a polygon with such a vertex got
+  # a point from GEOS, with sf's bare "bounding box has potentially an
+  # invalid value range for longlat data", and was pooled there.
+  layer <- .empty_unlocated(layer, .beyond_pole_rows(layer), lat = TRUE)
   if (!all(sf::st_geometry_type(layer, by_geometry = TRUE) == "POINT"))
-    layer <- withCallingHandlers(
-      coerce_to_points(layer, "auto"),
-      warning = function(w)
-        if (grepl("st_point_on_surface may not give correct results",
-                  conditionMessage(w), fixed = TRUE))
-          invokeRestart("muffleWarning"))
-  layer <- if (is.null(crs)) ensure_projected(layer)
-           else ensure_projected(layer, target_crs = crs)
+    layer <- .xy_if_mixed(
+      if (is.null(caller)) coerce_to_points(layer, "auto")
+      else .pointize_auto(layer, caller, arg))
+  given <- unname(sf::st_coordinates(layer)[, 1:2, drop = FALSE])
+  far_given <- abs(given[, 1L]) > .POOL_XY_MAX | abs(given[, 2L]) > .POOL_XY_MAX
+  # Those rows are emptied before the projection: the bounding box it is
+  # chosen from, and the test of a layer without a CRS for lon/lat, then read
+  # what they read with the rows emptied.  The empty point keeps the
+  # dimensions of the feature, as sf needs one dimension per layer.
+  layer <- .empty_unlocated(layer, which(far_given))
+  # A row the move cannot place comes back empty and gets NA coordinates
+  # below, and both callers (summarize_by_cell(), cell_values_at()) report
+  # it in their own words, so ensure_projected()'s warning about it, which
+  # names `x`, is not given as well.
+  done  <- .answer_for_classed("spatialkit_rows_unplaced")
+  layer <- tryCatch(if (is.null(crs)) ensure_projected(layer)
+                    else ensure_projected(layer, target_crs = crs),
+                    finally = done())
   xy <- unname(sf::st_coordinates(layer)[, 1:2, drop = FALSE])
   far <- abs(xy[, 1L]) > .POOL_XY_MAX | abs(xy[, 2L]) > .POOL_XY_MAX
-  xy[which(far), ] <- NA_real_
+  xy[which(far | far_given), ] <- NA_real_
   list(xy = xy, crs = sf::st_crs(layer))
 }
 
@@ -3241,19 +4847,27 @@ summarize_by_cell <- function(assigned_points_sf,
 #'   \code{NULL} when no correction was applied.
 #' @param kish_zero Under Kish's correction, the columns whose ICC is 0 and
 #'   whose standard errors are therefore the uncorrected ones.
+#' @param kish_na Under Kish's correction, the columns whose ICC cannot be
+#'   estimated and whose standard errors are therefore \code{NA}.
 #' @return One string for \code{.intervals_table()}: \code{1},
 #'   \code{"kish"} or \code{"variogram"} with their quotes, or the number.
-#'   It reads \code{1} only when nothing was applied: the table takes the
-#'   words of its row from that.
+#'   It reads \code{1}, alone or before a semicolon, only when nothing was
+#'   applied: the table takes the words of its row from that.  The columns
+#'   in \code{kish_na} are named after a semicolon, after \code{1} as after
+#'   \code{"kish"}: a request that corrected no column can still leave one
+#'   \code{NA}.
 #' @keywords internal
 #' @noRd
-.deff_label <- function(applied, kish_zero = character(0)) {
-  if (is.null(applied)) return("1")
+.deff_label <- function(applied, kish_zero = character(0), kish_na = character(0)) {
+  na_txt <- if (length(kish_na))
+    sprintf("; NA for %s, whose ICC cannot be estimated", .cols_text(kish_na))
+  if (is.null(applied)) return(paste0("1", na_txt))
   switch(applied$method,
     kish = paste0(
       "\"kish\"",
       if (length(kish_zero))
-        sprintf("; 1 for %s, whose ICC is 0", .cols_text(kish_zero))),
+        sprintf("; 1 for %s, whose ICC is 0", .cols_text(kish_zero)),
+      na_txt),
     variogram = "\"variogram\"",
     {
       # A number applied is above 1, and is written so that it does not read 1.
@@ -3285,7 +4899,9 @@ summarize_by_cell <- function(assigned_points_sf,
 #'   \code{.pooled_xy()} takes it.
 #' @return A list: \code{columns}, the new columns by name, in the order they
 #'   are appended; \code{record}, the list of class \code{spatialkit_pooled};
-#'   \code{events}, what \code{.pooled_warnings()} reads; and \code{loc}, the
+#'   \code{events}, what \code{.pooled_warnings()} reads (with
+#'   \code{response}, the response columns, which its texts tell from the
+#'   predictors); and \code{loc}, the
 #'   coordinates the columns were fitted on (\code{.pooled_xy()}'s list).
 #' @keywords internal
 #' @noRd
@@ -3293,7 +4909,7 @@ summarize_by_cell <- function(assigned_points_sf,
                             obs_level, conf_level, deff_label, crs = NULL) {
   use_fnn <- .has_backend("FNN")
   id   <- df[[id_col]]
-  loc  <- .pooled_xy(layer, crs)
+  loc  <- .pooled_xy(layer, crs, "summarize_by_cell", "`assigned_points_sf`")
   xy   <- loc$xy
   cols <- unique(c(resp_num, pred_num))
   located <- if (is.null(xy)) NULL else is.finite(xy[, 1L]) & is.finite(xy[, 2L])
@@ -3362,7 +4978,9 @@ summarize_by_cell <- function(assigned_points_sf,
     work    = vapply(fits, function(r) as.numeric(r$work), numeric(1)),
     limit   = vapply(fits, function(r) as.numeric(r$limit), numeric(1)),
     skipped_rows  = sum(unlocated),
-    skipped_cells = length(unique(id[unlocated])))
+    skipped_cells = length(unique(id[unlocated])),
+    skipped_ll    = inherits(layer, "sf") && .is_longlat(layer),
+    response      = resp_num)
   list(columns = columns, record = record, events = events, loc = loc)
 }
 
@@ -3423,15 +5041,27 @@ summarize_by_cell <- function(assigned_points_sf,
   w <- cols[status == "work limit"]
   if (length(w)) {
     top <- w[which.max(cells[w])]             # the column with the most cells
+    nums <- .count_text(c(ev$work[[top]], ev$limit[[top]]))
     .warn_classed("spatialkit_pool_unavailable", paste0(
       "summarize_by_cell(): the pooled columns of %s are NA: finding each cell's ",
-      "neighbours among %d cells without the FNN package would compare %.2g pairs, ",
-      "above the limit of %.2g (options(spatialkit.exact_pairs_max = )). Install FNN: ",
-      "the result is the same. The plain columns are unaffected."),
-      .cols_text(w), cells[[top]], ev$work[[top]], ev$limit[[top]],
+      "neighbours among %d cells without the FNN package would compare %s pairs, ",
+      "above the limit of %s (options(spatialkit.exact_pairs_max = )). %s The plain ",
+      "columns are unaffected."),
+      .cols_text(w), cells[[top]], nums[1L], nums[2L], .FNN_REMEDY,
       data = list(reason = "work limit", columns = w, work = ev$work[[top]],
                   limit = ev$limit[[top]], cells = cells[w]))
   }
+  w <- cols[status == "values out of range"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_unavailable", paste0(
+      "summarize_by_cell(): the pooled columns of %s are NA: %s values lie beyond what the ",
+      "arithmetic of pooled values holds, which is values up to %s in absolute value whose ",
+      "largest distance from their median is at least %s; beyond these bounds the squares ",
+      "of many values can overflow or lose their precision. Rescaled by a power of ten to ",
+      "within that, %s pooled. The plain columns are unaffected."),
+      .cols_text(w), if (one(w)) "its" else "their", .bound_text(.POOL_Y_MAX),
+      .bound_text(.POOL_Y_MIN), if (one(w)) "the column is" else "the columns are",
+      data = list(reason = "values out of range", columns = w))
 
   # ---- the pooled values carry no pooling ------------------------------------
   w <- cols[status == "one cell"]
@@ -3444,9 +5074,9 @@ summarize_by_cell <- function(assigned_points_sf,
   w <- cols[status == "no spread inside any cell"]
   if (length(w))
     .warn_classed("spatialkit_pool_degenerate", paste0(
-      "summarize_by_cell(): the values of %s do not vary inside any cell, so every ",
-      "own weight is 1 and the pooled value is the plain mean. attr(, \"pooled\") says ",
-      "which columns are constant."),
+      "summarize_by_cell(): the values of %s do not vary inside any cell, to the ",
+      "precision of the values, so every own weight is 1 and the pooled value is the ",
+      "plain mean. attr(, \"pooled\") says which columns are constant."),
       .cols_text(w),
       data = list(reason = "no spread inside any cell", columns = w,
                   constant = of("constant", as.logical)[w]))
@@ -3467,15 +5097,25 @@ summarize_by_cell <- function(assigned_points_sf,
   # count of cells or of values there, and nothing is said of either.
   fitted <- status %in% c("ok", "no signal between cells")
   w <- cols[fitted & cells >= 2L & cells <= 9L]
-  if (length(w))
+  if (length(w)) {
+    # Two cells and tau2 at 0: every own weight is 0 and each cell's target
+    # is the other cell's mean, so the pooled values are the plain means
+    # exchanged.  The text names the columns this happened to.
+    swap <- w[cells[w] == 2L & status[w] == "no signal between cells"]
+    swapped <- if (!length(swap)) "" else sprintf(paste0(
+      " For %s, with 2 cells and `tau2` at 0, each cell's pooled value is the other ",
+      "cell's mean: the two cells' values change places."), .cols_text(swap))
     .warn_classed("spatialkit_pool_few_cells", paste0(
       "summarize_by_cell(): %s %s values in fewer than 10 cells (%s), so each cell's ",
-      "target is the mean of all the other cells, not of cells near it. A cell with a ",
-      "small own weight then gets a pooled value on the far side of the overall mean ",
-      "from its plain mean, and two cells can change order. The `..pooled_w_*` columns ",
-      "hold the weights; estimate = \"mean\" gives the plain means."),
-      .cols_text(w), if (one(w)) "has" else "have", listed(cells[w]),
+      "target is the mean of all the other cells, not of cells near it. A cell whose ",
+      "own weight is below its share of the column's rows then gets a pooled value on ",
+      "the far side of the overall mean from its plain mean, and two cells can change ",
+      "order.%s ",
+      "The `..pooled_w_*` columns hold the weights; estimate = \"mean\" gives the plain ",
+      "means."),
+      .cols_text(w), if (one(w)) "has" else "have", listed(cells[w]), swapped,
       data = list(columns = w, cells = cells[w], own_weight = ev$w_min[w]))
+  }
   w <- cols[fitted & cells >= 2L & df >= 1L & df < .POOL_MIN_DF]
   if (length(w))
     .warn_classed("spatialkit_pool_few_df", paste0(
@@ -3510,13 +5150,18 @@ summarize_by_cell <- function(assigned_points_sf,
     # sentences, which are what the reader has to see and R prints a warning's
     # first getOption("warning.length") characters only.
     inside <- if (one(w)) sprintf(" (%s)", says) else ""
+    # What a smooth-looking map does not show: the response, when the
+    # response alone is named; a predictor is not the response.
+    smooth <- if (all(worse %in% ev$response) && one(worse)) "the response varies"
+              else if (one(worse)) "the column varies"
+              else "the columns vary"
     text <- c(
       if (length(worse)) sprintf(paste0(
         "the pooled values of %s predict a left-out observation no better than one ",
         "mean for all rows%s, so %s no spatial structure these cells can use. The ",
         "values are returned. A map of them looks smooth because each is mostly its ",
-        "neighbours' mean, not because the response varies smoothly."),
-        .cols_text(worse), inside, if (one(worse)) "it shows" else "they show"),
+        "neighbours' mean, not because %s smoothly."),
+        .cols_text(worse), inside, if (one(worse)) "it shows" else "they show", smooth),
       if (length(untold)) sprintf(paste0(
         "%s pooled values of %s predict a left-out observation better than one mean ",
         "for all rows, but the F test does not tell the cell means from one mean%s, so ",
@@ -3535,10 +5180,9 @@ summarize_by_cell <- function(assigned_points_sf,
   # ---- rows left out, and what the interval rests on --------------------------
   if (ev$skipped_rows > 0L)
     .warn_classed("spatialkit_pool_rows_skipped", paste0(
-      "summarize_by_cell(): %d row(s) in %d cell(s) have empty or non-finite ",
-      "coordinates. They count in `n` and the plain columns and take no part in the ",
-      "pooled columns."),
-      ev$skipped_rows, ev$skipped_cells,
+      "summarize_by_cell(): %d row(s) in %d cell(s) have no location (%s). They count ",
+      "in `n` and the plain columns and take no part in the pooled columns."),
+      ev$skipped_rows, ev$skipped_cells, .unlocated_what(ev$skipped_ll),
       data = list(n = ev$skipped_rows, cells = ev$skipped_cells,
                   columns = cols[of("skipped", as.integer) > 0L]))
   if (!is.null(obs_level)) {
@@ -3647,7 +5291,12 @@ print.spatialkit_pooled <- function(x, ...) {
     r <- x$columns[[nm]]
     cat(sprintf("Cell values: %s, %s in %s\n", r$column, count(r$n, "row"),
                 count(r$cells, "cell")))
-    if (!identical(r$status, "ok")) {
+    # A column with tau2 = 0 is fitted, and each of its values is its target.
+    # Its block is printed in full, with a line that says so in place of the
+    # status: its cells can still predict a left-out row better than one
+    # mean, and the loo line says whether they do.
+    no_tau2 <- identical(r$status, "no signal between cells")
+    if (!identical(r$status, "ok") && !no_tau2) {
       cat(label("status"), r$status, "\n", sep = "")
       next
     }
@@ -3660,6 +5309,13 @@ print.spatialkit_pooled <- function(x, ...) {
         "between a cell and its target ", sci(r$tau2), "\n", sep = "")
     cat(label("own weight"), sprintf("median %.2f (..pooled_w_%s)\n", r$own_weight, nm),
         sep = "")
+    if (no_tau2)
+      cat(label("note"),
+          paste(strwrap(paste0("tau2 is 0: every own weight is 0, and each value is its ",
+                               "neighbours' mean, with none of the cell's own rows in it"),
+                        width = 62),
+                collapse = paste0("\n", indent)),
+          "\n", sep = "")
     cat(label("alone"), sprintf("%.1f%% of the rows are the only one in their cell\n",
                                 100 * r$share_alone), sep = "")
     cat(label("loo"), sci(r$loo),

@@ -225,6 +225,16 @@ test_that("on gridded locations the check says match exactly when no row was pla
     by_polygons <- assign_features_to_polygons(pts, bare, polygon_id_col = "cell_id", quiet = TRUE)
     on_edge[info] <- sum(by_polygons$cell_id[match(pts$row, by_polygons$row)] != scored_in,
                          na.rm = TRUE)
+    # Those rows are on a boundary too: the centre of the cell the polygons
+    # gave them is as near as their nearest centre.
+    off <- which(by_polygons$cell_id[match(pts$row, by_polygons$row)] != scored_in)
+    if (length(off)) {
+      d2b <- function(rows, centre) (xy[rows, 1L] - cen[centre, 1L])^2 +
+                                    (xy[rows, 2L] - cen[centre, 2L])^2
+      got <- match(by_polygons$cell_id[match(pts$row, by_polygons$row)][off], tess$index)
+      own <- match(scored_in[off], tess$index)
+      expect_true(all(abs(d2b(off, got) - d2b(off, own)) / d2b(off, own) < 1e-6), info = info)
+    }
     # A row placed in another cell than the profile's is a row on a boundary:
     # the centre of the cell it was placed in is as near as its nearest
     # centre, exactly or to the rounding of the coordinates.  Any other row
@@ -270,27 +280,36 @@ test_that("on gridded locations the check says match exactly when no row was pla
                  else "loo"
       expect_identical(w[[1L]]$what, kind_of, info = info)
       expect_identical(w[[1L]]$found$n, 3000L - unassigned, info = info)
-      if (identical(kind_of, "loo"))
+      # This branch runs only where the edge rule did not hold on this
+      # platform: a row on a boundary that the rule did not reach was placed
+      # by the polygons alone, and the warning names that cause.
+      if (identical(kind_of, "loo")) {
         expect_match(conditionMessage(w[[1L]]),
-                     "rows exactly on a boundary between two cells (gridded locations)",
+                     "so rows sit in other cells than the profile put them in, or values changed.",
                      fixed = TRUE)
+        expect_match(conditionMessage(w[[1L]]),
+                     "A row on or near a boundary can sit in the neighbouring cell when the polygons alone placed it",
+                     fixed = TRUE)
+      }
     }
   }
   # Which lattice has rows on a boundary rests on exact ties, which another
   # GEOS or another arithmetic can settle the other way, so the counts are
   # held only on the platform the frozen fixture was recorded on.  There the
   # polygons alone put no row of either lattice in another cell than the
-  # profile's under the k-means kind, and 5 and 7 of 3,000 under the density
-  # kind, every one of them on a boundary; the assignment, on cells that
-  # carry the scored centres, gives each of them the cell the profile scored
-  # it in, so no row is elsewhere and the check reads match on all four.
-  # test-core-gridded-ties.R holds the branch that reports rows elsewhere.
+  # profile's under the k-means kind, and under the density kind 15 of 3,000
+  # on each lattice, all on a boundary (a point within the margin of an edge is
+  # on it, and the smallest-area rule settles it); the
+  # assignment, on cells that carry the scored centres, gives each of them the
+  # cell the profile scored it in, so no row is elsewhere and the check reads
+  # match on all four.  test-core-gridded-ties.R holds the branch that reports
+  # rows elsewhere.
   expect_identical(names(moved_in), c("whole metres kmeans", "whole metres density",
                                       "spacing 0.7 kmeans", "spacing 0.7 density"))
   expect_identical(names(on_edge), names(moved_in))
   recorded <- readRDS(test_path("fixtures", "core-frozen.rds"))$info
   if (core_frozen_same_platform(core_frozen_platform(), recorded)) {
-    expect_identical(unname(on_edge), c(0L, 5L, 0L, 7L))
+    expect_identical(unname(on_edge), c(0L, 15L, 0L, 15L))
     expect_identical(unname(moved_in), c(0L, 0L, 0L, 0L))
   }
 })

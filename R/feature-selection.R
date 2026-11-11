@@ -11,16 +11,17 @@
 #' variable has a baseline to beat with every learner, so the selection can
 #' be empty.
 #'
-#' \strong{The inner folds must be spatial, and that is the entire point.}
-#' Nested selection is only worth doing if the inner loop is blocked the same
-#' way the outer one is.  Random inner folds inside blocked outer folds select
-#' variables that look predictive only because nearby points leak between
-#' train and test.  The outer loop then reports honest-looking numbers for a
-#' dishonestly chosen feature set, which is worse than not selecting at all,
-#' because the dishonesty is now hidden behind a defensible-looking validation.
-#' \code{method} therefore defaults to \code{"block_kfold"} and logs a loud
-#' caution if set to \code{"random_kfold"} (a deliberate choice, so it is not
-#' raised as an R warning).
+#' \strong{The inner folds should hold points out as the outer ones do.}
+#' A cross-validated score is the error at the distance the folds put
+#' between the held-out points and their training data, so nested selection
+#' chooses the variables that predict best at the inner folds' distance.
+#' Random inner folds inside blocked outer folds choose for predicting among
+#' the samples, where a variable that only tracks nearby values of the
+#' response can win, and the outer loop then scores the chosen set at the
+#' blocks' distance, for which it was not chosen.  \code{method} therefore
+#' defaults to \code{"block_kfold"}, as the folds of the \code{cv_*()}
+#' functions do, and logs a loud caution if set to \code{"random_kfold"} (a
+#' deliberate choice, so it is not raised as an R warning).
 #'
 #' Call this \emph{inside} the \code{fit_fn} you pass to \code{cv_spatial()}.
 #' \code{.cv_fit_one_fold()} calls \code{fit_fn(train_sf)} on the training
@@ -195,7 +196,10 @@
 #' \code{train_sf} and returns the selected set's score on the other as
 #' \code{score_holdout}.
 #'
-#' @param train_sf Training data (\code{sf}).
+#' @param train_sf Training data (\code{sf}).  With \code{select_on =
+#'   "split"} a feature that is not a point is reduced to one, and a layer
+#'   whose geometries mix XY with XYZ or XYM, or carry M (XYM or XYZM), is
+#'   read in x and y.
 #' @param response_var Character(1).
 #' @param candidate_vars Character vector of predictors to choose among.
 #' @param fit_fn A function \code{(train_sf, predictor_vars)} returning a
@@ -229,13 +233,14 @@
 #' @param auto_range Logical.  If \code{TRUE} and \code{method} is
 #'   \code{"block_kfold"}, the autocorrelation range is estimated from the
 #'   response (detrended on the candidates) and used as the minimum block
-#'   size of the inner folds, exactly as in \code{\link{make_folds}()};
-#'   \code{block_size} still applies as a floor.  Default \code{FALSE}, which
-#'   keeps the geometric blocks.  Inner blocks smaller than the range let a
-#'   candidate be selected for spatial proximity to the response rather than
-#'   for predicting it, which is the same failure the \code{random_kfold}
-#'   caution above exists to prevent, so the leakage warning
-#'   \code{make_folds()} raises applies here with more force than usual.
+#'   size of the inner folds, exactly as in \code{\link{make_folds}()}:
+#'   a \code{block_size} given takes precedence, and the range is then only
+#'   compared with it.  Default \code{FALSE}, which
+#'   keeps the geometric blocks.  With inner blocks smaller than the range a
+#'   candidate can be chosen for tracking nearby values of the response, the
+#'   case the \code{random_kfold} caution above is about, so the warning
+#'   \code{make_folds()} raises on blocks smaller than the range applies to
+#'   the inner folds too.
 #' @param select_on \code{"all"} (default) runs the sweep on every row of
 #'   \code{train_sf}.  \code{"split"} runs it on one spatially blocked half,
 #'   then fits the selected set on that half and scores it on the other:
@@ -497,6 +502,11 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
               sum(!keep), sum(keep))
     train_sf <- train_sf[keep, , drop = FALSE]
   }
+  # Said here, once for the sweep: the first cross-validation, of the null
+  # model, runs with its warnings silenced, and the run then holds back the
+  # same warning from every later one (.warn_response_imprecise()).
+  .warn_response_imprecise(sf::st_drop_geometry(train_sf)[[response_var]],
+                           "select_features_forward", response_var)
 
   # Sample splitting: the sweep sees the selection half only; the estimation
   # half scores the chosen set afterwards.  .spatial_half_split()'s positions
@@ -504,8 +514,15 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   split <- NULL
   holdout_sf <- NULL
   if (identical(select_on, "split")) {
+    # A layer that mixes XY and XYZ (or XYM) geometries, or whose
+    # geometries carry M, which GEOS does not read, is pointized in x and y,
+    # as prep_model_data() pointizes it.  A polygon s2 cannot take a centroid
+    # of in degrees is refused in this function's words, naming its row of
+    # `train_sf` as passed, before the completeness filter (.pointize_auto()).
     if (!all(sf::st_geometry_type(train_sf, by_geometry = TRUE) == "POINT"))
-      train_sf <- coerce_to_points(train_sf, "auto")
+      train_sf <- .xy_if_mixed(.pointize_auto(.xy_if_mixed_or_m(train_sf),
+                                              "select_features_forward", "`train_sf`",
+                                              at = unname(which(keep)), n = length(keep)))
     split <- .spatial_half_split(train_sf, seed = seed,
                                  caller = "select_features_forward")
     holdout_sf <- train_sf[split$estimation, , drop = FALSE]
@@ -523,14 +540,18 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
                  nrow(train_sf), nrow(holdout_sf)))
   }
 
+  # In the words of the help's Details and vignette("diagnostics"): what
+  # each loop scores, not a direction with no target.
   if (identical(method, "random_kfold"))
     .log_warn(paste0("select_features_forward(): random_kfold inner folds ",
-                     "leak spatial autocorrelation between train and test. ",
-                     "Variables can then be selected for being spatially ",
-                     "close to the response rather than predictive of it, and ",
-                     "an outer blocked loop will report honest-looking numbers ",
-                     "for a dishonestly chosen feature set. Use ",
-                     "'block_kfold' unless you know why you are not."))
+                     "score each candidate set by its error among the ",
+                     "samples, so the sweep chooses the variables that ",
+                     "predict best there, where one that only tracks nearby ",
+                     "values of the response can win. A blocked outer loop ",
+                     "then scores the chosen set at the blocks' distance, ",
+                     "for which it was not chosen. Use inner folds that hold ",
+                     "points out as the outer ones do: 'block_kfold', the ",
+                     "default, inside blocked outer folds."))
 
   p <- length(candidate_vars)
   max_steps <- if (is.null(max_vars)) p else min(p, as.integer(max_vars))
@@ -551,24 +572,32 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   #
   # Fold construction does not depend on the candidate set: make_folds() reads
   # `predictor_vars` only to detrend the range estimate (under auto_range, and
-  # for the leakage diagnostic), which uses the full candidate list whatever
-  # the sweep has selected so far, and every other argument is fixed across
-  # the sweep.  Rebuilding them inside score_set() therefore produced the same
-  # splits p^2/2 times -- repeating every block-size warning as many times --
-  # and, worse, put make_folds() OUTSIDE the try() below, so a single
+  # for the check of the blocks against the range), which uses the full
+  # candidate list whatever the sweep has selected so far, and every other
+  # argument is fixed across the sweep.  Rebuilding them inside score_set()
+  # therefore produced the same splits p^2/2 times -- repeating every
+  # block-size warning as many times --
+  # and, worse, put make_folds() OUTSIDE the tryCatch() below, so a single
   # fold-construction failure (block_kfold raising when the geometry collapses
   # to one block, say) killed the whole sweep instead of the candidate being
   # scored NA.  It cannot be a per-candidate NA in any case: if the folds
   # cannot be built, no candidate is scorable, so this is one informative
   # error instead of p^2/2 silent ones.
-  folds <- try(make_folds(train_sf, k = k, method = method, seed = seed,
-                          block_size = block_size, auto_range = auto_range,
-                          response_var = response_var,
-                          predictor_vars = candidate_vars), silent = TRUE)
-  if (inherits(folds, "try-error"))
+  # make_folds() refuses a polygon s2 cannot take a centroid of in degrees
+  # naming its `points_sf`; that refusal is raised again in this function's
+  # words with its class, naming the row of `train_sf` as passed, since
+  # neither `method`, `k` nor `block_size` is the way on.
+  folds <- tryCatch(make_folds(train_sf, k = k, method = method, seed = seed,
+                               block_size = block_size, auto_range = auto_range,
+                               response_var = response_var,
+                               predictor_vars = candidate_vars),
+                    error = function(e) e)
+  if (inherits(folds, "spatialkit_features_degenerate"))
+    .pointize_refused(folds, "select_features_forward", arg = "`train_sf`",
+                      at = unname(which(keep)), n = length(keep))
+  if (inherits(folds, "error"))
     stop("select_features_forward(): could not build the inner CV folds, so no ",
-         "candidate can be scored: ",
-         trimws(conditionMessage(attr(folds, "condition"))),
+         "candidate can be scored: ", trimws(conditionMessage(folds)),
          " Adjust `method`, `k` or `block_size`.", call. = FALSE)
 
   # Every set is scored on ONE fixed row set, `ref_ids`: the rows the null
@@ -594,6 +623,12 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
     }
     # cv_spatial()'s own partial-failure warning is muffled: the consequence
     # for the sweep is reported below, once per step, in the sweep's terms.
+    # The folds also record the training mean about a centre where the raw
+    # response loses its spread, for the fold-mean baseline
+    # (.fs_fold_mean_predictions()); cv_spatial() reads the request as it
+    # starts.
+    .cv_request$fold_mean_centre <- TRUE
+    on.exit(.cv_request$fold_mean_centre <- NULL, add = TRUE)
     res <- try(withCallingHandlers(
       suppressMessages(
         cv_spatial(train_sf, response_var, vars, fit_fn = noting_fit,
@@ -634,7 +669,7 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
     d  <- d[is.finite(d)]
     out$n <- length(d)
     if (length(d) >= 1L) out$mean <- mean(d)
-    if (length(d) >= 2L) out$se <- stats::sd(d) / sqrt(length(d))
+    if (length(d) >= 2L) out$se <- .sd_any_size(d) / sqrt(length(d))
     out
   }
   # Does a gain count?  Always more than `tol` on the pooled score; under
@@ -844,12 +879,14 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
     # improves on it, and the function returns an empty selection and an NA
     # score with -- until this -- no word about why.  Two different predictor
     # sets do not produce the same cross-validated metric to the last digit,
-    # so the signature is unambiguous.
+    # so the signature is unambiguous.  The scores are compared relative to
+    # the null score: all.equal(tolerance = 1e-12) compares absolute
+    # differences when the scores are below 1e-12, so a working fit_fn on a
+    # response in small units counted as one that ignores its argument.
     if (length(selected) == 0L && length(step_scores) >= 2L &&
         identical(baseline_type, "null model") &&
         is.finite(null_score) && all(is.finite(step_scores)) &&
-        isTRUE(all.equal(unname(step_scores), rep(null_score, length(step_scores)),
-                         tolerance = 1e-12)))
+        all(abs(step_scores - null_score) <= 1e-12 * abs(null_score)))
       .warn_and_log(paste0(
         "select_features_forward(): every candidate scored exactly what the ",
         "intercept-only model scored (%s = %.6g), so `fit_fn` appears to be ",
@@ -998,13 +1035,30 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   if (!is.null(holdout_sf) && length(selected) > 0L) {
     score_holdout <- tryCatch({
       fit <- fit_fn(train_sf, selected)
-      yh  <- as.numeric(do.call(stats::predict, list(object = fit, newdata = holdout_sf)))
+      # Scored against `response_var`, as each fold of the sweep is
+      # (.cv_fit_one_fold()): a fit of another response is not scored.
+      if (!identical(unname(fit$response_var), unname(response_var)))
+        stop(sprintf("fit_fn() returned a fit %s, where the call's `response_var` is '%s'",
+                     if (is.character(fit$response_var) && length(fit$response_var) == 1L &&
+                         !is.na(fit$response_var))
+                       sprintf("of '%s' (its `response_var`)", fit$response_var)
+                     else "whose `response_var` is not one column name",
+                     response_var))
+      # A GWR whose response the fit took about a centre is scored on the
+      # values less that centre (.scored_predictions()).
+      sp  <- .scored_predictions(fit, holdout_sf)
+      yh  <- as.numeric(sp$yhat_centred)
+      yc  <- sp$centre
       y   <- as.numeric(sf::st_drop_geometry(holdout_sf)[[response_var]])
       if (length(yh) != length(y))
         stop(sprintf("predict() returned %d values for %d rows", length(yh), length(y)))
       y_tr <- as.numeric(sf::st_drop_geometry(train_sf)[[response_var]])
-      met <- .compute_reg_metrics(y, yh, p = NULL,
-                                  y_train_mean = mean(y_tr[is.finite(y_tr)]))
+      met <- if (yc != 0)
+        .compute_reg_metrics(y - yc, yh, p = NULL,
+                             y_train_mean = .train_mean(y_tr, yc),
+                             centre = yc)
+      else .compute_reg_metrics(y, yh, p = NULL,
+                                y_train_mean = .train_mean(y_tr))
       v <- met[[metric]]
       if (is.null(v) || !is.finite(v)) NA_real_ else as.numeric(v)
     }, error = function(e) {
@@ -1059,6 +1113,18 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
 #' of a model with no predictors, on the same rows and the same folds, at no
 #' further fit.
 #'
+#' A response at a large offset (1e15 plus a spread of a few units) is
+#' held to an eighth, and so is its training mean: scored as it stands, the
+#' baseline would read that rounding and move with the response's origin.
+#' Where a row's fold took the response about a centre, the frame carries
+#' that centre and the training mean less it, and
+#' \code{.cv_overall_metrics()} scores the row on the values less the
+#' centre: a GWR fitted about a centre (\code{y_centre},
+#' \code{y_train_mean_centred}), or a fit with none whose raw training
+#' response loses its spread (\code{.cv_mean_centre_cols}, which the folds
+#' record for this sweep).  Where no row has a centre the frame is the
+#' plain one.
+#'
 #' @param runs A list of prediction frames (or \code{NULL}s) from the sweep.
 #' @return A prediction frame with one row per row any run predicted, or
 #'   \code{NULL} when no run predicted anything.
@@ -1069,11 +1135,33 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   ok <- Filter(function(pr) is.data.frame(pr) && nrow(pr) > 0L &&
                  all(need %in% names(pr)), runs)
   if (!length(ok)) return(NULL)
-  bp <- do.call(rbind, lapply(ok, function(pr) pr[, need, drop = FALSE]))
+  # Each row's centre (0 for none) and its fold's training mean less it.
+  about <- function(pr, cols) {
+    ct <- rep(0, nrow(pr)); tm <- pr$y_train_mean
+    for (cn in cols) {
+      if (!all(cn %in% names(pr))) next
+      c0 <- pr[[cn[1L]]]
+      has <- ct == 0 & is.finite(c0) & c0 != 0
+      ct[has] <- c0[has]
+      tm[has] <- pr[[cn[2L]]][has]
+    }
+    out <- pr[, need, drop = FALSE]
+    out$y_centre <- ct
+    out$y_train_mean_centred <- tm
+    out
+  }
+  cols <- list(c("y_centre", "y_train_mean_centred"), .cv_mean_centre_cols)
+  bp <- do.call(rbind, lapply(ok, about, cols = cols))
   bp <- bp[!duplicated(bp[["..row_id"]]), , drop = FALSE]
   bp <- bp[is.finite(bp$y) & is.finite(bp$y_train_mean), , drop = FALSE]
   if (!nrow(bp)) return(NULL)
   bp$yhat <- bp$y_train_mean
+  if (any(bp$y_centre != 0)) {
+    bp$yhat_centred <- bp$y_train_mean_centred
+  } else {
+    bp$y_centre <- NULL
+    bp$y_train_mean_centred <- NULL
+  }
   rownames(bp) <- NULL
   bp
 }

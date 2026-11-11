@@ -137,6 +137,17 @@
 #' invariant to row order, to which backend found the neighbours, and to
 #' translation, rotation and rescaling of the coordinates.  Co-located twins
 #' are the \eqn{d = 0} case of the same rule and need no special handling.
+#' A candidate is tied at the k-th distance when the squares of the two
+#' distances lie within \code{.TIE_TOL} (one part in ten million) of each
+#' other, the package's one tie rule.  The rule reads the distances alone,
+#' with no term in the size of the coordinates, so the weights are the same
+#' at any origin and in any unit wherever the doubles hold the coordinates
+#' to better than about one part in 1e8 of the distances between
+#' neighbours.  At an offset whose rounding is coarser than that, a lattice
+#' can lose its ties: each row's k-th distance and the next one past the tie
+#' are handed to \code{.tie_note()}, which flags a pair the rounding can
+#' have parted, and the exported call warns (\code{.tie_watch()}).  The
+#' weights do not change.
 #'
 #' The kd-tree path asks \pkg{FNN} for more than \code{k} neighbours, drops
 #' any self-match (FNN returns a point's own index among exact duplicates),
@@ -150,24 +161,34 @@
 #' @param k Integer neighbour count, already clamped to \code{n - 1}.
 #' @param use_fnn Logical; whether the neighbour lookup uses \pkg{FNN}'s
 #'   kd-tree or a dense \code{dist()} scan.
+#' @param rnd The rounding the ties are compared with
+#'   (\code{.tie_rounding()}): by default that of \code{coords} in their
+#'   own units, \code{NULL} when no watch is open.
 #' @return A list with integer vectors \code{i}, \code{j} and a numeric
 #'   vector \code{w} of equal length; \code{tapply(w, i, sum)} is 1 for every
 #'   row.
 #' @keywords internal
 #' @noRd
-.knn_pairs <- function(coords, k, use_fnn) {
+.knn_pairs <- function(coords, k, use_fnn, rnd = .tie_rounding(coords)) {
   n <- nrow(coords)
   k <- as.integer(k)
+  # Each row's k-th distance and the next one past its tie, for .tie_note().
+  t_k <- t_next <- rep(NA_real_, n)
 
-  # Floating-point ties.  Two distances that differ by less than the rounding
-  # error of the coordinates themselves are one distance: coordinates near
-  # 1e7 (state-plane feet) carry ~1e-9 of absolute noise, and a grid
-  # translated there must still tie the way it does at the origin.
-  cscale  <- max(1, max(abs(coords), na.rm = TRUE))
-  tol_abs <- 1e-9 * cscale
+  # Floating-point ties, by the package's one tie rule (.TIE_TOL): two
+  # distances whose squares lie within .TIE_TOL of each other are one
+  # distance.  Distances computed from coordinates that differ only by their
+  # rounding differ by far less than that, so a lattice ties the same way in
+  # any unit and at any origin the doubles hold.  The rule reads the
+  # distances alone.  A term in the coordinates' size tied distances up to
+  # 1e-9 of the largest coordinate apart: 4 mm at a UTM northing, 1000 m at
+  # an offset of 1e12, every distance at 1e15, so the neighbours moved with
+  # the origin.  Compared as distances, against sqrt(1 + .TIE_TOL), so that
+  # no square overflows.  Distances of 0 tie only with each other.
+  tie_r  <- sqrt(1 + .TIE_TOL)
   # "within tolerance of dk" -- used both to extend the candidate set past the
   # k-th slot and to decide which candidates share it.
-  tie_of  <- function(d, dk) abs(d - dk) <= dk * 1e-9 + tol_abs
+  tie_of <- function(d, dk) d <= dk * tie_r & dk <= d * tie_r
 
   # Weights for one row from its candidate distances/indices (any order).
   row_weights <- function(js, ds) {
@@ -182,7 +203,9 @@
     w[close] <- 1 / k
     w[tied]  <- (k - m) / (t * k)
     keep  <- close | tied
-    list(j = js[keep], w = w[keep])
+    past  <- ds[!keep]
+    list(j = js[keep], w = w[keep], dk = dk,
+         nx = if (length(past)) past[1L] else Inf)
   }
 
   dense_row <- function(i) {
@@ -191,7 +214,12 @@
     dk   <- sort(d, partial = k)[k]
     cand <- which(d < dk | tie_of(d, dk))          # at or within the k-th distance
     cand <- cand[cand != i]
-    row_weights(cand, d[cand])
+    rw   <- row_weights(cand, d[cand])
+    if (!is.null(rnd)) {
+      past  <- d[-c(cand, i)]
+      rw$nx <- if (length(past)) min(past) else Inf
+    }
+    rw
   }
 
   out_i <- vector("list", n); out_j <- vector("list", n); out_w <- vector("list", n)
@@ -219,7 +247,7 @@
     #
     # "%.17g" round-trips a double exactly, so two rows share a location iff
     # they are bit-identical; `+ 0` folds -0 into 0.  Points a few ulps apart
-    # are distinct locations here and become ties through `tie_of` instead.
+    # are distinct locations here, as they are in the dense path.
     key     <- paste(sprintf("%.17g", coords[, 1L] + 0),
                      sprintf("%.17g", coords[, 2L] + 0), sep = "\r")
     gid     <- match(key, unique(key))            # 1..G
@@ -258,6 +286,7 @@
         if (length(js) < n - 1L && G > 1L && tie_of(cd[length(cd)], dk)) next
         rw  <- row_weights(js, ds)
         out_i[[i]] <- rep.int(i, length(rw$j)); out_j[[i]] <- rw$j; out_w[[i]] <- rw$w
+        t_k[i] <- rw$dk; t_next[i] <- rw$nx
         need_dense[i] <- FALSE
       }
     }
@@ -267,8 +296,11 @@
     for (i in which(need_dense)) {
       rw <- dense_row(i)
       out_i[[i]] <- rep.int(i, length(rw$j)); out_j[[i]] <- rw$j; out_w[[i]] <- rw$w
+      t_k[i] <- rw$dk; t_next[i] <- rw$nx
     }
   }
+  # The squares of the distances, for the rule of .tie_lost_by_rounding().
+  .tie_note(t_k^2, t_next^2, rnd)
 
   list(i = as.integer(unlist(out_i, use.names = FALSE)),
        j = as.integer(unlist(out_j, use.names = FALSE)),
@@ -334,8 +366,14 @@
   # entered whenever either is missing and always allocates W <- matrix(0,n,n),
   # so keying it on FNN alone let an unbounded n x n allocation through whenever
   # FNN was present but Matrix was not (or use_matrix = FALSE).
+  # The way on names what is missing.  FNN is in Imports, so it is there and
+  # could not be loaded; Matrix is suggested, so it may not be installed.
   if (!(has_fnn && has_matrix) && n > .KNN_DENSE_MAX)
-    stop("n = ", n, " requires FNN for k-NN weights, and Matrix to hold them sparsely (the dense fallback would allocate an n*n matrix). Install both with install.packages(c(\"FNN\", \"Matrix\")).", call. = FALSE)
+    stop("n = ", n, " requires FNN for k-NN weights, and Matrix to hold them sparsely ",
+         "(the dense fallback would allocate an n*n matrix).",
+         if (!has_fnn) " FNN, which installs with spatialkit, could not be loaded: reinstall it.",
+         if (!has_matrix) " Matrix could not be loaded: install it with install.packages(\"Matrix\").",
+         call. = FALSE)
 
   # The sparse path is bounded too.  k >= n - 1 is a complete graph -- n(n-1)
   # weights however they are stored -- and the guard above only covered the
@@ -365,6 +403,60 @@
 }
 
 
+#' The response a fit's residuals are of, scaled and taken about its centre
+#'
+#' The tests of the residuals read the response on a scale where its largest
+#' absolute value lies in [1, 2): divided by a power of two, which is exact,
+#' so that no sum of squares overflows or underflows and the tests give the
+#' same answer in any unit.  The centre is that of
+#' \code{.residual_centre()}: residuals do not change under a shift of the
+#' response, and a response at a large offset regressed on its raw values
+#' leaves residuals that carry the rounding of the offset.
+#'
+#' @param fit A \code{spatial_fit}.
+#' @param keep Logical vector over the rows of \code{fit$data_sf} marking the
+#'   observations that survived the finite-residual filter.
+#' @return \code{NULL} when the response cannot be read as finite numbers on
+#'   those rows, otherwise a list: \code{y}, the response on the kept rows;
+#'   \code{s}, the power of two at or below its largest absolute value (1
+#'   for a response of zeros); \code{ys}, \code{y / s}; \code{yc}, the centre
+#'   of \code{ys}; and \code{yd}, \code{ys - yc}.
+#' @keywords internal
+#' @noRd
+.morans_response <- function(fit, keep) {
+  d  <- fit$data_sf
+  rv <- fit$response_var
+  if (!inherits(d, "sf")) return(NULL)
+  if (!is.character(rv) || length(rv) != 1L || is.na(rv)) return(NULL)
+  df <- tryCatch(sf::st_drop_geometry(d), error = function(e) NULL)
+  if (is.null(df) || nrow(df) != length(keep) || !rv %in% names(df)) return(NULL)
+  y <- df[[rv]][keep]
+  if (!is.numeric(y) || length(y) < 2L || !all(is.finite(y))) return(NULL)
+  y  <- as.numeric(y)
+  s  <- .pow2_below(max(abs(y)))
+  ys <- y / s
+  yc <- .residual_centre(ys, bounded = FALSE)
+  list(y = y, s = s, ys = ys, yc = yc, yd = ys - yc)
+}
+
+
+#' The power of two at or below a positive number, or 1
+#'
+#' @param a A number.
+#' @return \code{2^floor(log2(a))}, kept within the doubles, or 1 when
+#'   \code{a} is not a positive finite number.
+#' @keywords internal
+#' @noRd
+.pow2_below <- function(a) {
+  if (!is.finite(a) || !(a > 0)) return(1)
+  # As in .spread_scaled(): log2() of the largest doubles rounds up to 1024,
+  # and of a value just below a power of two can round up to it.
+  p <- 2^max(min(floor(log2(a)), 1023), -1022)
+  if (p > a) p <- p / 2
+  p
+}
+
+
 #' Rebuild a fitted model's design matrix and test whether its residuals are
 #' the OLS residuals on it
 #'
@@ -377,51 +469,184 @@
 #' gracefully: a GWR whose bandwidth is wide enough to be global OLS passes,
 #' the same GWR at a small bandwidth does not.
 #'
+#' The regression reads the response of \code{.morans_response()}, scaled
+#' and taken about its centre, and the design with its predictor columns at
+#' an offset taken about their centres (\code{.lm_fit_centred()}): a
+#' predictor whose spread is under about 1e-7 of its size is otherwise
+#' dropped by the QR as collinear with the intercept, and a response at an
+#' offset leaves the rounding of the offset in the residuals.  The OLS
+#' residuals do not change under either shift.  The same centred design goes
+#' to \code{.morans_residual_moments()}.
+#'
+#' The residuals supplied are OLS residuals when they lie within 1e-7 of the
+#' response's standard deviation of those of the fit here, or within the
+#' rounding of a regression on the size of its terms: a root mean square of
+#' \code{.FIT_EPS} \code{.Machine$double.eps} times that of the terms, as
+#' \code{.residuals_rounding()} takes it, the terms being those of the
+#' predictors as given and of the offset the fit regressed the response at.
+#' A backend that regressed the raw response at an offset returns residuals
+#' that carry that rounding.  A GWR that took the response about its centre
+#' returns the residuals of the centred response, which do not
+#' (\code{.morans_fit_centre()}): its offset is the response's centre less
+#' that centre.  The rounding of \code{lm()} grows with the rows, so the
+#' residuals also pass where they lie within 1e-7 of the response's standard
+#' deviation of the OLS residuals of the raw columns (\code{qr.resid()}, the
+#' arithmetic of \code{lm.fit()}), where the raw design has the rank of the
+#' centred one.
+#'
 #' @param fit A \code{spatial_fit}.
 #' @param resid The residual vector already extracted and subset by \code{keep}.
 #' @param keep Logical vector over the rows of \code{fit$data_sf} marking the
 #'   observations that survived the finite-residual filter.
+#' @param resp \code{.morans_response(fit, keep)}.
 #' @return \code{NULL} when the design cannot be rebuilt, otherwise a list with
-#'   \code{X} (the model matrix, rows subset by \code{keep}) and \code{is_ols}.
+#'   \code{X} (the model matrix, rows subset by \code{keep}, predictor columns
+#'   at an offset taken about their centres), \code{is_ols}, \code{b} (the
+#'   coefficients of \code{resp$yd} on \code{X}) and \code{centres} (for
+#'   \code{.rounding_design()}).
 #' @keywords internal
 #' @noRd
-.morans_ols_design <- function(fit, resid, keep) {
+.morans_ols_design <- function(fit, resid, keep, resp) {
+  if (is.null(resp)) return(NULL)
   d  <- fit$data_sf
-  rv <- fit$response_var
   pv <- fit$predictor_vars
-  if (!inherits(d, "sf")) return(NULL)
-  if (!is.character(rv) || length(rv) != 1L || is.na(rv)) return(NULL)
   if (is.null(pv)) pv <- character(0)
   if (!is.character(pv)) return(NULL)
 
   df <- tryCatch(sf::st_drop_geometry(d), error = function(e) NULL)
   if (is.null(df) || nrow(df) != length(keep)) return(NULL)
-  if (!all(c(rv, pv) %in% names(df))) return(NULL)
+  if (!all(pv %in% names(df))) return(NULL)
 
-  df <- df[keep, c(rv, pv), drop = FALSE]
-  if (nrow(df) != length(resid) || anyNA(df)) return(NULL)
-
-  y <- df[[rv]]
-  if (!is.numeric(y) || !all(is.finite(y))) return(NULL)
+  df <- df[keep, pv, drop = FALSE]
+  if (length(resp$y) != length(resid) || anyNA(df)) return(NULL)
 
   X <- if (length(pv) == 0L) {
     # An intercept-only model.  tr(MW) = -S0/n for any W with a zero diagonal,
     # so the residual moments reduce to E[I] = -1/(n - 1) exactly -- the
     # classical value -- which is a useful sanity check on the general path.
-    matrix(1, nrow(df), 1L, dimnames = list(NULL, "(Intercept)"))
+    matrix(1, length(resid), 1L, dimnames = list(NULL, "(Intercept)"))
   } else {
     tryCatch(
-      stats::model.matrix(~ ., data = df[, pv, drop = FALSE]),
+      stats::model.matrix(~ ., data = df),
       error = function(e) NULL
     )
   }
-  if (!is.matrix(X) || nrow(X) != nrow(df) || !all(is.finite(X))) return(NULL)
+  if (!is.matrix(X) || nrow(X) != length(resid) || !all(is.finite(X))) return(NULL)
 
-  e_ols <- tryCatch(qr.resid(qr(X), y), error = function(e) NULL)
-  if (is.null(e_ols) || length(e_ols) != length(resid)) return(NULL)
+  cf <- .lm_fit_centred(X, resp$yd)
+  if (inherits(cf$fit, "try-error")) return(NULL)
+  e_ols <- as.numeric(cf$fit$residuals)
+  if (length(e_ols) != length(resid) || !all(is.finite(e_ols))) return(NULL)
+  b <- cf$fit$coefficients
 
-  scale <- max(stats::sd(y), .Machine$double.eps)
-  list(X = X, is_ols = max(abs(resid - e_ols)) <= 1e-7 * scale)
+  # The test reads the residuals on the scale of the response it was fitted
+  # on, so it gives the same answer in any unit.  The rounding a regression
+  # of the raw response leaves is bounded on the size of its terms: the
+  # predictors as given (.rounding_design()) and the intercept with the
+  # response's offset put back: the offset the fit regressed the response
+  # at, which is the response's centre less any centre the fit took off it
+  # and whose residuals it returns about that centre (.morans_fit_centre()).
+  dif <- resid / resp$s - e_ols
+  rd  <- .rounding_design(cf$X, b, cf$centres)
+  br  <- as.numeric(rd$b)
+  br[!is.finite(br)] <- 0
+  fc  <- .morans_fit_centre(fit)
+  br[1L] <- br[1L] + if (fc == 0) resp$yc else resp$yc - fc / resp$s
+  size <- drop(abs(rd$X) %*% abs(br))
+  tol <- 1e-7 * .cell_sd(resp$ys)
+  is_ols <- max(abs(dif)) <= tol ||
+    sum(dif^2) <= (.FIT_EPS * .Machine$double.eps)^2 * sum(size^2)
+  if (!isTRUE(is_ols)) {
+    # The rounding lm() and lm.fit() leave on the raw columns grows with the
+    # rows (10 to 30 eps times the terms on 10,000 rows, 500 on 30,000), so
+    # a backend that regressed them is read against the same regression:
+    # qr() and qr.resid() are lm.fit()'s arithmetic, and the division by a
+    # power of two commutes with it.  Only where the raw design keeps the
+    # rank of the centred one: a backend that dropped a predictor at an
+    # offset does not return the OLS residuals on the design.
+    qx <- tryCatch(qr(X), error = function(e) NULL)
+    if (!is.null(qx) && identical(qx$rank, cf$fit$rank)) {
+      e_raw <- tryCatch(qr.resid(qx, resp$ys), error = function(e) NULL)
+      is_ols <- length(e_raw) == length(resid) && all(is.finite(e_raw)) &&
+        max(abs(resid / resp$s - e_raw)) <= tol
+    }
+  }
+  list(X = cf$X, is_ols = isTRUE(is_ols), b = b, centres = cf$centres)
+}
+
+
+#' The centre a fit regressed its response about
+#'
+#' \code{fit_gwr_model()} takes a response at a large offset about a centre
+#' (\code{engine$centres$response}) and \code{residuals.gwr_fit()} returns
+#' the residuals of the centred response, which carry no rounding of that
+#' centre.  The rounding \code{.morans_ols_design()} allows such residuals
+#' is that of a regression at the offset left after the centre.  The scores
+#' of the fit read the values less the same centre (\code{.scored_fitted()},
+#' \code{.scored_predictions()}).
+#'
+#' @param fit A \code{spatial_fit}.
+#' @return The centre, in the response's units, for a \code{gwr_fit} that
+#'   records a finite non-zero one and keeps the residuals about it (the
+#'   case in which \code{residuals.gwr_fit()} returns them); 0 for any other
+#'   fit.
+#' @keywords internal
+#' @noRd
+.morans_fit_centre <- function(fit) {
+  if (!inherits(fit, "gwr_fit")) return(0)
+  fc <- tryCatch(fit$engine$centres$response, error = function(e) NULL)
+  if (!(is.numeric(fc) && length(fc) == 1L && is.finite(fc) && fc != 0)) return(0)
+  r <- tryCatch(fit$engine$SDF@data$residual, error = function(e) NULL)
+  if (is.numeric(r) && length(r) == nrow(fit$data_sf)) fc else 0
+}
+
+
+#' Why a set of residuals leaves Moran's I unidentified
+#'
+#' Moran's I is a ratio of sums of the centred residuals, unchanged by
+#' their unit.  Residuals that do not vary, or vary by no more than the
+#' rounding of the response they are of, leave it a ratio of rounding.  The
+#' bound is that of \code{.residuals_rounding()}, read on the response and
+#' residuals of \code{.morans_response()}'s scale: where the residuals are
+#' the OLS residuals on the rebuilt design (\code{des$is_ols}), on the size
+#' of that fit's terms with the predictors as given, so that the residuals
+#' of an exact fit are refused at every scale and the reason names the exact
+#' fit; for any other residuals, on the response alone.  Without a response,
+#' or where the residuals divided by the response's power of two pass the
+#' largest double (so they are not its rounding), the residuals are read
+#' against their own rounding.
+#'
+#' @param resid The residuals.
+#' @param resp \code{.morans_response()}, or \code{NULL}.
+#' @param des \code{.morans_ols_design()}, or \code{NULL}.
+#' @return \code{NA} when the residuals vary, otherwise the reason as a
+#'   phrase.
+#' @keywords internal
+#' @noRd
+.morans_no_spread <- function(resid, resp, des) {
+  if (!is.null(resp) && !all(is.finite(resid / resp$s))) {
+    resp <- NULL
+    des  <- NULL
+  }
+  s  <- if (is.null(resp)) .pow2_below(max(abs(resid))) else resp$s
+  e  <- resid / s
+  ys <- if (is.null(resp)) e else resp$ys
+  yd <- if (is.null(resp)) e - mean(e) else resp$yd
+  if (!any(e - mean(e) != 0))
+    return("the residuals do not vary (zero residual variance)")
+  what <- if (is.null(resp)) "their own rounding" else
+    "the rounding of the response"
+  if (!is.null(des) && isTRUE(des$is_ols)) {
+    # OLS residuals within rounding: the design fits the response exactly.
+    rd <- .rounding_design(des$X, des$b, des$centres)
+    if (!.residuals_rounding(e, ys, yd, rd$X, rd$b)) return(NA_character_)
+    return(if (ncol(des$X) > 1L)
+      "the residuals are the rounding of an exact fit of the response on the predictors"
+    else "the response does not vary beyond its rounding")
+  }
+  if (.residuals_rounding(e, ys, yd))
+    return(paste("the residuals do not vary beyond", what))
+  NA_character_
 }
 
 
@@ -536,7 +761,22 @@
 #' \code{X}, regresses the response on it, and uses the residual moments only
 #' when the supplied residuals \emph{are} those OLS residuals to numerical
 #' tolerance.  A GWR wide enough to have collapsed to global OLS passes that
-#' test; the same GWR at a working bandwidth does not.
+#' test; the same GWR at a working bandwidth does not.  The response, and
+#' each predictor whose centre is more than 1000 times its spread, are taken
+#' about their centres before the regression, which leaves its residuals as
+#' they are, so a timestamp or a response at 1e10 gives the null, moments and
+#' rank \eqn{p} of the same columns at 0.  The supplied residuals pass where
+#' none differs from the OLS residuals by more than 1e-7 of the response's
+#' standard deviation, or where the differences are no more than the
+#' rounding a regression of the raw columns leaves: a root mean square of
+#' \eqn{10\epsilon} (\eqn{\epsilon} = \code{.Machine$double.eps}) times
+#' that of the fit's terms, among them the offset the fit regressed the
+#' response at (for a GWR that took the response about its centre, the
+#' offset left after that centre).  They also
+#' pass where none differs by more than 1e-7 of the response's standard
+#' deviation from the residuals \code{lm()} gives on the raw columns, where
+#' the raw design keeps the rank of the centred one: that rounding grows
+#' with the number of rows.
 #'
 #' \strong{For the flexible backends neither null is exact}, and \code{"auto"}
 #' leaves them on \code{"randomisation"} because forcing the OLS moments on
@@ -568,7 +808,11 @@
 #' randomisation null without correcting it.
 #'
 #' @param fit A \code{spatial_fit} object (from \code{fit_gwr_model},
-#'   \code{fit_bayesian_spatial_model} or \code{fit_rf_model}).
+#'   \code{fit_bayesian_spatial_model} or \code{fit_rf_model}).  The
+#'   locations are read from its \code{data_sf}, a feature that is not a
+#'   point reduced to one as \code{\link{coerce_to_points}(, "auto")}
+#'   does.  A layer whose geometries mix XY with XYZ or XYM, or carry M
+#'   (XYM or XYZM), is read in x and y, with no warning.
 #' @param alternative Character: \code{"two.sided"} (default),
 #'   \code{"greater"} (positive autocorrelation), or \code{"less"}.
 #' @param weights Optional user-supplied n x n weight matrix: a base
@@ -578,7 +822,18 @@
 #'   at the k-th distance (every regular grid, every site with repeat
 #'   visits) share that slot's weight equally, with no tie-break by
 #'   row order or by which backend found them, so the matrix is a function
-#'   of the geometry alone; on distinct, untied coordinates it equals
+#'   of the geometry alone.  A distance is tied with the k-th when their
+#'   squares are within one part in ten million of each other, so the
+#'   matrix is the same in any unit and at any origin where the doubles
+#'   hold the coordinates to better than about one part in 1e8 of the
+#'   distances between neighbours.  Farther from the origin the doubles
+#'   round the coordinates more coarsely, and a lattice whose coordinates
+#'   are not on that rounding can lose its ties.  Where a distance lies
+#'   past a tie by less than that rounding, the call warns, with class
+#'   \code{"spatialkit_xy_imprecise"}, naming the rounding and the
+#'   distance; the matrix is the one the coordinates as stored give.  On
+#'   distinct, untied
+#'   coordinates it equals
 #'   \code{spdep}'s \code{knearneigh()} + \code{nb2listw(style = "W")}
 #'   exactly.
 #'   If a non-row-standardised matrix is supplied (i.e. rows do not all sum
@@ -673,8 +928,18 @@
 #'   \code{residuals()} raised an error (its message is quoted), or returned
 #'   \code{NULL} and the response minus \code{fitted()} could not be
 #'   formed either (the reason is quoted), fewer than 4 valid
-#'   residuals, or a residual vector whose length does not match the fit's
-#'   \code{data_sf}.
+#'   residuals, a residual vector whose length does not match the fit's
+#'   \code{data_sf}, weights that sum to less than
+#'   \code{.Machine$double.eps}, or residuals that leave I a ratio of
+#'   rounding: they do not vary, or vary by no more than the rounding of the
+#'   response (a standard deviation of 3 units in the last place of its
+#'   largest value, or a root mean square of \eqn{10\epsilon} times that of
+#'   the response about its centre), or are the OLS residuals of an exact fit
+#'   of the response on the predictors (a root mean square of
+#'   \eqn{10\epsilon} times that of the fit's terms).
+#'   The test reads the residuals against the response, so residuals in
+#'   any unit are scored or refused alike, and I, z and the p-value do not
+#'   depend on the unit.
 #' @references Cliff, A. D. and Ord, J. K. (1981) \emph{Spatial Processes:
 #'   Models and Applications}. Pion, London. Section 8.3.
 #' @family model evaluation
@@ -707,6 +972,10 @@ residual_morans_i <- function(fit,
                               k = 8L,
                               null = c("auto", "randomisation", "residual"),
                               keep_weights = FALSE) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("residual_morans_i", "the data of `fit`")
+  on.exit(tie_end(returnValue(tie_end), if (inherits(fit, "spatial_fit")) fit$data_sf), add = TRUE)
   alternative <- match.arg(alternative)
   # `k` reached .build_knn_weights() unvalidated, where min() collapses a
   # vector: k = c(4, 8) silently built the k = 4 matrix and returned a
@@ -773,8 +1042,14 @@ residual_morans_i <- function(fit,
     return(NULL)
   }
 
+  # The fit's layer is read in x and y when it mixes XY and XYZ (or XYM)
+  # geometries or its geometries carry M (.xy_if_mixed_or_m()), and so are
+  # the points reduced from it when they mix dimensions: sf reads a layer in
+  # the dimension of its first geometry, and GEOS does not read M.  No
+  # points are returned, so nothing is said.
   coords <- tryCatch({
-    pts <- ensure_projected(coerce_to_points(fit$data_sf, "auto"))
+    pts <- ensure_projected(.xy_if_mixed(coerce_to_points(
+      .xy_if_mixed_or_m(fit$data_sf), "auto")))
     sf::st_coordinates(pts)[, 1:2, drop = FALSE]
   }, error = function(e) NULL)
 
@@ -838,7 +1113,7 @@ residual_morans_i <- function(fit,
     } else {
       W <- weights
       # Every moment below sums W.  One NA anywhere makes S0 NA, and the
-      # `S0 < eps || ss_c < eps` guard then fails with "missing value where
+      # `S0 < eps` guard then fails with "missing value where
       # TRUE/FALSE needed" after a log line reading "row sums range from NA to
       # NA".  The shape, diagonal and row-standardisation are all checked
       # above; finiteness was the one property that was not.
@@ -891,18 +1166,44 @@ residual_morans_i <- function(fit,
   }
   S0 <- sum(W)
 
-  # Moran's I is a function of the CENTRED residuals, so the degeneracy guard
-  # has to test their sum of squares rather than the raw one.  Constant
-  # non-zero residuals pass sum(resid^2) but give resid_c == 0, and the
-  # variance block below then computes m2 = 0 -> b2 = NaN -> VI = NaN, so
-  # `if (VI > 0)` raises "missing value where TRUE/FALSE needed" instead of
-  # this function returning NULL.
-  resid_c <- resid - mean(resid)
-  ss_c    <- sum(resid_c^2)
-  if (S0 < .Machine$double.eps || ss_c < .Machine$double.eps) {
-    .warn_and_log("residual_morans_i(): degenerate weights or zero residual variance.")
+  if (S0 < .Machine$double.eps) {
+    .warn_and_log(paste0("residual_morans_i(): degenerate weights: the weight ",
+                         "matrix sums to %s, so Moran's I is not defined."),
+                  format(S0, digits = 3))
     return(NULL)
   }
+
+  # The response and the rebuilt design, read for the test below whatever
+  # the null, so that the residuals are refused or scored the same way
+  # under each.
+  resp <- tryCatch(.morans_response(fit, ok), error = function(e) NULL)
+  des  <- tryCatch(.morans_ols_design(fit, resid, ok, resp),
+                   error = function(e) NULL)
+
+  # Moran's I is a ratio of sums of the CENTRED residuals, unchanged by their
+  # unit, and is not identified where they do not vary beyond rounding.  The
+  # test was an absolute floor on their sum of squares, so residuals of real
+  # spread in small units were refused as "zero residual variance", and the
+  # residuals of an exact fit in large units were scored.  It now reads the
+  # rounding of the response, and of an exact fit where the residuals are
+  # the OLS residuals on the rebuilt design (.morans_no_spread()).  Constant
+  # residuals are refused there too: centred they are all zero, and the
+  # kurtosis below would be NaN.
+  why <- .morans_no_spread(resid, resp, des)
+  if (!is.na(why)) {
+    .warn_and_log("residual_morans_i(): %s, so Moran's I is not identified.", why)
+    return(NULL)
+  }
+
+  # The sums below are taken on the residuals divided by the power of two at
+  # or below their largest absolute value, which is exact and leaves I as
+  # it is, so that the squares and fourth powers neither underflow nor
+  # overflow, and the residuals in any power-of-two unit give the same
+  # numbers.  The kurtosis can move in the last bit against the unscaled
+  # residuals: x^4 is pow(), which does not commute with the division.
+  resid   <- resid / .pow2_below(max(abs(resid)))
+  resid_c <- resid - mean(resid)
+  ss_c    <- sum(resid_c^2)
 
   # --- Moran's I ---
   # sum(resid_c * (W %*% resid_c)) rather than crossprod(): see the dispatch
@@ -926,8 +1227,7 @@ residual_morans_i <- function(fit,
   # ?residual_morans_i, section "Which null, and when it is approximate", for
   # the measured size and power cost and for why "auto" refuses to apply the
   # OLS residual moments to a backend whose residuals are not OLS residuals.
-  des <- if (identical(null, "randomisation")) NULL else
-    .morans_ols_design(fit, resid, ok)
+  if (identical(null, "randomisation")) des <- NULL
 
   use_residual <- switch(null,
     randomisation = FALSE,
@@ -1423,8 +1723,8 @@ compare_models <- function(fits, newdata = NULL, ...) {
       if (is_fb) {
         warning(
           sprintf(
-            "compare_models(): GWR model '%s' used a fallback bandwidth (%.4f). Metrics may be unreliable; consider re-fitting with an explicit bandwidth.",
-            nm, obj$info$bandwidth
+            "compare_models(): GWR model '%s' used a fallback bandwidth (%s). Metrics may be unreliable; consider re-fitting with an explicit bandwidth.",
+            nm, .fmt_bw(obj$info$bandwidth, obj$info$adaptive)
           ),
           call. = FALSE
         )
@@ -1558,7 +1858,9 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' reliably carry \code{..row_id}, so the fingerprint is the row count, the
 #' sorted response and the sorted coordinates (in EPSG:4326 when the data
 #' has a CRS).  Sorting each margin separately keeps the comparison stable
-#' under the last-digit noise of a reprojection.
+#' under the last-digit noise of a reprojection.  A row of a projected CRS
+#' with a coordinate beyond \code{.LONLAT_MOVE_MAX} is not moved and gives
+#' \code{NA} (\code{.lonlat_of_placed()}).
 #'
 #' @param fit A \code{spatial_fit}.
 #' @return A list, or \code{NULL} when the fit's data cannot be read.
@@ -1572,7 +1874,10 @@ compare_models <- function(fits, newdata = NULL, ...) {
     if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
       g <- suppressWarnings(sf::st_centroid(g))
     lonlat <- !is.na(sf::st_crs(g))
-    if (lonlat) g <- suppressWarnings(sf::st_transform(g, 4326))
+    # A projected row with a coordinate beyond .LONLAT_MOVE_MAX is emptied
+    # before the move and gives NA, which matches NA: moved from Web
+    # Mercator at x = 1e20 it never came back from PROJ.
+    if (lonlat) g <- suppressWarnings(.lonlat_of_placed(g))
     xy <- sf::st_coordinates(g)
     if (!length(y) || nrow(xy) != length(y)) return(NULL)
     list(n = length(y), y = sort(y, na.last = TRUE),
@@ -1589,18 +1894,52 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' @keywords internal
 #' @noRd
 .same_rowset <- function(a, b) {
+  # The tolerance is a part of the response's spread plus its rounding
+  # (.same_values_tol()), with no floor in its units: a floor of 1 read two
+  # responses below 1e-10 as one, and a part of the response's size read a
+  # response at 1e12 and the same plus 50 as one.
   .same_rowset_xy(a, b) &&
-    .rowset_close(a$y, b$y, 1e-10 * max(1, abs(a$y), na.rm = TRUE))
+    .rowset_close(a$y, b$y, .same_values_tol(a$y, rel = 1e-10))
 }
 
 #' Do two \code{.fit_rowset()} fingerprints sit at the same locations?
+#'
+#' Within 1e-6 degrees when the data has a CRS (the fingerprint is then in
+#' EPSG:4326), otherwise within 1e-9 of the coordinates' spread plus their
+#' rounding (\code{.same_values_tol()}), in any unit and at any origin.
 #' @keywords internal
 #' @noRd
 .same_rowset_xy <- function(a, b) {
   if (a$n != b$n || !identical(a$lonlat, b$lonlat)) return(FALSE)
   tol_xy <- if (a$lonlat) 1e-6
-            else 1e-9 * max(1, abs(c(a$x1, a$x2)), na.rm = TRUE)
+            else .same_values_tol(a$x1, a$x2, rel = 1e-9)
   .rowset_close(a$x1, b$x1, tol_xy) && .rowset_close(a$x2, b$x2, tol_xy)
+}
+
+#' A margin for reading two copies of the same values as one
+#'
+#' \code{rel} of the values' spread (the largest range of the vectors given)
+#' plus eight units in the last place of their largest size.  The second term
+#' covers the rounding of values held at a large offset; the margin does not
+#' grow with the origin otherwise.  A part of the values' size was 1000 units
+#' at an offset of 1e12, so data moved by 500 units passed as the same.
+#' Values all equal give their rounding alone, and values all 0 give 0.
+#'
+#' @param ... Numeric vectors; values that are not finite are left out.
+#' @param rel The part of the spread.
+#' @return A single non-negative number.
+#' @keywords internal
+#' @noRd
+.same_values_tol <- function(..., rel) {
+  vs <- lapply(list(...), function(v) {
+    v <- as.numeric(v)
+    v[is.finite(v)]
+  })
+  vs <- vs[lengths(vs) > 0L]
+  if (!length(vs)) return(0)
+  # Halves first, so a spread near the largest double does not overflow.
+  half <- max(vapply(vs, function(v) max(v) / 2 - min(v) / 2, numeric(1)))
+  2 * rel * half + 8 * .Machine$double.eps * max(abs(unlist(vs)))
 }
 
 #' Two sorted margins equal within \code{tol}, \code{NA} matching \code{NA}
@@ -1623,7 +1962,9 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' perform fitting (inside CV folds), because CV inherently requires
 #' repeated fitting.
 #'
-#' @param data_sf An sf object.
+#' @param data_sf An sf object.  When the folds are built here, a feature
+#'   that is not a point is reduced to one, and a layer whose geometries mix
+#'   XY with XYZ or XYM, or carry M (XYM or XYZM), is read in x and y.
 #' @param response_var Response column name.
 #' @param predictor_vars Predictor column names.
 #' @param models Character vector: any subset of \code{c("GWR", "Bayesian",
@@ -1644,7 +1985,20 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   trains on its own test rows is not a cross-validation split and is refused
 #'   with an error), and IDs naming no row in the prepared data are dropped with
 #'   a logged count (expected when rows were removed for missing values; a sign
-#'   the folds came from other data when they were not).
+#'   the folds came from other data when they were not).  When it is
+#'   \code{NULL}, one set of \code{block_kfold} folds is built and every
+#'   model is scored on it.
+#'   With \code{folds = NULL} the score estimates the error at the distance
+#'   the block grid built here puts between the held-out points and their
+#'   training data, which overstates the error of a map where the samples
+#'   cover the area it predicts over.  The excess is how much the model's
+#'   error grows from the map's distances to the data to the block grid's,
+#'   and is small for a model whose error changes little with the distance
+#'   from the data.  \code{\link{fold_separation}()}
+#'   with \code{prediction_points} compares the held-out distances with those
+#'   of the locations the model will predict at, and
+#'   \code{make_folds(method = "knndm", prediction_points = )} builds folds
+#'   matched to them.
 #' @param boundary Optional polygon sf/sfc.
 #' @param pointize Geometry coercion strategy.  It also decides where a
 #'   polygon or line row falls in the shared blocks, so each row is placed by
@@ -1843,7 +2197,15 @@ compare_models_cv <- function(
   .warn_fold_args_ignored(folds, block_size, auto_range, "compare_models_cv")
   if (is.null(folds)) {
     pointized <- !all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")
-    fold_src  <- if (pointized) coerce_to_points(data_sf, pointize) else data_sf
+    # A layer that mixes XY and XYZ (or XYM) geometries, or whose
+    # geometries carry M, which GEOS does not read, is pointized in x and y,
+    # as prep_model_data() pointizes it.
+    fold_src  <- if (pointized)
+      .xy_if_mixed(tryCatch(
+        coerce_to_points(.xy_if_mixed_or_m(data_sf), pointize),
+        spatialkit_features_degenerate = function(e)
+          .pointize_refused(e, "compare_models_cv", pointize)))
+    else data_sf
     folds <- tryCatch(
       make_folds(fold_src, k = k, method = "block_kfold",
                  seed = if (is.null(seed)) 123L else seed,

@@ -20,7 +20,58 @@ get_voronoi_seeds(
 )
 }
 \arguments{
-\item{boundary}{Optional polygonal sf object defining the sampling area.}
+\item{boundary}{Optional polygonal sf object defining the sampling area.
+One that mixes XY and XYZ (or XYM) geometries is read without Z and M,
+since sf reads a layer in the dimension of its first geometry. So is one whose
+geometries carry M (XYM or XYZM), which GEOS refuses. Where seeds or
+the k-means cloud are sampled inside it, its rows are repaired with
+\code{\link[sf:st_make_valid]{sf::st_make_valid()}} before they are unioned. In
+longitude and latitude the union runs with s2, and a row s2 still
+refuses (crossing edges, a vertex listed twice) is repaired again, with
+crossing edges split as GEOS splits them in a projected CRS; a row s2
+refuses even then stops the call with an error of class
+\code{"spatialkit_cells_degenerate"} that names it and says to transform
+\code{boundary} to a projected CRS.
+A row that is empty, or has a coordinate that is not finite or lies
+beyond 1e150 (read as given, and again after any move into another
+CRS), covers no ground and is left out; a boundary with no such row
+left is refused with an error that says so. A boundary in a geographic
+CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+the Earth, is refused with an error of class
+\code{"spatialkit_cells_degenerate"} that names its rows and says to check
+its CRS.
+A row the repair leaves without a polygon (a ring with no height:
+every vertex on one line, or in degrees on one parallel) is left out
+as well, and a boundary with no polygon left is refused. In
+longitude and latitude, a boundary whose bounding box is over 10,000
+times its area (small pieces far apart), which sf does not sample whole,
+is sampled piece by piece, the points shared among the pieces in
+proportion to their areas; a piece whose own box is over 10,000 times
+its area stops the call with an error that says to transform
+\code{boundary} to a projected CRS. A boundary whose bounding box has no
+height or no width (three vertices on one parallel) is refused. In
+longitude and latitude s2 reads the edges as great circles, which
+leave the bounding box read from the coordinates, and sf (without the
+lwgeom package) draws in that box: a boundary whose box has less than
+half its area on the sphere (three vertices on or near one parallel)
+is refused too. That error, and the error for a box with no height
+whose vertices lie on one parallel other than the equator, say to
+transform \code{boundary} to a projected CRS in which a parallel is a
+curve, such as the one \code{\link[=ensure_projected]{ensure_projected()}} picks for it (a polar one,
+such as EPSG:3413 or 3031, for a ring around a pole), where the
+region has an area and lies in its box.
+sf draws the points in the bounding box and keeps those inside, so it
+draws the number asked for times the ratio of the box to the area. In
+any CRS, a boundary that would take more than 10^6 points drawn in its
+box, or 10 times the points asked for if more (small pieces far apart,
+a thin strip at a slant), is sampled piece by piece in the same way
+(or whole, in draws of at most 10^6 points in its box, where that takes
+less time), and a piece that would still take more is drawn in such
+draws. Where the points drawn in all would exceed 2e7 (or 10 times the
+points asked for, if more), the call stops before any draw with an
+error that gives the ratio and says to pass \code{sample_points}
+(\code{method = "kmeans"}, whose cloud is \code{max(2000, 50 * n)} points) or to
+ask for fewer seeds.}
 
 \item{method}{One of "kmeans", "random", "provided".}
 
@@ -39,7 +90,8 @@ assume \code{n}.
 
 Besides a number, \code{n} accepts what the level-selection step returned:
 the integer vector of ranked candidates from \code{\link[=determine_optimal_levels]{determine_optimal_levels()}}
-(its first element is used), a \code{\link[=select_resolution]{select_resolution()}} result (its
+(its first element is used; its \code{NA} is refused with a note on where it
+came from), a \code{\link[=select_resolution]{select_resolution()}} result (its
 \verb{$best}), or a \code{\link[=resolution_profile]{resolution_profile()}}. A profile built without an
 \code{estimate} is read with \code{select_resolution()} by \code{cp}. A profile built
 with \code{estimate} is read by \code{criterion = "auto"}, the rule that goes
@@ -69,7 +121,11 @@ With \code{method = "kmeans"}, a selection or profile also carries the
 centres of the partition the profile scored at that count, and those
 are returned instead of a new k-means: a k-means partition, weighted or
 not, is the Voronoi partition of its centres, so their cells are the
-cells the criteria judged. \code{sample_points}, when given, is then only
+cells the criteria judged. On a profile without an estimate whose
+centres were fitted to a subsample, \code{\link[=select_resolution]{select_resolution()}} refits them
+to every point first, and those centres are returned, with
+\code{attr(, "refit")}: their cells are near the cells judged but not the
+same. \code{sample_points}, when given, is then only
 assigned to them (for \code{attr(, "kmeans")}) and gives the cover, and
 \code{boundary} only
 sets the CRS and the cover (see "Details");
@@ -84,16 +140,30 @@ default. A call that supplies none of the four is told nothing,
 whichever kind and settings the profile was built with. Pass the
 count as a number (\code{n = sel$best}) for a fresh k-means instead.}
 
-\item{seeds}{sf POINT object of user-provided seeds (method = "provided").}
+\item{seeds}{sf POINT object of user-provided seeds (method = "provided").
+Methods \code{"kmeans"} and \code{"random"} do not read it, and ignore it with a
+warning; so does a call that passes \verb{seed =}, which R matches to
+\code{seeds} (the seed of the random stream is \code{set_seed}).
+Seeds in another CRS than \code{boundary} are returned in the boundary's CRS;
+seeds that mix XY and XYZ (or XYM) points are then returned in XY, with a
+warning of class \code{"spatialkit_zm_dropped"}, since sf reads a layer in
+the dimension of its first geometry.}
 
-\item{sample_points}{Optional sf POINT cloud for k-means clustering. Only
+\item{sample_points}{Optional sf POINT cloud for k-means clustering.
+Method \code{"random"} places its seeds in \code{boundary} and does not read it;
+it is ignored there with a warning. Only
 the first two coordinate columns are clustered, so a Z or M dimension does
-not join the distance calculation and dominate it; rows with empty or
-non-finite coordinates are dropped with a warning, so they never reach
-\code{stats::kmeans()}, which fails on them without naming a cause. A lon/lat
+not join the distance calculation and dominate it; rows without a
+location (an empty point, a coordinate that is not finite or lies
+beyond 1e150, or in a geographic CRS a latitude beyond 90 degrees, read
+as given before any move) are dropped with a warning,
+so they never reach \code{stats::kmeans()}, which fails on them without
+naming a cause. A lon/lat
 cloud, or one with no CRS whose coordinates look like lon/lat (the
 heuristic \code{\link[=ensure_projected]{ensure_projected()}} applies, with its warning), is projected
-before clustering.}
+before clustering. A cloud that mixes XY and XYZ (or XYM) points is read
+without Z and M before it is projected or clustered, since sf reads a
+layer in the dimension of its first geometry.}
 
 \item{kmeans_nstart}{The number of starts, of which the best is kept.
 \code{NULL} (default) is the kind's own number: 3 for \code{partition = "density"} and 10 for \code{partition = "kmeans"}, the default of earlier
@@ -126,7 +196,13 @@ below that the counts are about as uneven as under \code{"kmeans"}.
 \code{"kmeans"} is the same sum unweighted: compact cells, with several
 times the points in a cell of a dense place that a cell of a sparse
 place holds. It is the run of earlier versions, whose default it was:
-\code{\link[stats:kmeans]{stats::kmeans()}} from 10 random starts on the rows as they come. The
+\code{\link[stats:kmeans]{stats::kmeans()}} from 10 random starts on the rows as they come, with
+the coordinates centred, divided by the diagonal of their bounding box
+and rounded to 2^-30 of it, so that the seeds do not move with the unit
+or the origin; on gridded locations they can differ from those of
+earlier versions, and where the locations span less than a kilometre a
+change of unit or origin can still move them (see "The partition" in
+\code{\link[=resolution_profile]{resolution_profile()}}). The
 density kind follows the
 density of \code{sample_points}; a cloud this function draws inside
 \code{boundary} is uniform and has none to follow. Without the 'FNN' package
@@ -165,8 +241,12 @@ with unusable coordinates are dropped first), \code{size} (points per seed),
 \code{iter} and \code{nstart}. For the scored centres of a selection or profile
 (see \code{n}) it describes \code{sample_points} assigned to them, each point to
 its nearest seed, with \code{iter} \code{NA} and \code{nstart} the profile's restarts,
-and is absent when no \code{sample_points} were given. Under \code{partition = "density"} \code{withinss} and \code{tot_withinss} count every point once, about
-its cell's mean. A run this call makes with \code{partition = "density"} or
+and is absent when no \code{sample_points} were given. A point the same
+distance from two seeds (squared distances within one part in ten
+million) goes to the lower \code{seed_id}, the rule the profile scores its
+cells by, so the record is the same in another unit or with another
+origin. Under \code{partition = "density"} \code{withinss} and \code{tot_withinss}
+count every point once, about its cell's mean. A run this call makes with \code{partition = "density"} or
 \code{init = "kmeans++"} also records \code{converged}, whether the kept start
 stopped before \code{kmeans_iter}, and under \code{partition = "density"}
 \code{objective}, the weighted sum the seeds minimise; scored centres have
@@ -185,10 +265,12 @@ for (see "Details"): an sfc holding the boundary's polygons or the hull
 of the clustered points, in its own CRS.
 
 When \code{n} is a \code{\link[=select_resolution]{select_resolution()}} result that carries \code{count_rule},
-or a profile built with an \code{estimate}, the seeds carry that record as
+or a profile built with an \code{estimate} or read by \code{cp}, the seeds carry
+that record as
 \code{attr(, "count_rule")}: how the count was set, for which cell value, and
 what the profile scored at it. Its \code{scored_cells} is \code{TRUE} for the
-scored centres \code{method = "kmeans"} hands on, and \code{FALSE} for seeds this
+scored centres \code{method = "kmeans"} hands on, and \code{FALSE} for centres
+refitted to every point (see \code{n}) and for seeds this
 call places itself at that count: a k-means of its own when the
 selection holds no centres at the count, and every \code{method = "random"}
 seeding. \code{method = "provided"} does not read \code{n} and writes no record;
@@ -210,9 +292,12 @@ hull of the points they were fitted to, random seeds inside the
 boundary), so Voronoi cells clipped to the seeds' own hull would leave
 its edge uncovered. The result therefore
 carries that ground as \code{attr(, "cover")}: the \code{boundary} when one was
-given, otherwise the convex hull of \code{sample_points}, otherwise (for the
-scored centres of a \code{\link[=resolution_profile]{resolution_profile()}} or a \code{\link[=select_resolution]{select_resolution()}}
-result passed as \code{n}) the hull of the points the profile was computed on.
+given, otherwise the convex hull of \code{sample_points} (for lon/lat points,
+the hull of their coordinates in degrees, with the longitudes of points on
+both sides of 180 degrees taken from 0 to 360, -170 as 190), otherwise
+(for the scored centres of a \code{\link[=resolution_profile]{resolution_profile()}} or a
+\code{\link[=select_resolution]{select_resolution()}} result passed as \code{n}) the hull of the points the
+profile was computed on.
 \code{\link[=build_tessellation]{build_tessellation()}} and
 \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} derive their default boundary from it, so
 \code{build_tessellation(seeds, method = "voronoi")} holds every observation
@@ -226,11 +311,13 @@ themselves. The attribute survives
 A k-means seed is a mean of the points of its cluster, weighted under the
 density kind, so it can lie outside a \code{boundary} that is not convex, in a
 bay or a bend of a coast, even when every point lies inside. Tessellated
-within that boundary, its cell is built if any of it lies inside, but the
-seed itself lies in no cell: \code{\link[=build_tessellation]{build_tessellation()}} warns that it falls
-in no cell (class \code{spatialkit_unassigned}) and gives it \code{NA} in \code{index}.
-\code{seeds} in \code{\link[=cell_values_at]{cell_values_at()}} says how to give such a seed its cell's
-ID.
+within that boundary, its cell is built if any of it lies inside: the part
+of the study area nearer the seed than any other seed.
+\code{\link[=build_tessellation]{build_tessellation()}} gives the seed that cell in \code{index}, as it gives
+every seed the cell it generates, so \code{seeds$cell_id <- tess$index} holds
+each seed's cell for \code{\link[=cell_values_at]{cell_values_at()}}. A seed with every part of the
+study area nearer another seed has no cell, \code{NA} in \code{index}, and a
+warning of class \code{spatialkit_unassigned} gives the number.
 }
 \examples{
 library(sf)

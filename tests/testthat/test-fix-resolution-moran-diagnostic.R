@@ -141,9 +141,13 @@ test_that("a geometry-only profile with an elbow is still read by the elbow", {
 })
 
 test_that("determine_optimal_levels() says, with a class, when Moran's z ranked its counts", {
+  # The field's points are uniform, so the WSS curve has no elbow: the ladder
+  # places the window, which is scored under on_no_elbow = "warn".  At the
+  # default, "na", nothing is scored (test-fix-levels-no-elbow.R).
   fmd_dol <- function(...) {
     ws <- list()
-    value <- withCallingHandlers(determine_optimal_levels(...), warning = function(w) {
+    value <- withCallingHandlers(determine_optimal_levels(..., on_no_elbow = "warn"),
+                                 warning = function(w) {
       ws[[length(ws) + 1L]] <<- w
       invokeRestart("muffleWarning")
     })
@@ -160,7 +164,8 @@ test_that("determine_optimal_levels() says, with a class, when Moran's z ranked 
   expect_identical(r$n, 1L)
   expect_identical(r$w$k, r$value[1L])
   expect_identical(r$w$criterion, "morans_i")
-  expect_false(r$w$upgraded)
+  # The condition no longer carries `upgraded`: no criterion is switched.
+  expect_false("upgraded" %in% names(r$w))
   expect_identical(r$w$first_computable, min(d$eval_ks[is.finite(d$moran_z[d$eval_ks])]))
   expect_identical(r$w$window, range(d$eval_ks))
   msg <- conditionMessage(r$w)
@@ -170,65 +175,69 @@ test_that("determine_optimal_levels() says, with a class, when Moran's z ranked 
   expect_match(msg, sprintf("k = %d is ranked first; the statistic is computable from k = %d",
                             r$value[1L], r$w$first_computable))
   expect_match(msg, "Use criterion = \"geometric\" for the elbow's ranking", fixed = TRUE)
+  # It named select_resolution(criterion = "cp"), an error on the default
+  # profile; it names the two functions, which run there.
+  expect_match(msg, "or resolution_profile() and select_resolution() for a count", fixed = TRUE)
+  expect_false(grepl("criterion = \"cp\"", msg, fixed = TRUE))
   expect_identical(r$w$k, r$w$first_computable)
   # It can be caught by class (the no-elbow warning, raised before it on
   # these uniform points, is let through).
   expect_identical(
     withCallingHandlers(
       tryCatch(determine_optimal_levels(pts, max_levels = 40, response_var = "z",
-                                        criterion = "morans_i"),
+                                        criterion = "morans_i", on_no_elbow = "warn"),
                spatialkit_diagnostic_ranking = function(w) "caught"),
       spatialkit_no_elbow = function(w) invokeRestart("muffleWarning")),
     "caught")
 
-  # With both model variables "geometric" is read as "combined", so the way
-  # back to the elbow's ranking has two parts when the criterion was named:
-  # the criterion has to go and a variable has to go.  (The advice named the
-  # variable alone, and with criterion = "morans_i" still in the call that
-  # ranks by Moran's z all the same.)
+  # With both model variables "geometric" stays "geometric", so the way back
+  # to the elbow's ranking is the criterion alone; nothing has to be left
+  # out.  (It used to say to leave out a variable as well, because both
+  # switched "geometric" to "combined".)
   rb <- fmd_dol(pts, max_levels = 40, response_var = "z", predictor_vars = "w",
                 criterion = "morans_i")
   expect_identical(rb$n, 1L)
-  expect_false(rb$w$upgraded)
-  expect_match(conditionMessage(rb$w),
-               paste0("Use criterion = \"geometric\" and leave out `response_var` or ",
-                      "`predictor_vars` (with both, \"geometric\" is read as \"combined\") ",
-                      "for the elbow's ranking"),
-               fixed = TRUE)
+  expect_false("upgraded" %in% names(rb$w))
+  mb <- conditionMessage(rb$w)
+  expect_match(mb, "the residuals of the cell means regressed on the cell-mean predictors")
+  expect_match(mb, "Use criterion = \"geometric\" for the elbow's ranking", fixed = TRUE)
+  expect_false(grepl("leave out", mb, ignore.case = TRUE))
+  expect_false(grepl("is read as \"combined\"", mb, fixed = TRUE))
   # Following it gives the elbow's ranking, with no such warning.
   expect_identical(fmd_dol(pts, max_levels = 40, response_var = "z",
                            criterion = "geometric")$n, 0L)
 
-  # "combined", asked for or taken because both model variables are given:
-  # the same condition, and the message says which.
+  # "combined" ranks by the sag, not by Moran's z, so it raises no such
+  # warning; with no elbow its window comes out in the geometric order,
+  # its first count the chord rule's.  (It came with the warning, ranked
+  # by Moran's z alone, the sag being flat.)
+  geo <- fmd_dol(pts, max_levels = 40)$value
   rc <- fmd_dol(pts, max_levels = 40, response_var = "z", criterion = "combined")
-  expect_identical(rc$n, 1L)
-  expect_false(rc$w$upgraded)
-  expect_match(conditionMessage(rc$w), "the WSS curve's sag, is flat (the curve has no elbow)",
-               fixed = TRUE)
+  expect_identical(rc$n, 0L)
+  expect_identical(rc$value[1L], attr(rc$value, "diagnostics")$knee_k)
+  expect_identical(as.vector(rc$value), as.vector(geo))
+  # Both variables and no criterion: "geometric", not "combined", with no
+  # warning and no diagnostics.
   ru <- fmd_dol(pts, max_levels = 40, response_var = "z", predictor_vars = "w")
-  expect_identical(ru$n, 1L)
-  expect_true(ru$w$upgraded)
-  expect_identical(ru$w$criterion, "combined")
-  mu <- conditionMessage(ru$w)
-  expect_match(mu, "(taken because `response_var` and `predictor_vars` were both supplied)",
-               fixed = TRUE)
-  expect_match(mu, "the residuals of the cell means regressed on the cell-mean predictors")
-  expect_match(mu, "Leave out `response_var` or `predictor_vars` for the elbow's ranking",
-               fixed = TRUE)
+  expect_identical(ru$n, 0L)
+  expect_null(attr(ru$value, "diagnostics"))
+  expect_identical(ru$value, geo)
 
   # No such warning where Moran's z ordered nothing: the geometric criterion,
   # a window below ten cells (the default max_levels), and an elbow below
   # ten cells, where "combined" returns the geometric ranking.
   expect_identical(fmd_dol(pts, max_levels = 40, response_var = "z")$n, 0L)
-  expect_identical(fmd_dol(pts, response_var = "z", predictor_vars = "w")$n, 0L)
+  expect_identical(fmd_dol(pts, response_var = "z", predictor_vars = "w",
+                           criterion = "combined")$n, 0L)
   set.seed(6)
   ctr <- cbind(runif(8, 0, 1000), runif(8, 0, 1000))
   g <- rep(1:8, each = 50)
   cl <- sf::st_as_sf(data.frame(x = ctr[g, 1] + rnorm(400, 0, 8), y = ctr[g, 2] + rnorm(400, 0, 8),
                                 z = rnorm(400) + g, w = rnorm(400)),
                      coords = c("x", "y"), crs = 32632)
-  r8 <- fmd_dol(cl, max_levels = 14, response_var = "z", predictor_vars = "w")
+  r8 <- fmd_dol(cl, max_levels = 14, response_var = "z", predictor_vars = "w",
+                criterion = "combined")
   expect_identical(r8$n, 0L)
   expect_identical(r8$value[1L], 8L)
+  expect_identical(attr(r8$value, "diagnostics")$criterion, "geometric")
 })

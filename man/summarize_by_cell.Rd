@@ -76,7 +76,10 @@ off-diagonal correlation recovers \code{1 + (n - 1) * rho} exactly) but
 lets correlation decay with distance, which matters increasingly as
 cells get larger and Kish's single-\code{rho} assumption degrades. Supply
 the fit via \code{sac}, or it is estimated when \code{response_var} is given and
-'gstat' is available. Exponential, spherical and Gaussian models are
+'gstat' is available. The distances are taken in x and y: a layer
+whose features, or the points taken from them, do not all have the
+same dimensions (some with a Z or M coordinate) is read without its
+Z and M. Exponential, spherical and Gaussian models are
 supported, with a nugget and with several structured components
 (each weighted by its partial sill) and with gstat's 2-D geometric
 anisotropy (\code{vgm(..., anis = c(angle, ratio))}), applied as gstat
@@ -86,10 +89,13 @@ reason and the ICCs: a model of any other family (named in the
 warning), or no usable model (none supplied and none could be
 estimated, or a rejected fit that could not be replaced by an
 estimate). The standard errors, intervals and \code{cell_weight} are then
-Kish's, and the uncorrected ones only where Kish's own ICC is 0; the
+Kish's, the uncorrected ones where Kish's own ICC is 0 and \code{NA}
+where it cannot be estimated; the
 \code{deff_method} column says which on every row (see "Value"). The
 variogram route needs an identified range, which a layer does not
-always have, so read \code{deff_method} for the fallback. A model with
+always have, so read \code{deff_method} for the fallback. A layer whose
+geometries carry M (XYM or XYZM), which GEOS does not read, is
+read in x and y too. A model with
 no structured component (a pure
 nugget) implies that distinct observations are uncorrelated, so it
 is applied as a design effect of 1 in every cell, not treated as a
@@ -97,7 +103,10 @@ fallback. That includes the model \code{\link[=estimate_sac_range]{estimate_sac_
 when it finds no spatial structure (an \code{NA} range whose
 \code{rejected_reason} says so): the answer is then a design effect of
 1, \code{deff_method} reads \code{"variogram"}, and no fallback warning is
-raised. Points with empty
+raised. Predictor columns summarised under that verdict get the same
+design effect of 1, and a warning of class
+\code{"spatialkit_deff_no_structure"} names them (fields \code{columns} and
+\code{reason}). Points with empty
 geometry count towards their cells' values but not towards the
 correlation, with a warning.}
 \item{\code{"kish"}}{Estimate an intra-class correlation (ICC) for each
@@ -115,12 +124,29 @@ for that column's SEs and for no other: the response's ICC is never
 applied to a predictor, nor one predictor's to another. It is the
 response's ICC that sets \code{cell_weight} whenever a response was
 given, and the first predictor's own ICC otherwise.
-Requires at least 2 cells with 2+ observations and at least 2 residual
-degrees of freedom (\code{N - k >= 2}); the ICC is taken as 0 (no
-correction for that column) otherwise, and likewise when the
-estimate itself comes out at or below 0. The \code{"deff_applied"}
-attribute is attached when any ICC is positive, so when all are
-0 there is none.}
+An ICC needs at least 2 cells with 2+ observations of the column and
+at least 2 residual degrees of freedom (\code{N - k >= 2}). Where a column
+has fewer (all its values in one cell, say), its ICC cannot be
+estimated: it is \code{NA}, \code{attr(, "icc")$reason} says why, and the
+column's standard errors, \verb{..neff_*} and \verb{..ci_*} are \code{NA} in every
+cell of two or more observations (\verb{..df_*} stays \code{n - 1}), as is
+\code{cell_weight} when that column sets it, with a warning of class
+\code{"spatialkit_icc_unavailable"} (fields \code{columns} and \code{reason}). Rows
+with no cell id (kept by \code{keep_unassigned = TRUE} in
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}) give a summary row of their own but
+no cell to the ICC, so a column whose values all fall in them, or
+differ only there, has an ICC that cannot be estimated. An
+estimate at or below 0 is another case: the ICC is 0 and the
+column's standard errors are the uncorrected ones. A column that
+does not vary (all its values equal, those of rows with no cell id
+included) has an ICC of \code{NA} and standard errors of 0, with no
+warning: its mean has no error whatever the correlation. A column
+whose values differ only by their rounding (0.1 beside 0.3 / 3) is
+read the same way, as one that does not vary, at any size of its
+values; its standard errors are 0 in a cell whose values are equal
+and of the size of that rounding in one whose values differ. The
+\code{"deff_applied"} attribute is attached when any ICC is positive, so
+when all are 0 or \code{NA} there is none.}
 \item{A positive number}{Applied as a uniform design effect to every
 cell, as \code{sd * sqrt(deff / n)}, exactly \code{sqrt(deff)} times the
 naive SE. Use when you have an external estimate of the design
@@ -150,7 +176,11 @@ it corrects response columns (see "Design effects and variable types").}
 \item{deff_max_n}{Cells with more than this many points are subsampled
 before forming the \verb{n x n} correlation matrix used by
 \code{deff = "variogram"}. Default 500. It must be a single number of at
-least 2 when \code{deff = "variogram"}; anything else is an error.}
+least 2 when \code{deff = "variogram"}; anything else is an error. The
+subsample is drawn with a fixed seed from the cell's points in
+coordinate order, so it does not depend on the row order of
+\code{assigned_points_sf}, and the caller's random-number stream is left
+where it was.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
@@ -169,19 +199,51 @@ in the cell over that area, a point density; a rate of anything else
 is that thing's \code{agg_funs} sum over \code{cell_area}).  The request is
 \strong{refused} with an error, not answered with a number, when the cells'
 CRS distorts areas across them by more than 1 percent, measured as the
-spread of planar-to-geodesic area ratios over the cells: a density is a
+spread of planar-to-geodesic area ratios over the cells (over 200 of
+them when there are more, taken at even spacing along the cells sorted
+by their bounding boxes in that CRS and then by the means of their
+vertices, together with the cells that reach furthest along x and y
+either way, so the order of the rows does not matter): a density is a
 comparison between cells and is meaningless where the map scale differs
 from one cell to the next.  Inside a UTM zone the spread is under 0.3
 percent and the request goes through; the conterminous United States
 forced into one zone (14 percent), or a few degrees of latitude in Web
-Mercator (4 percent at 48N), does not.  \code{\link[=ensure_projected]{ensure_projected()}} with
+Mercator (4 percent at 48N), does not.  Exact copies of one cell count
+once.  A layer of one distinct cell gives one ratio and no spread, so its
+distortion is measured on a 6 by 6 grid over the cell's bounding box.
+Projected cells are first checked with \code{sf::st_is_valid()} in their
+CRS, every non-empty cell before any summary: a cell GEOS calls invalid
+(edges that cross, a spike, parts that overlap) has no planar area to
+vouch for, and the request is refused with an error that names the
+first such cells and GEOS's reason and says to repair the cells with
+\code{sf::st_make_valid()}.  A valid projected cell with two vertices that
+fall on one point once in degrees, where s2 refuses it, is measured
+there without the repeat, which moves no area; when s2 refuses a valid
+cell it measures for another reason, the spread cannot be measured and
+the request is refused.
+\code{\link[=ensure_projected]{ensure_projected()}} with
 \code{purpose = "area"} chooses an equal-area CRS for lon/lat input; build the
 cells in it.  Lon/lat cells are measured geodesically instead: their
 \code{cell_area} is \code{sf::st_area()}'s area in square metres (on the sphere
-with s2, sf's default), not a planar area in squared degrees, and the
-distortion check passes by construction; with s2 switched off, sf needs
-the lwgeom package for that area and the request is refused without
-it.  The measured spread is attached as \code{attr(, "area_error")}.}
+with s2, sf's default), not a planar area in squared degrees, and on
+the cells s2 measures the distortion check passes by construction.
+Every cell's area is taken before any summary, and when s2 refuses a
+cell that is not valid on the sphere, such as one with two corners it
+reads as one point (cells returned in lon/lat can hold them; see \code{crs}
+in \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}), the request stops with an error of
+class \code{"spatialkit_cells_degenerate"} that gives the rows of \code{cells_sf}
+s2 refuses (\code{rows} on the condition) and says to transform the cells to
+a projected CRS, such as the one they were built in or the equal-area
+one \code{ensure_projected(purpose = "area")} picks.  With s2 switched off,
+sf needs the lwgeom package for that area and the request is refused
+without it.  The measured spread is attached as \code{attr(, "area_error")}.
+Cells that mix XY and XYZ (or XYM) geometries are measured, and their
+spread taken, without Z and M, since sf reads a layer in the dimension
+of its first geometry; so are cells that carry M throughout, which GEOS
+does not read.  The cells are returned with their own geometry.  In a
+projected CRS whose unit sf has no name for (a \code{+to_meter} such as
+1e6), \code{sf::st_area()} gives square metres; \code{cell_area} is the planar
+area in that CRS's unit squared all the same.}
 
 \item{estimate}{Which value of a cell the frame reports: \code{"pooled"}
 (default) or \code{"mean"}. With \code{"mean"} the frame is the one described
@@ -206,7 +268,10 @@ distances are measured in; a layer projected beforehand is used in its
 own CRS. When the input carries the record of its cells' count (see
 "Value") and that record names a projected CRS, the one the profile
 worked in, the distances are measured in it, whatever CRS the layer is
-in. The value is matched as \code{\link[=match.arg]{match.arg()}} matches a choice, so an
+in. The distances are taken in x and y: a layer whose features, or the
+points taken from them, do not all have the same dimensions (some with a
+Z or M coordinate) is read without its Z and M. So is a layer whose
+geometries carry M (XYM or XYZM), which GEOS does not read. The value is matched as \code{\link[=match.arg]{match.arg()}} matches a choice, so an
 abbreviation (\code{"m"}) is accepted and \code{NULL} is the default. See "Pooled
 values" for what the pooled value estimates and what its numbers rest
 on, "Value" for the columns and the attributes, and "Conditions" for
@@ -238,14 +303,16 @@ shadow the count.
 \code{deff_applied} is \code{TRUE} on every row when a design-effect correction
 was applied (exactly when the \code{"deff_applied"} attribute below is
 attached; under \code{"kish"}, when any standard-error column was corrected)
-and \code{FALSE} when the standard errors are the uncorrected ones: a
-refused \code{deff}, or \code{"kish"} ICCs of 0 for every column (and \code{NA} on a
-\code{cells_sf} row no point fell in). \code{deff_method} names the correction
+and \code{FALSE} when none was: a refused \code{deff}, or \code{"kish"} ICCs of 0 or
+\code{NA} for every column (the standard errors are then the uncorrected
+ones, or \code{NA} where an ICC cannot be estimated). It is \code{NA} on a
+\code{cells_sf} row no point fell in. \code{deff_method} names the correction
 the standard errors carry, since their column names do not change with
 it: \code{"variogram"}, \code{"kish"} or \code{"fixed"} when the one requested was
 applied, \code{"none"} when none was, and \code{"kish (variogram fallback)"} or
 \code{"none (variogram fallback)"} when a \code{"variogram"} request could not be
-met and Kish stood in for it (the second when Kish's ICCs were 0 too).
+met and Kish stood in for it (the second when Kish's ICCs were 0 or
+\code{NA} too).
 So \code{deff_applied} is \code{TRUE} on a Kish fallback row: test
 \code{deff_method == "variogram"} to keep only rows the variogram corrected.
 Unlike the attribute, both columns survive \code{rbind()} and
@@ -256,13 +323,20 @@ warning of class \code{"spatialkit_deff_fallback"} (a Kish ICC of 0 under a
 message. It is raised when the correction requested was not the one
 applied: a refused number (the standard errors are then the uncorrected
 ones) or a \code{"variogram"} request that fell back to Kish; the condition
-of the second carries \code{requested} and \code{used}.
+of the second carries \code{requested} and \code{used}. Two more classes say what
+a design effect could not do: \code{"spatialkit_icc_unavailable"} names the
+columns whose Kish ICC cannot be estimated, and
+\code{"spatialkit_deff_no_structure"} the predictor columns given a design
+effect of 1 by a variogram that found no spatial structure.
 
 When a correction was actually applied, an attribute \code{"deff_applied"} is
 attached recording it: \code{method} plus \code{icc_resp}/\code{icc_pred} and \code{deff}
 for \code{"kish"} (\code{icc_pred} is a vector named by predictor column, one ICC
 each; \code{deff} is the primary variable's per-cell design effect,
-all 1 when only a predictor's ICC was positive; \code{requested} and
+all 1 when only a predictor's ICC was positive, except that it is \code{NA}
+in each cell of two or more of the primary variable's values when that
+variable's ICC cannot be estimated, and its entry in \code{icc_resp} or
+\code{icc_pred} is then \code{NA} too; \code{requested} and
 \code{fallback_reason} are added when a \code{"variogram"} request fell back to
 it),
 \code{deff}/\code{deff_rows}/\code{rbar}/\code{crs}/\code{max_n} for \code{"variogram"} (\code{deff} is
@@ -274,11 +348,13 @@ When \code{cells_sf} is supplied, \emph{every} per-cell vector in that attribute
 order, so \code{deff[i]} and \code{rbar[i]} still describe row \code{i}; cells with no
 observations carry \code{NA}. No attribute is attached when no correction was
 applied: \code{deff = 1}, or a \code{deff = "kish"} request (or Kish fallback)
-whose ICCs are all 0. A \code{deff = "kish"} request, and a \code{"variogram"}
+whose ICCs are all 0 or \code{NA}. A \code{deff = "kish"} request, and a \code{"variogram"}
 request that fell back to it, always
 records the ICCs it estimated on an attribute \code{"icc"} (\code{resp}, and
 \code{pred}, a vector named by predictor column; \code{NA} for a variable type
-with no numeric column), whether or not
+with no numeric column and for a column whose ICC cannot be estimated;
+\code{reason}, a character vector named by column, is then added and says
+why), whether or not
 they were positive enough to apply, so a result with no \code{"deff_applied"}
 still says what the ICCs came out as.
 
@@ -362,22 +438,44 @@ neither warning.
 
 A row that is the same distance from two centres lies on the boundary
 between their cells, which happens on gridded locations.
-\code{\link[=resolution_profile]{resolution_profile()}} scores such a row in the cell of the
-lower-numbered centre, and \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, on cells
-built from the centres the profile scored, gives a point on that
-boundary the same cell, measured in the CRS the record names, so the
-comparison reads \code{"match"} on gridded locations too.
+\code{\link[=resolution_profile]{resolution_profile()}} scores such a row in the cell of the lower-numbered
+centre (a distance counts as the same as the least when its square is no
+more than the square of the least distance lengthened by a margin, plus
+one part in ten million of the least squared distance; the margin is one
+part in 1e10 of the largest coordinate of the centres, at most a
+millionth of the diagonal of their bounding box and at least four times
+the spacing of doubles at that coordinate), and \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, on cells
+built from the centres the profile scored, gives a point on that boundary
+the same cell, measured in the CRS the record names, so the comparison
+reads \code{"match"} on gridded locations too. It does so on cells that carry
+the record, for rows that have a CRS exactly when the record names one.
+Rows without a CRS beside a record that names one, rows with a CRS beside
+a record that names none, rows assigned to the cells after they lost the
+record (written to a file and read back, say) and summarised with
+\code{cells_sf} set to the cells that carry it, and rows given their cells by
+another join are placed by the polygons alone, so a row on a boundary can
+sit in either cell.
 \code{\link[=build_tessellation]{build_tessellation()}} draws those cells in the CRS the record names,
 whatever CRS the seeds arrive in, unless its \code{crs} names another
 projected CRS. Cells built in another projected CRS are the
-nearest-centre cells of that CRS, so a row near a boundary, on it or
-not, can sit in another cell than the profile put it in. So can a row
-joined in longitude and latitude (rows and cells both in degrees), and
-a row that reached the record's CRS by another transformation than the
-profile's, which can settle a tie the other way. The comparison then
-reports \code{"differ"}, with \code{what = "loo"} when it finds the same rows in
-the same number of cells with another leave-one-out error. The
-summary's own numbers describe the cells as assigned.
+nearest-centre cells of that CRS, and cells transformed to another
+projected CRS are joined there, so a row near a boundary, on it or not,
+can sit in another cell than the profile put it in. So can a row joined
+in longitude and latitude, as rows and cells in degrees are when the
+cells do not carry the record or carry one in degrees (the Voronoi
+cells of the scored centres that \code{\link[=build_tessellation]{build_tessellation()}} returns in a
+geographic \code{crs} are joined in the record's CRS while they carry it), a
+row in cells that carry the record but are not the Voronoi cells of its
+centres (seeds moved, or cells edited, after the selection), and a row
+that reached the record's CRS by another transformation than the
+profile's, which can settle a tie the other way. Cells returned in a
+geographic \code{crs} are moved back to the record's CRS for that join, and
+for a layer wider than a UTM zone the round trip can move a corner by
+more than the margin of \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, so a row on an
+edge there can sit in another cell too. The comparison then reports
+\code{"differ"}, with \code{what = "loo"} when it finds the same rows in the same
+number of cells with another leave-one-out error, and the warning names
+these cases. The summary's own numbers describe the cells as assigned.
 
 The comparison uses the fit of the pooled columns when that is a fit of
 the estimate the profile scored, and fits the response once more
@@ -434,6 +532,16 @@ number of rows and cells affected (the condition carries \code{n} and
 the steps of one pipeline agree on a cell's mean. A function in \code{agg_funs}
 therefore never sees an infinite value: \code{max} returns the largest finite
 value, and infinities cannot be counted through \code{agg_funs}.
+
+\verb{..sd_*} is the standard deviation of the cell's values in the units of
+the column, at any size. Where the raw squares overflow or lose their bits
+(a standard deviation that is not finite or is below 1e-150), it is taken
+on the values centred on their median and divided by powers of two,
+which keeps their spread. A cell whose
+standard deviation is beyond the largest double (about 1.8e308) has
+\verb{..sd_*} of \code{Inf} and standard errors and interval of \code{NA}, with a warning
+of class \code{"spatialkit_sd_overflow"} (the condition carries \code{columns} and
+\code{cells}, the number of such cells of each column).
 }
 \section{Spatial autocorrelation and standard-error bias}{
 By default (\code{deff = 1}), the \verb{..se_*} columns are computed as
@@ -457,7 +565,9 @@ one-way random-effects decomposition across all cells. Each column's ICC
 is used for that column's SE adjustment, and each cell's effective sample
 size is reduced to \code{n_i / (1 + (n_i - 1) * rho)}. This is a first-order
 correction that does not require a full spatial covariance model but does
-require enough cells and observations for a stable ICC estimate.
+require enough cells and observations for a stable ICC estimate. A column
+whose ICC cannot be estimated at all gets \code{NA} standard errors (see
+\code{deff}).
 
 A design effect estimated from the data (\code{"kish"} or \code{"variogram"}) comes
 with a second, small-sample correction. The within-cell correlation that
@@ -532,6 +642,12 @@ accepts \strong{one} correlation function and applies it to every numeric column
 because a variogram is a property of the field being modelled rather than of
 a variable type; a predictor whose spatial structure differs markedly from
 the response's will have its SE corrected by the response's correlation.
+When that variogram finds no spatial structure (the pure nugget
+\code{\link[=estimate_sac_range]{estimate_sac_range()}} returns with that verdict), every column gets a
+design effect of 1, the predictors included, and a warning of class
+\code{"spatialkit_deff_no_structure"} names the predictor columns: the verdict
+is about the variable the variogram was fitted to, not about them.
+\code{deff = "kish"} gives each predictor its own ICC.
 The internally estimated variogram is fitted to the \strong{response itself},
 never to OLS residuals, whatever \code{predictor_vars} holds: the \verb{..se_resp_*}
 columns estimate the grand mean of the response, so the correlation to
@@ -664,14 +780,34 @@ number of values beyond one per cell. And when \code{tau2} comes out at 0,
 every own weight is 0 and each pooled value is its target; with two
 cells that is the other cell's mean, so the two values change places.
 
-A tie between two candidate neighbours goes to the centroid with the
-lower x, then the lower y, and the centroids are summed with the rows in
-coordinate order, so a cell's neighbours do not depend on the order of the
-rows. The values then agree to rounding: a cell's sums are taken in the
-order of its rows.
-The tie is between distances computed from the coordinates in the CRS the
-distances are measured in (see \code{estimate}), so on gridded locations the
-same layer in another CRS or unit can give a cell another neighbour.
+Two candidate neighbours are a tie when their squared distances differ by
+no more than one part in ten million. A tie goes to the centroid with the
+lower x, then the lower y, coordinates within that part of the distance
+counting as equal, and then to the cell whose ID sorts first. The
+centroids are summed with the rows in coordinate order, so a cell's
+neighbours do not depend on the order of the rows, and on gridded
+locations they do not depend on the unit or the origin of the coordinates
+either. The values agree to rounding under another order of the rows,
+since a cell's sums are taken in the order of its rows, and under another
+unit or origin where three to eight cells' centroids coincide, since the
+rounding then sets the order in which a cell's neighbours on that point
+are summed. A cell whose centroid shares its point with as many other
+cells as it has neighbours, or more, takes its neighbours from them, the
+first by ID, without a search. Centroids count as one point there when
+they are equal, or when they lie within a ten-millionth of the largest
+coordinate of one another, in x and in y. Where other centroids that close
+to them chain on further than that, the chain is taken again at half that
+reach, and so on, until its parts span no more than the reach they were
+taken at. So those cells keep their neighbours and their values in another
+unit, and with the origin moved by little against the coordinates. On such
+a point, cells whose centroids lie that close without coinciding take each
+other by ID as well, not by distance. The reach follows the largest
+coordinate, so with the origin moved far, to the corner of the data say,
+such centroids can lie beyond it, and their cells then take the nearest.
+Distances are measured in the CRS named under \code{estimate}, so the same
+layer in another projection can still give a cell other neighbours, and
+so can a lattice whose spacing is below about a ten-millionth of its
+coordinates.
 
 The figures on this page that describe pooled values and the two
 intervals come from one simulation, \code{dev/sim-pooled-values.R} in the
@@ -831,21 +967,29 @@ are in \code{attr(, "pooled")}.
 \code{reason} is \code{"no coordinates"} (a layer without geometry),
 \code{"no located value"} (no row with a value, a cell and a location),
 \code{"no cell holds two values"} (the condition also carries \code{n} and
-\code{cells} by column) or \code{"work limit"}. The last is the case of many
-cells without the 'FNN' package: the neighbour search then compares
-every pair of cells and is not made above
+\code{cells} by column), \code{"values out of range"} (values so large, or so
+close to their median, that the squares of many such values can
+overflow or lose their precision; the message gives the bounds, and the
+column rescaled by a power of ten is pooled) or \code{"work limit"}. The last
+is the case of many cells without the 'FNN' package: the neighbour
+search then compares every pair of cells and is not made above
 \code{getOption("spatialkit.exact_pairs_max", 2e9)} pairs, which is about
 44,700 cells (the condition also carries \code{work}, \code{limit}, and \code{cells}
 by column). With 'FNN' there is no such limit, and the result is the
 same.
 \item \code{"spatialkit_pool_degenerate"}: the pooled values were computed and
 carry no pooling. \code{reason} is \code{"one cell"} (the pooled value is the
-plain mean; also \code{n} by column), \code{"no spread inside any cell"} (every
-own weight is 1; also \code{constant} by column) or \code{"no signal between cells"} (\code{tau2} is 0 and every own weight is 0; also \code{sigma2} by
+plain mean; also \code{n} by column), \code{"no spread inside any cell"} (the
+values do not vary inside any cell to their precision, so every own
+weight is 1; also \code{constant} by column) or \code{"no signal between cells"} (\code{tau2} is 0 and every own weight is 0; also \code{sigma2} by
 column).
 \item \code{"spatialkit_pool_few_cells"}: 2 to 9 cells, so each target is the mean
-of all the other cells (\code{cells}, and \code{own_weight}, the smallest, by
-column).
+of all the other cells, and a cell whose own weight is below its share
+of the column's rows gets a pooled value on the far side of the overall
+mean from its plain mean (\code{cells}, and \code{own_weight}, the smallest, by
+column). The text also names each column with two cells and \code{tau2} at
+0, which has \code{cells} 2 and \code{own_weight} 0: each cell's pooled value is
+then the other cell's mean, so the two values change places.
 \item \code{"spatialkit_pool_few_df"}: \code{sigma2} rests on fewer than 30 values
 beyond one per cell (\code{needed}, and \code{df}, \code{n} and \code{cells} by column).
 \item \code{"spatialkit_no_structure"}: \code{structured} is \code{FALSE} (see "Pooled
@@ -854,9 +998,12 @@ values"). The text says which of the two tests failed, and \code{beats} is
 does not tell the cell means from one mean (also \code{criterion = "loo"},
 \code{estimate = "pooled"}, and by column \code{n}, the cells, \code{one_cell}, \code{loo}
 and \code{structure_p}).
-\item \code{"spatialkit_pool_rows_skipped"}: rows with a value and a cell have
-empty or non-finite coordinates. They count in \code{n} and the plain
-columns and take no part in the pooled ones (\code{n}, \code{cells}).
+\item \code{"spatialkit_pool_rows_skipped"}: rows with a value and a cell have no
+location: an empty point, a coordinate that is not finite or lies
+beyond 1e150, as given or in the CRS the distances are measured in, or
+in a geographic CRS a vertex at a latitude beyond 90 degrees.
+They count in \code{n} and the plain columns and take no part in the pooled
+ones (\code{n}, \code{cells}).
 \item \code{"spatialkit_repeated_locations"}, with \code{obs_level}: rows with a value
 share a location. A residual leaves one row out and keeps the others at
 its location, so the interval then describes a further observation at a

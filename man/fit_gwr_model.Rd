@@ -56,7 +56,19 @@ observations is capped at it, with a warning (a distance meant for
 \code{adaptive = FALSE}, most often).}
 
 \item{kernel}{Kernel function type. One of "bisquare" (default),
-"gaussian", "tricube", "boxcar", "exponential".}
+"gaussian", "tricube", "boxcar", "exponential".  The boxcar gives weight
+1 to every observation within the bandwidth's distance (with an adaptive
+bandwidth, the distance to the \code{bandwidth}-th nearest neighbour)
+and 0 to the others; an observation whose squared distance is within
+one part in ten million of the edge counts as at the edge, and inside,
+so on a regular grid every neighbour tied with the last one is in the
+window in any unit and at any origin where the doubles hold the
+coordinates to better than about one part in 1e8 of the distances
+between neighbours.  Farther from the origin the doubles round the
+coordinates more coarsely, and where a neighbour lies past the edge by
+less than that rounding the call warns, with class
+\code{"spatialkit_xy_imprecise"}; the windows are those the
+coordinates as stored give.}
 
 \item{.already_prepped}{Logical (internal). If \code{TRUE}, skip the
 \code{prep_model_data()} call because the caller has already projected,
@@ -118,7 +130,21 @@ when a bandwidth was supplied).
 standard errors \code{<term>_SE}, the t values \code{<term>_TV} and
 \code{Local_R2}), \code{GW.diagnostic}, \code{GW.arguments} and
 \code{lm} (the global least-squares fit).  It is a plain list, not a
-\code{gwrm} object.
+\code{gwrm} object.  Where a predictor or the response was taken less
+its centre (see \strong{The local solve}), \code{lm} is solved on the
+centred columns and returned as the fit at the data's origin: its
+coefficients, fitted values, \code{qr} and \code{effects} are those of
+the raw columns, so \code{summary()}, \code{vcov()}, \code{confint()}
+and \code{predict()} on it give the intercept at the data's 0 and its
+standard error, and the slopes and residuals are those of the centred
+fit.  With a predictor more than about 1e7 times its spread from 0,
+\code{predict(se.fit = TRUE)} on it stops with "singular matrix":
+\code{qr.solve()} reads the triangular factor at the data's origin as
+singular.  \code{predict()} on the fit itself has no such limit.
+\code{centres} holds what was taken off: \code{predictors}, the centre
+of each column of the design (\code{Intercept} first, 0 for a column
+used as it is), \code{NULL} where none was, and \code{response}, 0
+where none was.
 }
 \description{
 Fits a Gaussian GWR on an sf dataset with an adaptive or a fixed
@@ -139,6 +165,43 @@ weight, and each predictor is divided by its standard deviation over the
 whole data and centred in the window, so nothing below depends on a
 predictor's origin or units: an indicator coded 0/1 and one coded
 288.7/289.3 give the same fit.
+
+A predictor whose centre is more than 1000 times its spread (a timestamp
+in seconds, a northing, 1e8 plus a spread of 1) is taken less its centre
+first.  So is a response whose centre is more than 1000 times its spread
+(1e8 plus a spread of 1), whose raw values lose their spread to rounding
+(1e15 plus a spread of 1, stored to an eighth), or whose least-squares
+residuals on the predictors do.  The bandwidth search, the
+local regressions, the global least-squares fit and the centred condition
+indices (\code{info$condition_index}, \code{cn_slopes}) then work on the
+spread and not on the rounding of the offset, and the centres are added
+back only to what is returned in the data's units: the fitted values, the
+local intercepts, the intercept and fitted values of \code{$engine$lm},
+and \code{predict()}'s values, which take a new row's predictors about the
+same centres.  Residuals, slopes and their standard errors, AICc and the
+bandwidth are those of the same values at 0, to rounding; the fitted
+values and predictions of a response at 1e15 are held to the eighth a
+double holds there.  \code{model_metrics()}, \code{summary()} and the
+cross-validations score the fit on the response, the fitted values and
+the predictions less the response's centre, so their RMSE, MAE and
+R-squared are those of the same values at 0 too.  Every other predictor
+and response is used as it is.
+
+A response whose values, less any centre, reach beyond 1e100, or whose
+spread is below 1e-100, is divided by a power of two, which rounds
+nothing: the residual sum of squares, AICc and the bandwidth search
+square the residuals, and at 1e160 those squares overflow and at 1e-160
+they lose their bits.  The bandwidth is then that of the same values in
+ordinary units, and the fitted values, the residuals, the coefficients,
+their standard errors and \code{$engine$lm} are those of the same values
+times the factor; AICc, the AICc of \code{info$bandwidth_search} among
+them, gains \eqn{2 n \log} of the factor, and a cross-validation score
+of the search is multiplied by its square.  The residual sum of
+squares, \code{info$sigma2} and such a score are in the response's units
+squared, and are \code{NA}, with a warning, where a double cannot hold
+them there;
+\code{predict(se.fit = TRUE)} then takes its standard errors from the
+residual standard deviation, which it can hold.
 
 One tolerance, \code{1e-7}, decides what a window can estimate:
 \itemize{

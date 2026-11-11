@@ -42,16 +42,28 @@
 #' assumption is not. The lon/lat heuristic runs first, exactly as
 #' `ensure_projected()` does: coordinates that look like degrees are taken as
 #' EPSG:4326 and REPROJECTED; only when they do not is the target stamped. Both
-#' branches warn.
+#' branches warn.  A target in longitude and latitude is not stamped on
+#' coordinates that cannot be in it: that is refused.
 #'
 #' @param x An sf or sfc object.
 #' @param crs Target CRS (anything `sf::st_crs()` accepts).
 #' @param what Label naming `x` in the warning.
 #' @param caller Calling function name, for the warning.
-#' @return `x` reprojected to, or stamped with, `crs`.
+#' @param geo_remedy Words appended to the refusal's remedy (after "Set the
+#'   CRS of `what` with sf::st_crs()"), or NULL.
+#' @param lat_max The latitude, north or south, beyond which a CRS-less `x`
+#'   is refused a target in longitude and latitude.  90 by default.  A
+#'   caller that tests the rows of the stamped layer for a latitude beyond
+#'   90 and names them (create_grid_polygons() and build_tessellation(),
+#'   for `boundary`) passes 180, so that its refusal names the row.
+#' @return `x` reprojected to, or stamped with, `crs`.  A CRS-less `x` with
+#'   an x outside -180 to 360 or a y beyond `lat_max` north or south is
+#'   refused when `crs` is in longitude and latitude: its coordinates cannot
+#'   be in that CRS.
 #' @keywords internal
 #' @noRd
-.transform_or_stamp <- function(x, crs, what = "input", caller = "spatialkit") {
+.transform_or_stamp <- function(x, crs, what = "input", caller = "spatialkit",
+                                geo_remedy = NULL, lat_max = 90) {
   if (is.null(crs)) return(x)
   # An NA target means "leave the coordinates in whatever space they are in":
   # build_tessellation() passes it for CRS-less points that the lon/lat
@@ -77,19 +89,56 @@
                "CRS explicitly with sf::st_crs() to suppress this."),
         caller, what, ll$bb[["xmin"]], ll$bb[["xmax"]],
         ll$bb[["ymin"]], ll$bb[["ymax"]])
-      return(sf::st_transform(sf::st_set_crs(x, 4326), crs))
+      x0 <- sf::st_set_crs(x, 4326)
+      out <- .transform_keep_unlocated(x0, crs)
+      .warn_rows_unplaced(x0, out, caller = caller, arg = what, remedy = .UNPLACED_REMEDY)
+      return(out)
     }
     # Named by its label: most callers have no `crs` argument, so "the
     # supplied `crs`" sent the reader looking for one they had not passed.
     lbl <- tryCatch(sf::st_crs(crs)$input, error = function(e) NULL)
     lbl <- if (is.character(lbl) && length(lbl) == 1L && !is.na(lbl) && nzchar(lbl))
       sprintf("the target CRS ('%s')", lbl) else "the target CRS"
+    # A target in longitude and latitude is not stamped on coordinates that
+    # cannot be in it: an x outside longitude -180 to 360, or a y beyond 90
+    # north or south.  The stamp drew metres at "latitude" 4e6, and sf added
+    # its bare "bounding box has potentially an invalid value range for
+    # longlat data" after the warning above.  A caller that tests the rows
+    # of the stamped layer for a latitude beyond 90 and refuses them by row
+    # (the builders, for `boundary`, with class spatialkit_cells_degenerate)
+    # passes lat_max = 180, so that a y between 90 and 180 reaches that
+    # refusal.  The box is the one .looks_like_lonlat() read, of the
+    # coordinates that have a location.
+    bb <- ll$bb
+    if (.is_longlat(sf::st_crs(crs)) && !is.null(bb) &&
+        all(is.finite(bb)) &&
+        (bb[["xmin"]] < -180 || bb[["xmax"]] > 360 ||
+         bb[["ymin"]] < -lat_max || bb[["ymax"]] > lat_max))
+      stop(sprintf(paste0(
+        "%s(): `%s` has no CRS and its coordinates lie outside longitude -180 ",
+        "to 360 and latitude -90 to 90 (xmin=%.6g, xmax=%.6g, ymin=%.6g, ",
+        "ymax=%.6g), so they cannot be in %s, which is in longitude and ",
+        "latitude. Set the CRS of `%s` with sf::st_crs()%s."),
+        caller, what, bb[["xmin"]], bb[["xmax"]], bb[["ymin"]], bb[["ymax"]],
+        lbl, what, if (is.null(geo_remedy)) "" else paste0(", ", geo_remedy)),
+        call. = FALSE)
     .warn_and_log(
       "%s(): `%s` has no CRS and its coordinates do not look like lon/lat, so it cannot be reprojected; stamping %s WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set the input CRS with sf::st_crs().",
       caller, what, lbl)
     return(sf::st_set_crs(x, crs))
   }
-  sf::st_transform(x, crs)
+  # A row with a coordinate that is not finite or lies beyond 1e150 comes
+  # back empty (.transform_keep_unlocated()), not as the rest of the feature.
+  # A row of a projected `x` with a coordinate beyond .LONLAT_MOVE_MAX comes
+  # out empty when `crs` is in degrees (.lonlat_of_placed(), which it moves
+  # with): moved from Web Mercator at x = 1e20 it never came back from PROJ.
+  # A row with a location that `crs` cannot place in full comes back empty,
+  # or without the vertices it cannot place, and a warning of class
+  # "spatialkit_rows_unplaced" names it in the caller's words: a ring with
+  # a vertex at latitude 95 lost that vertex in silence.
+  out <- .transform_keep_unlocated(x, crs)
+  .warn_rows_unplaced(x, out, caller = caller, arg = what, remedy = .UNPLACED_REMEDY)
+  out
 }
 
 #' Check whether an sf/sfc object has a geographic (lon/lat) CRS
@@ -102,6 +151,68 @@
   cr <- sf::st_crs(x)
   if (is.na(cr)) return(FALSE)
   isTRUE(tryCatch(sf::st_is_longlat(cr), error = function(e) FALSE))
+}
+
+#' Areas in the squared unit of the layer's CRS
+#'
+#' \code{sf::st_area()} gives a projected layer's area in its CRS's unit
+#' squared when sf can name that unit (\code{st_crs()$ud_unit}), and in
+#' square metres when it cannot and the CRS carries a \code{+to_meter}
+#' (a unit of 1000 km, or of 3.28 m): there it multiplies GEOS's area by
+#' \code{to_meter^2}.  The package reads areas beside lengths in the CRS's
+#' unit, so such an area is taken as GEOS gives it, in that unit squared.
+#' Every other layer gets \code{sf::st_area()}'s numbers as they are: lon/lat
+#' layers their geodesic square metres, and layers in metres, in a named
+#' unit or with no CRS their planar areas.
+#'
+#' @param x An sf or sfc object.
+#' @return A plain numeric vector, one area per geometry.
+#' @keywords internal
+#' @noRd
+.planar_area <- function(x) {
+  g  <- sf::st_geometry(x)
+  cr <- sf::st_crs(g)
+  if (!is.na(cr) && !.is_longlat(g) && is.null(cr$ud_unit)) {
+    to_m <- cr$to_meter
+    if (!is.null(to_m) && length(to_m) == 1L && !is.na(to_m) && to_m != 1)
+      return(as.numeric(sf::st_area(sf::st_set_crs(g, NA))))
+  }
+  as.numeric(sf::st_area(g))
+}
+
+#' A point layer read in its typed class
+#'
+#' A geometry column of the general class \code{sfc_GEOMETRY} can hold
+#' points only: \code{sf::st_cast(x, "GEOMETRY")} builds one, and so do
+#' \code{c()} of such a column with points and a point set with
+#' \code{[[<-} in place of the last other geometry of a mixed column.
+#' \code{sf::st_coordinates()} refuses that class ("not implemented for
+#' objects of class sfc_GEOMETRY"), and \code{sf::st_dimension()} and
+#' \code{sf::st_transform()} stop with "Not compatible with STRSXP" on the
+#' column \code{sf::st_cast()} returns.  When every geometry is a POINT, empty ones included, the
+#' column is cast to \code{sfc_POINT}, which holds the same geometries; the
+#' layer is then read as the same points in that class are.  When every
+#' geometry is a MULTIPOINT, the column is cast to \code{sfc_MULTIPOINT} in
+#' the same way.  Any other layer, one that mixes points with other types or
+#' POINT with MULTIPOINT among them, is returned as it came.
+#'
+#' @param x An sf or sfc object.
+#' @return \code{x}, with its geometry column in \code{sfc_POINT} when it
+#'   was an \code{sfc_GEOMETRY} of points, and in \code{sfc_MULTIPOINT}
+#'   when it was one of multipoints.
+#' @keywords internal
+#' @noRd
+.typed_points <- function(x) {
+  is_sf <- inherits(x, "sf")
+  if (!is_sf && !inherits(x, "sfc")) return(x)
+  g <- if (is_sf) sf::st_geometry(x) else x
+  if (!inherits(g, "sfc_GEOMETRY") || length(g) == 0L) return(x)
+  types <- unique(as.character(sf::st_geometry_type(g, by_geometry = TRUE)))
+  if (length(types) != 1L || !types %in% c("POINT", "MULTIPOINT")) return(x)
+  g <- sf::st_cast(g, types)
+  if (!is_sf) return(g)
+  sf::st_geometry(x) <- g
+  x
 }
 
 
@@ -243,32 +354,65 @@
 
 #' Align the CRS of `a` to match `b` (transform if both defined & differ)
 #'
+#' A row of `a` with a coordinate that is not finite or lies beyond 1e150
+#' comes back empty, and so does a row of a projected `a` with a coordinate
+#' beyond `.LONLAT_MOVE_MAX` when `b` is in degrees
+#' (`.transform_keep_unlocated()`, `.lonlat_of_placed()`).
+#'
+#' A row of `a` with a location that the CRS of `b` cannot place in full
+#' comes back empty, or without the vertices it cannot place, and a warning
+#' of class `spatialkit_rows_unplaced` names it in the words of `caller` and
+#' `arg` (`.warn_rows_unplaced()`).
+#'
 #' @param a sf or sfc object to re-project.
 #' @param b sf or sfc reference whose CRS takes precedence.
+#' @param caller,arg The function the user called and the argument `a` came
+#'   from, for the warning.
+#' @param label `a` as the warning names it; the argument in backticks by
+#'   default.
 #' @return `a`, possibly transformed.
 #' @keywords internal
 #' @noRd
-.align_crs <- function(a, b) {
+.align_crs <- function(a, b, caller = "spatialkit", arg = "input",
+                       label = sprintf("`%s`", arg)) {
   if (is.null(a) || is.null(b)) return(a)
   if (is.na(sf::st_crs(a)) || is.na(sf::st_crs(b))) return(a)
   if (sf::st_crs(a) == sf::st_crs(b)) return(a)
-  sf::st_transform(a, sf::st_crs(b))
+  # A row with a coordinate that is not finite or lies beyond 1e150 comes
+  # back empty (.transform_keep_unlocated()), not as the rest of the feature.
+  out <- .transform_keep_unlocated(a, sf::st_crs(b))
+  .warn_rows_unplaced(a, out, caller = caller, arg = arg, label = label,
+                      remedy = .UNPLACED_REMEDY)
+  out
 }
 
 
-#' Remove duplicate features by rounded coordinate key
+#' Remove duplicate features by a coordinate key that does not move with
+#' the unit or the origin
 #'
 #' Works on sf objects and bare sfc vectors with POINT geometry, and also
 #' handles MULTIPOINT (or mixed) input by keying each feature on all of its
 #' vertices, keeping the deduplication mask aligned per feature.
 #'
+#' The key is a vertex's place in the frame of \code{.kmeans_frame()}: the
+#' coordinates centred on the middle of the bounding box of every vertex with
+#' a location, divided by its diagonal and rounded to \code{.KMEANS_STEP}
+#' (about a billionth of it).  Ten decimals of the layer's unit merged copies
+#' 3e-8 m apart in kilometres and not in metres, and copies 1e-9 m apart with
+#' one false origin and not with another; points within about a billionth of
+#' the extent of each other now key alike in any unit or origin, but for a
+#' point that lies within its own rounding noise of the middle of a step.  A
+#' vertex without a location (not finite, or beyond 1e150) is keyed by its
+#' coordinates as they are.
+#'
 #' @param g An sf object or sfc vector with POINT/MULTIPOINT geometry.
-#' @param digits Rounding precision. Default 10.
 #' @return `g` with duplicates removed (same class as input).
 #' @keywords internal
 #' @noRd
-.dedup_points <- function(g, digits = 10L) {
-  geom <- if (inherits(g, "sfc")) g else sf::st_geometry(g)
+.dedup_points <- function(g) {
+  # Points in an sfc_GEOMETRY column are keyed as the same points in
+  # sfc_POINT (.typed_points()): sf::st_coordinates() refuses that class.
+  geom <- .typed_points(if (inherits(g, "sfc")) g else sf::st_geometry(g))
   n <- length(geom)
   if (n == 0L) {
     if (inherits(g, "sfc")) return(g[integer(0)])
@@ -276,20 +420,34 @@
   }
 
   gtypes <- as.character(sf::st_geometry_type(geom, by_geometry = TRUE))
-  if (all(gtypes == "POINT")) {
-    # Fast path: one coordinate row per feature, so the key aligns 1:1.
-    m <- sf::st_coordinates(geom)
-    key <- paste0(round(m[, 1], digits), "_", round(m[, 2], digits))
+  fast <- all(gtypes == "POINT")
+  # The vertices of each feature: one row per feature on the fast path;
+  # MULTIPOINT (or mixed) input has one row per *vertex* in
+  # st_coordinates(), which would misalign a per-feature mask.
+  verts <- if (fast) {
+    m <- sf::st_coordinates(geom)[, 1:2, drop = FALSE]
+    list(xy = m, of = seq_len(n))
   } else {
-    # MULTIPOINT (or mixed) input: st_coordinates() returns one row per
-    # *vertex*, which would misalign a per-feature mask.  Build one key
-    # per feature from all of its vertices instead.
-    key <- vapply(seq_len(n), function(i) {
-      m <- sf::st_coordinates(geom[i])
-      if (nrow(m) == 0L) return("<empty>")
-      paste(round(m[, 1], digits), round(m[, 2], digits),
-            sep = "_", collapse = ";")
-    }, character(1))
+    ms <- lapply(seq_len(n), function(i) sf::st_coordinates(geom[i])[, 1:2, drop = FALSE])
+    list(xy = do.call(rbind, ms), of = rep(seq_len(n), vapply(ms, nrow, integer(1))))
+  }
+  xy <- verts$xy
+  ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L]) &
+    abs(xy[, 1L]) <= .POOL_XY_MAX & abs(xy[, 2L]) <= .POOL_XY_MAX
+  vkey <- character(nrow(xy))
+  if (any(ok)) {
+    z <- .kmeans_frame(xy[ok, , drop = FALSE])$to(xy[ok, , drop = FALSE])
+    # + 0 reads -0 as 0, so a point that rounds to the middle from below
+    # keys as one that rounds to it from above.
+    vkey[ok] <- sprintf("%a %a", z[, 1L] + 0, z[, 2L] + 0)
+  }
+  vkey[!ok] <- sprintf("raw %a %a", xy[!ok, 1L], xy[!ok, 2L])
+  key <- if (fast) vkey else {
+    k <- rep("<empty>", n)
+    have <- unique(verts$of)
+    k[have] <- vapply(split(vkey, factor(verts$of, levels = have)),
+                      paste, character(1), collapse = ";")
+    k
   }
 
   mask <- !duplicated(key)
@@ -357,6 +515,97 @@
 }
 
 
+#' The power of two at or below a positive value
+#'
+#' The first divisor of \code{.spread_scaled()}: \code{log2()} of the
+#' largest doubles rounds up to 1024, whose power is \code{Inf}, and of a
+#' value just below a power of two can round up to it.
+#'
+#' @param a A positive finite value.
+#' @return A power of two in \code{(a / 2, a]}.
+#' @keywords internal
+#' @noRd
+.pow2_floor <- function(a) {
+  s <- 2^min(floor(log2(a)), 1023)
+  if (s > a) s / 2 else s
+}
+
+
+#' The mean of a column at any size
+#'
+#' \code{mean()} sums in a double where a long double is not wider, and a
+#' column near the largest double then has a mean of \code{Inf}.  The
+#' column is divided by the power of two at or below its largest absolute
+#' value, which is exact, and the mean multiplied back.
+#'
+#' @param y Finite values, at least one.
+#' @return The mean of \code{y}.
+#' @keywords internal
+#' @noRd
+.mean_pow2 <- function(y) {
+  a <- max(abs(y))
+  if (!(a > 0)) return(0)
+  s <- .pow2_floor(a)
+  mean(y / s) * s
+}
+
+
+#' The training mean an out-of-sample R-squared is scored against
+#'
+#' \code{mean()} of the finite training responses, less \code{centre} where
+#' the fit took the response about one.  Where that mean is finite it is
+#' returned as it stands, so the baseline is the one \code{mean()} gives.
+#' Where it is not, the values are near the largest double and
+#' \code{mean()}, summing in a double where a long double is not wider, has
+#' overflowed: the mean is then \code{.mean_pow2()} of the values, and
+#' where a value less the centre overflows, twice \code{.mean_pow2()} of the
+#' halves.
+#'
+#' @param y The training responses; values that are not finite are dropped.
+#' @param centre One finite value, 0 where the fit took no centre.
+#' @return The mean, \code{NaN} where no value is finite (as \code{mean()}).
+#' @keywords internal
+#' @noRd
+.train_mean <- function(y, centre = 0) {
+  y <- y[is.finite(y)]
+  d <- if (centre != 0) y - centre else y
+  m <- mean(d)
+  if (is.finite(m) || !length(y)) return(m)
+  if (all(is.finite(d))) return(.mean_pow2(d))
+  .mean_pow2(y / 2 - centre / 2) * 2
+}
+
+
+#' A sum of squared differences at any size
+#'
+#' The differences \code{u - v} are divided by the power of two at or below
+#' their largest absolute value, so that the largest lies in [1, 2) and no
+#' square underflows or overflows where the sum is not itself beyond a
+#' double.  Division by a power of two is exact.  Where a difference
+#' overflows, the differences are taken on the halves, \code{f = 2}.
+#'
+#' @param u,v The values; \code{v} one value or one per value of \code{u}.
+#' @return A list with \code{m}, \code{s} and \code{f}, the sum being
+#'   \code{m * (s * f)^2}, \code{m} between 1 and \code{4 * length(u)} (0
+#'   where every difference is 0); \code{NULL} where a difference is not
+#'   finite on the halves either (\code{v} not finite).
+#' @keywords internal
+#' @noRd
+.ss_pow2 <- function(u, v) {
+  d <- u - v
+  f <- 1
+  if (!all(is.finite(d))) {
+    d <- u / 2 - v / 2
+    f <- 2
+  }
+  a <- max(abs(d))
+  if (!is.finite(a)) return(NULL)
+  if (!(a > 0)) return(list(m = 0, s = 1, f = 1))
+  s <- .pow2_floor(a)
+  list(m = sum((d / s)^2), s = s, f = f)
+}
+
+
 #' Compute basic regression metrics (RMSE, MAE, MAPE, SMAPE, R-squared, Adjusted R-squared)
 #'
 #' Shared across model-prep, cross-validation, and evaluation modules.
@@ -371,6 +620,15 @@
 #'   is filtered in parallel with `y` and `yhat` to remove non-finite cases.
 #'   Any other length is an error. Recycling it would silently produce a wrong
 #'   R-squared.
+#' @param centre The value `y`, `yhat` and `y_train_mean` are given less of:
+#'   0 (the default) for values in the response's units, or the centre a fit
+#'   regressed its response about (one value, or one per observation for
+#'   pooled folds, each the centre of its own fold's fit). RMSE, MAE and R2
+#'   do not change under a shift, so they read the centred values, which
+#'   keep the spread a double rounds away at the response's size; MAPE and
+#'   SMAPE, which read the size of the values, read the centred error over
+#'   the values with the centre added back. With 0 the arithmetic is that of
+#'   values in the response's units, to the last bit.
 #' @return A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2, n_MAPE and
 #'   n_SMAPE. `Adj_R2` is always present, and is `NA` when `p` is NULL or
 #'   `n <= p + 1`.
@@ -381,9 +639,11 @@
 #'   where `y == 0`, `SMAPE` where `|y| + |yhat| == 0`), returning `NA` only
 #'   when no row qualifies. "Zero" is relative to the data, as for every
 #'   metric here: a denominator no larger than `100 * .Machine$double.eps`
-#'   times the largest one, and, for `R2`, a total sum of squares whose RMS
-#'   deviation is no larger than that fraction of the RMS of `y` (then `R2`
-#'   is `NA`). The result therefore does not depend on the response's units.
+#'   times the largest one. `R2` is `NA` where the total sum of squares has
+#'   an RMS deviation no larger than that fraction of the RMS of `y` and `y`,
+#'   read again centred and scaled (`.constant_column()`), shows no spread
+#'   beyond its rounding. The result therefore does not depend on the
+#'   response's units or origin.
 #'   `n_MAPE` and `n_SMAPE` are the row counts each was
 #'   actually averaged over, so that a percentage error over a subset is
 #'   labelled as one; they equal `n` whenever no row was dropped, and are `0`
@@ -394,7 +654,8 @@
 #'   the count makes the subsetting visible, not harmless.
 #' @keywords internal
 #' @noRd
-.compute_reg_metrics <- function(y, yhat, p = NULL, y_train_mean = NULL) {
+.compute_reg_metrics <- function(y, yhat, p = NULL, y_train_mean = NULL,
+                                 centre = 0) {
   ok <- is.finite(y) & is.finite(yhat)
 
   # A scalar baseline (per-fold training mean) is used as-is; a per-observation
@@ -408,6 +669,17 @@
       ), call. = FALSE)
     y_train_mean <- y_train_mean[ok]
   }
+  if (length(centre) != 1L) {
+    if (length(centre) != length(ok))
+      stop(sprintf(
+        ".compute_reg_metrics(): `centre` must be length 1 or length %d (one per observation); got %d.",
+        length(ok), length(centre)
+      ), call. = FALSE)
+    centre <- centre[ok]
+  }
+  if (!all(is.finite(centre)))
+    stop(".compute_reg_metrics(): `centre` must be finite.", call. = FALSE)
+  centred <- any(centre != 0)
 
   y <- y[ok]; yhat <- yhat[ok]
   n <- length(y)
@@ -419,7 +691,25 @@
 
   baseline <- if (!is.null(y_train_mean)) y_train_mean else mean(y)
   tss  <- sum((y - baseline)^2)
-  rmse <- sqrt(rss / n)
+  # Squares of errors below about 1e-162 fall below the smallest double, and
+  # squares of large errors sum past the largest one: on the values as they
+  # stand RSS is 0 (RMSE 0, R2 1 whatever the fit) or Inf (RMSE Inf, R2 NA
+  # or -Inf), and TSS the same.  Where a sum is not finite, or is below
+  # n * .POOL_Y_MIN^2 while its terms are not all 0, that sum alone is read
+  # again on its own terms divided by a power of two (.ss_pow2()), which is
+  # exact: the sum is m * (s * f)^2.  The other sum keeps its value, as m
+  # with s = f = 1, so a far prediction or baseline does not move the scale
+  # of the sum it is not part of.  RMSE is multiplied back, and R2 takes
+  # the ratio of the sums as m_rss / m_tss times the square of the ratio of
+  # their scales.  With both sums as they stand, every product below is by
+  # 1 and the arithmetic is the old one to the bit.
+  lim <- n * .POOL_Y_MIN^2
+  sr <- if (!is.finite(rss) || (rss < lim && any(y != yhat))) .ss_pow2(y, yhat)
+  if (is.null(sr)) sr <- list(m = rss, s = 1, f = 1)
+  st <- if (!is.finite(tss) || (tss < lim && any(y != baseline)))
+    .ss_pow2(y, if (!is.null(y_train_mean)) y_train_mean else .mean_pow2(y))
+  if (is.null(st)) st <- list(m = tss, s = 1, f = 1)
+  rmse <- sqrt(sr$m / n) * sr$s * sr$f
   mae  <- mean(abs(y - yhat))
 
   # "Zero" means zero at the scale of the data, 100 machine epsilons of its
@@ -430,10 +720,15 @@
   # response still has a TSS of exactly 0 (or of rounding noise, below the
   # threshold), so its R2 stays NA.
   tol <- 100 * .Machine$double.eps
-  nz <- abs(y) > tol * max(abs(y))
-  mape <- if (any(nz)) mean(abs((y[nz] - yhat[nz]) / y[nz])) * 100 else NA_real_
+  # The percentage errors read the size of the values, so centred values
+  # are read with their centre added back; the error itself is that of the
+  # centred values.
+  ya  <- if (centred) y + centre else y
+  yha <- if (centred) yhat + centre else yhat
+  nz <- abs(ya) > tol * max(abs(ya))
+  mape <- if (any(nz)) mean(abs((y[nz] - yhat[nz]) / ya[nz])) * 100 else NA_real_
 
-  denom <- abs(y) + abs(yhat)
+  denom <- abs(ya) + abs(yha)
   smape_ok <- denom > tol * max(denom)
   smape <- if (any(smape_ok)) {
     mean(2 * abs(y[smape_ok] - yhat[smape_ok]) / denom[smape_ok]) * 100
@@ -442,8 +737,25 @@
   # TSS against the squared magnitude of y: R2 needs the spread about the
   # baseline to exceed rounding, i.e. an RMS deviation above tol times the
   # RMS of y.  (Relative to sum(y^2) itself, not squared tol, it would turn
-  # R2 NA for an ordinary response on a large offset, 1e8 +- 0.1.)
-  r2 <- if (tss > tol^2 * sum(y^2)) 1 - rss / tss else NA_real_
+  # R2 NA for an ordinary response on a large offset, 1e8 +- 0.1.)  At a
+  # larger offset the bound reads the size of the values, not their
+  # spread: 1e15 plus a spread of 2.3 has an RMS deviation under 100 eps
+  # of its RMS.  Where the bound finds no spread, y is read again centred
+  # and scaled (.constant_column()), and R2 is NA only where that reading
+  # finds none either.  TSS and RSS are sums of differences, which a double
+  # holds at the offset, so only the test changes.  The test reads y's own
+  # spread whatever the baseline.
+  # On a TSS read again the test reads y in the units of its scale.  An
+  # exact fit has RSS 0 at any scale (0 times an Inf ratio would be NaN).
+  # .constant_column() takes y as it stands: its own second reading is on
+  # the column scaled, and where its raw sums underflow or overflow they do
+  # so together and leave the answer to that reading.
+  ss_y <- sum(((y / st$f) / st$s)^2)
+  g  <- ((sr$s / st$f) / st$s) * sr$f
+  rr <- if (sr$m == 0) 0 else sr$m / st$m * g * g
+  r2 <- if (st$m > tol^2 * ss_y) 1 - rr
+        else if (is.finite(st$m) && st$m > 0 && !.constant_column(y)) 1 - rr
+        else NA_real_
 
   adj_r2 <- NA_real_
   if (!is.null(p) && is.finite(r2) && n > (p + 1L)) {
@@ -609,23 +921,41 @@
 #' dependency).
 #'
 #' @param lon1,lat1,lon2,lat2 Numeric vectors in decimal degrees, recycled.
-#' @return Distances in metres.  Nearly antipodal pairs, where the iteration
-#'   does not converge, fall back to the spherical distance.
+#' @return Distances in metres, \code{NA} for a pair with a coordinate that
+#'   is not finite.  Nearly antipodal pairs, where the iteration does not
+#'   converge, fall back to the spherical distance.
 #' @keywords internal
 #' @noRd
 .geod_distance <- function(lon1, lat1, lon2, lat2) {
   a <- 6378137; f <- 1 / 298.257223563; b <- a * (1 - f)
   rad <- pi / 180
+  # A pair with a coordinate that is not finite is left out of the
+  # iteration and given NA.  Its test below was NA, and the update of
+  # `active` stopped with "NAs are not allowed in subscripted assignments",
+  # so one such row made every candidate CRS score NA.  Its latitudes are
+  # set to 0 so that tan() gives no warning on them.
+  n <- max(length(lon1), length(lat1), length(lon2), length(lat2))
+  lon1 <- rep_len(lon1, n); lat1 <- rep_len(lat1, n)
+  lon2 <- rep_len(lon2, n); lat2 <- rep_len(lat2, n)
+  fin <- is.finite(lon1 + lat1 + lon2 + lat2)
+  lat1[!fin] <- 0; lat2[!fin] <- 0
   U1 <- atan((1 - f) * tan(lat1 * rad)); U2 <- atan((1 - f) * tan(lat2 * rad))
-  L  <- (lon2 - lon1) * rad
+  # A pair whose longitudes differ by more than 180 degrees is measured the
+  # short way round, so that the stopping test below reads its true
+  # longitude difference: a pair a few millimetres across longitude 180 has
+  # a difference close to 360 degrees as written.  Each part is taken from
+  # its own side of 180, where the subtraction is exact, so the difference
+  # keeps the precision of a pair away from 180.
+  dlon <- lon2 - lon1
+  w <- which(fin & dlon < -180)
+  dlon[w] <- (lon2[w] + 180) + (180 - lon1[w])
+  e <- which(fin & dlon > 180)
+  dlon[e] <- (lon2[e] - 180) - (lon1[e] + 180)
+  L  <- dlon * rad
   sU1 <- sin(U1); cU1 <- cos(U1); sU2 <- sin(U2); cU2 <- cos(U2)
-  n <- max(length(U1), length(U2), length(L))
-  lambda <- rep_len(L, n); U1 <- rep_len(U1, n); U2 <- rep_len(U2, n)
-  sU1 <- rep_len(sU1, n); cU1 <- rep_len(cU1, n)
-  sU2 <- rep_len(sU2, n); cU2 <- rep_len(cU2, n)
-  L   <- rep_len(L, n)
+  lambda <- L
   sinSigma <- cosSigma <- sigma <- cosSqAlpha <- cos2SigmaM <- numeric(n)
-  active <- rep(TRUE, n)
+  active <- fin
   for (iter in seq_len(200L)) {
     sl <- sin(lambda[active]); cl <- cos(lambda[active])
     ss <- sqrt((cU2[active] * sl)^2 +
@@ -640,7 +970,16 @@
       (sg + C * ss * (c2sm + C * cs * (-1 + 2 * c2sm^2)))
     sinSigma[active] <- ss; cosSigma[active] <- cs; sigma[active] <- sg
     cosSqAlpha[active] <- csa; cos2SigmaM[active] <- c2sm
-    done <- abs(lambda_new - lambda[active]) < 1e-12
+    # The change is measured against L, not in radians: each pass shrinks
+    # it by about f cos^2 U, so on an east-west pair under about
+    # 1e-12 / (f cos^2 U) rad the first pass already moved lambda by less
+    # than 1e-12, and sigma, taken from the starting lambda, was short by
+    # f cos^2 U (0.34% at the equator, on pairs of a few millimetres).  A
+    # pair 1 rad or more apart in longitude keeps the test in radians, so
+    # nearly antipodal pairs fall back to the sphere as before.  A pair
+    # along a meridian (L = 0) stops on the first pass, as does a pair at
+    # longitudes 180 and -180 on one parallel.
+    done <- abs(lambda_new - lambda[active]) <= 1e-12 * pmin(1, abs(L[active]))
     lambda[active] <- lambda_new
     active[active] <- !done
     if (!any(active)) break
@@ -654,12 +993,13 @@
   d <- b * A * (sigma - dSigma)
   # Non-converged (near-antipodal) pairs: spherical fallback.
   if (any(active)) {
-    la1 <- rep_len(lat1, n)[active] * rad; la2 <- rep_len(lat2, n)[active] * rad
+    la1 <- lat1[active] * rad; la2 <- lat2[active] * rad
     dl  <- L[active]
     d[active] <- 6371008.8 * acos(pmin(1, pmax(-1,
       sin(la1) * sin(la2) + cos(la1) * cos(la2) * cos(dl))))
   }
-  d[rep_len(lon1, n) == rep_len(lon2, n) & rep_len(lat1, n) == rep_len(lat2, n)] <- 0
+  d[fin & lon1 == lon2 & lat1 == lat2] <- 0
+  d[!fin] <- NA_real_
   d
 }
 
@@ -695,6 +1035,20 @@
   is.character(why) && length(why) >= 1L && !is.na(why[1L]) &&
     grepl("no spatial structure", why[1L], fixed = TRUE)
 }
+
+# estimate_sac_range()'s floor of 30 counts distinct locations as well as
+# rows: rows that share a location are one place to the variogram and to its
+# test for spatial structure.  This is the reason of the NA it returns below
+# that floor.  It starts with the count that fell short, as the floor on rows
+# does, and is not a verdict on structure (it does not say "no spatial
+# structure", so .sac_no_structure() is FALSE for it).  `subsampled` is TRUE
+# when the layer has 30 or more locations and the n_max subsample kept fewer.
+.sac_reason_few_locations <- function(n_locations, n_points, subsampled = FALSE)
+  sprintf(paste0("%d distinct location(s) among the %d point(s) %s, fewer than ",
+                 "the 30 a variogram range is estimated from"),
+          as.integer(n_locations), as.integer(n_points),
+          if (isTRUE(subsampled)) "of the n_max subsample"
+          else "with a finite value to model")
 
 
 # Two functions hand back a layer with a record of what happened to its rows:
@@ -1045,7 +1399,363 @@ setOldClass(c("spatialkit_rows", "sf"))
   FALSE
 }
 
-# The two classed warnings prep_model_data() raises about a layer.  A function
-# that prepares one layer several times raises each once (.once_per_run()).
+# The three classed warnings prep_model_data() raises about a layer, and
+# the one make_folds() raises about coordinates far from their origin
+# (.warn_xy_imprecise()).  A function that prepares one layer several times,
+# or makes folds on it several times, raises each once (.once_per_run()).
 .prep_warning_classes <- c("spatialkit_rows_dropped",
-                           "spatialkit_constant_predictor")
+                           "spatialkit_response_imprecise",
+                           "spatialkit_constant_predictor",
+                           "spatialkit_xy_imprecise")
+
+
+#' Warn where a response lies so far from zero that doubles there do not
+#' hold a millionth of its spread
+#'
+#' At 1e15 doubles are 0.125 apart, so a response of standard deviation 1
+#' stored there is rounded to eighths, and so is every mean, prediction and
+#' fold score computed at that size: the range, the folds and the selection
+#' read off it are those of the rounded values.  The values are what the
+#' caller gave and are not refused; this says once per call that the
+#' results read that rounding, where one unit in the last place of the
+#' largest absolute value (\code{.ulp_of()}) is more than a millionth of
+#' the standard deviation (\code{.cell_sd()}, which holds at any size).  A
+#' response with no spread beyond a few units in the last place
+#' (\code{.constant_column()}), or of fewer than two finite values, is left
+#' to the tests for a constant.  In a run of calls (\code{.once_per_run()}) it
+#' is said once for the column, by whichever function reads it first.
+#'
+#' @param y The response.
+#' @param caller The function that reads it, named in the message.
+#' @param arg The name of the response column, named in the message.
+#' @return \code{TRUE} (invisibly) when it warned, else \code{FALSE}.
+#' @keywords internal
+#' @noRd
+.warn_response_imprecise <- function(y, caller, arg) {
+  if (!(is.numeric(y) || is.logical(y))) return(invisible(FALSE))
+  y <- as.numeric(y)
+  y <- y[is.finite(y)]
+  if (length(y) < 2L) return(invisible(FALSE))
+  u <- .ulp_of(y)
+  s <- .cell_sd(y)
+  if (!(is.finite(s) && s > 0 && u > 1e-6 * s)) return(invisible(FALSE))
+  # A spread of a few units in the last place is the package's reading of a
+  # constant (.constant_column()), which the tests for one report.
+  if (.constant_column(y)) return(invisible(FALSE))
+  # Taken over by the caller (.answer_for_classed()): not said, and not
+  # recorded for the run either, so that a later call of the run that the
+  # user sees still says it (make_folds()'s range diagnostic muffles every
+  # warning of its estimate_sac_range() call).
+  if ("spatialkit_response_imprecise" %in% .answered_state$classes)
+    return(invisible(FALSE))
+  # Keyed on the column, not on the caller's words, so that a run says it
+  # once whichever of its functions reads the response first.
+  if (.said_in_run("spatialkit_response_imprecise", paste("column", arg)))
+    return(invisible(FALSE))
+  .warn_classed(
+    "spatialkit_response_imprecise",
+    paste0("%s(): `%s` lies so far from zero that its values lose their ",
+           "precision: doubles there are %s apart, more than a millionth of ",
+           "their standard deviation (%s), and the results read that ",
+           "rounding. Subtract a constant from it first."),
+    caller, arg, format(signif(u, 3)), format(signif(s, 3)),
+    data = list(spacing = u, spread = s))
+  invisible(TRUE)
+}
+
+
+# The least length whose square is a normal double (about 1.49e-154).  A
+# buffer by a shorter distance, or a box with a shorter side, has an area
+# that underflows.
+.SQRT_XMIN <- sqrt(.Machine$double.xmin)
+
+
+#' Warn where coordinates lie so far from their origin that doubles there do
+#' not hold a millionth of the layer's extent
+#'
+#' At 1e15 doubles are 0.125 apart, so a layer 4 km across stored there is
+#' rounded to eighths of a metre, and so is every edge computed at that size:
+#' the edges of blocks (a corner plus a multiple of a block's side), the
+#' lines of a grid and the buffer drawn around points.  A point that lies
+#' within that rounding of an edge near the origin can then fall on the
+#' other side of it.  The coordinates are what the caller gave and are not
+#' refused; this says once per call that the result reads that rounding,
+#' where one unit in the last place of the largest coordinate
+#' (\code{.ulp_of()}) is more than a millionth of the extent, the bound of
+#' the package's precision rule.  A layer with no extent (every location at
+#' one point) has no spread to resolve and is left to the caller's own
+#' tests.  Rows without a location (\code{.located_rows()}) are not read.
+#' In a run of calls (\code{.once_per_run()}) the same text is said once.
+#'
+#' @param x The layer (sf or sfc), or a bounding box of its located
+#'   coordinates in a form \code{.edge_tol()} reads.  A list of layers is
+#'   read as one, all of them in one CRS.
+#' @param caller The function that reads it, named in the message.
+#' @param arg The names of the arguments \code{x} holds, named in the
+#'   message.
+#' @param extent The extent the spacing is compared with; by default the
+#'   diagonal of the located coordinates' bounding box.
+#' @param of What \code{extent} is, in the message.
+#' @param reads What reads the rounding, in the message.
+#' @param remedy The remedy, in the message.
+#' @return The spacing of doubles at the coordinates and the extent, in a
+#'   list, with \code{warned} \code{TRUE} when it warned (invisibly).
+#' @keywords internal
+#' @noRd
+.warn_xy_imprecise <- function(x, caller, arg, extent = NULL,
+                               of = if (length(arg) > 1L) "their extent" else "its extent",
+                               reads = "so edges and ties are read at that rounding",
+                               remedy = "Shift the layer nearer the origin, or project it.") {
+  out <- list(warned = FALSE, spacing = NA_real_, extent = NA_real_)
+  layers <- if (inherits(x, c("sf", "sfc")) || !is.list(x)) list(x) else x
+  boxes <- lapply(layers, function(l) {
+    if (!inherits(l, c("sf", "sfc"))) return(l)
+    g <- sf::st_geometry(l)
+    if (!length(g)) return(NULL)
+    # The box of the whole layer leaves out empty rows; rows with a
+    # coordinate that is not finite or lies beyond the bound are left out
+    # only where the box shows one, so a layer of a million cells is not
+    # read row by row.
+    bb <- unclass(sf::st_bbox(g))
+    if (all(is.finite(bb)) && max(abs(bb)) <= .POOL_XY_MAX) return(bb)
+    g <- g[.located_rows(g)]
+    if (!length(g)) return(NULL)
+    unclass(sf::st_bbox(g))
+  })
+  boxes <- Filter(Negate(is.null), boxes)
+  if (!length(boxes)) return(invisible(out))
+  bb <- unlist(boxes)
+  v <- suppressWarnings(as.numeric(bb))
+  v <- v[is.finite(v)]
+  if (!length(v)) return(invisible(out))
+  u <- .ulp_of(v)
+  d <- if (is.null(extent)) .bb_diagonal(bb) else extent
+  out$spacing <- u
+  out$extent  <- d
+  if (!(is.finite(d) && d > 0 && u > 1e-6 * d)) return(invisible(out))
+  crs_of <- vapply(layers, function(l)
+    inherits(l, c("sf", "sfc", "bbox")) && !is.na(sf::st_crs(l)), logical(1))
+  who <- if (length(arg) > 1L)
+    paste0(paste0("`", arg[-length(arg)], "`", collapse = ", "), " and `",
+           arg[length(arg)], "` lie")
+  else paste0("`", arg, "` lies")
+  .warn_classed(
+    "spatialkit_xy_imprecise",
+    paste0("%s(): %s so far from the origin%s that %s coordinates lose ",
+           "their precision: they are rounded to %s, more than a millionth of ",
+           "%s (%s), %s. %s"),
+    caller, who,
+    if (!any(crs_of)) "" else if (length(arg) > 1L) " of their CRS" else " of its CRS",
+    if (length(arg) > 1L) "their" else "its",
+    format(signif(u, 3)), of, format(signif(d, 3)), reads, remedy,
+    data = list(spacing = u, extent = d))
+  out$warned <- TRUE
+  # The exported call has said that its coordinates are rounded: a tie
+  # that rounding parted is not said again in another text (.tie_watch()).
+  if (isTRUE(.tie_state$open)) .tie_state$said <- TRUE
+  invisible(out)
+}
+
+
+# ---------------------------------------------------------------------------
+# Ties lost to the rounding of the coordinates
+# ---------------------------------------------------------------------------
+# The neighbour searches call two squared distances within .TIE_TOL of each
+# other a tie (R/pool.R).  That holds at any origin while the doubles hold
+# the coordinates to about .TIE_TOL / 4 of the distances compared.  Far from
+# the origin the spacing of doubles is coarser: a lattice whose coordinates
+# are not on that spacing (100.1 m at 1e11) is stored rounded, its distances
+# differ by the rounding, nominally tied neighbours lie more than .TIE_TOL
+# apart, and which of them a row takes follows the rounding.  The extent
+# bound of .warn_xy_imprecise() does not reach it: there the spacing is
+# 1.5e-8 to 2.8e-7 of the extent.  A search that settles a row's k-th
+# neighbour, or a nearest location, hands the k-th squared distance and the
+# next one past the tie to .tie_note(); the exported function that runs the
+# search opens a watch (.tie_watch()) and says it once, when it returns.
+# Results do not change.
+
+# The open watch: `open`, and the largest spacing of doubles and the least
+# neighbour distance of the ties found, in the units of the layer.
+.tie_state <- new.env(parent = emptyenv())
+
+
+#' Whether the rounding of the coordinates can have parted a tie
+#'
+#' \code{a} is the squared distance of a row's \code{k}-th neighbour (or its
+#' nearest), \code{b} the next squared distance past the tie.  Rounding each
+#' coordinate to the spacing of doubles \code{r} moves a squared distance by
+#' up to about \code{2 sqrt(2) r} times the distance, so where \code{b} lies
+#' past the tie line \code{a (1 + .TIE_TOL)} by no more than
+#' \code{8 r (sqrt(a) + sqrt(b))} the two can be one distance that the
+#' rounding parted.  The rule is one-sided: a pair that is tied (within
+#' \code{.TIE_TOL}) stays tied whatever the rounding did, and an exact
+#' lattice at an offset that holds it raises nothing.  A squared distance
+#' that is not finite (one that overflows, or no next one) is not read.
+#'
+#' @param a,b Squared distances, \code{b} the farther; vectors of one
+#'   length.
+#' @param M The largest absolute coordinate of the layer searched.
+#' @param r The spacing of doubles at the coordinates, in the units of
+#'   \code{sqrt(a)}: one unit in the last place of \code{M}
+#'   (\code{.ulp_of()}, \code{2^(floor(log2 M) - 52)}) by default; a search
+#'   in a frame divided by a scale passes that over the scale.
+#' @return A logical vector, \code{TRUE} where the tie may have been lost.
+#' @keywords internal
+#' @noRd
+.tie_lost_by_rounding <- function(a, b, M, r = .ulp_of(M)) {
+  line <- a * (1 + .TIE_TOL)
+  out  <- is.finite(a) & is.finite(b) & b > line
+  if (any(out))
+    out[out] <- (b - line)[out] <= 8 * r * (sqrt(a[out]) + sqrt(b[out]))
+  out
+}
+
+
+#' The rounding a search compares its ties with, while a watch is open
+#'
+#' @param xy The coordinates of the layer searched, in its own units (a
+#'   matrix or vector; values that are not finite are left out), or its
+#'   largest absolute coordinate.
+#' @param scale The scale the search's frame divides the layer by (1 when
+#'   it searches the layer as it is).
+#' @return \code{NULL} when no watch is open or no coordinate is finite,
+#'   so the search reads nothing; else a list of \code{r}, the spacing of
+#'   doubles in the frame's units, \code{spacing}, the same in the layer's,
+#'   and \code{scale}.
+#' @keywords internal
+#' @noRd
+.tie_rounding <- function(xy, scale = 1) {
+  if (!isTRUE(.tie_state$open)) return(NULL)
+  v <- as.numeric(xy)
+  v <- v[is.finite(v)]
+  if (!length(v) || !(is.finite(scale) && scale > 0)) return(NULL)
+  u <- .ulp_of(v)
+  if (!(u > 0)) return(NULL)
+  list(r = u / scale, spacing = u, scale = scale)
+}
+
+
+#' Note the ties a search may have lost to rounding
+#'
+#' Called by each neighbour search with the squared distance of every row's
+#' \code{k}-th neighbour (or nearest) and the next one past the tie.  Builds
+#' no condition: it records, for the watch open, the spacing of doubles and
+#' the least such neighbour distance, in the layer's units.
+#'
+#' @param a,b As for \code{.tie_lost_by_rounding()}, in the search's units.
+#' @param rnd \code{.tie_rounding()}; \code{NULL} reads nothing.
+#' @return \code{TRUE} (invisibly) when a tie may have been lost.
+#' @keywords internal
+#' @noRd
+.tie_note <- function(a, b, rnd) {
+  if (is.null(rnd) || !isTRUE(.tie_state$open) || !length(a)) return(invisible(FALSE))
+  hit <- .tie_lost_by_rounding(a, b, r = rnd$r)
+  if (!any(hit)) return(invisible(FALSE))
+  .tie_state$spacing <- max(.tie_state$spacing, rnd$spacing)
+  .tie_state$dist <- min(.tie_state$dist, sqrt(min(a[hit])) * rnd$scale)
+  invisible(TRUE)
+}
+
+
+#' Open a watch for ties lost to rounding, for one exported call
+#'
+#' The exported function that runs a neighbour search opens it on entry and
+#' registers the function returned with \code{on.exit()}:
+#' \code{on.exit(tie_end(returnValue(tie_end), layer), add = TRUE)}.  When
+#' the call returns and a search noted a tie its rounding may have parted
+#' (\code{.tie_note()}), it warns once, with class
+#' \code{"spatialkit_xy_imprecise"} (\code{.warn_xy_imprecise()}'s class,
+#' and so said once in a run of calls), naming the argument, the spacing of
+#' doubles at the coordinates and the least neighbour distance concerned.
+#' A call that stops says nothing, and neither does a call that has said
+#' with \code{.warn_xy_imprecise()} that its coordinates are rounded, so
+#' that one call raises one warning of the class.  A watch opened while
+#' another is open leaves the call to the outer one, which says it once for
+#' both.
+#'
+#' @param caller The exported function, named in the message.
+#' @param arg The argument whose coordinates are searched, named in the
+#'   message in backticks; text that holds a backtick already (\code{"the
+#'   data of `fit`"}) is used as it is.
+#' @param plural Whether \code{arg} names more than one thing (\code{"the
+#'   points of `profile`"}), for the verb and the pronouns of the message.
+#' @return The function that closes the watch.  It takes the call's return
+#'   value, or itself when the call stops; the layer, or its CRS, read only
+#'   when it warns, for whether it has a CRS; and \code{named}, an argument
+#'   to name in place of \code{arg} (read only when it warns), or
+#'   \code{NULL}.
+#' @keywords internal
+#' @noRd
+.tie_watch <- function(caller, arg, plural = FALSE) {
+  if (isTRUE(.tie_state$open)) {
+    inner <- function(value, layer = NULL, named = NULL) invisible(FALSE)
+    return(inner)
+  }
+  .tie_state$open <- TRUE
+  .tie_state$said <- FALSE
+  .tie_state$spacing <- 0
+  .tie_state$dist <- Inf
+  end <- function(value, layer = NULL, named = NULL) {
+    sp <- .tie_state$spacing; d <- .tie_state$dist; said <- isTRUE(.tie_state$said)
+    .tie_state$open <- FALSE
+    .tie_state$said <- FALSE
+    .tie_state$spacing <- 0
+    .tie_state$dist <- Inf
+    if (identical(value, end) || said || !(sp > 0)) return(invisible(FALSE))
+    has_crs <- isTRUE(tryCatch(
+      if (inherits(layer, "crs")) !is.na(layer)
+      else inherits(layer, c("sf", "sfc")) && !is.na(sf::st_crs(layer)),
+      error = function(e) FALSE))
+    if (!is.null(named)) arg <- named
+    who <- if (grepl("`", arg, fixed = TRUE)) arg else paste0("`", arg, "`")
+    .warn_classed(
+      "spatialkit_xy_imprecise",
+      paste0("%s(): %s %s so far from the origin%s that %s coordinates are ",
+             "rounded to %s, and some neighbour distances near %s lie just past a ",
+             "tie by less than that rounding: which neighbour is taken there ",
+             "follows the rounding. Shift the layer nearer the origin, or ",
+             "project it."),
+      caller, who, if (plural) "lie" else "lies",
+      if (!has_crs) "" else if (plural) " of their CRS" else " of its CRS",
+      if (plural) "their" else "its",
+      format(signif(sp, 3)), format(signif(d, 3)),
+      data = list(spacing = sp, distance = d))
+    invisible(TRUE)
+  }
+  end
+}
+
+
+#' The ties a forked worker noted, for the watch of the process that forked it
+#'
+#' A forked child inherits the open watch (\code{.tie_watch()}) but not the
+#' way back: what its searches note (\code{.tie_note()}) dies with it.  The
+#' worker returns \code{.tie_carry()} beside its result, and the parent
+#' hands that to \code{.tie_merge()}.
+#'
+#' @return A list of the spacing and the least distance noted, and whether
+#'   the coordinates were said to be rounded, or \code{NULL} with no watch
+#'   open.
+#' @keywords internal
+#' @noRd
+.tie_carry <- function() {
+  if (!isTRUE(.tie_state$open)) return(NULL)
+  list(spacing = .tie_state$spacing, dist = .tie_state$dist,
+       said = isTRUE(.tie_state$said))
+}
+
+#' Add the ties a forked worker noted to the open watch
+#'
+#' @param x What \code{.tie_carry()} returned in the worker, or \code{NULL}.
+#' @return \code{NULL}, invisibly.
+#' @keywords internal
+#' @noRd
+.tie_merge <- function(x) {
+  if (!isTRUE(.tie_state$open) || !is.list(x)) return(invisible(NULL))
+  if (is.numeric(x$spacing) && length(x$spacing) == 1L && x$spacing > 0) {
+    .tie_state$spacing <- max(.tie_state$spacing, x$spacing)
+    .tie_state$dist <- min(.tie_state$dist, x$dist)
+  }
+  if (isTRUE(x$said)) .tie_state$said <- TRUE
+  invisible(NULL)
+}

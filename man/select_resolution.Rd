@@ -72,7 +72,8 @@ an interior optimum and under \code{"size"}), \code{n_levels},
 \code{values} (the criterion
 at every level, \code{NA} where it could not be computed),
 \code{structured} (for \code{cp}: \code{FALSE} when \code{cp} at one
-cell is within \code{tol} of the optimum, when the cell means at the
+cell is not above the optimum by more than \code{tol} (below it
+included), when the cell means at the
 optimum differ from one mean by no more than chance allows, or when
 the variogram found no spatial structure; \code{TRUE} when the optimum
 beats one cell on both counts; see "What each criterion returns".
@@ -113,7 +114,33 @@ the partition the profile scored at \code{best}, in the CRS it was
 computed in; \code{NULL} for a profile that does not carry them).  Their
 Voronoi cells are the cells that were scored;
 \code{\link{get_voronoi_seeds}(method = "kmeans", n = <this>)} and
-\code{\link{voronoi_seeds_kmeans}(k = <this>)} return them.  For a
+\code{\link{voronoi_seeds_kmeans}(k = <this>)} return them.  On a
+profile without an estimate whose centres were fitted to a subsample
+(\code{n_sample} below \code{n} in \code{attr(profile, "bounds")}) the
+seeds are those centres refitted to every point: the kind's own
+iteration (Hartigan and Wong's for \code{"kmeans"}, Lloyd's on every
+point's density weights for \code{"density"}) run from the centres
+scored, with the profile's iteration limit and no random draw.  Where
+Hartigan and Wong's algorithm refuses the centres, Lloyd's iteration
+with every weight one runs in its place, and a log line says so.  They
+carry \code{attr(, "refit")}: \code{rows} (the points),
+\code{subsample} (the points the profile fitted to), \code{kind},
+\code{iter}, \code{iter_max}, \code{converged}, \code{wss_scored}
+(the within-cell sum of squares of every point in the cells of the
+centres scored, each cell about its own mean) and \code{wss} (the same
+of the refitted cells).  Their cells are then not the cells scored, and
+the count is still the one the subsample gave; the centres scored are
+\code{attr(profile, "centres")[[as.character(best)]]}.  The refit reads
+every point's coordinates from \code{attr(profile, "refit_rows")}, which
+every such profile this version builds carries; on one built before it
+the centres scored are the seeds, and a log line says so.  The refit is
+not run either, and the centres scored are the seeds, when it would
+pass the work limits of a profile's own fits (see "Conditions" in
+\code{\link{resolution_profile}}); a log line says so.  A profile with
+an estimate scores it on every row of the layer in the cells of the
+centres fitted to the subsample, so its seeds are those centres, whose
+cells are the cells scored.  \code{summary()} and \code{plot()} of a
+profile read no seeds and refit nothing.  For a
 profile built with \code{partition = "density"} or \code{init =
   "random"} the list also has \code{partition} (\code{kind},
 \code{init}, \code{density_power}, \code{density_k}), and the seeds
@@ -156,7 +183,12 @@ in the profile's order; \code{NULL} without an estimate),
 \code{scored_cells} (\code{NA}: the record stands for a count).
 \code{seeds} carries the same record as \code{attr(, "count_rule")}
 with \code{scored_cells = TRUE}, since they are the centres that were
-scored.  The record travels on with the seeds, the cells and the
+scored, or \code{FALSE} when they were refitted to every point, since
+they are then other cells built from the count.  A \code{"cp"}
+selection off a profile without an estimate has \code{count_rule} as
+well, after \code{seeds}, and nothing else of this list: its
+\code{estimate} is \code{"mean"}, since \eqn{C_p} scores plain means,
+and \code{scored} is \code{NULL}.  The record travels on with the seeds, the cells and the
 assigned layer to \code{\link{summarize_by_cell}()}, which warns when
 it reports another cell value than the count was chosen for (class
 \code{spatialkit_estimate_mismatch}) and when the cells or rows it is
@@ -298,9 +330,9 @@ an \code{estimate}.  It is \code{FALSE} when the leave-one-out error
 of one mean for all scored rows is within \code{tol} of the error at
 the level, or below it, or when the F test of the cells at the level
 against one mean has \eqn{p \ge 0.05}.  The count stands either way,
-since the caller set it: \code{structured = FALSE} says that the cell
-values will say little that one mean for the layer does not.  The
-functions that take the selection as a count then raise
+since a size set it and no criterion: \code{structured = FALSE} says
+that the cell values will say little that one mean for the layer does
+not.  The functions that take the selection as a count then raise
 \code{spatialkit_no_structure}.  On a profile without an estimate
 \code{structured} is \code{NA}.}
 \item{\code{auto}}{The rule that goes with the profile's estimate:
@@ -347,8 +379,12 @@ For a ladder of one size, \code{summary()} of the profile lists each
 criterion that is finite at the level and says that the size set the
 count, and \code{plot()} draws each as one point, with no selected level
 and no band.  When none is finite, as on a constant response, where
-\code{loo} is \code{NA} too, \code{summary()} stops with an error that
-says so.
+\code{loo} is \code{NA} too, or when no row of the selection half has a
+response (\code{select_on = "split"}), \code{summary()} stops with an
+error that says so.  In that last case \code{"cp"} and \code{"moran_z"},
+and \code{"loo"} with an \code{estimate}, are errors that give the same
+reason, except \code{"cp"} on a size ladder that fitted no variogram,
+which gives the size ladder's reason, as above.
 }
 
 \examples{

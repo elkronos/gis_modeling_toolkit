@@ -77,20 +77,34 @@ test_that("25 k-means++ restarts leave the WSS curve monotone where 5 random one
 test_that("determine_optimal_levels warns before the sweep when no k can clear the floor", {
   pts <- rp_field(120, with_pred = TRUE)
   # Uniform locations also have no WSS elbow, which is an R warning of its
-  # own; it is not the one under test here.
+  # own; it is not the one under test here.  At the default the call then
+  # returns NA, and the line says it falls back only if there is an elbow;
+  # under "warn" it falls back and returns the geometric count.
   lines <- capture_spatialkit_log(suppressWarnings(
     out <- determine_optimal_levels(pts, max_levels = 6, response_var = "z",
                                     predictor_vars = "w", criterion = "morans_i")))
   expect_true(log_has(lines, "nine cells or fewer"))
   expect_true(log_has(lines, "Raise max_levels"))
+  expect_true(log_has(lines, "if the WSS curve has an elbow \\(with none the call returns NA\\)"))
   expect_type(out, "integer")
+  expect_true(is.na(out))
+  lines <- capture_spatialkit_log(suppressWarnings(
+    out <- determine_optimal_levels(pts, max_levels = 6, response_var = "z",
+                                    predictor_vars = "w", criterion = "morans_i",
+                                    on_no_elbow = "warn")))
+  expect_true(log_has(lines, "nine cells or fewer"))
+  expect_true(log_has(lines, "will fall back to the geometric ranking\\. Raise max_levels"))
+  expect_type(out, "integer")
+  expect_true(all(is.finite(out)))
   # With room above the floor the warning before the sweep is not raised.
   # These points have no cluster structure, so the elbow sits near
   # sqrt(14) and its neighbourhood still ends below ten cells: the fallback
-  # is then said with that reason, not as "could not be computed".
+  # is then said with that reason, not as "could not be computed".  With no
+  # elbow the window is placed and read under on_no_elbow = "warn" only.
   quiet <- capture_spatialkit_log(suppressWarnings(
     determine_optimal_levels(pts, max_levels = 14, response_var = "z",
-                             predictor_vars = "w", criterion = "morans_i")))
+                             predictor_vars = "w", criterion = "morans_i",
+                             on_no_elbow = "warn")))
   expect_false(log_has(quiet, "max_levels leaves k_max"))
   expect_true(log_has(quiet, "score only the elbow's neighbourhood"))
 })
@@ -106,8 +120,9 @@ test_that("determine_optimal_levels reports the restart budget and bumps in its 
   pts <- sf::st_as_sf(data.frame(x = xy[, 1], y = xy[, 2], w = rnorm(640)),
                       coords = c("x", "y"), crs = 32632)
   pts$z <- pts$w + rnorm(640)
-  # Moran's z takes part in this ranking, and the call says so with a class.
-  expect_warning(
+  # Moran's z does not take part in the ranking of "combined" (the sag
+  # orders it), so the call raises no warning that it did.
+  expect_no_warning(
     out <- determine_optimal_levels(pts, max_levels = 30, response_var = "z",
                                     predictor_vars = "w", criterion = "combined"),
     class = "spatialkit_diagnostic_ranking")
@@ -117,10 +132,13 @@ test_that("determine_optimal_levels reports the restart budget and bumps in its 
   expect_true(is.integer(d$wss_bumps) && d$wss_bumps >= 0L)
   expect_length(d$wss_spread, length(d$wss))
   expect_true(all(d$wss_spread >= 0))
-  # The geometric path stays a plain integer vector (no attribute), as
-  # documented and as its callers pin.
+  # The geometric path is an integer vector whose only attributes are the
+  # elbow's flag and sag at the default, on_no_elbow = "na", and which has
+  # none under "warn", as documented.
   geo <- determine_optimal_levels(pts, max_levels = 30)
-  expect_null(attributes(geo))
+  expect_type(geo, "integer")
+  expect_named(attributes(geo), c("structured", "sag"))
+  expect_null(attributes(determine_optimal_levels(pts, max_levels = 30, on_no_elbow = "warn")))
 })
 
 
@@ -300,7 +318,12 @@ test_that("resolution_profile is reproducible from its seed and subsamples large
   expect_identical(attr(sub, "bounds")$n_sample, 120L)
   expect_identical(attr(sub, "bounds")$ceiling, 22L)
   expect_identical(attr(sub, "bounds")$ceiling_from, "min_cell_n")
-  expect_output(print(sub), "on 200 points \\(k-means fitted to a subsample of 120\\)")
+  # The kind the profile fitted to the subsample is named: the default is
+  # the density kind, which the header used to call k-means.
+  expect_output(print(sub),
+                "on 200 points \\(density-weighted k-means fitted to a subsample of 120\\)")
+  expect_output(print(resolution_profile(pts, n_levels = 5, sample_n = 120, partition = "kmeans")),
+                "on 200 points \\(k-means fitted to a subsample of 120\\)")
   # A subsample too small to fit that many cells holds the ceiling to two of
   # its points per cell, and says which bound is choosing.
   tiny <- resolution_profile(pts, n_levels = 4, sample_n = 30, min_cell_n = 3)

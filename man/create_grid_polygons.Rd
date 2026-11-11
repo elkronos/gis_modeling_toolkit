@@ -17,7 +17,23 @@ create_grid_polygons(
 )
 }
 \arguments{
-\item{boundary}{Polygonal sf or sfc object.}
+\item{boundary}{Polygonal sf or sfc object. One that mixes XY and XYZ (or
+XYM) geometries is read without Z and M, since sf reads a layer in the
+dimension of its first geometry. So is one whose
+geometries carry M (XYM or XYZM), which GEOS refuses.
+A row that is empty, or has a coordinate that is not finite or lies
+beyond 1e150 (read as given, and again after any move into another
+CRS), covers no ground and is left out; a boundary with no such row
+left is refused with an error that says so. A boundary in a geographic
+CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+the Earth, is refused with an error of class
+\code{"spatialkit_cells_degenerate"} that names its rows and says to check
+its CRS.
+A row the repair of \code{boundary} leaves without a polygon (a ring with no
+height: every vertex on one line, or in degrees on one parallel) is
+left out as well, and a boundary with no polygon left is refused.
+A boundary without a CRS that \code{crs} stamps with a geographic CRS is
+tested for its latitude in the same way.}
 
 \item{target_cells}{Optional approximate desired number of cells.  The cell
 \emph{size} is derived from it as \code{sqrt(area / target_cells)}, where
@@ -42,7 +58,19 @@ the working CRS. Takes precedence over \code{n}: if both are supplied,
 \code{cellsize} is used, \code{n} is ignored and a warning is logged. Supply exactly
 one of \code{target_cells}, \code{cellsize} and \code{n}.  For \code{type = "hex"} a hexagon
 is defined by a single edge-to-edge distance, so only \code{cellsize[1]} is
-used and a differing \code{cellsize[2]} is ignored with a logged warning.}
+used and a differing \code{cellsize[2]} is ignored with a logged warning.
+A side of the boundary's bounding box that exceeds a whole number of
+square cells, of this size or of the size derived from \code{target_cells},
+by no more than a margin of one part in 1e10 of the largest coordinate
+of the boundary, at most a millionth of the diagonal of its bounding
+box and at least four times the spacing of doubles at that coordinate,
+gets that number of cells, so a box of 9000 by 6000 at 1000 gets 9 by 6
+cells in any unit or origin, where rounding could add a row or column.
+A boundary so far from the origin of its coordinates that doubles there
+are spaced more than a millionth of its extent apart (0.125 at 1e15,
+beside a boundary a few kilometres across) has its grid lines rounded to
+that spacing; the grid is laid, and a warning of class
+\code{"spatialkit_xy_imprecise"} gives the spacing and the extent.}
 
 \item{n}{Optional grid resolution (integer, length 1 or 2) giving the number
 of columns and rows to divide the boundary's bounding box into; the cell
@@ -54,7 +82,15 @@ warning) when \code{cellsize} is also supplied. Passing both would otherwise
 truncate the grid to \code{n[1]} x \code{n[2]} cells anchored at the bounding-box
 corner, covering only part of the boundary.}
 
-\item{clip}{Logical; clip grid to boundary.}
+\item{clip}{Logical; clip grid to boundary. In a projected or CRS-less
+grid, a cell that meets the boundary only within a margin of the cell's
+edge (the margin \code{cellsize} gives: one part in 1e10 of the largest
+coordinate of the boundary, within its bounds; a
+cell whose edge lies on the boundary's edge but for rounding) is
+dropped, rather than kept as a sliver. The call stops when the clip
+leaves no cell, as it does when the lattice has none: in degrees with
+s2 on, a boundary edge that spans more than 180 degrees of longitude is
+read as the shorter great-circle arc, the other way round the globe.}
 
 \item{crs}{Optional target CRS: anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, including
 an sf or sfc layer, whose CRS is used. When \code{NULL} (default) a lon/lat
@@ -69,7 +105,20 @@ returned in: a grid sized by \code{target_cells} or \code{n} is laid in that
 projected CRS and then transformed, with long edges densified. A
 \code{cellsize} is in the units of \code{crs}, so with a geographic \code{crs} it is in
 degrees and the grid is laid in degrees, as asked; such cells are not
-equal-area.}
+equal-area. With \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} on (the default) such a grid is
+clipped with sf's spherical engine s2, and s2 measures and joins its
+cells after; s2 refuses a polygon that is not valid on the sphere. The
+rows of \code{boundary} and the cells are checked with s2 whatever
+\code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} says. Before the clip, a row of \code{boundary} that s2
+refuses is repaired, with crossing edges split. A cell that lists a
+corner twice in a row, or two corners within 1e-12 degrees of each
+other, which s2 reads as one point, is returned with one of them, which
+moves no corner and changes the cell's area by rounding. A row of
+\code{boundary}, or a cell, that s2 refuses even then (a cell of a grid laid
+past latitude 90, say) stops the call with an error of class
+\code{"spatialkit_cells_degenerate"} that names its rows and s2's reason, and
+says to pass a projected \code{crs} or to size the grid by \code{target_cells} or
+\code{n}.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo

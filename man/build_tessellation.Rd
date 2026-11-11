@@ -19,7 +19,9 @@ build_tessellation(
 )
 }
 \arguments{
-\item{points_sf}{An sf object with POINT/MULTIPOINT geometry.}
+\item{points_sf}{An sf object with POINT/MULTIPOINT geometry. Points that
+mix XY and XYZ (or XYM), or that carry M, are read in x and y, since sf
+reads a layer in the dimension of its first geometry and GEOS refuses M.}
 
 \item{boundary}{Polygonal sf/sfc study area. \strong{Required} for
 \code{method = "hex"} and \code{method = "square"}, which have no extent of their
@@ -42,7 +44,23 @@ otherwise. When neither has one, both are read by the lon/lat heuristic
 of \code{\link[=ensure_projected]{ensure_projected()}}: taken as EPSG:4326 and projected when the points
 look like degrees (a boundary whose coordinates do not fit the lon/lat
 envelope is then refused with an error), otherwise left in the same
-unnamed planar space.}
+unnamed planar space. A boundary that mixes XY and XYZ (or XYM)
+geometries is read without Z and M, since sf reads a layer in the
+dimension of its first geometry. So is one whose
+geometries carry M (XYM or XYZM), which GEOS refuses.
+A row that is empty, or has a coordinate that is not finite or lies
+beyond 1e150 (read as given, and again after any move into another
+CRS), covers no ground and is left out; a boundary with no such row
+left is refused with an error that says so. A boundary in a geographic
+CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+the Earth, is refused with an error of class
+\code{"spatialkit_cells_degenerate"} that names its rows and says to check
+its CRS.
+A row the repair of \code{boundary} leaves without a polygon (a ring with no
+height: every vertex on one line, or in degrees on one parallel) is
+left out as well, and a boundary with no polygon left is refused.
+A boundary without a CRS that \code{crs} stamps with a geographic CRS is
+tested for its latitude in the same way.}
 
 \item{method}{One of "voronoi", "triangles", "hex", "square".}
 
@@ -59,7 +77,8 @@ grids the target is adjusted for packing density; the actual count after
 clipping to an irregular boundary may differ noticeably.  Besides a
 number, this accepts what the level-selection step returned: the integer
 vector of ranked candidates from \code{\link{determine_optimal_levels}()}
-(its first element is used), a \code{\link{select_resolution}()} result
+(its first element is used; its \code{NA} is refused with a note on
+where it came from), a \code{\link{select_resolution}()} result
 (its \code{$best}), or a \code{\link{resolution_profile}()}.  A profile
 built without an \code{estimate} is read with
 \code{select_resolution()} by \code{cp}; one built with
@@ -88,7 +107,9 @@ seed a Voronoi tessellation with
 \code{get_voronoi_seeds(method = "kmeans", n = <the selection>, sample_points = <the points>)}:
 given the \code{select_resolution()} result or the profile itself, it
 returns the centres of the partition the profile scored, whose Voronoi
-cells are the cells the criteria judged.  Seeds made that way carry the
+cells are the cells the criteria judged (refitted to every point when
+the profile, without an estimate, was fitted to a subsample).  Seeds
+made that way carry the
 hull of \code{sample_points} as their cover, so the cells built on them
 hold every point; made with neither \code{sample_points} nor a boundary,
 they carry the hull of the points the profile was computed on.}
@@ -98,7 +119,16 @@ they carry the hull of the points the profile was computed on.}
 that it was ignored.  When both \code{cellsize} and \code{approx_n_cells}
 are given, \code{cellsize} wins and \code{approx_n_cells} is ignored with
 a logged warning; supply one or the other.  With a geographic \code{crs}
-it is in that CRS's degrees, and the grid is laid in degrees.}
+it is in that CRS's degrees, and the grid is laid in degrees, as
+\code{\link[=create_grid_polygons]{create_grid_polygons()}} lays it; where s2 refuses a row of
+\code{boundary} or a cell even repaired, the call stops with an error of
+class \code{"spatialkit_cells_degenerate"} that says to pass a projected
+\code{crs} or to size the grid by \code{approx_n_cells}.  A side of the
+boundary's bounding box that exceeds a whole number of square cells by
+no more than a margin of one part in 1e10 of the largest coordinate of
+the boundary, at most a millionth of the diagonal of its bounding
+box and at least four times the spacing of doubles at that coordinate,
+gets that number of cells (see \code{\link[=create_grid_polygons]{create_grid_polygons()}}).}
 
 \item{expand}{Buffer distance, in the working CRS's units, by which the
 Voronoi boundary is grown before the diagram is built. Applied by
@@ -110,10 +140,14 @@ beyond the study area, and a point up to \code{expand} outside it is indexed.}
 
 \item{clip}{Logical; clip to boundary.}
 
-\item{keep_duplicates}{Logical. Has no effect on the cells or the index:
-coincident points are merged before a Voronoi diagram or a Delaunay
-triangulation is built either way, and every one of them is indexed to
-the cell they share.}
+\item{keep_duplicates}{Logical. With \code{FALSE} (the default), points
+are merged before a Voronoi diagram or a Delaunay triangulation is built
+when they round to one point in coordinates centred on the middle of
+their bounding box, divided by its diagonal and rounded to 2^-30 of it,
+so points within about a billionth of the extent of each other count as
+coincident in any unit or origin. With \code{TRUE} only points at
+exactly one location are merged. Every point is indexed to the cell
+that holds it.}
 
 \item{crs}{Optional target CRS: anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, including
 an sf or sfc layer, whose CRS is used. A projected CRS is the working
@@ -142,7 +176,10 @@ returns them there or in the geographic \code{crs}; see
 cells built in another projected CRS, named here, are the nearest-seed
 cells of that CRS, so a row near a boundary can fall in the
 neighbouring cell, and \code{\link[=summarize_by_cell]{summarize_by_cell()}} then reports that the
-cells are not the ones scored.}
+cells are not the ones scored. Voronoi cells returned in a geographic
+\code{crs} can hold two corners at one point where four seeds stand the same
+distance from a corner (gridded locations), which sf's spherical engine
+(s2) refuses; \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} says what still stops on them.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
@@ -164,8 +201,11 @@ CRS is read in the coordinates of \code{points_sf}; one in another CRS is
 transformed. With a \code{boundary} (and for the other methods) the cover
 sizes nothing: when it is a point layer, the number of its points that
 fall outside every cell is returned as \code{params$cover_outside}, with a
-warning of class \code{"spatialkit_unassigned"} when it is not 0. See
-\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}.}
+warning of class \code{"spatialkit_unassigned"} when it is not 0. A cover,
+given or attached, that mixes XY and XYZ (or XYM) geometries, or that
+carries M, is read in x and y. A row of the cover with a coordinate
+that is not finite or lies beyond 1e150, read as given before any move,
+is read as an empty row. See \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}.}
 }
 \value{
 A list with components:
@@ -175,21 +215,52 @@ a \code{cell_id} column; the \code{"hex"} and \code{"square"} methods additional
 carry \code{poly_id}, which holds the same values.}
 \item{\code{index}}{Integer vector of \code{cell_id} values, one per row of
 \code{points_sf}, and \code{NA} for a point that falls inside no cell, that is,
-one outside the study area. Only a point within a thousandth of the
-median cell width of a cell is snapped to it. That covers points
-sitting exactly on a shared edge, and leaves points outside the study
-area as \code{NA}. A summary built from \code{index} therefore counts only the
+one outside the study area. A point within a margin of one part in
+1e10 of the largest coordinate of the cells from a cell's edge, at
+most a millionth of the diagonal of their bounding box and at
+least four times the spacing of doubles at that coordinate, is in
+that cell, and a point in two or more cells (on a shared edge, or
+within that margin of it) takes the smallest \code{cell_id} among them, so
+a lattice point on a cell edge takes the same cell in any unit or
+origin. A point outside every cell is snapped to the nearest cell
+only when it is within a thousandth of the median cell width of it,
+and a point the same distance from two cells, to one part in ten
+million, takes the smaller \code{cell_id}. For cells in degrees the
+distances of the snap are taken on the sphere, in metres, whatever
+\code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} says, and the width is taken as an arc of the
+sphere, as the margin is. That leaves points outside the
+study area as \code{NA}. A summary built from \code{index} therefore counts only the
 points the tessellation actually covers. When any point is \code{NA}, a
 warning of class \code{"spatialkit_unassigned"} gives the number
 (\code{tryCatch(spatialkit_unassigned = )} catches it; the condition
-carries \code{n} and \code{total}).}
+carries \code{n} and \code{total}). For \code{"voronoi"} and seeds (a layer a
+seeding function returned, the seeds of a \code{\link[=select_resolution]{select_resolution()}}
+result, or points given with a \code{cover}), \code{index} holds the cell each
+seed generates, whether the seed lies inside the boundary or not: a
+k-means seed outside a boundary that is not convex has its cell,
+the part of the study area nearer it than any other seed. Only a
+seed whose cell the clip removed whole, or without a location (an
+empty geometry, or a coordinate that is not finite or lies beyond
+1e150), is \code{NA}, and the warning then names seeds. See
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}. For \code{"voronoi"} and \code{"triangles"},
+points so far from the origin of their CRS that doubles there are
+spaced more than a millionth of their extent apart (0.125 at 1e15,
+beside a layer a few kilometres across) have the cells' edges and
+their own cells read at that rounding; the cells are built, and a
+warning of class \code{"spatialkit_xy_imprecise"} gives the spacing and
+the extent. For \code{"hex"} and \code{"square"} the grid's warning says the
+same of the boundary (see \code{\link[=create_grid_polygons]{create_grid_polygons()}}).}
 \item{\code{boundary}}{The boundary used (possibly derived and/or
 reprojected, and for \code{"voronoi"} grown by \code{expand}).}
 \item{\code{method}}{The method actually used.}
 \item{\code{params}}{The parameters the tessellation was built with, plus
 \code{snapped}, the record of that nearest-cell repair: a list with \code{n},
 \code{which} (row positions in \code{points_sf}) and \code{distance} (how far
-outside every cell each sat, in CRS units); \code{n_outside}, the number
+outside every cell each sat, in CRS units, and in metres for cells
+in degrees; a point within the margin
+of an edge is in that cell and is not listed), which for seeds lists
+only those whose \code{index} entry is the cell they were snapped to;
+\code{n_outside}, the number
 of points of \code{points_sf} that fall in no cell (the \code{NA}s of
 \code{index}); and \code{cover_outside}, the number of \code{cover} points in no
 cell when a point \code{cover} was checked against the cells (\code{NULL}
@@ -211,7 +282,8 @@ carries one (\code{attr(points_sf, "count_rule")}: the seeds of a
 \code{\link[=select_resolution]{select_resolution()}} result, or seeds \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} or
 \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}} placed from one): the record as the seeds
 carry it, whose \code{scored_cells} says whether these are the cells the
-profile scored. For \code{"hex"} and \code{"square"}, when \code{approx_n_cells}
+profile scored, and \code{FALSE} when the seeds are fewer or more than
+its count. For \code{"hex"} and \code{"square"}, when \code{approx_n_cells}
 is a selection that carries a record, or a profile built with an
 \code{estimate}, and no \code{cellsize} is given: that record with
 \code{scored_cells} \code{FALSE}, since a lattice at that count is not the
@@ -240,8 +312,15 @@ decision you make, and the data does not make it for you; hexagons avoid the
 axis-aligned artefacts of squares and have uniform neighbour distances.
 \code{"triangles"} returns the Delaunay triangulation, useful for
 interpolation and adjacency work; it is not meant as an aggregation unit.
-\code{\link{determine_optimal_levels}()} will suggest a cell count from the
-spatial structure of the data.
+Points on one circle, such as the four corners of each square of a
+lattice, have more than one Delaunay triangulation; they are triangulated
+in coordinates centred on the middle of their bounding box, divided by its
+diagonal and rounded to 2^-30 of it, so they are split the same way in any
+unit or origin, but for a point that lies within its own rounding noise of
+the middle of such a step.
+\code{\link{determine_optimal_levels}()} suggests a cell count from the
+elbow of the WSS curve of the points' k-means clustering, and returns
+\code{NA}, which \code{approx_n_cells} refuses, when the curve has none.
 
 \code{"voronoi"} and \code{"triangles"} are built on the points' vertices:
 a MULTIPOINT feature with several vertices gets one cell (or triangle

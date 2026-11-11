@@ -35,14 +35,18 @@ test_that("new_spatial_fit builds the documented structure", {
   assign(".probe", 42, envir = copy$info$.cache)
   expect_equal(get(".probe", envir = fit$info$.cache), 42)
 
-  # A caller-supplied cache is not replaced.
+  # A cache that arrives in `info` is replaced by a fresh one, so two fits
+  # never share one.  identical(), not expect_identical(): testthat compares
+  # two empty environments by their contents and finds them equal.
   own <- new.env(parent = emptyenv())
   custom <- new_spatial_fit("x_fit", engine = NULL, formula = z ~ 1,
                             response_var = "z", predictor_vars = character(0),
                             data_sf = pts, info = list(.cache = own))
-  expect_identical(custom$info$.cache, own)
+  expect_true(is.environment(custom$info$.cache))
+  expect_false(identical(custom$info$.cache, own))
 
-  expect_error(new_spatial_fit(c("a", "b"), NULL, z ~ 1, "z", character(0), pts))
+  expect_error(new_spatial_fit(c("a", "b"), NULL, z ~ 1, "z", character(0), pts),
+               "`subclass` must be one class name", fixed = TRUE)
 })
 
 

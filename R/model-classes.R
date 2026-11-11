@@ -24,6 +24,19 @@
 #' naming the method to define, without one.  \code{\link{residuals}()} and
 #' \code{\link{coef}()} methods are optional.
 #'
+#' The constructor checks the fields the package's functions read from a fit,
+#' and stops with an error that names the argument: \code{subclass} must be
+#' one class name, \code{data_sf} an sf object with its geometry column,
+#' \code{formula} a formula whose left side, when it has one, holds the
+#' response, \code{response_var} the name of one attribute column of
+#' \code{data_sf} (a column other than its geometry),
+#' \code{predictor_vars} a character vector of its attribute columns other
+#' than the response, the columns the right side of \code{formula} uses, and
+#' \code{info} a list.  It does not check the
+#' response's type (a Bayesian fit can have a factor or ordinal response);
+#' \code{summary()} and \code{model_metrics()} refuse a response
+#' that is not numeric or logical.
+#'
 #' @section The coef() contract:
 #' \code{coef()} on one of the three built-in backends either returns the
 #' coefficients or signals an error.  It never returns \code{NULL}.  A custom
@@ -50,13 +63,34 @@
 #' @param engine   The raw model object your backend produced (an \code{lm},
 #'   a \code{ranger} object, a \code{brmsfit}, ...).  Nothing inspects it
 #'   except your own methods.
-#' @param formula  A formula.
-#' @param response_var  Character(1).
-#' @param predictor_vars Character vector.
-#' @param data_sf  An sf object used for fitting.
-#' @param info     Named list of model-specific extras.  Set
-#'   \code{fitted_are_oob = TRUE} when your \code{fitted()} values are held
-#'   out instead of in-sample, so \code{summary()} labels them correctly.
+#' @param formula  A formula: the model, as \code{print()} and
+#'   \code{summary()} show it.  Its left side, when it has one, holds
+#'   \code{response_var} (\code{log(price) ~ elev} for \code{"price"}).  Its
+#'   right side uses the columns \code{predictor_vars} names and no other
+#'   attribute column of \code{data_sf} than these and the response, read
+#'   by \code{all.vars()}, so \code{log(elev)} and \code{elev * slope}
+#'   count as their columns, and so do the columns of an \code{offset()} or
+#'   a grouping term; names that are not columns of \code{data_sf} and the
+#'   reserved names \code{..x} and \code{..y} are not checked, and a right
+#'   side with \code{.} is not read.  A column a \code{fit_fn} derives
+#'   itself and keeps out of \code{predictor_vars}, such as coordinates
+#'   \code{x} and \code{y} for a trend surface, needs a name that is not a
+#'   column of \code{data_sf}: on a layer that keeps its coordinates as
+#'   columns \code{x} and \code{y}, derive them as \code{cx} and
+#'   \code{cy}, or drop those columns first.
+#' @param response_var  Character(1): the name of the response column of
+#'   \code{data_sf}, an attribute column (not the geometry).
+#' @param predictor_vars Character vector of attribute column names of
+#'   \code{data_sf}, not including \code{response_var}: the columns the right
+#'   side of \code{formula} uses.  \code{character(0)} for a model without
+#'   predictors.
+#' @param data_sf  An sf object with its geometry column: the rows the model
+#'   was fitted on, with their geometry, in the order \code{fitted()}
+#'   returns its values.
+#' @param info     Named list of model-specific extras (\code{list()} for
+#'   none).  Set \code{fitted_are_oob = TRUE} when your \code{fitted()} values
+#'   are held out instead of in-sample, so \code{summary()} labels them
+#'   correctly.
 #' @return An object of class \code{c(subclass, "spatial_fit")}.
 #' @seealso \code{\link{cv_spatial}()}, which consumes a custom \code{fit_fn};
 #'   \code{\link{fit_rf_model}()} for a worked built-in fitter.
@@ -100,7 +134,134 @@
 #' @export
 new_spatial_fit <- function(subclass, engine, formula, response_var,
                             predictor_vars, data_sf, info = list()) {
-  stopifnot(is.character(subclass), length(subclass) == 1L)
+  if (!is.character(subclass) || length(subclass) != 1L || is.na(subclass) ||
+      !nzchar(subclass))
+    stop("new_spatial_fit(): `subclass` must be one class name, a character ",
+         "string such as \"lm_fit\"; got ",
+         if (is.null(subclass)) "NULL"
+         else if (!is.character(subclass) || length(subclass) != 1L)
+           sprintf("%s of length %d", class(subclass)[1L], length(subclass))
+         else if (is.na(subclass)) "NA" else "an empty string",
+         ".", call. = FALSE)
+  # Every method reads these four, so a malformed one is refused here, where
+  # the message can name it.  Past the constructor, a plain data.frame as
+  # `data_sf` has no residuals() fallback and no maps, a list gives n = NULL
+  # and "missing value where TRUE/FALSE needed" from summary(), a column
+  # number or a factor as `response_var` scores the fitted values against
+  # the column at that position (a factor indexes by its code), and a
+  # misspelt name fails in another function with a message about something
+  # else.  The methods read the response and the predictors from
+  # st_drop_geometry(data_sf), so the geometry column is not one of them.
+  # The response is not checked for numeric here: a Bayesian fit can have a
+  # factor or ordinal response, and summary() and model_metrics() refuse a
+  # non-numeric one themselves.  Past the constructor, an object classed sf
+  # without its geometry column (no "sf_column" attribute, or one naming a
+  # column that is not an sfc) fails in st_drop_geometry() with "missing
+  # value where TRUE/FALSE needed"; the response among the predictors goes
+  # into the area-of-applicability distances and has to be present in the
+  # new rows; and a left side of `formula` that is another column makes
+  # print() show one model while summary() and model_metrics() score another.
+  if (!inherits(data_sf, "sf"))
+    stop("new_spatial_fit(): `data_sf` must be an sf object (the training ",
+         "rows with their geometry); got ",
+         paste(class(data_sf), collapse = "/"), ".", call. = FALSE)
+  geom <- attr(data_sf, "sf_column")
+  geom_one <- is.character(geom) && length(geom) == 1L && !is.na(geom)
+  if (!geom_one || !(geom %in% names(data_sf)) ||
+      !inherits(data_sf[[geom]], "sfc"))
+    stop("new_spatial_fit(): `data_sf` must be an sf object with its geometry ",
+         "column; its \"sf_column\" attribute ",
+         if (is.null(geom)) "is NULL"
+         else if (!geom_one) "is not one column name"
+         else if (!(geom %in% names(data_sf)))
+           sprintf("names '%s', which is not one of its columns", geom)
+         else sprintf("names '%s', a column of class %s, not an sfc", geom,
+                      class(data_sf[[geom]])[1L]),
+         ". Build it with sf::st_as_sf() or sf::st_sf().", call. = FALSE)
+  if (!inherits(formula, "formula"))
+    stop("new_spatial_fit(): `formula` must be a formula; got ",
+         class(formula)[1L], ".", call. = FALSE)
+  cols <- setdiff(names(data_sf), geom)
+  if (!is.character(response_var) || length(response_var) != 1L ||
+      !(response_var %in% cols))
+    stop("new_spatial_fit(): `response_var` must name one attribute column ",
+         "of `data_sf`",
+         if (is.null(response_var)) "; got NULL"
+         else if (!is.character(response_var) || length(response_var) != 1L)
+           sprintf("; got %s of length %d", class(response_var)[1L],
+                   length(response_var))
+         else if (response_var %in% geom)
+           sprintf("; '%s' is its geometry column", response_var)
+         else sprintf("; '%s' is not one", response_var),
+         ".", call. = FALSE)
+  # A one-sided formula has no left side to check.
+  if (length(formula) == 3L && !(response_var %in% all.vars(formula[[2L]])))
+    stop("new_spatial_fit(): the left side of `formula` (",
+         paste(deparse(formula[[2L]]), collapse = " "), ") does not hold ",
+         "`response_var` ('", response_var, "'); print() shows the formula, ",
+         "while summary() and model_metrics() score the fitted values against '",
+         response_var, "'.", call. = FALSE)
+  if (!is.character(predictor_vars))
+    stop("new_spatial_fit(): `predictor_vars` must be a character vector of ",
+         "column names (character(0) for a model without predictors); got ",
+         class(predictor_vars)[1L], ".", call. = FALSE)
+  miss <- setdiff(predictor_vars, names(data_sf))
+  if (length(miss))
+    stop("new_spatial_fit(): `predictor_vars` names ",
+         if (length(miss) == 1L) "a column" else "columns",
+         " that `data_sf` does not have: ",
+         paste(sprintf("'%s'", miss), collapse = ", "), ".", call. = FALSE)
+  if (any(predictor_vars %in% geom))
+    stop("new_spatial_fit(): `predictor_vars` names '", geom, "', the ",
+         "geometry column of `data_sf`; predictors are attribute columns.",
+         call. = FALSE)
+  if (response_var %in% predictor_vars)
+    stop("new_spatial_fit(): `predictor_vars` names '", response_var, "', the ",
+         "response (`response_var`); a model cannot use its own response as a ",
+         "predictor.", call. = FALSE)
+  # The right side of `formula` and `predictor_vars` name the same columns.
+  # print() shows the formula, while area_of_applicability() measures
+  # distances in `predictor_vars`, residual_morans_i() rebuilds the OLS
+  # design from them and predict_surface() asks for them in the covariates.
+  # Read by all.vars(), so transforms (log(elev)), interactions and
+  # backticked names build; a name on the right that is not a column of
+  # `data_sf` is not checked, and a formula with `.` is not read.  `..x` and
+  # `..y` are the package's reserved names for the coordinates a built-in
+  # fitter derives from the geometry (fit_rf_model(include_coords = TRUE)
+  # writes them over a column of the same name), so they are not checked
+  # either, even when `data_sf` has such a column.
+  rhs <- formula[[length(formula)]]
+  rhs_vars <- all.vars(rhs)
+  if (!("." %in% rhs_vars)) {
+    rhs_text <- paste(deparse(rhs), collapse = " ")
+    unused <- setdiff(predictor_vars, rhs_vars)
+    if (length(unused))
+      stop("new_spatial_fit(): `predictor_vars` names ",
+           paste(sprintf("'%s'", unused), collapse = ", "), ", which the right ",
+           "side of `formula` (", rhs_text, ") does not use; print() shows the ",
+           "formula, while area_of_applicability(), residual_morans_i() and ",
+           "predict_surface() read `predictor_vars`.", call. = FALSE)
+    unnamed <- setdiff(intersect(rhs_vars, setdiff(cols, c(response_var, "..x", "..y"))),
+                       predictor_vars)
+    if (length(unnamed))
+      stop("new_spatial_fit(): the right side of `formula` (", rhs_text,
+           ") uses ", paste(sprintf("'%s'", unnamed), collapse = ", "),
+           ", which `predictor_vars` does not name; print() shows the ",
+           "formula, while area_of_applicability(), residual_morans_i() and ",
+           "predict_surface() read `predictor_vars`. Name ",
+           if (length(unnamed) == 1L) "it" else "them",
+           " in `predictor_vars`, or give a column the fit derives itself ",
+           "(such as its coordinates) a name that is not a column of `data_sf`.",
+           call. = FALSE)
+  }
+  # `info` is a list the methods read extras from and the cache is added to:
+  # a data.frame stopped below with "replacement has 0 rows", and a vector
+  # was coerced to a list with a warning.  NULL is no extras.
+  if (is.null(info)) info <- list()
+  if (!is.list(info) || is.data.frame(info))
+    stop("new_spatial_fit(): `info` must be a list of model-specific extras ",
+         "(list() for none); got ", paste(class(info), collapse = "/"), ".",
+         call. = FALSE)
   # Use an environment for the cache so it has reference semantics —
 
   # mutations persist across calls without triggering R copy-on-modify.
@@ -158,6 +319,70 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
 }
 
 
+#' The observed and fitted values a fit is scored on in sample
+#'
+#' A \code{gwr_fit} whose response \code{fit_gwr_model()} took about a
+#' centre (\code{.morans_fit_centre()}: a response at a large offset) returns
+#' fitted values in the response's units, which a double holds at 1e15 only
+#' to an eighth, so a score of them reads that rounding.  It is scored on the
+#' response less the centre, which the subtraction gives exactly at the
+#' offset, and on that less \code{residuals()}, the residuals of the
+#' centred response.  Every other fit is scored on the values as given.
+#'
+#' @param object A \code{spatial_fit}.
+#' @param y_obs,fit_vals The observed response and \code{fitted(object)}.
+#' @return A list for \code{.compute_reg_metrics()}: \code{y}, \code{yhat}
+#'   and \code{centre} (0 where the values are as given).
+#' @keywords internal
+#' @noRd
+.scored_fitted <- function(object, y_obs, fit_vals) {
+  yc <- .morans_fit_centre(object)
+  if (yc == 0) return(list(y = y_obs, yhat = fit_vals, centre = 0))
+  r <- as.numeric(residuals(object))
+  if (length(r) != length(y_obs)) return(list(y = y_obs, yhat = fit_vals, centre = 0))
+  y_c <- y_obs - yc
+  list(y = y_c, yhat = y_c - r, centre = yc)
+}
+
+
+#' The predictions a fit is scored on, on new rows
+#'
+#' \code{predict()} of the fit, and for a \code{gwr_fit} whose response
+#' \code{fit_gwr_model()} took about a centre, the same predictions less
+#' that centre, taken before it is added back
+#' (\code{.gwr_predict_centred_at()}).  The scores read the observed values
+#' less the same centre against those (\code{.compute_reg_metrics()}'s
+#' \code{centre}).  \code{se.fit = FALSE}, the one argument
+#' \code{predict.gwr_fit()} takes that leaves its values as they are, keeps
+#' that path; any other argument takes the plain path, where
+#' \code{predict()} reads it.
+#'
+#' @param object A \code{spatial_fit}.
+#' @param newdata The rows to predict.
+#' @param predict_args A list of further arguments to \code{predict()}.
+#' @return A list: \code{yhat}, \code{predict()}'s values, in the
+#'   response's units; \code{yhat_centred}, those less \code{centre}; and
+#'   \code{centre}, 0 for every fit but such a \code{gwr_fit}.
+#' @keywords internal
+#' @noRd
+.scored_predictions <- function(object, newdata, predict_args = list()) {
+  plain_args <- length(predict_args) == 0L ||
+    (length(predict_args) == 1L && identical(names(predict_args), "se.fit") &&
+       isFALSE(predict_args[[1L]]))
+  if (inherits(object, "gwr_fit") && plain_args &&
+      .morans_fit_centre(object) != 0) {
+    r <- .gwr_predict_rows(object, newdata, centred = TRUE)
+    if (r$centre != 0)
+      return(list(yhat = r$fit + r$centre, yhat_centred = r$fit,
+                  centre = r$centre))
+    return(list(yhat = r$fit, yhat_centred = r$fit, centre = 0))
+  }
+  yh <- do.call(stats::predict, c(list(object = object, newdata = newdata),
+                                  predict_args))
+  list(yhat = yh, yhat_centred = yh, centre = 0)
+}
+
+
 # ---------------------------------------------------------------------------
 # print / summary
 # ---------------------------------------------------------------------------
@@ -168,14 +393,18 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
 #' custom subclass: backend, formula, number of observations, CRS, and the few
 #' backend-specific numbers worth seeing immediately (GWR bandwidth; for a
 #' \code{bayesian_fit} the GP basis size, the smallest effective range that
-#' basis resolves in map units, the slope prior, and a flagged line when the
-#' sampler's diagnostics or the basis-adequacy check failed).  An
+#' basis resolves in map units, the LOOIC when the fit computed it
+#' (\code{compute_loo = TRUE}, the default of
+#' \code{\link{fit_bayesian_spatial_model}()}), the slope prior, and a flagged
+#' line when the sampler's diagnostics or the basis-adequacy check failed).  An
 #' \code{rf_fit} has its own method (see
 #' \code{\link{print.rf_fit}}), which shows the same header plus the forest
 #' settings.  It is what you get by typing the object's name, and the quickest
 #' way to confirm a fit used the data, predictors and CRS you meant.  For fit
 #' quality use \code{\link{model_metrics}()} or \code{\link{summary}()}
-#' instead.  Nothing printed here is an out-of-sample score.
+#' instead.  Apart from a \code{bayesian_fit}'s LOOIC, an approximate
+#' leave-one-out score of single rows rather than a spatial one, nothing
+#' printed here is an out-of-sample score.
 #'
 #' For a \code{gwr_fit} the bandwidth and AICc are followed by the effective
 #' number of parameters and, when any local window is of deficient rank, by
@@ -455,14 +684,16 @@ summary.spatial_fit <- function(object, ...) {
   # The same guard model_metrics() applies, for the same reason and on the same
   # columns.  Without it summary() still did what model_metrics() was fixed to
   # stop doing: a character response gave n = 0 and every metric NA with
-  # nothing said, and a factor died in `abs()`.  new_spatial_fit() is the
-  # documented entry point for a user's own backend and validates neither.
+  # nothing said, and a factor died in `abs()`.  new_spatial_fit() checks that
+  # the response is an attribute column of `data_sf`, not that it is numeric:
+  # a Bayesian fit can have a factor response.
   y_obs <- .checked_response(y_obs, object$response_var, "summary")
   # GWR fits locally varying coefficients at every observation, so the
   # global predictor count is not a valid effective-parameter count for
   # Adj R².  Pass p = NULL to suppress it, consistent with cv_gwr().
   # Bayesian fits likewise use p = NULL.
-  met      <- .compute_reg_metrics(y_obs, fit_vals, p = NULL)
+  sc       <- .scored_fitted(object, y_obs, fit_vals)
+  met      <- .compute_reg_metrics(sc$y, sc$yhat, p = NULL, centre = sc$centre)
 
   out <- list(
     class          = class(object)[1L],
@@ -624,8 +855,17 @@ print.summary.spatial_fit <- function(x, ...) {
 #' against the new rows' own mean, which it could not have known.  It is
 #' below 0 when the model predicts the new rows worse than the training mean
 #' does, and it is \code{NA} when the response does not vary about that
-#' baseline by more than rounding error (100 machine epsilons of its
-#' magnitude, whatever its units).
+#' baseline beyond the rounding of its values, whatever its units and
+#' origin.
+#'
+#' A \code{gwr_fit} whose response \code{fit_gwr_model()} took about a
+#' centre (\code{fit$engine$centres$response}, a response at a large offset)
+#' is scored on the response and the fitted values or predictions less that
+#' centre, which keep the spread a double rounds away at the response's
+#' size: \code{RMSE}, \code{MAE} and \eqn{R^2} are those of the same values
+#' at 0, and \code{MAPE} and \code{SMAPE} divide the same errors by the
+#' values in the response's units.  \code{fitted()} and \code{predict()}
+#' still return values in the response's units.
 #'
 #' @section Percentage errors on responses with zeros:
 #' \code{MAPE} divides by the observed value and \code{SMAPE} by
@@ -728,6 +968,8 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
   dots <- list(...)
   shaped <- intersect(names(dots)[vapply(dots, isTRUE, logical(1))],
                       c("draws", "se.fit"))
+  # cv_bayes() scores posterior draws, so it is named where draws were asked
+  # for or the fit is Bayesian, and not for the standard errors of a GWR.
   if (length(shaped))
     stop("model_metrics(): ", paste(sprintf("`%s = TRUE`", shaped), collapse = " and "),
          " cannot be passed through `...`: the metrics are computed from one ",
@@ -735,8 +977,10 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
          if (identical(shaped, "draws")) "a matrix of posterior draws"
          else if (identical(shaped, "se.fit")) "a list with the standard errors"
          else "more than that",
-         ". Call predict() yourself for those, or cv_bayes() for CRPS and ",
-         "interval coverage.", call. = FALSE)
+         ". Call predict() yourself for those",
+         if ("draws" %in% shaped || inherits(object, "bayesian_fit"))
+           ", or cv_bayes() for CRPS and interval coverage" else "",
+         ".", call. = FALSE)
   if (is.null(newdata)) {
     y_hat <- .fitted_checked(object, .caller = "model_metrics")
     y_obs <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
@@ -746,10 +990,24 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
            object$response_var,
            "' to compute evaluation metrics. predict() can be used without it.",
            call. = FALSE)
-    y_hat <- predict(object, newdata = newdata, ...)
+    sp <- .scored_predictions(object, newdata, list(...))
     y_obs <- sf::st_drop_geometry(newdata)[[object$response_var]]
   }
   y_obs <- .checked_response(y_obs, object$response_var, "model_metrics")
+  # A GWR whose response the fit took about a centre is scored on the
+  # values less that centre (.scored_fitted(), .scored_predictions()).
+  yc <- 0
+  if (is.null(newdata)) {
+    sc <- .scored_fitted(object, y_obs, y_hat)
+    y_obs <- sc$y; y_hat <- sc$yhat; yc <- sc$centre
+  } else {
+    y_hat <- sp$yhat
+    if (sp$centre != 0) {
+      yc <- sp$centre
+      y_obs <- y_obs - yc
+      y_hat <- sp$yhat_centred
+    }
+  }
   # R² on newdata is measured against the TRAINING mean, as every cv_*()
   # measures it: the null prediction the model had to beat.  It used the
   # held-out rows' own mean, so the same predictions scored R² -0.89 here and
@@ -761,12 +1019,13 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
     y_tr <- tryCatch(suppressWarnings(as.numeric(
       sf::st_drop_geometry(object$data_sf)[[object$response_var]])),
       error = function(e) NULL)
-    if (length(y_tr) && any(is.finite(y_tr))) ytm <- mean(y_tr[is.finite(y_tr)])
+    if (length(y_tr) && any(is.finite(y_tr)))
+      ytm <- .train_mean(y_tr, yc)
   }
   # Adj R² is suppressed (p = NULL) because GWR's effective parameter count
   # far exceeds the global predictor count, and Bayesian GP models likewise
   # lack a simple p.  This is consistent with the CV evaluation path.
-  .compute_reg_metrics(y_obs, y_hat, p = NULL, y_train_mean = ytm)
+  .compute_reg_metrics(y_obs, y_hat, p = NULL, y_train_mean = ytm, centre = yc)
 }
 
 # ---------------------------------------------------------------------------
@@ -890,7 +1149,9 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #' @param object A \code{gwr_fit} object.
 #' @param newdata An sf object with the same predictors.
 #'   The response variable need not be present (true out-of-sample prediction
-#'   is supported).  NULL = fitted values.
+#'   is supported).  NULL = fitted values.  A layer whose geometries mix XY
+#'   with XYZ or XYM (as \code{rbind()} of an XY and an XYZ layer gives) is
+#'   read in x and y.
 #' @param se.fit Logical; also return standard errors.  Default \code{FALSE}.
 #' @param ... Ignored.
 #' @return With \code{se.fit = FALSE}, a numeric vector aligned to
@@ -900,7 +1161,9 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #'   those.  If the design matrix for \code{newdata} cannot be built, every
 #'   value is \code{NA} and a warning says why.  CRS-less
 #'   \code{newdata} first receives the interpretation the training data got, so
-#'   the same rows land where they did at fit time.
+#'   the same rows land where they did at fit time; when that is longitude and
+#'   latitude, \code{newdata} with an x outside -180 to 360 or a y beyond 90
+#'   north or south cannot be in it, and the call stops.
 #'
 #'   With \code{se.fit = TRUE}, a list: \code{fit} (that vector),
 #'   \code{se.fit} (the standard error of the fitted value,
@@ -917,10 +1180,37 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #' @export
 predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
   .check_dots(list(...), "predict.gwr_fit")
+  .gwr_predict_rows(object, newdata, se.fit = se.fit)
+}
+
+
+#' The work of \code{predict.gwr_fit()}, with the predictions also less the
+#' response's centre
+#'
+#' @param object,newdata,se.fit As for \code{predict.gwr_fit()}.
+#' @param centred \code{TRUE} to return the predictions less the centre
+#'   \code{fit_gwr_model()} took the response about
+#'   (\code{.gwr_predict_centred_at()}), for the scores of the fit
+#'   (\code{.scored_predictions()}); \code{se.fit} is then ignored.
+#' @return What \code{predict.gwr_fit()} returns; with \code{centred =
+#'   TRUE}, a list: \code{fit}, the predictions less the centre, aligned to
+#'   \code{nrow(newdata)} as \code{predict()}'s are, and \code{centre}, the
+#'   centre (0 for a response fitted on its raw values).
+#' @keywords internal
+#' @noRd
+.gwr_predict_rows <- function(object, newdata = NULL, se.fit = FALSE,
+                              centred = FALSE) {
+  # A tie of a window's edge that the rounding of the coordinates can have
+  # parted is said once, when the call returns (.tie_watch()): by
+  # predict.gwr_fit(), as its other warnings are, or by the exported call
+  # that predicts.
+  tie_end <- .tie_watch("predict.gwr_fit", "`newdata` and the data of `object`", plural = TRUE)
+  on.exit(tie_end(returnValue(tie_end), object$data_sf), add = TRUE)
+  if (centred) se.fit <- FALSE
   if (!is.logical(se.fit) || length(se.fit) != 1L || is.na(se.fit))
     stop("predict.gwr_fit(): `se.fit` must be TRUE or FALSE.", call. = FALSE)
   if (is.null(newdata)) {
-    if (!se.fit) return(fitted(object))
+    if (!se.fit && !centred) return(fitted(object))
     # The standard errors need each row's weights on the training responses,
     # which the fit does not keep; the training rows are predicted afresh.
     newdata <- object$data_sf
@@ -942,6 +1232,16 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
   # CRS-less newdata first gets the interpretation the TRAINING data got
   # (recorded by ensure_projected() when it assumed lon/lat), so the same rows
   # land where they did at fit time -- see .replay_crs_assumption().
+  # newdata is read in x and y when it mixes XY and XYZ (or XYM) geometries:
+  # sf::st_transform() reads such a layer in the dimension of its first
+  # geometry, so an XYZ first row stopped the move into the fit's CRS with
+  # "OGR error".  Only predictions are returned, so nothing is said.
+  newdata <- .xy_if_mixed(newdata)
+  # A row without a location (a coordinate that is not finite or lies beyond
+  # .POOL_XY_MAX) is emptied as given, before the move, which can bring it
+  # back finite; it then comes back NA as the same row emptied.  As in
+  # predict.rf_fit().
+  newdata <- .empty_unlocated(newdata)
   newdata <- .replay_crs_assumption(newdata, object$data_sf, "predict.gwr_fit")
   newdata <- ensure_projected(newdata, target_crs = .crs_or_null(object$data_sf))
 
@@ -963,6 +1263,7 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
   # What comes back when nothing can be predicted, in the shape asked for.
   na_result <- function() {
     v <- rep(NA_real_, n_orig)
+    if (centred) return(list(fit = v, centre = 0))
     if (!se.fit) return(v)
     list(fit = v, se.fit = v, se.pred = v,
          residual.scale = NA_real_, df = NA_real_)
@@ -990,12 +1291,13 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
   # solved for itself, so a location whose window is empty or cannot place
   # its row (a grid cell beyond a fixed bandwidth, a point inside a held-out
   # block) is NA and the others are what they would be without it.
+  predict_at <- if (centred) .gwr_predict_centred_at else .gwr_predict_at
   res <- tryCatch(
-    .gwr_predict_at(object$formula, sp_train,
-                    newdata_df = sf::st_drop_geometry(newdata),
-                    rp = sf::st_coordinates(newdata)[, 1:2, drop = FALSE],
-                    bw = bw, kernel = kernel, adaptive = adaptive,
-                    se = se.fit),
+    predict_at(object$formula, sp_train,
+               newdata_df = sf::st_drop_geometry(newdata),
+               rp = sf::st_coordinates(newdata)[, 1:2, drop = FALSE],
+               bw = bw, kernel = kernel, adaptive = adaptive,
+               se = se.fit),
     error = function(e) e
   )
   if (inherits(res, "error")) {
@@ -1053,17 +1355,32 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
 
   # Expand back to original length, filling dropped rows with NA.
   fit_vals <- .expand_predictions(preds_clean, clean_idx, n_orig)
+  if (centred) return(list(fit = fit_vals, centre = res$centre))
   if (!se.fit) return(fit_vals)
 
   sigma2 <- suppressWarnings(as.numeric(object$info$sigma2 %||% NA_real_))[1L]
-  if (!is.finite(sigma2))
+  vf <- res$var_fit
+  vf[is.na(preds_clean)] <- NA_real_
+  # A residual variance a double cannot hold in the response's units squared
+  # (a response near 1e160 or 1e-160, which fit_gwr_model() divided by a
+  # power of two) is NA in the fit; its square root is held, and the
+  # standard errors are taken from it.
+  sigma <- if (is.finite(sigma2)) NA_real_ else .gwr_residual_sd(object)
+  if (!is.finite(sigma2) && !is.finite(sigma))
     .warn_and_log(paste0("predict.gwr_fit(): the fit carries no residual ",
                          "variance (it has no effective residual degrees of ",
                          "freedom, a fitted value of its own is NA, or it was ",
                          "not made by fit_gwr_model()), so `se.fit` and ",
                          "`se.pred` are NA."))
-  vf <- res$var_fit
-  vf[is.na(preds_clean)] <- NA_real_
+  if (is.finite(sigma))
+    return(list(fit            = fit_vals,
+                se.fit         = .expand_predictions(sigma * sqrt(vf),
+                                                     clean_idx, n_orig),
+                se.pred        = .expand_predictions(sigma * sqrt(1 + vf),
+                                                     clean_idx, n_orig),
+                residual.scale = sigma,
+                df             = suppressWarnings(
+                  as.numeric(object$info$edf %||% NA_real_))[1L]))
   list(fit            = fit_vals,
        se.fit         = .expand_predictions(sqrt(sigma2 * vf), clean_idx, n_orig),
        se.pred        = .expand_predictions(sqrt(sigma2 * (1 + vf)), clean_idx,
@@ -1071,6 +1388,32 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
        residual.scale = sqrt(sigma2),
        df             = suppressWarnings(
          as.numeric(object$info$edf %||% NA_real_))[1L])
+}
+
+
+#' The residual standard deviation of a GWR fit whose variance is NA
+#'
+#' Where \code{fit_gwr_model()} divided the response by a power of two
+#' (\code{$engine$centres$scale}) and the residual variance in the
+#' response's units squared lies beyond what a double holds, the variance is
+#' \code{NA} in \code{$info$sigma2}.  Its square root is held: it is taken
+#' here from the residuals the fit keeps, divided by the scale, over the
+#' effective residual degrees of freedom, as the variance was, and the
+#' scale is put back on it.
+#'
+#' @param object A \code{gwr_fit}.
+#' @return The standard deviation, or \code{NA} where the fit records no
+#'   scale or does not carry what it needs.
+#' @keywords internal
+#' @noRd
+.gwr_residual_sd <- function(object) {
+  ys  <- tryCatch(object$engine$centres$scale, error = function(e) NULL)
+  edf <- suppressWarnings(as.numeric(object$info$edf %||% NA_real_))[1L]
+  r   <- tryCatch(object$engine$SDF@data$residual, error = function(e) NULL)
+  if (!(is.numeric(ys) && length(ys) == 1L && is.finite(ys) && ys > 0 &&
+        ys != 1 && isTRUE(edf > 0) && is.numeric(r) && !anyNA(r)))
+    return(NA_real_)
+  ys * sqrt(sum((r / ys)^2) / edf)
 }
 
 
@@ -1440,7 +1783,8 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
 #' @param object A \code{bayesian_fit} object.
 #' @param newdata An sf object with the same predictors.  The response variable
 #'   need not be present (true out-of-sample prediction is supported).
-#'   NULL = fitted values.
+#'   NULL = fitted values.  A layer whose geometries mix XY with XYZ or XYM
+#'   (as \code{rbind()} of an XY and an XYZ layer gives) is read in x and y.
 #' @param summary "mean" (default) or "median" over posterior draws.
 #' @param type "epred" (default) for expected predictions (no obs noise),
 #'   or "predict" for full posterior predictive draws (includes obs noise).
@@ -1448,7 +1792,9 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
 #'   point summary.  Default FALSE.
 #' @param ... Ignored.
 #' @return Numeric vector of length \code{nrow(newdata)}, or a
-#'   \code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE}.  Rows
+#'   \code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE}, in the
+#'   units of the response (see "The response's centre and scale" in
+#'   \code{\link{fit_bayesian_spatial_model}}).  Rows
 #'   with a missing or non-finite predictor or coordinate, and rows carrying
 #'   a level of a categorical predictor the model was not fitted with, are
 #'   \code{NA} (an \code{NA} column with \code{draws = TRUE}); the other
@@ -1520,6 +1866,16 @@ predict.bayesian_fit <- function(object, newdata = NULL,
   # predict.gwr_fit() and predict.rf_fit().
   n_orig       <- nrow(newdata)
   training_crs <- sf::st_crs(object$data_sf)
+  # newdata is read in x and y when it mixes XY and XYZ (or XYM) geometries:
+  # sf::st_transform() reads such a layer in the dimension of its first
+  # geometry, so an XYZ first row stopped the move into the fit's CRS with
+  # "OGR error".  Only predictions are returned, so nothing is said.
+  newdata      <- .xy_if_mixed(newdata)
+  # A row without a location (a coordinate that is not finite or lies beyond
+  # .POOL_XY_MAX) is emptied as given, before the move, which can bring it
+  # back finite; it then comes back NA as the same row emptied.  As in
+  # predict.rf_fit().
+  newdata      <- .empty_unlocated(newdata)
   newdata      <- .replay_crs_assumption(newdata, object$data_sf, "predict.bayesian_fit")
   newdata      <- ensure_projected(newdata, target_crs = .crs_or_null(training_crs))
 
@@ -1632,6 +1988,10 @@ predict.bayesian_fit <- function(object, newdata = NULL,
            else rep(NA_real_, n_orig))
   }
 
+  # Back in the response's units where the response was handed to brms
+  # less a centre or divided by a scale ($info$response_scaling).
+  draw_mat <- .bayes_unscale(draw_mat, object$info$response_scaling)
+
   if (draws) {
     # Expand draw matrix: insert NA columns for dropped rows.
     if (sum(clean_idx) < n_orig) {
@@ -1680,7 +2040,9 @@ fitted.gwr_fit <- function(object, ...) {
 #' In-sample fitted values from a Bayesian spatial GP fit
 #'
 #' Posterior expectation at the training locations: the column means of
-#' \code{brms::posterior_epred()}.  These are \strong{in-sample} values.
+#' \code{brms::posterior_epred()}, in the units of the response (see "The
+#' response's centre and scale" in \code{\link{fit_bayesian_spatial_model}}).
+#' These are \strong{in-sample} values.
 #'
 #' @section The result is cached:
 #' \code{posterior_epred()} is O(draws x n), and \code{summary()},
@@ -1787,7 +2149,9 @@ fitted.bayesian_fit <- function(object, ...) {
                  if (is.matrix(draws)) paste(dim(draws), collapse = " x ")
                  else class(draws)[1L], object$n), call. = FALSE)
 
-  fitted_vals <- colMeans(draws)
+  # In the response's units where it was handed to brms less a centre or
+  # divided by a scale ($info$response_scaling).
+  fitted_vals <- .bayes_unscale(colMeans(draws), object$info$response_scaling)
 
   # Store in cache for subsequent calls, stamped so a copy carrying different
   # data cannot read it back.  A wrong-length result is never cached.
@@ -1905,7 +2269,13 @@ clear_fitted_cache <- function(object) {
 #' In-sample residuals from a GWR fit
 #'
 #' Observed response minus \code{\link{fitted.gwr_fit}}, so these are
-#' \strong{in-sample} residuals.
+#' \strong{in-sample} residuals.  Where \code{\link{fit_gwr_model}()} took
+#' the response about its centre (a response whose centre is more than 1000
+#' times its spread, such as 1e8 plus a spread of 1, or whose raw values
+#' lose their spread, such as 1e15 plus a spread of 1; see \strong{The local
+#' solve} there), both are taken about that centre, so the residuals keep the
+#' spread a double rounds away from the response and the fitted values at
+#' that size.
 #'
 #' @param object A \code{gwr_fit}.
 #' @param ... Ignored.
@@ -1914,6 +2284,14 @@ clear_fitted_cache <- function(object) {
 #' @export
 residuals.gwr_fit <- function(object, ...) {
   y_obs <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
+  # The residuals of the centred response, which fit_gwr_model() keeps in
+  # the engine's table; the raw values less the fitted values would read
+  # the rounding of both at the response's size.
+  yc <- tryCatch(object$engine$centres$response, error = function(e) NULL)
+  if (is.numeric(yc) && length(yc) == 1L && isTRUE(yc != 0)) {
+    r <- tryCatch(object$engine$SDF@data$residual, error = function(e) NULL)
+    if (is.numeric(r) && length(r) == length(y_obs)) return(as.numeric(r))
+  }
   y_obs - fitted(object)
 }
 
@@ -2103,7 +2481,13 @@ coef.gwr_fit <- function(object, se = FALSE, ...) {
 #' @param ... Ignored.
 #' @return A matrix of fixed-effect posterior summaries, as returned by
 #'   \code{brms::fixef()}, on the fitted scale (per standard deviation of each
-#'   predictor under \code{standardize_predictors = TRUE}; see above).  Never
+#'   predictor under \code{standardize_predictors = TRUE}; see above), in the
+#'   units of the response: where the response was handed to brms less a
+#'   centre or divided by a scale, the intercept has the centre added back
+#'   and every column is multiplied by the scale (see "The response's centre
+#'   and scale" in \code{\link{fit_bayesian_spatial_model}}).  Read on
+#'   \code{object$engine}, \code{brms::fixef()} answers on the scale brms was
+#'   given.  Never
 #'   \code{NULL}: a missing 'brms' or a failing
 #'   \code{fixef()} call errors, following the \code{coef()} contract described
 #'   in \code{\link{new_spatial_fit}}.
@@ -2119,7 +2503,7 @@ coef.bayesian_fit <- function(object, ...) {
   if (inherits(fx, "error"))
     stop(sprintf("coef.bayesian_fit(): brms::fixef() failed: %s",
                  conditionMessage(fx)), call. = FALSE)
-  fx
+  .bayes_unscale_fixef(fx, object$info$response_scaling)
 }
 
 

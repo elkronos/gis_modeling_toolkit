@@ -9,7 +9,10 @@ gp_lengthscale_bounds(coords_xy, q_small = 0.25, max_n = 1000L)
 \arguments{
 \item{coords_xy}{Numeric matrix or data.frame of coordinates with at least
 two columns; the first two are used, and replicated rows are collapsed
-before the distance quantiles are taken.  \code{brms::gp()} defaults to
+before the distance quantiles are taken.  A row with a coordinate that
+is missing, not finite or beyond 1e150 has no location: it is left out,
+with a warning of class \code{spatialkit_rows_dropped} that gives the
+count.  \code{brms::gp()} defaults to
 \code{gr = TRUE} and reduces its covariates to unique rows, so a
 heavily-sampled station would otherwise weight the quantile by how often it
 was measured rather than by where the sites are.}
@@ -21,12 +24,16 @@ dominated by within-cluster spacing in clustered data, producing
 a misleadingly small lower bound.}
 
 \item{max_n}{Maximum number of \emph{distinct} points to use in the distance
-computation.  Default 1000. Set to \code{Inf} to use all of them.}
+computation.  Default 1000. Set to \code{Inf} to use all of them.  Above
+it, a subsample is drawn with a fixed seed from the distinct points in
+coordinate order, so the bounds do not depend on the row order of
+\code{coords_xy}, and the caller's random-number stream is left where it
+was.}
 }
 \value{
 Named numeric vector \code{c(lower, upper)} on the length-scale;
-\code{c(lower = 0.001, upper = 1)} when fewer than two distinct locations
-or no positive distances remain.
+\code{c(lower = 0.001, upper = 1)} when fewer than two distinct located
+rows or no positive distances remain.
 }
 \description{
 Computes sensible prior bounds for the GP length-scale parameter \eqn{\ell}

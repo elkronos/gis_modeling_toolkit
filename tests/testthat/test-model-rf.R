@@ -217,13 +217,20 @@ test_that("coef() on an rf_fit refuses rather than inventing something", {
   expect_error(coef(fit), "importance")
 })
 
-test_that("print.rf_fit states the out-of-bag caveat", {
+test_that("print.rf_fit says what the out-of-bag error is the error of", {
   skip_if_not_installed("ranger")
   fit <- fit_rf_model(mk_rf_pts(80), "z", c("a", "b"), num_trees = 100L)
   txt <- paste(utils::capture.output(print(fit)), collapse = "\n")
   expect_match(txt, "Random Forest \\(ranger\\)")
   expect_match(txt, "OOB RMSE")
-  expect_match(txt, "optimistic under spatial")
+  # It said the OOB error "is optimistic under spatial autocorrelation",
+  # with no word on where the forest will predict (?fold_separation).
+  expect_no_match(txt, "optimistic")
+  flat <- gsub("[[:space:]]+", " ", txt)
+  expect_match(flat, paste("OOB is a random hold-out: under spatial autocorrelation it is the",
+                           "error of predicting among the samples, and reads low for predictions",
+                           "made farther from the data than the samples sit from each other."),
+               fixed = TRUE)
   expect_match(txt, "cv_rf")
   expect_match(txt, "Coords as predictors: no")
   invisible(utils::capture.output(vis <- withVisible(print(fit))))

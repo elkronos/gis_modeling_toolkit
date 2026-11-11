@@ -63,7 +63,7 @@
 #'     error tends to read low for that target.}
 #'   \item{\code{"farther"}}{The gap is above the tolerance and at least
 #'     half of \eqn{W_1}: the held-out points sit farther, and the error
-#'     tends to read high.}
+#'     tends to read high for that target.}
 #'   \item{\code{"matched"}}{The gap is within the tolerance and
 #'     \eqn{W_1} within twice the tolerance.}
 #'   \item{\code{"mixed"}}{The two distributions cross, closer at some
@@ -85,7 +85,15 @@
 #'   layer, such as the points before
 #'   \code{\link{assign_features_to_polygons}()} dropped some) is refused;
 #'   the location check is skipped when one of the two layers is POINT and
-#'   the other is not.
+#'   the other is not.  A layer that mixes XY and XYZ (or XYM) geometries is
+#'   read in x and y, for the distances and for that check, since sf reads
+#'   a layer in the dimension of its first geometry.  So is a layer whose
+#'   geometries carry M (XYM or XYZM), which GEOS refuses.  The points a
+#'   layer is reduced to are read in x and y when they mix dimensions, as
+#'   those of a layer XYZ throughout that holds points and polygons do.  A
+#'   row without a location (an empty point, or a coordinate that is not
+#'   finite or lies beyond 1e150, read as given and again in the CRS the
+#'   distances are measured in) is left out of the distances.
 #' @param sac Optional: an \code{\link{estimate_sac_range}()} result or a
 #'   single number.  Defaults to the range the folds carry, if any.  Supplying
 #'   one adds the \code{mean_cor} column and, with a prediction target,
@@ -105,15 +113,22 @@
 #'   is reduced to one representative point per feature, as in
 #'   \code{make_folds(method = "nndm")}, so pass grid cells or points, not
 #'   one polygon of the region.  It is brought into the CRS the distances are
-#'   measured in.  Default \code{NULL}: no target and no reading, except for
-#'   NNDM and kNNDM folds (\code{method = "nndm"} and \code{"knndm"}), which
-#'   carry the distances from the prediction points they were built for and
-#'   are compared against those, measured to all sites.  The carried
-#'   distances are lengths in the CRS the folds were built in
+#'   measured in; one that mixes XY and XYZ (or XYM) geometries is read in x
+#'   and y first.  So is one whose geometries carry M (XYM or XYZM), and so
+#'   are the points it is reduced to when they mix dimensions.  Default
+#'   \code{NULL}: no target and no reading, except for NNDM and kNNDM folds
+#'   (\code{method = "nndm"} and \code{"knndm"}), which carry the distances
+#'   from the prediction points they were built for and are compared
+#'   against those, measured to all sites.  The carried distances are
+#'   lengths in the CRS the folds were built in
 #'   (\code{folds$params$crs}).  When the distances here are measured in
 #'   another CRS (\code{data_sf} is in another projected CRS, or \code{sac}
 #'   records another), the two are not compared, \code{print()} says so, and
-#'   passing \code{prediction_points} has the target measured here.
+#'   passing \code{prediction_points} has the target measured here.  A
+#'   prediction point without a location (an empty point, or a coordinate
+#'   that is not finite or lies beyond 1e150) as given or in the CRS the
+#'   distances are measured in takes no part in the target and is not
+#'   counted.
 #' @return A data.frame of class \code{fold_separation}, one row per fold:
 #'   \code{fold} (the fold's number: for the \code{$folds} of a
 #'   \code{cv_*()} result, the \code{fold_id} its \code{fold_metrics} use,
@@ -168,7 +183,9 @@
 #' @family cross-validation
 #' @seealso \code{\link{make_folds}()} for the fold schemes and the block
 #'   sizing this measures the outcome of; \code{\link{cv_block_size_sweep}()}
-#'   for choosing a block size by cross-validated error instead.
+#'   for the cross-validated error at each block size.  The sweep does not
+#'   say which size matches a map; this function does, read on the folds of
+#'   each size with the map's locations as \code{prediction_points}.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -246,17 +263,27 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
       rng_crs <- cr
   }
 
-  pts <- data_sf
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y,
+  # before the coerce and the move and again after the coerce: sf reads a
+  # layer in the dimension of its first geometry.  So is one whose
+  # geometries carry M, which GEOS refuses in the coerce.  It is not
+  # returned, so no warning.  A polygon s2 cannot take a centroid of in
+  # degrees is refused in this function's words, naming `data_sf`
+  # (.pointize_auto()).
+  # A row without a location as given (an empty point, or a coordinate that
+  # is not finite or lies beyond 1e150) is emptied before the coerce and the
+  # move, which could otherwise bring it back finite, and has none after it.
+  pts <- .empty_unlocated(.xy_if_mixed_or_m(data_sf))
   if (!all(sf::st_geometry_type(pts, by_geometry = TRUE) == "POINT"))
-    pts <- coerce_to_points(pts, "auto")
+    pts <- .xy_if_mixed(.pointize_auto(pts, "fold_separation", "`data_sf`"))
   pts <- if (is.null(rng_crs)) ensure_projected(pts) else
     .transform_or_stamp(pts, rng_crs, what = "data_sf", caller = "fold_separation")
   pts <- sf::st_zm(pts, drop = TRUE, what = "ZM")
   crs_lbl <- .fold_crs_label(pts)
 
-  # A distance is only meaningful between finite coordinates.
-  xy <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
-  ok <- stats::complete.cases(xy) & is.finite(xy[, 1L]) & is.finite(xy[, 2L])
+  # A distance is only meaningful between points that have a location, read
+  # again after the move.
+  ok <- .located_rows(pts)
   if (!any(ok))
     stop("fold_separation(): `data_sf` has no usable coordinates.", call. = FALSE)
 
@@ -454,7 +481,7 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
 #'
 #' @param prediction_points An sf/sfc layer, as passed.
 #' @param pts The data points, already in the measuring CRS.
-#' @return An sf POINT layer with finite coordinates.
+#' @return An sf POINT layer of the points that have a location.
 #' @keywords internal
 #' @noRd
 .fold_sep_prediction_points <- function(prediction_points, pts) {
@@ -466,11 +493,22 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
          class(prediction_points)[1L], ".", call. = FALSE)
   if (!nrow(prediction_points))
     stop("fold_separation(): `prediction_points` has no rows.", call. = FALSE)
+  # Read in x and y when it mixes dimensions or carries M, as `data_sf` is.
+  # Points held in a column of the general class sfc_GEOMETRY are read in
+  # sfc_POINT (.typed_points()): sf::st_transform() below stops on the
+  # column sf::st_cast(x, "GEOMETRY") returns.
+  prediction_points <- .xy_if_mixed_or_m(.typed_points(prediction_points))
+  # A point without a location as given (an empty point, or a coordinate
+  # that is not finite or lies beyond 1e150) is emptied before the coerce and
+  # the move, which could otherwise bring it back finite (a northing of 1e200
+  # in EPSG:32616 lands at a finite point in EPSG:32617).
+  prediction_points <- .empty_unlocated(prediction_points)
   if (!all(sf::st_geometry_type(prediction_points, by_geometry = TRUE) == "POINT")) {
     .log_info(paste0("fold_separation(): `prediction_points` are not POINTs; ",
                      "using one representative point per feature so the ",
                      "target distances are point-to-point."))
-    prediction_points <- coerce_to_points(prediction_points, "auto")
+    prediction_points <- .xy_if_mixed(.pointize_auto(prediction_points, "fold_separation",
+                                                     "`prediction_points`"))
   }
   if (is.null(.crs_or_null(pts))) {
     if (!is.na(sf::st_crs(prediction_points)))
@@ -484,10 +522,10 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
                                 caller = "fold_separation")
   }
   pred <- sf::st_zm(pred, drop = TRUE, what = "ZM")
-  empty <- sf::st_is_empty(pred)
-  if (any(empty)) pred <- pred[!empty, , drop = FALSE]
-  xy <- if (nrow(pred)) sf::st_coordinates(pred)[, 1:2, drop = FALSE] else matrix(0, 0, 2)
-  keep <- is.finite(xy[, 1L]) & is.finite(xy[, 2L])
+  # Only the points that have a location are measured and counted: the bound
+  # (finite and within 1e150) is read on the coordinates as given, above,
+  # and again here.
+  keep <- .located_rows(pred)
   if (!any(keep))
     stop("fold_separation(): `prediction_points` has no usable coordinates.",
          call. = FALSE)

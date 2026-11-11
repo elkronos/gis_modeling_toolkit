@@ -159,11 +159,12 @@ test_that("get_voronoi_seeds(partition = \"density\") returns den_centres()'s ce
 
 test_that("a density profile's centres are the engine's at the profile's settings", {
   # resolution_profile() runs `nstart` starts of at most 100 Lloyd steps.
-  # Geometry only, so nothing draws from the stream before the sweep.
+  # Geometry only, so no subsample is drawn, and the level runs on its own
+  # stream (helper-level-streams.R).
   xy  <- .pr_sets()$uniform
   pts <- partition_points_sf(xy)
   prof <- resolution_profile(pts, levels = 15L, nstart = 4, seed = 9, partition = "density")
-  set.seed(9)
+  set.seed(profile_level_seed(9L, nrow(xy), 15L))
   eng <- spatialkit:::.partition_centres(xy, 15L, partition = "density", nstart = 4L,
                                          iter.max = 100L)
   expect_identical(attr(prof, "centres")[["15"]], eng$centers)
@@ -178,14 +179,15 @@ test_that("with the reference's 40 steps a density profile's centres are den_cen
   xy  <- .pr_sets()$clustered
   pts <- partition_points_sf(xy)
   k <- 30L
-  set.seed(1)
+  set.seed(profile_level_seed(1L, nrow(xy), k))
   eng <- spatialkit:::.partition_centres(xy, k, partition = "density", nstart = DEN_NSTART,
                                          iter.max = DEN_ITER)
   expect_true(eng$converged)
   prof <- resolution_profile(pts, levels = k, nstart = DEN_NSTART, seed = 1,
                              partition = "density")
   expect_lt(max(abs(attr(prof, "centres")[[as.character(k)]] -
-                      den_centres(partition_sorted(xy), k, 1L))), 1e-8)
+                      den_centres(partition_sorted(xy), k,
+                                  profile_level_seed(1L, nrow(xy), k)))), 1e-8)
 })
 
 
@@ -207,8 +209,13 @@ test_that("random starts are rnd_centres()'s: stats::kmeans() from 5 starts, 100
     one <- spatialkit:::.partition_centres(xy, k, partition = "kmeans", init = "random",
                                            nstart = RND_NSTART, iter.max = RND_ITER,
                                            one_call = TRUE)
-    expect_identical(each$centers, ref)
-    expect_identical(one$centers, ref)
+    # The centres of that run to rounding, in the order of the start kept.
+    # Starts that reach the same cells have sums equal to rounding, and the
+    # start kept among them is set by the sums in the frame of
+    # .kmeans_frame(), so the centres can come in another order.
+    by_xy <- function(m) m[order(m[, 1L], m[, 2L]), , drop = FALSE]
+    expect_equal(by_xy(each$centers), by_xy(ref), tolerance = 1e-12)
+    expect_identical(one$centers, each$centers)
     expect_identical(each$cluster, one$cluster)
     expect_identical(each$wss, one$wss)
     # The start-by-start run also has the spread of the starts.
@@ -243,7 +250,9 @@ test_that("get_voronoi_seeds() and a random-start profile return rnd_centres()'s
                          partition = "kmeans")
   expect_identical(partition_xy(s), ref)
   # The profile puts the rows in coordinate order first.
-  ref_sorted <- matrix(as.numeric(rnd_centres(partition_sorted(xy), k, 4L)), ncol = 2L)
+  ref_sorted <- matrix(as.numeric(rnd_centres(partition_sorted(xy), k,
+                                              profile_level_seed(4L, nrow(xy), k))),
+                       ncol = 2L)
   prof <- resolution_profile(pts, levels = k, nstart = RND_NSTART, seed = 4, init = "random",
                              estimate = NULL, obs_per_cell = NULL, sac = NULL,
                              partition = "kmeans")

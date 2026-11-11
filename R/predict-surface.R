@@ -102,6 +102,171 @@
 }
 
 
+#' The covariate row nearest each grid point
+#'
+#' A grid point between covariate points of a lattice (the grid of
+#' \code{predict_surface()} laid over the training points, say) is the same
+#' distance from several of them.  \code{sf::st_nearest_feature()} gave it
+#' whichever one GEOS met first, and the distances differ in their last bits
+#' once the unit or the origin of the coordinates changes, so the surface
+#' took another covariate row in another frame.  For point covariates the
+#' search is that of \code{cell_values_at()} (\code{.values_at_nearest()}):
+#' squared distances within \code{.TIE_TOL} (one part in ten million) of the
+#' least, plus the margin \code{.centres_tol()} of the points on the
+#' distance (\code{.tie_bound()}), are a tie, and the tie goes to the point
+#' in the lowest column
+#' (\code{.near_columns()}: first coordinates within \code{.TIE_TOL} of the
+#' extent are one column), then in the lowest row by the same rule read on
+#' y, then the lower row of the layer.  The extent is the diagonal of the
+#' points' box, or the margin of an edge at their largest coordinate
+#' (\code{.edge_tol()}) over \code{.TIE_TOL} where that is more
+#' (\code{.near_points_extent()}): two
+#' records of one station that differ in their last bits, alone in the
+#' layer, have a box whose diagonal is last-bits small, and a raw y read
+#' after the column let those bits choose, which move with the unit and the
+#' origin.  A layer of lines or polygons (or one that mixes them with
+#' points) is searched by \code{.surface_nearest_shapes()}, the same rule
+#' read on distances to the features and on the centres of their bounding
+#' boxes.  A layer in degrees is searched by \code{sf::st_nearest_feature()}
+#' as before.  A grid point without a location gets \code{NA} whatever the
+#' layer, where \code{st_nearest_feature()} gave a line, polygon or point in
+#' degrees a row.
+#'
+#' @param pts The grid's points, an sfc in the CRS of \code{covariates}.
+#' @param covariates The covariate layer.
+#' @return Integer vector, one row of \code{covariates} per point; \code{NA}
+#'   for a point without a location and where no covariate row has one.
+#' @keywords internal
+#' @noRd
+.surface_nearest_rows <- function(pts, covariates) {
+  # Points in an sfc_GEOMETRY column are read as the same points in
+  # sfc_POINT (.typed_points()): sf::st_coordinates() refuses that class.
+  pts <- .typed_points(pts)
+  cg  <- .typed_points(sf::st_geometry(covariates))
+  if (!isTRUE(sf::st_is_longlat(cg)) &&
+      !all(sf::st_geometry_type(cg, by_geometry = TRUE) == "POINT"))
+    return(.surface_nearest_shapes(pts, cg))
+  out  <- rep(NA_integer_, length(pts))
+  gxy  <- .values_at_xy(sf::st_sf(geometry = pts))
+  q    <- which(!is.na(gxy[, 1L]))
+  if (!length(q)) return(out)
+  if (isTRUE(sf::st_is_longlat(cg))) {
+    out[q] <- sf::st_nearest_feature(pts[q], cg)
+    return(out)
+  }
+  cxy  <- .values_at_xy(sf::st_sf(geometry = cg))
+  live <- which(!is.na(cxy[, 1L]))
+  if (!length(live)) return(out)
+  cx <- cxy[live, 1L]; cy <- cxy[live, 2L]
+  # By column, then by row read the same way on y, then row of the layer:
+  # order() keeps the row order among ties.  The step is never less than the
+  # margin of an edge (.near_points_extent(), .edge_tol()): points
+  # that all lie within the last bits of each other have a last-bits small
+  # box.
+  ex <- .near_points_extent(cx, cy)
+  o  <- order(.near_columns(cx, cy, ex), .near_columns(cy, cx, ex))
+  j <- .values_at_nearest(gxy[q, 1L], gxy[q, 2L], cx[o], cy[o],
+                          use_fnn = .has_backend("FNN"))
+  out[q] <- live[o[j]]
+  out
+}
+
+
+#' The line or polygon nearest each grid point
+#'
+#' A grid point on the edge two covariate polygons share (or at the shared
+#' end of two lines) is at distance 0 from both, and
+#' \code{sf::st_nearest_feature()} gave it whichever one GEOS met first,
+#' which moved with the last bits of the coordinates and with the row order
+#' of the layer.  Here the least distance \code{d} is
+#' \code{st_nearest_feature()}'s, and the features within
+#' \code{d * (1 + .TIE_TOL) + .edge_tol()} of the point (the margin of the
+#' layer's bounding box, \code{.edge_join()}'s) are a tie.  A point with one
+#' such feature takes it, as before.  Among several, the one whose
+#' bounding-box centre is in the lowest column (\code{.near_columns()} over
+#' the centres of the layer's features that have a location, with centre x
+#' values within \code{.TIE_TOL} of the diagonal of the layer's bounding box
+#' one column), then in the lowest row by the same rule read on y
+#' (\code{.near_columns(y, x)}), then in the lower row of the layer, is
+#' taken.  The extent is the layer's, not the centres' own: where every
+#' centre lies on one point (a polygon with a hole and the island that fills
+#' it) the centres' box is last-bits small, and the tie would go by those
+#' bits.  The features near a point are shortlisted by the square of
+#' half-side a hair above that reach around it
+#' (\code{st_intersects()} uses GEOS's index, where
+#' \code{st_is_within_distance()} takes a distance for every pair of a
+#' projected layer), then by the distance from the point to their bounding
+#' box, which is never more than the distance to the feature (a point far
+#' from the layer has a large square), and kept by their distance.  A point
+#' without a location (an empty point, or a coordinate that is not finite or
+#' lies beyond \code{.POOL_XY_MAX}) gets \code{NA}.
+#'
+#' @param pts The grid's points, an sfc in the CRS of \code{cg}.
+#' @param cg The covariates' geometry, not in degrees.
+#' @return Integer vector, one feature of \code{cg} per point; \code{NA}
+#'   for a point without a location and where \code{st_nearest_feature()}
+#'   gives none.
+#' @keywords internal
+#' @noRd
+.surface_nearest_shapes <- function(pts, cg) {
+  nn <- sf::st_nearest_feature(pts, cg)
+  pxy <- .values_at_xy(sf::st_sf(geometry = pts))
+  nn[is.na(pxy[, 1L])] <- NA_integer_
+  q <- which(!is.na(nn))
+  if (!length(q)) return(nn)
+  d   <- as.numeric(sf::st_distance(pts[q], cg[nn[q]], by_element = TRUE))
+  tol <- .edge_tol(sf::st_bbox(cg))
+  r   <- d * (1 + .TIE_TOL) + tol
+  # The square holds every feature within r of the point; its corners are
+  # computed in floating point, so it is taken a hair wider.
+  sq   <- sf::st_buffer(pts[q], r * (1 + 1e-6) + tol, endCapStyle = "SQUARE")
+  hits <- sf::st_intersects(sq, cg)
+  many <- which(lengths(hits) > 1L)
+  if (!length(many)) return(nn)
+
+  # The bounding box of each feature (NA for an empty one), for its centre
+  # and for the box distance below.
+  live <- which(!sf::st_is_empty(cg))
+  bbm  <- matrix(NA_real_, length(cg), 4L)
+  bbm[live, ] <- matrix(vapply(cg[live], function(g) as.numeric(sf::st_bbox(g)),
+                               numeric(4)), ncol = 4L, byrow = TRUE)
+  # The rank of each feature by its box centre: column, then row by the
+  # same rule on y, then row of the layer (order() keeps it among ties).
+  # The step is a part of the layer's diagonal: the centres' own box is
+  # last-bits small where every centre lies on one point (a polygon with a
+  # hole and the island that fills it).
+  cx <- (bbm[live, 1L] + bbm[live, 3L]) / 2
+  cy <- (bbm[live, 2L] + bbm[live, 4L]) / 2
+  bb <- as.numeric(sf::st_bbox(cg))
+  ex <- sqrt((bb[3L] - bb[1L])^2 + (bb[4L] - bb[2L])^2)
+  rank <- rep(NA_integer_, length(cg))
+  rank[live[order(.near_columns(cx, cy, ex), .near_columns(cy, cx, ex))]] <-
+    seq_along(live)
+
+  pk <- rep(many, lengths(hits[many]))
+  fj <- unlist(hits[many], use.names = FALSE)
+  # The distance to a feature's box is never more than the distance to the
+  # feature, so a pair whose box lies beyond the reach is not a tie.  Far
+  # from the layer the square holds many features that are not near.
+  px <- pxy[q[pk], 1L]; py <- pxy[q[pk], 2L]
+  bx <- pmax(bbm[fj, 1L] - px, 0, px - bbm[fj, 3L])
+  by <- pmax(bbm[fj, 2L] - py, 0, py - bbm[fj, 4L])
+  near <- sqrt(bx^2 + by^2) <= r[pk] * (1 + 1e-6) + tol
+  pk <- pk[near]; fj <- fj[near]
+  two <- pk %in% pk[duplicated(pk)]
+  pk <- pk[two]; fj <- fj[two]
+  if (!length(pk)) return(nn)
+  dj <- as.numeric(sf::st_distance(pts[q[pk]], cg[fj], by_element = TRUE))
+  ok <- dj <= r[pk]
+  pk <- pk[ok]; fj <- fj[ok]
+  # The lowest rank among the features each point ties with.
+  o  <- order(pk, rank[fj])
+  first <- !duplicated(pk[o])
+  nn[q[pk[o][first]]] <- fj[o][first]
+  nn
+}
+
+
 #' Predict a fitted spatial model onto a regular grid
 #'
 #' Builds a prediction surface over the extent of the training data (or over a
@@ -123,16 +288,32 @@
 #'   \code{NULL}, a regular grid is built over the training extent.  Must have
 #'   at least one row.  It is brought into the fit's CRS first: a CRS-less grid
 #'   is given the interpretation the training data got (the assumption recorded
-#'   on the fit), with a warning, and then reprojected.  Otherwise a CRS-less
+#'   on the fit), with a warning, and then reprojected; when that is longitude
+#'   and latitude, a grid with an x outside -180 to 360 or a y beyond 90 north
+#'   or south cannot be in it, and the call stops.  Otherwise a CRS-less
 #'   grid can land thousands of kilometres from the covariates and every cell
 #'   takes the same nearest feature.  A grid still without a CRS after that
 #'   is treated as \code{boundary} is: taken as EPSG:4326 and reprojected
 #'   when its coordinates look like lon/lat, otherwise stamped with the fit's
-#'   CRS, with a warning either way.  A grid of polygons
+#'   CRS, with a warning either way.  A fit's CRS in longitude and latitude
+#'   is not stamped on coordinates outside longitude -180 to 360 and
+#'   latitude -90 to 90: that is refused.  A grid of polygons
 #'   (\code{\link{create_grid_polygons}()} output, say) is reduced to one
 #'   representative point per cell, as \code{\link{coerce_to_points}()} does,
 #'   so covariates are taken at the location predicted for; \code{boundary}
-#'   then keeps the cells whose point falls inside it.
+#'   then keeps the cells whose point falls inside it.  The grid is read in x
+#'   and y: one whose geometries mix XY with XYZ or XYM (as \code{rbind()}
+#'   of an XY and an XYZ layer gives), or carry M (XYM or XYZM), is read
+#'   without its Z and M.  A POINT grid whose coordinates are not moved (one
+#'   in the fit's CRS, or one without a CRS that is stamped with it) is
+#'   returned with its rows as given, Z and M included; one that mixes
+#'   dimensions and is reprojected into the fit's CRS comes back in XY with a
+#'   warning of class \code{"spatialkit_zm_dropped"}.
+#'   The points a grid of polygons is reduced to are in XY when its
+#'   geometries mix dimensions or carry M.  A row without a location (an
+#'   empty geometry, or a coordinate that is not finite or lies beyond
+#'   1e150) gets an \code{NA} prediction; in a grid that is reprojected, or
+#'   reduced from polygons, it comes back as an empty point.
 #' @param cell_size Grid resolution in CRS units.  Ignored when \code{grid} is
 #'   supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
 #'   would produce more than 5,000,000 cells is refused, naming the implied
@@ -149,12 +330,57 @@
 #'   it are dropped.  Put through the same CRS replay and reprojection as
 #'   \code{grid}.  One still without a CRS after the replay is taken as
 #'   EPSG:4326 and reprojected when its coordinates look like lon/lat, and
-#'   is otherwise stamped with the fit's CRS, with a warning either way.
+#'   is otherwise stamped with the fit's CRS, with a warning either way, or
+#'   refused as \code{grid} is.
+#'   Read in x and y: a boundary whose geometries mix XY with XYZ or XYM, or
+#'   carry M, is read without its Z and M.
 #' @param covariates Optional \code{sf} layer carrying the model's predictors.
 #'   Required when the model has predictors and \code{grid} does not already
 #'   contain them.  Values are taken from the nearest feature.  Aligned to
 #'   the fit's CRS as \code{grid} is, with the same warning when it has no
-#'   CRS.
+#'   CRS.  Read in x and y: a layer whose geometries mix XY with XYZ or XYM,
+#'   or carry M, is read without its Z and M, with no warning.  A row
+#'   without a location (an empty geometry, or a coordinate that is not
+#'   finite or lies beyond 1e150) is never the nearest feature.  A grid
+#'   point the same distance from several points of \code{covariates} (a
+#'   squared distance no more than the square of the least distance
+#'   lengthened by a margin, plus one part in ten million of the least
+#'   squared distance; the margin is one part in 1e10 of the largest
+#'   coordinate of the points that have a location, at most a millionth of
+#'   the diagonal of their bounding box and at least four times the spacing
+#'   of doubles at that coordinate) takes
+#'   the one lowest in x, x values within one part in ten million of the
+#'   diagonal of the points' bounding box, or within one part in 1e10 of
+#'   their largest coordinate (at most a millionth of that diagonal, and
+#'   at least four times the spacing of doubles at that coordinate) where
+#'   that is more, counting as one, then the
+#'   one lowest in y, y values read the same way, then the first in row
+#'   order, so a grid laid between the points of a lattice takes the same
+#'   covariates in another unit or with another origin, and with or without
+#'   the \pkg{FNN} package, as does a grid point near two points that lie
+#'   within that margin of each other (two records of one station that
+#'   differ only in the last bits of their coordinates), however near it
+#'   lies.  A grid
+#'   point the same distance from several features of a layer of lines or
+#'   polygons, or of one that mixes them with points (on the edge two
+#'   polygons share, say: distances within one part in ten million of the
+#'   least, plus one part in 1e10 of the largest coordinate of
+#'   \code{covariates}, at most a millionth of the diagonal of its
+#'   bounding box and at least four times the spacing of doubles at that
+#'   coordinate, count as the same) takes the one whose bounding-box
+#'   centre is lowest in x, then lowest in y, x values and y values within
+#'   one part in ten million of the diagonal of the bounding box of
+#'   \code{covariates} counting as one, then the first in row order.  For a
+#'   layer in degrees the nearest feature is
+#'   \code{sf::st_nearest_feature()}'s, which settles
+#'   such a tie in the order its search meets the features (GEOS, or s2 for
+#'   a layer in degrees while \code{sf::sf_use_s2()} is on).  Both margins
+#'   grow with the largest coordinate (about 0.46 mm
+#'   at a UTM northing near 4,550 km, about half a micrometre once the
+#'   origin lies next to data 5 km across), so a grid point whose distances
+#'   to two features differ by less than the margin with one origin and by
+#'   more with another takes the one the tie rule picks with the first and
+#'   the nearer with the second.
 #' @param chunk_size Rows per prediction call. Default 5000.  A pure
 #'   performance knob: rows do not interact, and for a \code{bayesian_fit} the
 #'   GP boundary is held at its fitted value whatever the chunk holds; see
@@ -271,6 +497,57 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
     # from the correctly-reprojected covariates.  st_nearest_feature() then
     # handed every cell the same covariate row and the whole surface collapsed
     # to one constant -- silently, with no error anywhere.
+    # A grid that mixes XY and XYZ (or XYM) geometries is read in x and y:
+    # sf reads a layer in the dimension of its first geometry, so a move
+    # into the fit's CRS stopped with "OGR error", and GEOS stopped on its
+    # polygons ("ParseException", "Points of LinearRing do not form a closed
+    # linestring") or on any that carry M.  A POINT grid is returned as the
+    # surface: one whose coordinates are moved into the fit's CRS below
+    # comes back in XY with the warning of class spatialkit_zm_dropped, as
+    # ensure_projected() returns such a layer, under this function's name.
+    # One whose coordinates stay as they are (already in that CRS, or
+    # without a CRS and stamped with it or left in a CRS-less fit's space)
+    # keeps its rows as given, as area_of_applicability() keeps stamped
+    # `newdata`, and the joins below read a copy of it in XY.  The points a
+    # grid of polygons is reduced to are this function's own, so that grid,
+    # and one that carries M, are read in XY without a word.
+    grid_moves <- function(g) {
+      gcrs <- sf::st_crs(g)
+      if (!is.na(gcrs)) {
+        if (identical(gcrs, target_crs)) return(FALSE)
+        # ensure_projected() with no target moves only a lon/lat layer.
+        if (is.na(target_crs)) return(isTRUE(sf::st_is_longlat(g)))
+        return(TRUE)
+      }
+      if (is.na(target_crs)) return(FALSE)
+      # The replay below gives a CRS-less grid the fit's assumption, which
+      # ensure_projected() then moves into the fit's CRS; without one,
+      # .align_to_fit() reprojects it when it looks like lon/lat and stamps
+      # it otherwise.
+      assumed <- attr(train, "crs_assumed")
+      if (!is.null(assumed) && !identical(assumed, "none"))
+        return(!identical(sf::st_crs(assumed), target_crs))
+      isTRUE(.looks_like_lonlat(g)$lonlat)
+    }
+    grid_points <- all(sf::st_geometry_type(grid, by_geometry = TRUE) == "POINT")
+    moves <- grid_points && grid_moves(grid)
+    if (!grid_points)
+      grid <- .xy_if_mixed_or_m(grid)
+    else if (moves)
+      grid <- .xy_if_mixed_warn(
+        grid, "predict_surface", "grid",
+        why = paste0("so it is read in x and y before it is brought into ",
+                     "the fit's CRS: Z and M are dropped and the surface is ",
+                     "returned in XY"))
+    # A row with a coordinate that is not finite or lies beyond .POOL_XY_MAX
+    # has no location.  It is emptied as given, before the move into the
+    # fit's CRS, which can bring it back finite (a northing of 1e200 in
+    # EPSG:32616 lands at a finite point in EPSG:32617), and before a grid of
+    # polygons is reduced to points; such a row was predicted at the point
+    # the move gave it.  It comes back empty with an NA prediction, as the
+    # same row emptied.  A POINT grid that stays where it is keeps the row as
+    # given, and predict() gives it NA.
+    if (!grid_points || moves) grid <- .empty_unlocated(grid)
     grid <- .replay_crs_assumption(grid, train, "predict_surface", "grid")
     grid <- .align_to_fit(grid, "grid")
     # A polygon grid -- create_grid_polygons() output, say -- was used as it
@@ -281,16 +558,24 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
     # a 0-30 response, and a row shuffle of `covariates` moved them by up to
     # 4.7.  Reduce it to representative points first, as
     # area_of_applicability() does, so the surface is the POINT layer the
-    # manual promises.
-    if (!all(sf::st_geometry_type(grid, by_geometry = TRUE) == "POINT"))
-      grid <- coerce_to_points(grid, "auto")
+    # manual promises.  A cell whose centroid cannot be taken is refused in
+    # this function's words, naming `grid` (.pointize_auto()).
+    if (!grid_points)
+      grid <- .xy_if_mixed(.pointize_auto(grid, "predict_surface", "`grid`"))
   }
   res <- attr(grid, "cell_size")
+  # The joins below read the grid's points in x and y; a grid returned with
+  # its rows as given can still mix dimensions or carry M.
+  grid_xy <- function() .xy_if_mixed_or_m(sf::st_geometry(grid))
 
   # ---- clip ----------------------------------------------------------------
   if (!is.null(boundary)) {
-    bnd <- .replay_crs_assumption(sf::st_geometry(boundary), train,
-                                  "predict_surface", "boundary")
+    # Read only for its x and y: a boundary that mixes XY and XYZ (or XYM)
+    # geometries, or whose geometries carry M, is read in XY before it is
+    # moved (sf::st_transform() stopped with "OGR error" on an XYZ first
+    # row) and before GEOS reads it.
+    bnd <- .replay_crs_assumption(.xy_if_mixed_or_m(sf::st_geometry(boundary)),
+                                  train, "predict_surface", "boundary")
     # A boundary still without a CRS is aligned to the fit's as other
     # functions align one: an R warning naming this function and argument.
     # ensure_projected()'s stamp was a log line naming neither.
@@ -298,7 +583,7 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
       ensure_projected(bnd)
     else .transform_or_stamp(bnd, target_crs, what = "boundary",
                              caller = "predict_surface")
-    keep <- lengths(sf::st_intersects(grid, bnd)) > 0L
+    keep <- lengths(sf::st_intersects(grid_xy(), bnd)) > 0L
     grid <- grid[keep, , drop = FALSE]
     if (nrow(grid) == 0L)
       stop("predict_surface(): no grid points fall inside `boundary`.",
@@ -327,10 +612,20 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
       stop("predict_surface(): `covariates` lacks column(s) ",
            paste(sQuote(cov_missing), collapse = ", "), ".", call. = FALSE)
 
-    covariates <- .replay_crs_assumption(covariates, train, "predict_surface",
-                                        "covariates")
+    # Read only for its x and y and its columns: a layer that mixes XY and
+    # XYZ (or XYM) geometries, or whose geometries carry M, is read in XY
+    # before it is moved, so ensure_projected() has no copy of it to warn
+    # about, and before GEOS reads it.
+    # A row of `covariates` without a location (a coordinate that is not
+    # finite or lies beyond .POOL_XY_MAX) is emptied as given, before the
+    # move, which can bring it back finite, where it was taken as the nearest
+    # feature of the grid points around it.  An empty row is never the
+    # nearest feature.
+    covariates <- .replay_crs_assumption(
+      .empty_unlocated(.xy_if_mixed_or_m(covariates)), train,
+      "predict_surface", "covariates")
     covariates <- .align_to_fit(covariates, "covariates")
-    nn  <- sf::st_nearest_feature(grid, covariates)
+    nn  <- .surface_nearest_rows(grid_xy(), covariates)
     cdf <- sf::st_drop_geometry(covariates)[nn, missing_preds, drop = FALSE]
     for (cn in missing_preds) grid[[cn]] <- cdf[[cn]]
   }

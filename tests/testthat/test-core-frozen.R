@@ -7,7 +7,9 @@
 # the baseline code and where it left the random-number stream, with the
 # data the calls read and the platform they ran on.
 # dev/baseline-core-frozen.R wrote it.  The calls are run again here, twice:
-# as they are, and with FNN and Matrix switched off.
+# as they are, and with FNN and Matrix switched off.  A record a fix changed
+# on purpose was taken again from the code of that fix with the script's
+# --retake mode, and the fixture's `retaken` names it, with the reason.
 #
 # On the platform of the fixture (the same R, sf, GEOS, PROJ, optional
 # packages and linear algebra library) every record has to be identical().
@@ -141,6 +143,16 @@ test_that("the fixture names its baseline, its platform and the calls of the hel
   for (nm in names(base$records))
     expect_named(base$records[[nm]],
                  c("value", "conditions", "output", "printed", "log", "rng"), info = nm)
+  # Records taken again from later code are records of the list, each with
+  # its reason and the parts that changed.
+  expect_true(all(names(base$retaken) %in% names(base$records)))
+  for (nm in names(base$retaken)) {
+    expect_named(base$retaken[[nm]], c("reason", "parts", "parts_without", "date", "code"),
+                 info = nm)
+    expect_true(nzchar(base$retaken[[nm]]$reason), info = nm)
+    expect_true(all(base$retaken[[nm]]$parts %in%
+                      c("value", "conditions", "output", "printed", "log", "rng")), info = nm)
+  }
   # The records the baseline gives without FNN and Matrix, where they differ.
   expect_identical(base$without$packages, c("FNN", "Matrix"))
   expect_true(all(names(base$without$records) %in% names(base$records)))
@@ -558,9 +570,11 @@ test_that("two platform records are the same platform only when every key agrees
     other[[key]] <- if (key == "packages") replace(here$packages, "s2", "0.0.0") else "another"
     expect_false(core_frozen_same_platform(other, here), info = key)
   }
+  # A package installed on one side only; where it is missing here (they
+  # are in Suggests), installed on the other side.
   for (pkg in names(here$packages)) {
     other <- here
-    other$packages[[pkg]] <- NA_character_
+    other$packages[[pkg]] <- if (is.na(here$packages[[pkg]])) "0.0.0" else NA_character_
     expect_false(core_frozen_same_platform(other, here), info = pkg)
   }
   # GDAL reads and writes files; no call of the list does.

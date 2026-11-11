@@ -111,10 +111,11 @@ test_that("select_on = 'split' chooses a count for the layer it is applied to", 
   d$z <- d$a + rnorm(240)
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
   all <- suppressWarnings(determine_optimal_levels(
-    pts, max_levels = 12, response_var = "z", predictor_vars = c("a", "b"), set_seed = 1))
+    pts, max_levels = 12, response_var = "z", predictor_vars = c("a", "b"),
+    criterion = "combined", set_seed = 1))
   spl <- suppressWarnings(determine_optimal_levels(
     pts, max_levels = 12, response_var = "z", predictor_vars = c("a", "b"),
-    select_on = "split", set_seed = 1))
+    criterion = "combined", select_on = "split", set_seed = 1))
   expect_identical(as.integer(all[1]), 4L)
   expect_identical(as.integer(spl[1]), 4L)
 })
@@ -138,9 +139,11 @@ test_that("select_on = 'split' reads the selection half's response on the whole 
       c(I = NA_real_, z = NA_real_)
     },
     .package = "spatialkit")
+  # Uniform points have no elbow, so the window is scored under
+  # on_no_elbow = "warn" only.
   out <- suppressWarnings(determine_optimal_levels(
     pts, max_levels = 12, response_var = "z", predictor_vars = "w",
-    criterion = "morans_i", select_on = "split", set_seed = 2))
+    criterion = "morans_i", select_on = "split", set_seed = 2, on_no_elbow = "warn"))
   sel <- attr(out, "split")$selection
   expect_true(length(seen) > 0L)
   # The rows arrive in the canonical (coordinate) order the sweep uses, so
@@ -194,15 +197,21 @@ test_that("a WSS curve that falls like c / k has no elbow", {
 })
 
 
-test_that("determine_optimal_levels() warns when uniform points have no elbow", {
+test_that("determine_optimal_levels() warns when uniform points have no elbow, and returns NA by default", {
   set.seed(3)
   n <- 400
   pts <- sf::st_as_sf(data.frame(x = runif(n, 0, 10000), y = runif(n, 0, 10000)),
                       coords = c("x", "y"), crs = 32632)
   for (ml in c(12, 40)) {
     expect_warning(k <- determine_optimal_levels(pts, max_levels = ml),
+                   "no elbow.*set by the ladder.*Returning NA", class = "spatialkit_no_elbow")
+    expect_type(k, "integer")
+    expect_true(is.na(k))
+    expect_identical(attr(k, "structured"), FALSE)
+    expect_warning(k <- determine_optimal_levels(pts, max_levels = ml, on_no_elbow = "warn"),
                    "no elbow.*set by the ladder")
     expect_type(k, "integer")
+    expect_true(all(is.finite(k)))
   }
 })
 

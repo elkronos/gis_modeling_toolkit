@@ -21,7 +21,13 @@ kriging_adequacy(
 }
 \arguments{
 \item{assigned_points_sf}{Points with a cell identifier column, as
-\code{\link{assign_features_to_polygons}()} returns.}
+\code{\link{assign_features_to_polygons}()} returns.  Any Z or M
+dimension is dropped, on every layer, because \code{gstat::krige()}
+uses every coordinate dimension of its locations and the variogram is
+fitted in x and y (\code{\link{estimate_sac_range}()} drops Z and M
+too): the points are kriged in x and y.
+Multipoints whose geometries carry M (XYM or XYZM) are reduced to
+points in x and y, since GEOS does not read M.}
 
 \item{response_var}{The response column: numeric or logical. A logical
 column is kriged as 0/1, so its cell mean is a share. Any other class
@@ -33,7 +39,9 @@ levels. For a category, pass an indicator (\code{x == "level"}).}
 
 \item{cells_sf}{The cell polygons, with the matching ID column.  A layer
 with no CRS is taken to be in the points' CRS (and points with none in
-the cells'), with a warning.}
+the cells'), with a warning.  Cells that do not all have the same
+dimensions are read in x and y, without their Z and M.  So are cells
+whose geometries carry M (XYM or XYZM), which GEOS does not read.}
 
 \item{id_col}{Preferred name of the ID column, found as
 \code{\link{summarize_by_cell}()} finds it: on the points the first of
@@ -43,17 +51,26 @@ the cells'), with a warning.}
 and \code{"grid_id"}.  IDs are matched as text, whole numbers written
 out in full, so a double \code{1e5} matches an integer \code{100000};
 a point whose ID matches no cell is counted in no cell, with a
-warning.  Default \code{"poly_id"}.}
+warning.  \code{NA} and \code{NaN} are no ID: a cell without one holds
+no point (\code{n} 0, \code{mean} and \code{se} \code{NA}) and is
+kriged as any other, and a \code{cells_sf} in which no cell has an ID
+is an error.  Two cells with one ID are an error too, since the points
+that carry it cannot be placed in one of them.  Default
+\code{"poly_id"}.}
 
 \item{sac}{Optional \code{sac_range} carrying a variogram model.}
 
 \item{folds}{Optional \code{\link{make_folds}()} result on
-\code{assigned_points_sf} for the cross-validation statistic; built here
-with \code{block_kfold} when \code{NULL}.  As in \code{cv_*()}, folds
+\code{assigned_points_sf} for the cross-validation statistic, or a
+vector of fold labels, one per row of \code{assigned_points_sf} (the
+labels of rows dropped for a missing response or location are not
+used; one label per row kept is read as well); built here with
+\code{block_kfold} when \code{NULL}.  As in \code{cv_*()}, folds
 whose recorded rows sit at other locations in
 \code{assigned_points_sf} (built on another layer, such as the points
 before \code{\link{assign_features_to_polygons}()} dropped some) are
-refused.}
+refused.  So are folds whose test sets share a location: each location
+is kriged once, under one fold.}
 
 \item{k, seed}{Folds and seed for that construction.}
 
@@ -158,7 +175,10 @@ repeated, whose replicate variance is read off the data and does not
 scale with the model).  It is at least 0: the
 kriging neighbourhood always holds the cell's own points, the plain
 mean is one unbiased combination of them, and kriging is the best
-such combination.  It is what the variogram expects, not what
+such combination.  The exception is a cell with rows at a location
+whose rows name more than one cell: that location is no cell's own
+(see "The kriging neighbourhood"), and the neighbourhood need not
+hold it.  It is what the variogram expects, not what
 happened: read it beside \code{attr(, "cv")$zscore_var}, which says
 whether the variogram's variances are the right size.  \code{NA}
 where \code{plain_var} is.  \code{kr_var} is not compared with
@@ -277,18 +297,44 @@ its range is a length in that CRS's units.  Requires \pkg{gstat}.
 \section{The kriging neighbourhood}{
 
 \pkg{gstat} kriges a cell from the \code{nmax} locations nearest its
-centre.  A cell holding more locations than that would be estimated from
+centre.  On gridded locations several of them are often the same distance
+away, and which of those the last bits of the coordinates make nearer
+moves with the unit and the origin.  So the \code{nmax} are chosen by the
+package's tie rule: squared distances within one part in ten million of
+each other count as equal, and a tie goes to the location of lower first
+coordinate, then lower second, coordinates within that part of the
+distance counting as equal.  Where the \code{nmax}-th nearest location
+ties with the next, the cell is kriged from the locations the rule
+picks; elsewhere the \code{nmax} nearest are one set and \pkg{gstat}'s
+own search finds it.  Each held-out location of the cross-validation is
+kriged from its \code{nmax} nearest training locations the same way.
+The kriged figures, and the cross-validation statistic on the same folds,
+are then the same in another unit or with another origin, to rounding,
+as long as no coordinate moves by more than about a two-hundred-millionth
+of the distance between neighbouring locations.  The
+rows are put in order by their coordinates, then their cell ID, then
+their response before any of this, so the result does not depend on the
+order of the rows either.
+
+A cell holding more locations than \code{nmax} would be estimated from
 its middle alone, which describes the middle rather than the cell (in one
 simulated case a cell of 1,500 points came out 0.43 off at
 \code{nmax = 50}, against 0.07 from all of them and 0.02 for its plain
 mean).  So wherever the \code{nmax} locations nearest a cell's centre
-leave out any of the cell's own locations, the cell is kriged from all of
-its own locations plus the \code{nmax} nearest outside it;
+leave out any of the cell's own locations (more than \code{nmax}
+locations are as near as its furthest own one, under the same tolerance),
+the cell is kriged from all of its own locations plus the \code{nmax}
+nearest outside it, chosen by the same rule;
 \code{kr_n_used} says how many locations each cell was kriged from.  The
 cost of a kriging system grows with the cube of its size (about 1 s at
 2,000 locations and 17 s at 5,000), so a cell that would need more than
 \code{max_neighbours} is left out with a warning, its \code{kr_} columns
-\code{NA}.
+\code{NA}.  A cell's own locations are those whose rows name it.  A
+location whose rows name more than one cell (rows at one place carrying
+different IDs) is no cell's own, with a warning that gives the count of
+such locations: it is kriged from as any other location, and each of its
+rows still counts in \code{n}, \code{mean}, \code{se} and
+\code{plain_var} of the cell it names.
 
 \pkg{gstat} also discretises each cell into 500 points on a regular grid
 laid over the cell's whole bounding box, keeping those inside, so the
@@ -298,7 +344,11 @@ memory a cell takes grows with the ratio of that box to its area: about
 \code{max_box_ratio} times (a sliver, parts far apart, a cell that is
 mostly hole) is left out the same way.  \code{attr(, "cells_left_out")}
 counts both kinds, and \code{print()} says how many cells have no
-estimate and why.
+estimate and why.  An empty cell, or one with a coordinate that is not
+finite or lies beyond 1e150 (read as given), has no location and is left
+out as well, with a warning of its own, and comes back with an empty
+geometry; it is counted with the cells of the second kind
+(\code{shape}).
 }
 
 \section{Repeat measurements at one location}{

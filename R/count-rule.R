@@ -3,11 +3,12 @@
 # The record of how a cell count was set
 # -----------------------------------------------------------------------------
 # select_resolution() writes one list, `count_rule`, when the count is set on
-# the path that names an estimate: the profile carries one, or the criterion
-# is "size" or "loo".  It says which rule set the count, for which estimate,
-# and what the profile scored at that count.  A selection from a profile
-# without an estimate by "cp", "reliability", "elbow" or "moran_z" carries
-# none, and neither does a count given as a number.
+# the path that names an estimate (the profile carries one, or the criterion
+# is "size" or "loo") and when it is set by "cp", which scores plain means.
+# It says which rule set the count, for which estimate, and what the profile
+# scored at that count.  A selection from a profile without an estimate by
+# "reliability", "elbow" or "moran_z" carries none, and neither does a count
+# given as a number.
 #
 # The record travels as the attribute "count_rule": from the selection's
 # seeds to the seeds a seeding function returns, to the cells built on them
@@ -179,7 +180,7 @@
   if (nrow(xy) != K || K < 2L || !all(is.finite(xy[, 1:2]))) return(NULL)
   two <- .two_nearest(xy[, 1L], xy[, 2L], cen[, 1L], cen[, 2L], use_fnn)
   if (anyDuplicated(two$first)) return(NULL)
-  tol <- .edge_tol(c(range(cen[, 1L]), range(cen[, 2L])))
+  tol <- .edge_tol(.xy_box(cen[, 1L], cen[, 2L]))
   if (!all(sqrt(two$d1) <= pmax(1e-3 * sqrt(two$d2), tol))) return(NULL)
   of <- integer(K)
   of[two$first] <- seq_len(K)
@@ -194,20 +195,173 @@
 #' Rounding grows with the size of the coordinates, so the margin is one
 #' part in 1e10 of the largest coordinate of the layer: 0.44 mm at a UTM
 #' northing of 4,400 km, far more than the rounding of the corners and far
-#' less than the spacing of gridded locations.  The cells
+#' less than the spacing of gridded locations.  It has no floor in the
+#' units of the CRS: a floor of 1e-10 units read seeds 10 units from the
+#' centres, on a layer whose cells are 1000 units apart, as the centres once
+#' the coordinates were scaled by 2^-40.  The cells
 #' \code{create_voronoi_polygons()} draws on seeds that are the centres are
 #' drawn around the centres as the record holds them
 #' (\code{.seeds_as_centres()}), so rounding the seeds took on through
 #' another CRS does not move their edges.
 #'
-#' @param bb A bounding box (\code{sf::st_bbox()}), in the CRS the distance
-#'   is taken in.
-#' @return One positive number, in the units of that CRS.
+#' The margin is at most \code{.EDGE_REACH} (a millionth) of the diagonal
+#' of the coordinates' extent, the bound beyond which the package says the
+#' coordinates lose their precision (\code{.warn_xy_imprecise()}).  A layer
+#' far from the origin of its coordinates has a largest coordinate far
+#' larger than its extent: at an offset of 1e12 one part in 1e10 is 100 m
+#' on a 4 km layer, whose points within 100 m of an edge then went to the
+#' lower block or polygon, and at 1e15 it was 100 km, more than the layer.
+#' With the cap, a layer at an offset gives the folds, the join and the
+#' cells it gives near the origin for every point farther than a millionth
+#' of its diagonal from an edge.  Where the diagonal is at least a
+#' ten-thousandth of the largest coordinate (400 m at a UTM northing of
+#' 4,000 km) the cap does not act.  A cap of a ten-millionth of the
+#' diagonal, the reach of the package's tie rule, is too small: across a
+#' cell 1 km high it is 0.19 mm, less than the 0.2 to 0.3 mm between a
+#' meridian and the straight line a projected CRS draws for it, and points
+#' that a move through degrees leaves on that meridian then fall to the
+#' polygons, not to their nearest scored centre (test-core-gridded-ties.R).  The margin is at
+#' least \code{.EDGE_ULPS} units in the last place of the largest
+#' coordinate, so that it still covers the rounding of an edge computed at
+#' that size (0.5 m at 1e15, where doubles are 0.125 apart).
+#'
+#' @param bb The coordinates the margin is taken from, in the CRS the
+#'   distance is taken in: a bounding box (\code{sf::st_bbox()}), several
+#'   joined with \code{c()}, or \code{.xy_box()} of coordinates; their x
+#'   and y are read by the names \code{xmin}, \code{xmax}, \code{ymin} and
+#'   \code{ymax}.  Numbers without those names give no diagonal, and the
+#'   margin is then one part in 1e10 of the largest of them (with the
+#'   floor).
+#' @return One number, in the units of that CRS: 0 when every coordinate is
+#'   0 or none is finite.
 #' @keywords internal
 #' @noRd
 .edge_tol <- function(bb) {
-  m <- suppressWarnings(max(abs(as.numeric(bb)), na.rm = TRUE))
-  1e-10 * max(1, if (is.finite(m)) m else 1)
+  v <- suppressWarnings(as.numeric(bb))
+  m <- suppressWarnings(max(abs(v), na.rm = TRUE))
+  if (!is.finite(m) || !(m > 0)) return(0)
+  tol <- 1e-10 * m
+  d <- .bb_diagonal(bb)
+  if (is.finite(d)) tol <- min(tol, .EDGE_REACH * d)
+  max(tol, .EDGE_ULPS * .ulp_of(m))
+}
+
+# The box of coordinates x and y, named as sf::st_bbox() names it, for
+# .edge_tol().
+.xy_box <- function(x, y) {
+  c(xmin = min(x), ymin = min(y), xmax = max(x), ymax = max(y))
+}
+
+# The share of the diagonal of the coordinates' extent .edge_tol() takes at
+# most.
+.EDGE_REACH <- 1e-6
+
+# The units in the last place of the largest coordinate that .edge_tol()
+# keeps at least: an edge computed at the coordinates' size (a corner plus a
+# multiple of a block's side) is rounded by one or two of them.  On a layer
+# 4 km across shifted to 1e15, margins of 0 to 4 of them give the folds and
+# the join of the layer at the origin; 64 of them (8 m there) move 26 of its
+# 60 rows to other folds.
+.EDGE_ULPS <- 4
+
+#' The diagonal of the coordinates a margin is taken from
+#'
+#' @param bb As for \code{.edge_tol()}.
+#' @return The length of the diagonal of the box that holds every finite
+#'   coordinate, computed without overflow; \code{NA} when \code{bb} has no
+#'   x or no y named.
+#' @keywords internal
+#' @noRd
+.bb_diagonal <- function(bb) {
+  nm <- names(bb)
+  if (is.null(nm)) return(NA_real_)
+  v <- suppressWarnings(as.numeric(bb))
+  x <- v[nm %in% c("xmin", "xmax")]
+  y <- v[nm %in% c("ymin", "ymax")]
+  x <- x[is.finite(x)]
+  y <- y[is.finite(y)]
+  if (!length(x) || !length(y)) return(NA_real_)
+  dx <- max(x) - min(x)
+  dy <- max(y) - min(y)
+  big <- max(dx, dy)
+  if (!is.finite(big)) return(NA_real_)
+  if (big == 0) return(0)
+  big * sqrt(1 + (min(dx, dy) / big)^2)
+}
+
+
+#' Which polygon each point lies in, a point on an edge given the lowest
+#'
+#' A point on the edge two polygons share lies in both, and
+#' \code{sf::st_intersects()} reports both when the edge passes through it
+#' exactly.  On a lattice the points sit on the edges of a grid laid over
+#' them, and a change of unit or a shift of the origin moves the last bits
+#' of the coordinates, so the same point lands a hair inside one polygon in
+#' one frame and inside the other in the next.  Here a point within
+#' \code{.edge_tol()} of a polygon is in it, and the lowest index among the
+#' polygons it is in is kept, so an edge point goes to the lower polygon in
+#' every frame.  Projected and CRS-less layers are joined with the smaller of
+#' the two layers buffered by the margin, the points or the polygons
+#' (\code{st_is_within_distance()} takes a distance for every pair of a
+#' projected layer, which is far slower, and buffering a million grid cells
+#' takes thirty times as long as buffering the points in them); a layer
+#' in degrees is joined with \code{st_is_within_distance()} while
+#' \code{sf::sf_use_s2()} is on, the margin taken as an arc of the sphere,
+#' and with \code{st_intersects()} (no margin) while it is off.
+#'
+#' @param x Points (sf or sfc).
+#' @param y Polygons (sf or sfc), in the CRS of \code{x}.
+#' @param bb Coordinates the margin is taken from (\code{.edge_tol()}); by
+#'   default the bounding boxes of both layers.
+#' @return Integer vector, for each point of \code{x} the lowest index of
+#'   \code{y} it lies in, \code{NA} for none; attribute \code{"hits"} holds
+#'   every index (an \code{sgbp}).
+#' @keywords internal
+#' @noRd
+.edge_join <- function(x, y, bb = c(sf::st_bbox(x), sf::st_bbox(y))) {
+  gy  <- sf::st_geometry(y)
+  tol <- .edge_tol(bb)
+  hits <- if (!(tol > 0)) {
+    sf::st_intersects(x, gy)
+  } else if (isTRUE(sf::st_is_longlat(gy))) {
+    if (sf::sf_use_s2())
+      sf::st_is_within_distance(x, gy, dist = tol * pi / 180 * 6371010)
+    else sf::st_intersects(x, gy)
+  } else if (length(sf::st_geometry(x)) < length(gy)) {
+    sf::st_intersects(sf::st_buffer(sf::st_geometry(x), tol), gy)
+  } else {
+    sf::st_intersects(x, sf::st_buffer(gy, tol))
+  }
+  id <- vapply(hits, function(ix) if (length(ix)) min(ix) else NA_integer_,
+               integer(1))
+  attr(id, "hits") <- hits
+  id
+}
+
+
+#' The lowest column among those nearest, row by row
+#'
+#' \code{which.min()} takes the first exact minimum, and two distances that
+#' tie in one unit differ in their last bits in another, so a point the same
+#' distance from two polygons went to either.  Distances within one part in
+#' \code{.TIE_TOL} of the least, plus \code{tol}, are a tie, and the lowest
+#' column among them is kept.
+#'
+#' @param dmat Numeric matrix of distances (rows: points, columns:
+#'   polygons).
+#' @param tol An absolute margin added to the relative one
+#'   (\code{.edge_tol()}).
+#' @return Integer vector, one column per row; \code{NA} for a row with no
+#'   distance.
+#' @keywords internal
+#' @noRd
+.lowest_nearest <- function(dmat, tol = 0) {
+  vapply(seq_len(nrow(dmat)), function(i) {
+    d <- dmat[i, ]
+    w <- which.min(d)
+    if (!length(w)) return(NA_integer_)
+    as.integer(which(!is.na(d) & d <= d[w] * (1 + .TIE_TOL) + tol)[1L])
+  }, integer(1))
 }
 
 
@@ -281,7 +435,9 @@
 #'   Its last element, \code{centres}, is the matrix of the centres the
 #'   profile scored at the count, in \code{crs} and in the profile's order
 #'   (\code{NULL} when the profile no longer holds them): each scored row was
-#'   given to the nearest of them, a tie to the lower-numbered one, and
+#'   given to the nearest of them, a tie (squared distances within
+#'   \code{.TIE_TOL} of the least, plus the margin \code{.centres_tol()}
+#'   on the distance) to the lower-numbered one, and
 #'   \code{assign_features_to_polygons()} and \code{cell_values_at()} read
 #'   them to place a point on the edge between two cells the same way.
 #' @keywords internal
@@ -604,11 +760,19 @@
                   a$n, rec$response, a$cells, num(a$loo), b$n, b$cells, num(b$loo),
                   if (identical(what, "loo"))
                     paste0("The same number of rows and cells was found, so rows sit in ",
-                           "other cells than the profile put them in, or values changed: ",
-                           "rows exactly on a boundary between two cells (gridded ",
-                           "locations) can be assigned to the other cell, and coordinates ",
-                           "that reached this CRS by another transformation can settle a ",
-                           "tie between neighbouring cells the other way.")
+                           "other cells than the profile put them in, or values changed. A ",
+                           "row on or near a boundary can sit in the neighbouring cell when ",
+                           "the polygons alone placed it (as for rows without a CRS beside ",
+                           "a count record that names one or the reverse, rows assigned to ",
+                           "cells without their count record, such as cells read back from ",
+                           "a file, and rows given their cells by another ",
+                           "join than assign_features_to_polygons()), when the cells were ",
+                           "built in, or transformed to, another CRS than the one the ",
+                           "profile measured the rows in (crs in the count record), or ",
+                           "when they are not the Voronoi cells of the centres the profile ",
+                           "scored (seeds moved, cells edited); and coordinates that ",
+                           "reached that CRS by another transformation can settle a tie ",
+                           "between neighbouring cells the other way.")
                   else
                     paste0("Rows were dropped or moved between cells: points outside every ",
                            "cell, a boundary that clips the cells, a subset of the rows, or ",
@@ -632,9 +796,11 @@ print.spatialkit_count_rule <- function(x, ...) {
     sprintf("%s %s%s", format(k), what, if (isTRUE(k == 1L)) "" else "s")
 
   # ---- the count and what set it ----------------------------------------------
+  # The default size is called that whoever named it, as the selection's
+  # print and note call it; any other size is one the caller asked for.
   asked <- x$obs_per_cell_asked
   how <- c(if (identical(x$rule, "size") && is.numeric(asked) && one(asked))
-             paste(.per_cell_text(asked), "asked"),
+             paste0(.per_cell_text(asked), .size_source_text(asked)),
            if (is.numeric(x$n) && one(x$n))
              sprintf("%s / %s = %.2f", count(x$n, "row"), count(x$cells, "cell"),
                      x$n / x$cells))
@@ -685,7 +851,10 @@ print.spatialkit_count_rule <- function(x, ...) {
 
   # ---- what the profile scored at the count -----------------------------------
   sc <- x$scored
-  if (is.list(sc))
+  # A selection half with no response: `loo` read no row and no cell.
+  if (is.list(sc) && half && isTRUE(sc$n == 0L))
+    cat(label("scored"), "loo NA: no row of the selection half has a response\n", sep = "")
+  else if (is.list(sc))
     cat(label("scored"),
         sprintf("loo %s on %s in %s (one cell: %s)%s\n", num(sc$loo),
                 if (half) sprintf("the %s of the selection half", count(sc$n, "row"))

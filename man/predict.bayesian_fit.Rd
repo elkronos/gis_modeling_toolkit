@@ -18,7 +18,8 @@
 
 \item{newdata}{An sf object with the same predictors.  The response variable
 need not be present (true out-of-sample prediction is supported).
-NULL = fitted values.}
+NULL = fitted values.  A layer whose geometries mix XY with XYZ or XYM
+(as \code{rbind()} of an XY and an XYZ layer gives) is read in x and y.}
 
 \item{summary}{"mean" (default) or "median" over posterior draws.}
 
@@ -32,7 +33,9 @@ point summary.  Default FALSE.}
 }
 \value{
 Numeric vector of length \code{nrow(newdata)}, or a
-\code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE}.  Rows
+\code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE}, in the
+units of the response (see "The response's centre and scale" in
+\code{\link{fit_bayesian_spatial_model}}).  Rows
 with a missing or non-finite predictor or coordinate, and rows carrying
 a level of a categorical predictor the model was not fitted with, are
 \code{NA} (an \code{NA} column with \code{draws = TRUE}); the other

@@ -63,7 +63,9 @@
 #' working CRS on it was right only when that zone happened to be the user's.
 #' That, and stamping degrees on it (a metre polygon then transformed to
 #' nothing and was refused as "not polygonal"), are refused with an error
-#' naming both layers.
+#' naming both layers.  The box is the one \code{.looks_like_lonlat()} reads,
+#' over the coordinates that have a location; a boundary with no such
+#' coordinate is refused too.
 #'
 #' @param boundary CRS-less sf/sfc polygon layer.
 #' @param crs_ll The points' geographic \code{sf::crs}.
@@ -76,21 +78,31 @@
 #' @noRd
 .crsless_boundary_as_lonlat <- function(boundary, crs_ll, caller, assumed = FALSE) {
   bb <- .looks_like_lonlat(boundary)$bb
-  in_env <- is.null(bb) ||
-    (bb[["xmin"]] >= -180 && bb[["xmax"]] <= 180 &&
-     bb[["ymin"]] >= -90  && bb[["ymax"]] <= 90)
+  pts_txt <- if (assumed) "has no CRS either and was taken as lon/lat (EPSG:4326)"
+             else sprintf("is in a geographic CRS (%s)", .fold_crs_label(crs_ll))
+  # No box: no coordinate of the boundary has a location (it has no rows, or
+  # each coordinate is not finite or lies beyond 1e150).  Read as inside the
+  # envelope, such a boundary was given the points' CRS in silence, and one
+  # in metres with a single infinite vertex with it.
+  if (is.null(bb))
+    stop(sprintf(paste0(
+      "%s(): `boundary` has no CRS and no coordinate that is finite and within ",
+      "1e150, so it cannot be read as lon/lat beside `points_sf`, which %s. ",
+      "Pass a boundary with coordinates that are finite and within 1e150, ",
+      "or set its CRS with sf::st_crs()."),
+      caller, pts_txt), call. = FALSE)
+  in_env <- bb[["xmin"]] >= -180 && bb[["xmax"]] <= 180 &&
+            bb[["ymin"]] >= -90  && bb[["ymax"]] <= 90
   if (!in_env)
     stop(sprintf(paste0(
       "%s(): `boundary` has no CRS and its coordinates (xmin=%.6g, xmax=%.6g, ",
       "ymin=%.6g, ymax=%.6g) are not lon/lat, but `points_sf` %s, so the two ",
       "cannot be placed in one space. Set the CRS of `boundary`%s with ",
       "sf::st_crs()."),
-      caller, bb[["xmin"]], bb[["xmax"]], bb[["ymin"]], bb[["ymax"]],
-      if (assumed) "has no CRS either and was taken as lon/lat (EPSG:4326)"
-      else sprintf("is in a geographic CRS (%s)", .fold_crs_label(crs_ll)),
+      caller, bb[["xmin"]], bb[["xmax"]], bb[["ymin"]], bb[["ymax"]], pts_txt,
       if (assumed) " and of `points_sf`" else ""),
       call. = FALSE)
-  if (!assumed && !is.null(bb))
+  if (!assumed)
     .warn_and_log(paste0(
       "%s(): `boundary` has no CRS; its coordinates look like lon/lat (they fit ",
       "the lon/lat envelope: xmin=%.2f, xmax=%.2f, ymin=%.2f, ymax=%.2f) and ",
@@ -166,6 +178,26 @@
 }
 
 
+#' Which centre of a record each point is
+#'
+#' @param pts Points, in the working CRS.
+#' @param rec Their record of the count, or \code{NULL}.
+#' @return For each centre the row of \code{pts} that is it, when the record
+#'   sits beside the centres a profile scored (\code{.scored_centres()}),
+#'   \code{pts} are in the record's CRS (or both have none), and the points
+#'   are those centres (\code{.seeds_as_centres()}); \code{NULL} otherwise.
+#' @keywords internal
+#' @noRd
+.centres_of_seeds <- function(pts, rec) {
+  cen <- .scored_centres(rec)
+  if (is.null(cen) || nrow(pts) != nrow(cen)) return(NULL)
+  crs <- sf::st_crs(pts)
+  if (is.na(crs) != is.na(rec$crs) || (!is.na(crs) && !isTRUE(crs == rec$crs))) return(NULL)
+  if (!all(sf::st_geometry_type(pts, by_geometry = TRUE) == "POINT")) return(NULL)
+  .seeds_as_centres(unname(sf::st_coordinates(pts)[, 1:2, drop = FALSE]), cen)
+}
+
+
 #' Seeds moved onto the centres they stand for
 #'
 #' Seeds whose record sits beside the centres a profile scored
@@ -185,20 +217,41 @@
 #' @keywords internal
 #' @noRd
 .seeds_at_centres <- function(pts, rec) {
-  cen <- .scored_centres(rec)
-  if (is.null(cen) || nrow(pts) != nrow(cen)) return(pts)
-  crs <- sf::st_crs(pts)
-  if (is.na(crs) != is.na(rec$crs) || (!is.na(crs) && !isTRUE(crs == rec$crs))) return(pts)
-  if (!all(sf::st_geometry_type(pts, by_geometry = TRUE) == "POINT")) return(pts)
-  xy <- unname(sf::st_coordinates(pts)[, 1:2, drop = FALSE])
-  of <- .seeds_as_centres(xy, cen)
+  of <- .centres_of_seeds(pts, rec)
   if (is.null(of)) return(pts)
+  cen <- .scored_centres(rec)
+  crs <- sf::st_crs(pts)
+  xy  <- unname(sf::st_coordinates(pts)[, 1:2, drop = FALSE])
   at <- integer(nrow(cen))
   at[of] <- seq_len(nrow(cen))
   if (identical(xy, cen[at, , drop = FALSE])) return(pts)
   geom <- sf::st_geometry(sf::st_as_sf(data.frame(x = cen[at, 1L], y = cen[at, 2L]),
                                        coords = c("x", "y"), crs = crs))
   sf::st_set_geometry(pts, geom)
+}
+
+
+#' The record of a count, as a layer of seeds carries it
+#'
+#' Seeds fewer or more than the record's count are not the centres the
+#' profile scored, whatever the record they carry says: a caller who cuts a
+#' selection's seeds down (`sel$seeds[1:16, ]`) keeps its record, which
+#' survives row subsetting.  Their record is read with `scored_cells =
+#' FALSE`, as [get_voronoi_seeds()] (`method = "provided"`) marks such seeds,
+#' so their cells are built as other seeds' are and do not claim to be the
+#' cells the profile scored.
+#'
+#' @param x The seeds, as given.
+#' @return The record (\code{.count_rule_get()}), with \code{scored_cells}
+#'   \code{FALSE} when the number of rows of \code{x} differs from its
+#'   \code{cells}; \code{NULL} when \code{x} carries none.
+#' @keywords internal
+#' @noRd
+.seeds_count_rule <- function(x) {
+  rec <- .count_rule_get(x)
+  if (!is.null(rec) && !identical(nrow(x), as.integer(rec$cells)))
+    rec$scored_cells <- FALSE
+  rec
 }
 
 
@@ -268,8 +321,27 @@
 #' For a polygon layer, its polygons as they are; for anything else (points),
 #' the planar convex hull of the coordinates as given, which is a POINT or a
 #' LINESTRING when they have no area.  The hull is taken on the bare numbers,
-#' CRS set aside: the question is which coordinates it has to hold, and sf
-#' would otherwise build a spherical hull for lon/lat.
+#' CRS set aside, and the layer's CRS is set on it after: the question is
+#' which coordinates it has to hold, and sf would otherwise build a spherical
+#' hull for lon/lat.  \code{.cover_follow()} moves the cover into the cells'
+#' CRS with its edges read as straight lines in these coordinates.  The edges
+#' of a spherical hull are great circles, which bow toward the pole, so read
+#' that way they leave out points near a long edge (of 800 points over the
+#' conterminous United States one fell in no cell at 44 and at 178 seeds).
+#' Round a pole the spherical hull, read so, is a thin band that holds none
+#' of the seeds, and round the globe it is the full sphere; the builders set
+#' either aside.
+#'
+#' For lon/lat points the hull is taken on their longitudes from -180 to 180
+#' or from 0 to 360, whichever spans fewer degrees, unless they span no more
+#' as given (see \code{.lon_narrowest()}): points on both sides of 180
+#' degrees get the hull of their longitudes from 0 to 360 (-170 as 190), so
+#' its longitudes run past 180.  Taken from -180 to 180, the hull of such
+#' points ran the long way round the globe, and moved into a projection
+#' centred on the points, as the CRS chosen for them is, it no longer held
+#' them: of 600 points between 170 E and 170 W and 45 S and 45 N, 32 fell in
+#' no cell at 10 seeds, in cells more than ten times the area of the points'
+#' hull.
 #'
 #' @param x An sf or sfc layer, or \code{NULL}.
 #' @return An sfc in the CRS of \code{x}, or \code{NULL} when \code{x} is not
@@ -287,7 +359,33 @@
   if (ncol(xy) < 2L) return(NULL)
   xy <- xy[is.finite(xy[, 1L]) & is.finite(xy[, 2L]), 1:2, drop = FALSE]
   if (!nrow(xy)) return(NULL)
-  sf::st_convex_hull(sf::st_sfc(sf::st_multipoint(unname(xy)), crs = sf::st_crs(g)))
+  if (isTRUE(sf::st_is_longlat(g))) xy[, 1L] <- .lon_narrowest(xy[, 1L])
+  sf::st_set_crs(sf::st_convex_hull(sf::st_sfc(sf::st_multipoint(unname(xy)))),
+                 sf::st_crs(g))
+}
+
+
+#' Longitudes as given, or from -180 to 180 or 0 to 360, whichever spans least
+#'
+#' A hull in degrees runs from the least longitude to the greatest.  Points
+#' on both sides of 180 degrees given from -180 to 180 span nearly 360
+#' degrees, the long way round; from 0 to 360 (-170 as 190) they span the
+#' short way.  Longitudes that span no more as given than either
+#' way are returned as given, so 0 to 360 longitudes over the Pacific stay as
+#' they are; otherwise the narrower of the two, -180 to 180 on a tie.  Both
+#' stay within -180 to 360, the longitudes \code{sf::st_is_longlat()} takes
+#' without a warning.
+#'
+#' @param lon Finite longitudes in degrees.
+#' @return \code{lon}, as given or moved by multiples of 360.
+#' @keywords internal
+#' @noRd
+.lon_narrowest <- function(lon) {
+  w180 <- ((lon + 180) %% 360) - 180
+  w360 <- lon %% 360
+  span <- function(x) max(x) - min(x)
+  if (span(lon) <= min(span(w180), span(w360)) + 1e-9) return(lon)
+  if (span(w360) < span(w180) - 1e-9) w360 else w180
 }
 
 
@@ -305,22 +403,43 @@
 #'     coordinates moved, and the cover is given the same reading.
 #'   \item When the generators are still in an unnamed planar space, so is
 #'     the cover, whatever CRS it carried.
-#'   \item When both have a CRS and they differ, the cover is transformed.  A
+#'   \item When both have a CRS and they differ, the cover is transformed,
+#'     with \code{.transform_keep_unlocated()}: a row with a coordinate that
+#'     is not finite or lies beyond 1e150, read as given, comes back empty,
+#'     never as the rest of the feature or at the finite place a move from
+#'     another projected CRS gives it.  A
 #'     polygon or hull gets vertices along its edges first (in its own
 #'     coordinates, a two-hundredth of its extent apart), because a straight
 #'     edge in one CRS is not straight in another: across the conterminous
 #'     United States the middle of a lon/lat hull's northern edge would
 #'     otherwise sit hundreds of kilometres inside the points it was drawn
 #'     round, once projected.
+#'   \item A lon/lat cover whose longitudes run past 180 degrees (the hull
+#'     \code{.cover_of()} takes of points on both sides of 180) goes into a
+#'     CRS that joins the two sides of 180 as it is.  A CRS that splits the
+#'     map there, as Web Mercator (the CRS for points spread round the globe)
+#'     does, would send the part past 180 to the far side of the map and
+#'     draw its edges across it, so the cover is cut at 180 first and that
+#'     part moved back by 360 degrees: it arrives in two pieces, one at each
+#'     side of the map, as the points do.  The cut comes before the vertices
+#'     are added, so the edges along 180 get them as well.
 #' }
+#'
+#' A row of the cover with a location that the working CRS cannot place in
+#' full comes back empty, or without the vertices it cannot place, and a
+#' warning of class \code{"spatialkit_rows_unplaced"} names it in the words
+#' of \code{caller} (\code{.warn_rows_unplaced()}).
 #'
 #' @param cover sfc geometry of the cover.
 #' @param pts_in The generators as the calling function received them.
 #' @param pts_now The generators in the working CRS.
+#' @param caller The function the user called, for the warning.
+#' @param label The cover as the warning names it.
 #' @return The cover as an sfc in the CRS of \code{pts_now}.
 #' @keywords internal
 #' @noRd
-.cover_follow <- function(cover, pts_in, pts_now) {
+.cover_follow <- function(cover, pts_in, pts_now, caller = "spatialkit",
+                          label = "`cover`") {
   g <- sf::st_geometry(cover)
   crs_in <- sf::st_crs(pts_in); crs_now <- sf::st_crs(pts_now)
   if (is.na(sf::st_crs(g))) {
@@ -340,13 +459,101 @@
     bb  <- sf::st_bbox(g)
     ext <- max(as.numeric(bb[["xmax"]] - bb[["xmin"]]),
                as.numeric(bb[["ymax"]] - bb[["ymin"]]))
+    # Cut before the vertices are added, so the edges the cut makes along
+    # 180 get them too: in Mollweide or Equal Earth the 180th meridian is a
+    # curve, and an edge along it with no vertices but its two ends is a
+    # chord that leaves out the points near 180.
+    if (isTRUE(sf::st_is_longlat(g)) && isTRUE(bb[["xmax"]] > 180) &&
+        !.joins_across_180(sf::st_crs(g), crs_now, c(bb[["ymin"]], bb[["ymax"]])))
+      g <- .cut_at_180(g)
     if (is.finite(ext) && ext > 0) {
       crs_g <- sf::st_crs(g)
       g <- sf::st_set_crs(sf::st_segmentize(sf::st_set_crs(g, NA),
                                             dfMaxLength = ext / 200), crs_g)
     }
   }
-  sf::st_transform(g, crs_now)
+  out <- .transform_keep_unlocated(g, crs_now)
+  .warn_rows_unplaced(g, out, caller = caller, arg = "cover", label = label,
+                      remedy = .UNPLACED_REMEDY)
+  out
+}
+
+
+#' Does a CRS join the two sides of the 180th meridian?
+#'
+#' A projection centred on the data, or on a pole, puts (180, lat) and
+#' (-180, lat) at one point; Web Mercator and the other world maps centred
+#' on the prime meridian put them at the two sides of the map.  Tested at
+#' the cover's lowest, middle and highest latitudes (kept 1 degree off the
+#' poles): joined where the two points land closer than a millionth of the
+#' length of one degree of the parallel there.
+#'
+#' @param crs_ll The geographic CRS of the cover.
+#' @param crs The CRS the cover goes to.
+#' @param lat The cover's lowest and highest latitudes.
+#' @return \code{TRUE} or \code{FALSE}; \code{FALSE} when the points cannot
+#'   be moved there.
+#' @keywords internal
+#' @noRd
+.joins_across_180 <- function(crs_ll, crs, lat) {
+  lat <- pmin(pmax(c(lat, mean(lat)), -89), 89)
+  if (!all(is.finite(lat))) return(FALSE)
+  at <- function(lon) lapply(lat, function(p) sf::st_point(c(lon, p)))
+  xy <- tryCatch(sf::st_coordinates(sf::st_transform(
+    sf::st_sfc(c(at(180), at(-180), at(179)), crs = crs_ll), crs))[, 1:2, drop = FALSE],
+    error = function(e) NULL)
+  if (is.null(xy) || !all(is.finite(xy))) return(FALSE)
+  i <- seq_along(lat)
+  apart <- function(a, b) sqrt(rowSums((xy[a, , drop = FALSE] - xy[b, , drop = FALSE])^2))
+  degree <- apart(i, 2L * length(lat) + i)
+  all(degree > 0 & apart(i, length(lat) + i) <= 1e-6 * degree)
+}
+
+
+#' Cut a lon/lat cover at 180 degrees and move the part past it back by 360
+#'
+#' @param g An sfc in a geographic CRS whose longitudes run past 180.
+#' @return An sfc in the same CRS: the part of \code{g} up to 180 as it
+#'   was, and the part past 180 moved back by 360 degrees.
+#' @keywords internal
+#' @noRd
+.cut_at_180 <- function(g) {
+  crs_g <- sf::st_crs(g)
+  h  <- sf::st_union(sf::st_set_crs(g, NA))
+  bb <- sf::st_bbox(h)
+  dim0 <- max(sf::st_dimension(h), na.rm = TRUE)
+  box <- function(x0, x1) sf::st_as_sfc(sf::st_bbox(c(
+    xmin = x0, ymin = bb[["ymin"]] - 1, xmax = x1, ymax = bb[["ymax"]] + 1)))
+  side <- function(x) {
+    x <- x[!sf::st_is_empty(x)]
+    if (length(x) && any(sf::st_geometry_type(x) == "GEOMETRYCOLLECTION"))
+      x <- suppressWarnings(sf::st_collection_extract(
+        x, c("POINT", "LINESTRING", "POLYGON")[dim0 + 1L]))
+    x[sf::st_dimension(x) == dim0]
+  }
+  near <- side(sf::st_intersection(h, box(min(bb[["xmin"]], 180) - 1, 180)))
+  far  <- side(sf::st_intersection(h, box(180, bb[["xmax"]] + 1)))
+  if (length(far)) far <- far - c(360, 0)
+  sf::st_set_crs(sf::st_union(c(near, far)), crs_g)
+}
+
+
+#' The margin a Voronoi frame grows by
+#'
+#' 2 percent of the diagonal of the generators' hull or of the cover, with
+#' no floor in the units of the CRS (as \code{.edge_tol()}): a floor of 1
+#' unit grew a 500 m layer in a kilometre CRS by 20 m where it grows by
+#' 15.9 m in metres, and its edge cells took another shape.  A diagonal of
+#' 0 (one location) has no size to take 2 percent of; its hull, a point,
+#' is grown by 0.02 units as before, so the cells keep an area.
+#'
+#' @param diag The diagonal, in the units of the CRS.
+#' @return A distance in the units of the CRS; not finite when \code{diag}
+#'   is not.
+#' @keywords internal
+#' @noRd
+.voronoi_grow <- function(diag) {
+  if (isTRUE(diag == 0)) 0.02 else 0.02 * diag
 }
 
 
@@ -376,10 +583,11 @@
     u <- if (all(types %in% c("POLYGON", "MULTIPOLYGON")))
       sf::st_union(.safe_make_valid(g))
     else sf::st_convex_hull(sf::st_combine(g))
+    # 2% of the diagonal with no floor in the units of the CRS (.voronoi_grow()).
     grow_of <- function(x) {
       bb <- sf::st_bbox(x)
-      0.02 * max(sqrt(as.numeric(bb[["xmax"]] - bb[["xmin"]])^2 +
-                      as.numeric(bb[["ymax"]] - bb[["ymin"]])^2), 1)
+      .voronoi_grow(sqrt(as.numeric(bb[["xmax"]] - bb[["xmin"]])^2 +
+                         as.numeric(bb[["ymax"]] - bb[["ymin"]])^2))
     }
     grow <- grow_of(u)
     if (!is.finite(grow)) return(NULL)
@@ -424,6 +632,43 @@
 }
 
 
+#' Is this layer seeds, each of which stands for the cell it generates?
+#'
+#' The question \code{create_voronoi_polygons()} asks before it fills
+#' \code{index}.  A seed stands for its cell: a k-means seed outside a
+#' boundary that is not convex (a mean of observations around a bay) still
+#' has a cell, the part of the study area nearer it than any other seed, and
+#' \code{index} gives it that cell.  An observation outside the boundary
+#' lies outside the study area, and \code{index} gives it \code{NA}.  The
+#' points are seeds when a seeding function returned them (columns
+#' \code{seed_id} and \code{method}, all \code{"kmeans"}, \code{"random"}
+#' or \code{"provided"}, or one of the attributes the seeding functions set:
+#' \code{"kmeans"}, \code{"n_from"} or \code{"cover"}), when they carry the
+#' record of a count and are its seeds (a \code{seed_id} column, or the
+#' centres the record holds), or when a \code{cover} is passed with them,
+#' which is given for seeds.  The record alone does not make seeds:
+#' \code{assign_features_to_polygons()} puts the cells' record on the
+#' observations it returns.
+#'
+#' @param x The points, as they arrived.
+#' @param cover The \code{cover} argument, or \code{NULL}.
+#' @param pts The points in the working CRS, where they are compared with
+#'   the centres of their record.
+#' @keywords internal
+#' @noRd
+.seed_layer <- function(x, cover = NULL, pts = x) {
+  if (!is.null(cover) || .looks_like_seeds(x)) return(TRUE)
+  if (inherits(attr(x, "cover", exact = TRUE), c("sf", "sfc"))) return(TRUE)
+  rec <- .count_rule_get(x)
+  if (!is.null(rec) && (inherits(x, "sf") && "seed_id" %in% names(x) ||
+                        !is.null(.centres_of_seeds(pts, rec))))
+    return(TRUE)
+  if (!inherits(x, "sf") || !all(c("seed_id", "method") %in% names(x))) return(FALSE)
+  m <- x[["method"]]
+  is.character(m) && length(m) > 0L && all(m %in% c("kmeans", "random", "provided"))
+}
+
+
 #' Count the points of a `cover` argument that the cells do not hold
 #'
 #' Wherever `cover` does not size the cells it is only checked against them:
@@ -450,12 +695,14 @@
   g <- sf::st_geometry(cover)
   types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
   if (!length(g) || !all(types %in% c("POINT", "MULTIPOINT"))) return(NULL)
-  g <- tryCatch(.cover_follow(g, pts_in, pts_now), error = function(e) NULL)
+  g <- tryCatch(.cover_follow(g, pts_in, pts_now, caller = caller),
+                error = function(e) NULL)
   if (is.null(g)) return(NULL)
   cells_cmp <- cells
   if (is.na(sf::st_crs(g)) != is.na(sf::st_crs(cells_cmp)))
     cells_cmp <- sf::st_set_crs(cells_cmp, sf::st_crs(g))
-  idx <- .build_point_cell_index(sf::st_sf(geometry = g), cells_cmp, warn = FALSE)
+  idx <- .build_point_cell_index(sf::st_sf(geometry = g), cells_cmp, warn = FALSE,
+                                 caller = caller)
   n_out <- sum(is.na(idx) & !sf::st_is_empty(g))
   if (n_out > 0L) {
     # What set the cells, and what would make them hold the cover, by method.
@@ -551,8 +798,15 @@
 #' axis-aligned bounding box of `points_sf` (the rectangle in the working
 #' CRS), again optionally buffered, or a small buffer around the points when
 #' they all share one x or one y, or nearly so (the short side of their
-#' bounding box below a millionth of the long side). Reach for it to build the
-#' `boundary` that
+#' bounding box below a millionth of the long side, or below about 1.5e-154,
+#' a length whose square doubles cannot hold). When every point sits at one
+#' location, or the share of their spread the buffer would take (5 percent,
+#' or a fractional `expand`) is below that length, the box has no extent to
+#' take a share of, and the target is a disk of radius 1 unit of the CRS
+#' around it (1 m in a metre CRS, 1 km in a
+#' kilometre CRS), unless `expand` is 1 or more, which is then the radius;
+#' the message says so. Pass `boundary` for a target of real size.
+#' Reach for this function to build the `boundary` that
 #' `method = "hex"` and `"square"` require, to check that a study-area
 #' polygon actually contains the observations before tessellating, or to
 #' pass the same envelope to [create_voronoi_polygons()] and
@@ -567,14 +821,43 @@
 #' corners with no data, so a hex or square grid laid over it has cells that
 #' hold no points; pass the study-area polygon when there is one.
 #'
-#' @param points_sf An sf object with POINT/MULTIPOINT geometry.
+#' @param points_sf An sf object with POINT/MULTIPOINT geometry. Points that
+#'   mix XY and XYZ (or XYM), or that carry M, are read in x and y, since sf
+#'   reads a layer in the dimension of its first geometry and GEOS refuses M.
+#'   A point that is empty, or has a coordinate that is not finite or lies
+#'   beyond 1e150, has no location and takes no part in the bounding box.
+#'   With no `boundary`, points none of which has a location (as given, or
+#'   after the move of lon/lat points into a projected CRS) are refused with
+#'   an error that says so.
+#'   Points that take the buffer, so far from the origin of their CRS that
+#'   doubles there are spaced more than a millionth of the target's size
+#'   apart (0.125 at 1e15, beside a disk of radius 1), give a buffer drawn
+#'   at that rounding, with a warning of class `"spatialkit_xy_imprecise"`
+#'   that gives the spacing and the radius. Where the buffer comes back
+#'   empty or with no area, as a radius below that spacing can make it, the
+#'   call stops with an error of class `"spatialkit_xy_imprecise_error"`.
+#'   Shift such points nearer the origin, or pass `boundary`.
 #' @param boundary Optional polygonal sf object. One with no CRS, given with
 #'   points that have one, is interpreted in the points' own CRS, with a
 #'   warning. With points in a projected CRS it is read as [harmonize_crs()]
 #'   does: coordinates that look like lon/lat are taken as EPSG:4326 and
 #'   reprojected, anything else is stamped with the points' CRS. With lon/lat
 #'   points it is read as lon/lat when its coordinates fit the lon/lat
-#'   envelope, and refused with an error otherwise.
+#'   envelope, and refused with an error otherwise. A boundary that mixes XY
+#'   and XYZ (or XYM) geometries is read without Z and M, since sf reads a
+#'   layer in the dimension of its first geometry. So is one whose
+#'   geometries carry M (XYM or XYZM), which GEOS refuses.
+#'   A row that is empty, or has a coordinate that is not finite or lies
+#'   beyond 1e150 (read as given, and again after any move into another
+#'   CRS), covers no ground and is left out; a boundary with no such row
+#'   left is refused with an error that says so. A boundary in a geographic
+#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+#'   the Earth, is refused with an error of class
+#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
+#'   its CRS.
+#'   A row the repair of `boundary` leaves without a polygon (a ring with no
+#'   height: every vertex on one line, or in degrees on one parallel) is
+#'   left out as well, and a boundary with no polygon left is refused.
 #' @param expand Numeric expansion distance or fraction (0–1 = fraction of
 #'   extent). Absolute values are expressed in the units of the CRS the clip
 #'   target is built in. Because [sf::st_buffer()] interprets `dist` as
@@ -603,6 +886,40 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   .msg <- function(...) if (!quiet) message(...)
   .assert_sf(points_sf, c("POINT", "MULTIPOINT"), "points_sf")
   .check_boundary_arg(boundary, "clip_target_for")
+  # Points and a boundary that mix XY and XYZ (or XYM) geometries, or whose
+  # geometries carry M, are read in XY (.xy_if_mixed_or_m()): sf reads a
+  # layer in the dimension of its first geometry, so the move of points in
+  # degrees stopped with "OGR error", and GEOS stopped on an XYZ ring among
+  # XY ones and on M.  The target is new geometry, so nothing is said; the
+  # points are flattened before ensure_projected(), which would warn of an
+  # XY copy this function does not return.
+  points_sf <- .xy_if_mixed_or_m(points_sf)
+  if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
+  # A point with a coordinate that is not finite or lies beyond 1e150 has no
+  # location.  It is read as given, before any move, and emptied
+  # (.empty_unlocated()), so it takes no part in the box below, as an empty
+  # point takes none: at Inf the buffer stopped with GEOS's message, and at
+  # 1e200 the target had an infinite area.
+  points_sf <- .empty_unlocated(points_sf)
+  # With no `boundary` the target is built from the points alone, so points
+  # none of which has a location are refused by name, as given here and
+  # again after the move below, which empties a point it cannot place (a
+  # latitude beyond 90): their box is NA, and the call stopped with R's
+  # "missing value where TRUE/FALSE needed".
+  no_point <- function(why)
+    stop(sprintf(paste0("clip_target_for(): no point in `points_sf` has a location (%s), ",
+                        "and with no `boundary` no clip target can be built from them."),
+                 .BOUNDARY_UNLOCATED_WHY[[why]]), call. = FALSE)
+  if (is.null(boundary) && nrow(points_sf) > 0L &&
+      all(sf::st_is_empty(sf::st_geometry(points_sf))))
+    no_point("given")
+  # So is a row of `boundary`, which is then left out (.boundary_located()):
+  # an empty row gave a target of area 0 or one with an empty line in it, and
+  # a row with a vertex at 1e200 a target of area 5e204.  A boundary with no
+  # row left, or in degrees with a latitude beyond 90 (a target a few metres
+  # high), is refused.
+  nothing <- "no clip target can be built from it"
+  boundary <- .boundary_located(boundary, "clip_target_for", nothing)
   # .expand_distance() below TOLERATES a malformed `expand` by returning 0,
   # which turned `expand = c(0.05, 0.05)` into a silent no-op -- the returned
   # bbox was byte-identical to expand = 0, with no condition raised -- and a
@@ -649,10 +966,16 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
     # points' (projected) CRS instead, as build_tessellation() does.
     if (is.na(sf::st_crs(boundary)) && !is.na(crs_pts))
       boundary <- .transform_or_stamp(boundary, crs_pts, "boundary", "clip_target_for")
-    boundary <- .align_crs(boundary, points_sf)
+    boundary <- .align_crs(boundary, points_sf, caller = "clip_target_for", arg = "boundary")
+    # The move empties a row it cannot place.  No move here empties a row
+    # with a location yet (a move into a projected CRS keeps a row at 1e20
+    # as another shape); the test guards a move that empties it.
+    boundary <- .boundary_located(boundary, "clip_target_for", nothing, moved = TRUE)
     if (!any(sf::st_geometry_type(boundary) %in% c("POLYGON", "MULTIPOLYGON")))
       stop("clip_target_for(): `boundary` must be polygonal.")
-    boundary <- .safe_make_valid(boundary)
+    # A row the repair leaves without a polygon (a ring with no height) is
+    # left out (.boundary_repaired()): the target held it as a line.
+    boundary <- .boundary_repaired(boundary, "clip_target_for", nothing)
     dist <- .expand_distance(boundary, expand)
     tgt <- if (dist != 0) suppressWarnings(sf::st_buffer(boundary, dist = dist)) else boundary
     return(sf::st_sf(geometry = sf::st_geometry(tgt)))
@@ -660,26 +983,97 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 
   pts_geom <- sf::st_geometry(points_sf)
   if (length(pts_geom) == 0) stop("clip_target_for(): `points_sf` is empty.")
+  if (all(sf::st_is_empty(pts_geom))) no_point("moved")
 
   bb <- sf::st_bbox(pts_geom)
-  # Degenerate RELATIVE to the extent, not only when all.equal() calls the two
-  # ends equal: points on a transect with sub-millimetre numerical scatter
-  # gave a 1000 x 1e-6 sliver, over which a hex or square grid sized by a
-  # count needed 166,536 cells for 25, or stopped at `max_cells`.
+  # Degenerate RELATIVE to the extent: points on a transect with
+  # sub-millimetre numerical scatter gave a 1000 x 1e-6 sliver, over which a
+  # hex or square grid sized by a count needed 166,536 cells for 25, or
+  # stopped at `max_cells`.  The side is read against the span only.
+  # all.equal() of its two ends compared them relative to their size, which
+  # reads the origin: a 3 km x 2 km box at x = 1e12, or a 5 cm x 3 cm one at
+  # y = 4e6, was called degenerate and got disks around the points.  A box
+  # with no extent (span 0) is degenerate; points none of which has a
+  # location never reach here (refused above).
+  # A side shorter than a length whose square is a normal double
+  # (.SQRT_XMIN, about 1.5e-154) counts as no side: the area of such a box
+  # underflows, and .safe_make_valid() turned a box 1e-320 on a side into a
+  # POINT.
   dx <- as.numeric(bb$xmax - bb$xmin)
   dy <- as.numeric(bb$ymax - bb$ymin)
   span <- max(dx, dy)
-  zero_w <- isTRUE(all.equal(as.numeric(bb$xmin), as.numeric(bb$xmax))) ||
-    isTRUE(dx <= 1e-6 * span)
-  zero_h <- isTRUE(all.equal(as.numeric(bb$ymin), as.numeric(bb$ymax))) ||
-    isTRUE(dy <= 1e-6 * span)
+  zero_w <- !isTRUE(dx > 1e-6 * span) || !isTRUE(dx >= .SQRT_XMIN)
+  zero_h <- !isTRUE(dy > 1e-6 * span) || !isTRUE(dy >= .SQRT_XMIN)
 
   if (zero_w || zero_h) {
-    .msg("clip_target_for(): degenerate bbox; using small buffer around points.")
     dist_use <- .expand_distance(points_sf, if (expand == 0) 0.05 else expand)
-    if (dist_use <= 0) dist_use <- 1
+    # A share whose square is not a normal double is no length to buffer by:
+    # GEOS drew a disk whose area underflowed, or a MULTIPOINT, or an empty
+    # line, for points 1e-160, 1e-320 or 1e-310 apart.  Such points have no
+    # extent to take a share of, as points at one location have none.
+    if (!isTRUE(dist_use >= .SQRT_XMIN)) {
+      # A box with no extent (every point at one location) has no length to
+      # take a share of, so the disk has a radius of 1 unit of the CRS: 1 m
+      # in a metre CRS, 1 km in a kilometre one.  The message gives that
+      # size in the layer's unit and the ways to another one, and how far
+      # apart the points are: the diagonal of their box.
+      dist_use <- 1
+      u <- if (is.na(crs_pts)) NA_character_
+           else tryCatch(suppressWarnings(crs_pts$units_gdal), error = function(e) NULL)
+      unit <- if (is.character(u) && length(u) == 1L && !is.na(u) && nzchar(u))
+        sprintf("1 %s (1 unit of the CRS)", u)
+      else if (is.na(crs_pts)) "1 unit of the coordinates (the points have no CRS)"
+      else "1 unit of the CRS"
+      .msg(sprintf(paste0(
+        "clip_target_for(): degenerate bbox: %s, so the box has no extent to take a ",
+        "share of; using a disk of radius %s around %s. Pass `boundary` for a ",
+        "target of real size, or an `expand` of 1 or more, which is taken as the ",
+        "radius in the units of %s."),
+        if (span == 0) "the points sit at one location"
+        else sprintf("the points lie within %s of each other", format(.bb_diagonal(bb))),
+        unit, if (span == 0) "it" else "them",
+        if (is.na(crs_pts)) "the coordinates" else "the CRS"))
+    } else {
+      .msg("clip_target_for(): degenerate bbox; using small buffer around points.")
+    }
+    # GEOS draws the buffer at the coordinates' size, where doubles are
+    # spaced .ulp_of() apart: at 1e15, 0.125 apart, the disk of radius 1
+    # had an area of 2.6875.  Where that spacing is more than a millionth of
+    # the target's extent it is said (.warn_xy_imprecise()); `quiet` does
+    # not silence it.
+    spacing <- .warn_xy_imprecise(
+      pts_geom, "clip_target_for", "points_sf", extent = span + 2 * dist_use,
+      of = "the target's extent",
+      reads = sprintf("so the buffer of radius %s around the points is drawn at that rounding",
+                      format(signif(dist_use, 3))),
+      remedy = "Shift the layer nearer the origin, or pass `boundary`.")$spacing
     tgt <- suppressWarnings(sf::st_buffer(sf::st_union(pts_geom), dist = dist_use))
     tgt <- .safe_make_valid(tgt)
+    # A buffer whose radius is below that spacing can come back empty, or as
+    # points or a line, with no area: two points 0.5 m apart at 1e15 gave
+    # an empty LINESTRING.  No target is identified, and the call is refused
+    # rather than return something that is not a polygon of positive area.
+    area <- suppressWarnings(as.numeric(sum(sf::st_area(sf::st_set_crs(tgt, NA)))))
+    if (all(sf::st_is_empty(tgt)) || !isTRUE(area > 0)) {
+      got <- if (all(sf::st_is_empty(tgt))) "empty"
+             else paste("a", paste(unique(as.character(sf::st_geometry_type(tgt))),
+                                   collapse = "/"))
+      msg <- if (isTRUE(spacing > dist_use))
+        sprintf(paste0(
+          "clip_target_for(): `points_sf` lies so far from the origin%s that its ",
+          "coordinates lose their precision: they are rounded to %s, more than the ",
+          "radius %s of the buffer around the points, which comes back %s with no ",
+          "area, so no clip target can be drawn. Shift the layer nearer the origin, ",
+          "or pass `boundary`."),
+          if (is.na(crs_pts)) "" else " of its CRS",
+          format(signif(spacing, 3)), format(signif(dist_use, 3)), got)
+      else
+        sprintf(paste0(
+          "clip_target_for(): the buffer of radius %s around the points in ",
+          "`points_sf` comes back %s with no area, so no clip target can be drawn. ",
+          "Pass `boundary`."), format(signif(dist_use, 3)), got)
+      stop(errorCondition(msg, class = "spatialkit_xy_imprecise_error", call = NULL))
+    }
     sf::st_crs(tgt) <- crs_pts
     return(sf::st_sf(geometry = sf::st_geometry(tgt)))
   }
@@ -697,36 +1091,65 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 
 #' Assign each point to its containing cell, returning cell_id values
 #'
-#' Uses st_intersects then falls back to st_nearest_feature for unmatched
-#' points. The returned vector uses the cell_id column of `cells_sf`, not
-#' raw row indices.
+#' A point within the margin \code{.edge_tol()} takes from the cells'
+#' bounding box of a cell is in it (\code{.edge_join()}), and a point in
+#' several cells takes the smallest cell_id among them.  On a lattice the
+#' points sit on the edges of
+#' a grid laid over them, and a change of unit or a shift of the origin moves
+#' the last bits of the coordinates, so the same point lay a hair inside one
+#' cell in one frame and inside the other in the next.  A point in no cell
+#' goes to the nearest cell when it is within a thousandth of the median cell
+#' width of it, and among the cells as near to one part in ten million (plus
+#' the same margin) to the smallest cell_id: a point outside the study area
+#' beside a corner two cells share is the same distance from both, and the
+#' last bits of the distances chose between them.  For cells in degrees the
+#' nearest cell and the distances are taken on the sphere whatever
+#' \code{sf::sf_use_s2()} says (\code{.with_s2()}), in metres, and the width
+#' and the margin are taken as arcs of the sphere.  With no cell every point
+#' is NA, and the warning says so.  The returned vector uses
+#' the cell_id column of `cells_sf`, not raw row indices.
 #'
 #' @param pts An sf POINT object.
 #' @param cells_sf An sf polygon object with a `cell_id` column.
 #' @param warn Raise the classed warning when points fall outside every cell.
 #'   \code{FALSE} for a caller that reports the count in its own words.
+#' @param caller The function the user called, named in the warning and the
+#'   log line: \code{"create_voronoi_polygons"} when that function was
+#'   called directly.
 #' @return Integer vector of cell_id values, one per row of `pts`, with
 #'   \code{NA} for points that fall outside every cell, carrying the
 #'   nearest-cell repairs as \code{attr(, "snapped")} (\code{n}, \code{which},
 #'   \code{distance}); the callers move that record into \code{params}.
 #' @keywords internal
 #' @noRd
-.build_point_cell_index <- function(pts, cells_sf, warn = TRUE) {
+.build_point_cell_index <- function(pts, cells_sf, warn = TRUE,
+                                    caller = "build_tessellation") {
   n <- nrow(pts)
-  if (n == 0L || nrow(cells_sf) == 0L)
-    return(structure(rep(NA_integer_, n),
+  if (n == 0L)
+    return(structure(integer(0),
                      snapped = list(n = 0L, which = integer(0), distance = numeric(0))))
 
   cell_ids <- cells_sf$cell_id
-  hits <- sf::st_intersects(pts, cells_sf)
-  
-  index <- vapply(hits, function(row_idx) {
-    row_idx <- as.integer(row_idx)
-    if (length(row_idx) == 0L)     return(NA_integer_)
-    if (length(row_idx) == 1L)     return(cell_ids[row_idx])
-    # Ambiguous: pick the cell with the smallest cell_id
-    min(cell_ids[row_idx])
-  }, integer(1))
+  # The margin of an edge is taken from the cells alone: a point without a
+  # location (a coordinate beyond 1e150) would set it otherwise.  Rows
+  # without a location are in no cell and are not searched.  With no cell
+  # every point is in none, and is counted in the warning below: the early
+  # return that stood here left zero cells with nothing said.
+  has_cells <- nrow(cells_sf) > 0L
+  etol    <- if (has_cells) .edge_tol(sf::st_bbox(cells_sf)) else NA_real_
+  located <- .located_rows(pts)
+  index   <- rep(NA_integer_, n)
+  if (has_cells && any(located)) {
+    at   <- which(located)
+    hits <- attr(.edge_join(sf::st_geometry(pts)[at], cells_sf,
+                            bb = sf::st_bbox(cells_sf)), "hits")
+    # A point in several cells, or within the margin of their shared edge,
+    # takes the smallest cell_id among them.
+    index[at] <- vapply(hits, function(row_idx) {
+      row_idx <- as.integer(row_idx)
+      if (length(row_idx) == 0L) NA_integer_ else min(cell_ids[row_idx])
+    }, integer(1))
+  }
 
   # Points that fall in no cell.  For a Voronoi tessellation, or a grid clipped
   # to a boundary, "outside every cell" means outside the study area, and
@@ -737,37 +1160,61 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   # right repair for a point a hair outside a cell edge (floating-point, a
   # clipped sliver), so keep it -- but bound it by the cell size and say how
   # many points were snapped, and leave the genuinely-outside ones NA.
-  unmatched <- which(is.na(index))
+  unmatched <- if (has_cells) which(is.na(index) & located) else integer(0)
   snapped   <- list(n = 0L, which = integer(0), distance = numeric(0))
+  # For cells in degrees the nearest cell, its distance and the candidates
+  # of the tie are taken on the sphere whatever sf_use_s2() says, in metres,
+  # as the package's other measures in degrees are (.with_s2()).  With s2
+  # off sf handed these distances to lwgeom, which the package does not
+  # depend on, and the call stopped with "there is no package called
+  # 'lwgeom'".  The join above keeps the session's engine, as the clip does.
+  in_degrees <- has_cells && isTRUE(sf::st_is_longlat(cells_sf))
+  on_sphere  <- function(expr) if (in_degrees) .with_s2(expr) else expr
   if (length(unmatched) > 0L) {
-    near  <- suppressWarnings(sf::st_nearest_feature(pts[unmatched, ], cells_sf))
+    near  <- on_sphere(suppressWarnings(sf::st_nearest_feature(pts[unmatched, ], cells_sf)))
     valid <- is.finite(near)
     if (any(valid)) {
-      d <- suppressWarnings(as.numeric(sf::st_distance(
+      d <- on_sphere(suppressWarnings(as.numeric(sf::st_distance(
         sf::st_geometry(pts[unmatched[valid], ]),
-        sf::st_geometry(cells_sf)[near[valid]], by_element = TRUE)))
+        sf::st_geometry(cells_sf)[near[valid]], by_element = TRUE))))
       # A tolerance of one thousandth of the median cell width: wide enough for
       # any rounding at a shared edge, far too narrow to swallow a point that
-      # is genuinely outside the study area.
+      # is genuinely outside the study area.  In degrees the distances are in
+      # metres on the sphere, and the width is taken as an arc, with the
+      # factor .snap_lowest_cell() and .edge_join() apply to the margin: a
+      # width in degrees held against metres snapped a 0.1 degree grid within
+      # 1e-4 m, not the 11 m the rule gives.
       cw  <- suppressWarnings(stats::median(vapply(
         sf::st_geometry(cells_sf), function(g) {
           bb <- sf::st_bbox(g)
           as.numeric(bb[["xmax"]] - bb[["xmin"]])
         }, numeric(1)), na.rm = TRUE))
       tol <- if (is.finite(cw) && cw > 0) cw / 1000 else 0
+      if (in_degrees) tol <- tol * pi / 180 * 6371010
       snap <- valid
       snap[valid] <- is.finite(d) & d <= tol
-      index[unmatched[snap]] <- cell_ids[near[snap]]
+      # The cell each snapped point goes to: among the cells as near as the
+      # nearest, to one part in ten million plus the margin of an edge, the
+      # smallest cell_id.  sf::st_nearest_feature() settled such a tie by
+      # the last bits of the distances.
+      d_all <- rep(NA_real_, length(unmatched)); d_all[valid] <- d
+      to <- on_sphere(.snap_lowest_cell(sf::st_geometry(pts)[unmatched[snap]], cells_sf,
+                                        d_all[snap], etol))
+      miss <- is.na(to)
+      to[miss] <- cell_ids[near[snap]][miss]
+      index[unmatched[snap]] <- to
       # Which points were repaired, and how far outside each sat: the comment
       # above promised to say how many, and nothing did.
-      d_all <- rep(NA_real_, length(unmatched)); d_all[valid] <- d
       snapped <- list(n = sum(snap), which = as.integer(unmatched[snap]),
                       distance = as.numeric(d_all[snap]))
       if (snapped$n > 0L)
-        .log_info(paste0("build_tessellation(): %d point(s) sitting just outside ",
-                         "every cell (at most %.3g units, within a thousandth of ",
+        .log_info(paste0("%s(): %d point(s) sitting just outside ",
+                         "every cell (at most %.3g %s, within a thousandth of ",
                          "the median cell width) were assigned to the nearest cell."),
-                  snapped$n, max(snapped$distance))
+                  caller, snapped$n, max(snapped$distance),
+                  if (in_degrees) "m"
+                  else { u <- sf::st_crs(cells_sf)$units_gdal
+                         if (length(u) == 1L && !is.na(u)) u else "units" })
     }
   }
   # A point in no cell is a point every summary built from `index` leaves
@@ -775,17 +1222,20 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   # INFO line in the temp log, and nothing on the result held the number.
   n_out <- sum(is.na(index))
   if (n_out > 0L && isTRUE(warn)) {
-    # A point with empty geometry is in no cell either, but for want of a
-    # location, not for lying outside the study area.
-    n_empty <- sum(is.na(index) & sf::st_is_empty(sf::st_geometry(pts)))
+    # A point without a location (an empty point, or a coordinate that is
+    # not finite or lies beyond 1e150) is in no cell either, but for want of
+    # a location, not for lying outside the study area.
+    n_empty <- sum(is.na(index) & !.located_rows(pts))
     .warn_classed("spatialkit_unassigned", paste0(
-      "build_tessellation(): %d of %d point(s) (%.1f%%) fall in no cell and ",
+      "%s(): %d of %d point(s) (%.1f%%) fall in no cell and ",
       "are NA in `index`; `params$n_outside` holds the count. %s"),
-      n_out, length(index), 100 * n_out / length(index),
+      caller, n_out, length(index), 100 * n_out / length(index),
       if (n_empty == n_out)
-        "They have empty geometry, so there is no location to index."
+        sprintf("They have no location (%s), so there is nothing to index.",
+                .UNLOCATED_WHAT)
       else paste0(
-        if (n_empty > 0L) sprintf("%d of them have empty geometry; the rest lie ", n_empty)
+        if (n_empty > 0L) sprintf("%d of them have no location (%s); the rest lie ",
+                                  n_empty, .UNLOCATED_WHAT)
         else "They lie ",
         "outside the ground the cells cover (the boundary, grown by `expand`). ",
         "Pass a boundary that holds them, or a larger `expand`, if they belong ",
@@ -795,6 +1245,78 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 
   attr(index, "snapped") <- snapped
   index
+}
+
+
+#' The Delaunay triangles of points, triangulated by GEOS in the frame of
+#' .kmeans_frame()
+#'
+#' The fallback of \code{build_tessellation(method = "triangles")} when
+#' \pkg{geometry} is not there.  \code{sf::st_triangulate()} is handed the
+#' points centred on the middle of their bounding box, divided by its
+#' diagonal and rounded to \code{.KMEANS_STEP}, so co-circular points are
+#' split the same in any unit or origin, and each triangle is drawn on the
+#' original coordinates of the points at its corners.
+#'
+#' @param coords Numeric matrix of finite coordinates, two columns.
+#' @param crs The CRS of the triangles.
+#' @return An sfc of POLYGON, possibly empty.
+#' @keywords internal
+#' @noRd
+.triangulate_in_frame <- function(coords, crs) {
+  z   <- .kmeans_frame(coords)$z
+  key <- complex(real = z[, 1L], imaginary = z[, 2L])
+  tri <- sf::st_triangulate(sf::st_sfc(sf::st_multipoint(unique(z))))
+  tri <- sf::st_collection_extract(tri, "POLYGON", warn = FALSE)
+  polys <- lapply(tri, function(t) {
+    v  <- sf::st_coordinates(t)[1:3, 1:2, drop = FALSE]
+    at <- match(complex(real = v[, 1L], imaginary = v[, 2L]), key)
+    if (anyNA(at)) return(NULL)
+    ring <- coords[c(at, at[1L]), , drop = FALSE]
+    signed_area <- sum(ring[-4L, 1] * ring[-1L, 2] - ring[-1L, 1] * ring[-4L, 2]) / 2
+    if (signed_area < 0) ring <- ring[4:1, , drop = FALSE]
+    sf::st_polygon(list(unname(ring)))
+  })
+  sf::st_sfc(polys[!vapply(polys, is.null, logical(1))], crs = crs)
+}
+
+
+#' The cell a point just outside every cell is snapped to
+#'
+#' Among the cells whose distance from the point is within one part in ten
+#' million of the least, plus \code{tol}, the smallest cell_id.  The
+#' candidates are found with the point grown by a little more than that
+#' reach (a buffer's sides lie inside its circle), and the distances are
+#' then taken exactly; in degrees, with \code{sf::st_is_within_distance()}.
+#'
+#' @param g Points (sfc), each within the snapping distance of a cell.
+#' @param cells_sf The cells, with a \code{cell_id} column.
+#' @param d The least distance of each point from a cell.
+#' @param tol The margin of an edge (\code{.edge_tol()}), in the units of
+#'   the CRS.
+#' @return Integer vector of cell_id values, one per point.
+#' @keywords internal
+#' @noRd
+.snap_lowest_cell <- function(g, cells_sf, d, tol) {
+  if (!length(g)) return(integer(0))
+  gc <- sf::st_geometry(cells_sf)
+  in_degrees <- isTRUE(sf::st_is_longlat(gc))
+  # In degrees the distances are in metres on the sphere, and the margin is
+  # taken as an arc, as .edge_join() does.
+  if (in_degrees) tol <- tol * pi / 180 * 6371010
+  reach <- d * (1 + .TIE_TOL) + tol
+  cand <- if (in_degrees) {
+    sf::st_is_within_distance(g, gc, dist = max(reach) * 1.01)
+  } else {
+    sf::st_intersects(sf::st_buffer(g, reach * 1.01), gc)
+  }
+  vapply(seq_along(g), function(i) {
+    r <- as.integer(cand[[i]])
+    if (!length(r)) return(NA_integer_)
+    dd <- suppressWarnings(as.numeric(sf::st_distance(g[i], gc[r])))
+    keep <- r[is.finite(dd) & dd <= min(dd, na.rm = TRUE) * (1 + .TIE_TOL) + tol]
+    if (!length(keep)) NA_integer_ else as.integer(min(cells_sf$cell_id[keep]))
+  }, integer(1))
 }
 
 # -----------------------------------------------------------------------------
@@ -840,10 +1362,36 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' by hand) gets the seeds' own hull and a warning of class
 #' `"spatialkit_no_cover"`.
 #'
+#' A seed stands for its cell, so `index` gives each seed the cell it
+#' generates. A k-means seed is a mean of observations and can lie outside a
+#' `boundary` that is not convex, in a bay or a bend of a coast (see
+#' [get_voronoi_seeds()]). Its cell, the part of the study area nearer it
+#' than any other seed, is built, and its `index` entry is that cell's
+#' `cell_id`, although the seed lies in no cell. A seed is `NA` only when
+#' every part of the study area is nearer another seed, so the clip removed
+#' its cell whole, or when it has no location (its geometry is empty, or a
+#' coordinate is not finite or lies beyond 1e150). The points are seeds when
+#' a seeding function returned them ([get_voronoi_seeds()],
+#' [voronoi_seeds_kmeans()], [voronoi_seeds_random()], `rbind()` of such
+#' layers included), when they are the seeds of a [select_resolution()]
+#' result, and when a `cover` is passed with them. A selection's seeds are
+#' seeds by the attributes they carry, which `rbind()` and a write to a file
+#' drop. Any other points are indexed by the cell that holds them, so a
+#' point outside the study area is `NA`, unless it lies within a thousandth
+#' of the median cell width of a cell, whose ID it then takes (see `index`
+#' in [build_tessellation()]); that includes observations that
+#' carry a selection's record of the count, as
+#' [assign_features_to_polygons()] returns them. Seeds placed by hand, and
+#' a selection's seeds that lost their attributes, are seeds once they pass
+#' through `get_voronoi_seeds(method = "provided", seeds = )`.
+#'
 #' @param points_sf An sf object with POINT/MULTIPOINT geometries. Points with
 #'   no CRS whose coordinates look like lon/lat (the heuristic
 #'   [ensure_projected()] applies, with its warning) are taken as EPSG:4326
-#'   and projected, as lon/lat points are.
+#'   and projected, as lon/lat points are. Points that mix XY and XYZ (or
+#'   XYM), or that carry M, are read in x and y, since sf reads a layer in the
+#'   dimension of its first geometry and GEOS refuses M; the attributes the
+#'   seeding functions set on them are kept.
 #' @param boundary Optional polygonal sf object. When exactly one of
 #'   `points_sf` and `boundary` has a CRS, the other is interpreted in it, with
 #'   a warning. CRS-less points, and a CRS-less boundary given with projected
@@ -853,7 +1401,21 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   refused with an error. A CRS-less boundary given with lon/lat points (or
 #'   with CRS-less points taken as lon/lat) is read as lon/lat when its
 #'   coordinates fit the lon/lat envelope, and refused with an error
-#'   otherwise.
+#'   otherwise. A boundary that mixes XY and XYZ (or XYM) geometries is read
+#'   without Z and M, since sf reads a layer in the dimension of its first
+#'   geometry. So is one whose
+#'   geometries carry M (XYM or XYZM), which GEOS refuses.
+#'   A row that is empty, or has a coordinate that is not finite or lies
+#'   beyond 1e150 (read as given, and again after any move into another
+#'   CRS), covers no ground and is left out; a boundary with no such row
+#'   left is refused with an error that says so. A boundary in a geographic
+#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+#'   the Earth, is refused with an error of class
+#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
+#'   its CRS.
+#'   A row the repair of `boundary` leaves without a polygon (a ring with no
+#'   height: every vertex on one line, or in degrees on one parallel) is
+#'   left out as well, and a boundary with no polygon left is refused.
 #' @param cover Optional sf or sfc layer the cells have to hold, read when
 #'   there is no `boundary`: the observations (points), or a polygon. The
 #'   boundary is then derived from it instead of from `points_sf`: the convex
@@ -870,7 +1432,10 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   and `cover` is only checked against them: the number of its points that
 #'   fall outside every cell is returned as `params$cover_outside`, with a
 #'   warning of class `"spatialkit_unassigned"` when it is not 0 (a polygon
-#'   cover is not checked).
+#'   cover is not checked). A cover, given or attached, that mixes XY and XYZ
+#'   (or XYM) geometries, or that carries M, is read in x and y. A row of the
+#'   cover with a coordinate that is not finite or lies beyond 1e150, read
+#'   as given before any move, is read as an empty row.
 #' @param expand Numeric; absolute distance, in the working CRS's units, by
 #'   which the boundary (or the hull derived from the points) is grown before
 #'   the diagram is built. With `clip = TRUE` the cells are clipped to the
@@ -878,9 +1443,13 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   up to `expand` outside it gets a cell and an `index` value. The grown
 #'   boundary is the one returned as `boundary`.
 #' @param clip Logical; intersect cells with boundary.
-#' @param keep_duplicates Logical. Has no effect on the result: coincident
-#'   points are merged before the diagram is built either way, so they share
-#'   one cell and all of them are indexed to it.
+#' @param keep_duplicates Logical. With \code{FALSE} (the default), points
+#'   are merged before the diagram is built when they round to one point in
+#'   coordinates centred on the middle of their bounding box, divided by its
+#'   diagonal and rounded to 2^-30 of it, so points within about a billionth
+#'   of the extent of each other count as coincident in any unit or origin
+#'   and share one cell. With \code{TRUE} only points at exactly one
+#'   location are merged. Every point is indexed to the cell that holds it.
 #' @param crs Optional target CRS: anything [sf::st_crs()] accepts, including
 #'   an sf or sfc layer, whose CRS is used. A projected CRS is the working
 #'   CRS. A geographic one (EPSG:4326, say) is the CRS the result is returned
@@ -888,7 +1457,24 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   picks for the points, so they are nearest-point cells on the ground, and
 #'   are then transformed, with long edges densified. Seeds that are the
 #'   centres a profile scored are built in the CRS the profile worked in
-#'   instead (see "Seeds a profile scored").
+#'   instead (see "Seeds a profile scored"). Where four seeds stand the same
+#'   distance from one point, as on gridded locations, two cells can meet
+#'   there at two corners that differ only by rounding, which the transform
+#'   to degrees can put at one point, and sf's spherical engine (s2) refuses
+#'   such a cell. [assign_features_to_polygons()] joins the cells of the
+#'   centres a profile scored in the CRS they were built in, while they
+#'   carry the record that says so (`scored_cells = TRUE`). `sf::st_area()`,
+#'   `sf::st_union()`, and a join of rows in degrees to other cells (cells
+#'   without the record, such as those of a count given as a number or those
+#'   a verb that drops attributes has stripped of it, and cells whose record
+#'   says `scored_cells = FALSE`, such as those of centres refitted to every
+#'   point) go to s2 and stop on such a cell: transform the cells to a
+#'   projected CRS first. [assign_features_to_polygons()] then stops with an
+#'   error of class `"spatialkit_cells_degenerate"` that names the cells s2
+#'   refuses, the cause and that transform; its largest-overlap join of
+#'   polygon features repairs such cells instead, with a warning.
+#'   [summarize_by_cell()] with `area = TRUE`, which takes the areas of such
+#'   cells, stops with the same error before any summary.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
@@ -897,7 +1483,16 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' [get_voronoi_seeds()] or [voronoi_seeds_kmeans()] return for one, are the
 #' centres [resolution_profile()] scored, and their record of the count
 #' (`attr(, "count_rule")`) says so (`scored_cells = TRUE`) and holds the
-#' centres in the CRS the profile worked in. Unless a projected `crs` is
+#' centres in the CRS the profile worked in. (On a profile without an
+#' estimate fitted to a subsample the seeds are those centres refitted to
+#' every point, which carry `attr(, "refit")`; their record says
+#' `scored_cells = FALSE`, and their cells are built as other seeds' are.
+#' So are seeds fewer or more than the record's count, such as a
+#' selection's seeds cut down to some of its rows: they are not the centres
+#' the profile scored, and their record is handed on with
+#' `scored_cells = FALSE`, as [get_voronoi_seeds()] (`method = "provided"`)
+#' marks such seeds.)
+#' Unless a projected `crs` is
 #' given, their cells are built in that CRS, whatever CRS the seeds arrive
 #' in (degrees, or the CRS of a boundary they were placed in), and returned
 #' in it, or in a geographic `crs` when one is given. When the seeds are
@@ -911,10 +1506,24 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   \code{method} and \code{params}.  \code{index} holds one \code{cell_id}
 #'   per row of \code{points_sf}, and \code{NA} for a point that falls outside
 #'   every cell, which means outside the study area (grown by \code{expand}
-#'   when it is positive), so a summary built from it counts only the points
+#'   when it is positive), and farther than a thousandth of the median cell
+#'   width from the nearest cell, so a summary built from it counts only the points
 #'   the tessellation actually covers.  Such points are counted in
 #'   \code{params$n_outside}, and a warning of class
-#'   \code{"spatialkit_unassigned"} gives their number.  \code{boundary} is
+#'   \code{"spatialkit_unassigned"} gives their number.  Points so far from
+#'   the origin of their CRS that doubles there are spaced more than a
+#'   millionth of their extent apart (0.125 at 1e15, beside a layer a few
+#'   kilometres across) have the cells' edges and their own cells read at
+#'   that rounding, so two points that close can fall in one cell; the cells
+#'   are built, and a warning of class \code{"spatialkit_xy_imprecise"}
+#'   gives the spacing and the extent.  For seeds (see
+#'   "Details") \code{index} holds the cell each seed generates, whether the
+#'   seed lies inside the boundary or not, and \code{NA} only for a seed whose
+#'   cell the clip removed whole or without a location (an empty geometry,
+#'   or a coordinate that is not finite or lies beyond 1e150);
+#'   \code{params$n_outside} counts those, the warning names them as seeds,
+#'   and \code{params$snapped} lists only the seeds whose entry is the cell
+#'   they were snapped to.  \code{boundary} is
 #'   the boundary the cells were built in: the one supplied or derived, grown
 #'   by \code{expand}.  \code{params$boundary_source} says where it came
 #'   from: \code{"boundary"} (the argument), \code{"cover"} (the
@@ -931,8 +1540,9 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   \code{params$count_rule} is present when \code{points_sf} carries the
 #'   record of how its count was set (\code{attr(points_sf, "count_rule")}:
 #'   the seeds of a \code{\link{select_resolution}()} result, or seeds a
-#'   seeding function placed from one): the same list, which the cells carry
-#'   too as \code{attr(cells, "count_rule")}.
+#'   seeding function placed from one): the same list, with
+#'   \code{scored_cells = FALSE} when the seeds are fewer or more than its
+#'   count, which the cells carry too as \code{attr(cells, "count_rule")}.
 #'   \code{\link{assign_features_to_polygons}()} copies it to the rows it
 #'   assigns, and \code{\link{summarize_by_cell}()} checks its result
 #'   against it.
@@ -952,11 +1562,90 @@ create_voronoi_polygons <- function(
     points_sf, boundary = NULL, expand = 0, clip = TRUE,
     keep_duplicates = FALSE, crs = NULL, quiet = FALSE, cover = NULL
 ) {
+  .voronoi_polygons(points_sf, boundary = boundary, expand = expand, clip = clip,
+                    keep_duplicates = keep_duplicates, crs = crs, quiet = quiet,
+                    cover = cover, caller = "create_voronoi_polygons")
+}
+
+#' The body of create_voronoi_polygons(), with the name of the function called
+#'
+#' \code{create_voronoi_polygons()} and the voronoi route of
+#' \code{build_tessellation()} both build their cells here.  The warnings
+#' that count the points, seeds or \code{cover} points in no cell, the log
+#' line on points assigned to the nearest cell, and the warning on cover
+#' rows that cannot be moved name \code{caller}, the function the user
+#' called: they named \code{build_tessellation()} on a direct call to
+#' \code{create_voronoi_polygons()}, or \code{create_voronoi_polygons()}
+#' on a call to \code{build_tessellation()}.  The other texts name
+#' \code{create_voronoi_polygons()}, as they always have.
+#'
+#' @param points_sf,boundary,expand,clip,keep_duplicates,crs,quiet,cover As for
+#'   \code{create_voronoi_polygons()}.
+#' @param caller \code{"create_voronoi_polygons"} or
+#'   \code{"build_tessellation"}.
+#' @return What \code{create_voronoi_polygons()} returns.
+#' @keywords internal
+#' @noRd
+.voronoi_polygons <- function(points_sf, boundary, expand, clip, keep_duplicates,
+                              crs, quiet, cover, caller) {
   .assert_sf(points_sf, c("POINT", "MULTIPOINT"), "points_sf")
   .check_boundary_arg(boundary, "create_voronoi_polygons")
   .check_boundary_arg(cover, "create_voronoi_polygons", label = "cover",
                       what = "point or polygon")
+  # The points, the boundary and the cover are read in XY when they mix XY
+  # and XYZ (or XYM) geometries or carry M (.xy_if_mixed_or_m()): sf reads a
+  # layer in the dimension of its first geometry, so the union, the
+  # transform and the read of the coordinates stopped with GEOS's, sf's or
+  # base R's message, GEOS stopped on M, and a mixed cover was set aside as
+  # giving no polygon.  The cells are new geometry and none of the three is
+  # returned, so nothing is said.  sf::st_zm() keeps the points' attributes,
+  # their cover and count record among them.  A layer XY or XYZ throughout
+  # takes its old path.  Points in an sfc_GEOMETRY column are read as the
+  # same points in sfc_POINT, or sfc_MULTIPOINT (.typed_points()):
+  # sf::st_union() of the hull stopped with "Not compatible with STRSXP" and
+  # sf::st_coordinates() refuses that class.  A cover of such points is read
+  # the same way.
+  points_sf <- .xy_if_mixed_or_m(.typed_points(points_sf))
+  if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
+  if (!is.null(cover)) cover <- .xy_if_mixed_or_m(.typed_points(cover))
+  # A point with a coordinate that is not finite or lies beyond 1e150 has no
+  # location.  It is read as given, before any move, and emptied
+  # (.empty_unlocated()), so it takes no part in the hull, the Voronoi
+  # diagram or the CRS chosen, and is NA in `index` and counted as an empty
+  # point is.  Kept, it stopped st_voronoi() or the hull's buffer with
+  # GEOS's message, and a northing of 1e200 in another CRS than the
+  # boundary's was moved to a finite place.
+  points_sf <- .empty_unlocated(points_sf)
+  # So is a row of the cover: at Inf or 1e200 one point set the whole cover
+  # aside ("gives no polygon"), and a polygon with such a vertex was moved
+  # into the working CRS as a smaller shape, or one far larger.
+  if (!is.null(cover)) cover <- .empty_unlocated(cover)
+  # A row of `boundary` without a location is left out (.boundary_located()):
+  # at Inf its cells moved, at 1e200 GEOS stopped, and with every row empty
+  # the call returned 0 cells and blamed the seeds.  A boundary with no row
+  # left, or in degrees with a latitude beyond 90, is refused.
+  nothing_b <- "no cell can be built in it"
+  boundary <- .boundary_located(boundary, "create_voronoi_polygons", nothing_b)
   if (nrow(points_sf) < 1) stop("create_voronoi_polygons(): `points_sf` has no rows.")
+  # No point with a location builds no cell, with a boundary or without one.
+  # Unchecked, the call gave zero cells with sf's bare "x contains no
+  # geometries of specified type" when a boundary was given, and without one
+  # stopped with GEOS's "BufferOp::getResultGeometry distance must be a
+  # finite value" on the hull of no point.  Read as given here, and again
+  # once the points are in the working CRS, where a move can leave a point
+  # without a place (a latitude beyond 90 moved to EPSG:3857); that second
+  # refusal says the move, since the points as given had a location.
+  no_location <- function(x, moved = FALSE) {
+    if (!any(.located_rows(x)))
+      stop(if (moved)
+             paste0("create_voronoi_polygons(): the move of `points_sf` to the CRS the ",
+                    "cells are built in placed none of its points, so no cell can be built.")
+           else
+             paste0("create_voronoi_polygons(): no point of `points_sf` has a location ",
+                    "(each is an empty point, or has a coordinate that is not finite or ",
+                    "lies beyond 1e150), so no cell can be built."), call. = FALSE)
+  }
+  no_location(points_sf)
   .msg <- function(...) if (!quiet) message(...)
   # The ground the cells have to hold, when there is no boundary: the `cover`
   # argument, else the cover a seeding function attached.  Read before the
@@ -968,7 +1657,8 @@ create_voronoi_polygons <- function(
     cover_geom <- sf::st_geometry(cover)
     cover_from <- "cover"
   } else if (inherits(attr(points_sf, "cover", exact = TRUE), c("sf", "sfc"))) {
-    cover_geom <- sf::st_geometry(attr(points_sf, "cover", exact = TRUE))
+    cover_geom <- .empty_unlocated(
+      .xy_if_mixed_or_m(sf::st_geometry(attr(points_sf, "cover", exact = TRUE))))
     cover_from <- "seeds' cover"
   }
   seed_like <- .looks_like_seeds(points_sf)
@@ -979,8 +1669,10 @@ create_voronoi_polygons <- function(
   # The record of how the seeds' count was set, when they carry one (a
   # selection's seeds, or seeds placed from a selection or a profile): handed
   # on in `params` and on the cells, so the summary can check that it is
-  # given the cells and rows the count was scored on.
-  seed_rule <- .count_rule_get(points_sf)
+  # given the cells and rows the count was scored on.  Seeds fewer or more
+  # than the record's count are not the centres it scored, and the record
+  # handed on says so (.seeds_count_rule()).
+  seed_rule <- .seeds_count_rule(points_sf)
   # A layer as `crs` means its CRS (as ensure_projected(target_crs =) reads
   # it); passed on as it was, it stopped with "the condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
@@ -1005,7 +1697,9 @@ create_voronoi_polygons <- function(
     if (.is_geographic_crs(crs)) {
       crs_out <- sf::st_crs(pts)
       pts <- if (is.null(scored_crs)) ensure_projected(pts) else sf::st_transform(pts, scored_crs)
-      if (!is.null(boundary)) boundary <- .align_crs(boundary, pts)
+      if (!is.null(boundary))
+        boundary <- .align_crs(boundary, pts, caller = "create_voronoi_polygons",
+                               arg = "boundary")
     }
   } else {
     # A CRS-less boundary with lon/lat points is read in the points' own CRS
@@ -1037,20 +1731,28 @@ create_voronoi_polygons <- function(
       pts <- pair$points; boundary <- pair$boundary
       # CRS-less lon/lat points that just took a geographic boundary's CRS.
       if (.is_longlat(pts)) pts <- ensure_projected(pts)
-      boundary <- .align_crs(boundary, pts)
+      boundary <- .align_crs(boundary, pts, caller = "create_voronoi_polygons",
+                             arg = "boundary")
     }
   }
   # In the record's CRS, seeds that are its centres stand where the record
   # holds them, so the edges between their cells are where the profile drew
   # them, whatever rounding a trip through another CRS left on the seeds.
   pts <- .seeds_at_centres(pts, seed_rule)
+  # Seeds stand for the cells they generate, and `index` gives each one its
+  # own cell even when the seed lies outside the boundary (see .seed_layer()).
+  # Asked here, where the points can be compared with their record's centres.
+  seed_layer <- .seed_layer(points_sf, cover, pts)
+  no_location(pts, moved = TRUE)
 
   boundary_source <- "boundary"
   if (is.null(boundary) && !is.null(cover_geom)) {
     # From the cover: its hull or polygons, in the working CRS, grown by 2% of
     # the diagonal (see .cover_boundary()).
     from_cover <- .cover_boundary(
-      tryCatch(.cover_follow(cover_geom, pts_in, pts),
+      tryCatch(.cover_follow(cover_geom, pts_in, pts, caller = caller,
+                             label = if (identical(cover_from, "cover")) "`cover`"
+                                     else "the cover the seeds carry"),
                error = function(e) sf::st_sfc(crs = sf::st_crs(pts))),
       pts)
     if (inherits(from_cover, "sf")) {
@@ -1096,15 +1798,24 @@ create_voronoi_polygons <- function(
                          "on a line): the cells are a sliver")
         else "")
     }
-    hull <- suppressWarnings(sf::st_buffer(hull, dist = 0.02 * max(diag, 1)))
+    hull <- suppressWarnings(sf::st_buffer(hull, dist = .voronoi_grow(as.numeric(diag))))
     hull_sfc <- sf::st_sfc(hull, crs = sf::st_crs(pts))
     boundary <- sf::st_sf(geometry = hull_sfc)
     boundary_source <- "points"
   } else {
+    # The moves above empty a row they cannot place.
+    if (identical(boundary_source, "boundary"))
+      boundary <- .boundary_located(boundary, "create_voronoi_polygons", nothing_b,
+                                    moved = TRUE)
     if (!any(sf::st_geometry_type(boundary) %in% c("POLYGON", "MULTIPOLYGON")))
       stop("create_voronoi_polygons(): `boundary` must be polygonal.")
   }
-  boundary <- .safe_make_valid(boundary)
+  # A row of the caller's `boundary` the repair leaves without a polygon (a
+  # ring with no height) is left out (.boundary_repaired()): alone, the
+  # cells were clipped to a line and held none of the seeds.
+  boundary <- if (identical(boundary_source, "boundary"))
+    .boundary_repaired(boundary, "create_voronoi_polygons", nothing_b)
+  else .safe_make_valid(boundary)
 
   # `isTRUE(is.numeric(expand)) && expand > 0` short-circuits to FALSE for a
   # character `expand`, dropping the requested expansion with no condition at
@@ -1127,6 +1838,19 @@ create_voronoi_polygons <- function(
   cells_sfc <- sf::st_sfc(cells, crs = sf::st_crs(pts))
   cells <- sf::st_sf(geometry = cells_sfc)
   cells <- .safe_make_valid(cells)
+  # Each seed's own cell, carried through the clip.  A generator lies inside
+  # its own Voronoi cell and in no other, so before the clip the cell a seed
+  # touches is the cell it generates.  After the clip a seed outside a
+  # boundary that is not convex (a k-means centre over a bay) lies in no
+  # cell, although its cell is there: the part of the study area nearer it
+  # than any other seed.  The row each clipped cell came from rides through
+  # the clip in a column, which is dropped once the cells have their IDs.
+  tagged <- seed_layer && nrow(cells) > 0L
+  if (seed_layer) {
+    generates <- sf::st_intersects(pts, cells)
+    made <- rep(NA_integer_, nrow(cells))
+  }
+  if (tagged) cells$..generated <- seq_len(nrow(cells))
 
   if (clip) {
     clip_to <- if (expand > 0) boundary_expanded else boundary
@@ -1143,21 +1867,92 @@ create_voronoi_polygons <- function(
     cells <- .keep_polygonal(cells)
   }
 
+  # The column comes off before the cells get their IDs.  Passed with it,
+  # ensure_stable_poly_id() returns other row names and attributes, and on
+  # a layer with a degenerate cell sf::st_centroid() stops where it does not
+  # for the geometry alone, so the cells were not the cells the same points
+  # get when they are not seeds.
+  if (tagged) {
+    from    <- cells$..generated
+    cells   <- sf::st_sf(geometry = sf::st_geometry(cells))
+    clipped <- sf::st_geometry(cells)
+  }
   if (nrow(cells) > 0) {
     cells <- ensure_stable_poly_id(cells, id_col = "cell_id")
   } else {
     cells$cell_id <- integer(0)
   }
+  if (tagged && nrow(cells) > 0L) {
+    # ensure_stable_poly_id() repairs the cells (.make_valid_rows()) and puts
+    # them in order, so each cell it returns is the repaired copy of one
+    # clipped cell, which says which cell before the clip it is.  The same
+    # repair here finds each of them.  The cells are in a projected CRS here
+    # (lon/lat seeds are projected above), so both repairs are GEOS's.
+    # `made` then holds the cell_id of each cell before the clip, and NA
+    # where the clip left nothing of it.
+    key  <- function(g) sf::st_as_binary(g, hex = TRUE)
+    rows <- match(key(sf::st_geometry(cells)), key(.make_valid_rows(clipped)))
+    hit  <- !is.na(rows)
+    made[from[rows[hit]]] <- cells$cell_id[hit]
+  }
 
   # Build point → cell index using cell_id values.  The snapping record rides
   # on `params`, not on `index`, so `index` stays a plain integer vector.
-  index   <- .build_point_cell_index(pts, cells)
+  # Seeds raise their own warning below.  The cells' edges are laid at the
+  # coordinates' size and the points are read against them with a margin of
+  # at least four units in the last place (.edge_tol()): at 1e15, 0.5 m, so
+  # two points 0.25 m apart fell in one cell.  Where the spacing of doubles
+  # at the points is more than a millionth of their extent it is said
+  # (.warn_xy_imprecise()).
+  .warn_xy_imprecise(pts, caller, "points_sf",
+                     reads = "so the cells' edges and the points' cells are read at that rounding")
+  index   <- .build_point_cell_index(pts, cells, warn = !seed_layer, caller = caller)
   snapped <- attr(index, "snapped")
   attr(index, "snapped") <- NULL
+  if (seed_layer) {
+    # Each seed's index is the cell it generates; a MULTIPOINT seed's is the
+    # smallest cell_id among the cells its vertices generate, as it is among
+    # the cells it lies in.  A seed whose cell is not known (an empty
+    # geometry, a cell the clip removed, or one whose copy was not found
+    # above) keeps what the search gave it, which is its own cell wherever
+    # the seed lies in one.
+    own <- vapply(generates, function(r) {
+      ids <- made[as.integer(r)]
+      ids <- ids[!is.na(ids)]
+      if (length(ids)) min(ids) else NA_integer_
+    }, integer(1))
+    found <- index
+    took  <- !is.na(own)
+    index[took] <- own[took]
+    # The record of the nearest-cell repair keeps the seeds whose index it
+    # still gave.
+    kept <- !is.na(index) & !is.na(found) & index == found
+    keep <- snapped$which %in% which(kept)
+    snapped <- list(n = sum(keep), which = snapped$which[keep],
+                    distance = snapped$distance[keep])
+    n_out <- sum(is.na(index))
+    if (n_out > 0L) {
+      n_empty <- sum(is.na(index) & !.located_rows(pts))
+      .warn_classed("spatialkit_unassigned", paste0(
+        "%s(): %d of %d seed(s) (%.1f%%) have no cell and are NA ",
+        "in `index`; `params$n_outside` holds the count. %s"),
+        caller, n_out, length(index), 100 * n_out / length(index),
+        if (n_empty == n_out)
+          sprintf("They have no location (%s), so there is nothing to index.",
+                  .UNLOCATED_WHAT)
+        else paste0(
+          if (n_empty > 0L) sprintf("%d of them have no location (%s); the rest lie ",
+                                    n_empty, .UNLOCATED_WHAT)
+          else "They lie ",
+          "outside the boundary (grown by `expand`), and every part of the study ",
+          "area is nearer another seed, so the clip left nothing of their cells. ",
+          "A seed outside the boundary whose cell reaches into it keeps that cell."),
+        data = list(n = n_out, total = length(index)))
+    }
+  }
   # With a boundary given, a point `cover` is checked against the cells.
   cover_outside <- if (identical(boundary_source, "boundary"))
-    .cover_points_outside(cover, cells, pts_in, pts, "create_voronoi_polygons",
-                          method = "voronoi")
+    .cover_points_outside(cover, cells, pts_in, pts, caller, method = "voronoi")
   else NULL
 
   res <- list(
@@ -1195,6 +1990,87 @@ create_voronoi_polygons <- function(
 # Grid Tessellations (Hex / Square)
 # -----------------------------------------------------------------------------
 
+#' The error for polygons of a grid laid in degrees that s2 refuses
+#'
+#' create_grid_polygons() lays a grid sized by `cellsize` with a geographic
+#' `crs` in degrees, and measures and joins on such cells, and on the
+#' boundary they are clipped to, run with s2.  Three sites can meet a polygon
+#' s2 refuses: `boundary` itself, after its repair (\code{site =
+#' "boundary"}); the cells of the lattice before the clip, which s2's clip
+#' stops on (\code{"lattice"}: a lattice that runs past latitude 90); and the
+#' clipped cells, after their repeated vertices are dropped (\code{"grid"}).
+#' The error is of class \code{"spatialkit_cells_degenerate"}
+#' (\code{.raise_cells_degenerate()}) and carries \code{site}, so
+#' build_tessellation(), which hands its arguments on, raises it again in its
+#' own words.  The remedy names the arguments that lay the grid in a
+#' projected CRS.
+#'
+#' @param parent s2's error.
+#' @param rows,reasons,n The rows s2 refuses, its reason for each, and the
+#'   number of polygons it was handed.
+#' @param s2_forced Whether the session has \code{sf::sf_use_s2(FALSE)}.
+#' @param site \code{"boundary"}, \code{"lattice"} or \code{"grid"}.
+#' @param caller \code{"create_grid_polygons"} or \code{"build_tessellation"}.
+#' @param clipped \code{FALSE} for a grid laid with \code{clip = FALSE}: its
+#'   cells were not clipped, so the error does not say they were.
+#' @param call_it \code{FALSE} to return the arguments of
+#'   \code{.raise_cells_degenerate()} that depend on \code{site} and
+#'   \code{caller} (\code{layer}, \code{task}, \code{of}, \code{source},
+#'   \code{remedy}) as a list instead of raising the error.
+#' @return Does not return, unless \code{call_it} is \code{FALSE}.
+#' @keywords internal
+#' @noRd
+.grid_refused <- function(parent, rows, reasons, n, s2_forced = FALSE,
+                          site = c("grid", "lattice", "boundary"),
+                          caller = "create_grid_polygons", clipped = TRUE,
+                          call_it = TRUE) {
+  site  <- match.arg(site)
+  count <- if (identical(caller, "build_tessellation")) "`approx_n_cells`"
+           else "`target_cells` or `n`"
+  plural <- function(k, one, many) sprintf("%d %s", k, if (k == 1L) one else many)
+  args <- switch(site,
+    boundary = list(
+      layer = "`boundary`", task = "the clip of the grid to it",
+      of = sprintf("the %s of `boundary`", plural(n, "polygon", "polygons")),
+      source = ""),
+    lattice = list(
+      layer = "the grid", task = "the clip of the grid to `boundary`",
+      of = sprintf("the %s of the grid laid in degrees over `boundary`, before its clip",
+                   plural(n, "cell", "cells")),
+      source = .GRID_DEGREES_SOURCE),
+    grid = list(
+      layer = "the grid", task = "a measure or a join on these cells",
+      of = sprintf("the %s of the grid laid in degrees%s", plural(n, "cell", "cells"),
+                   if (isTRUE(clipped)) " and clipped to `boundary`" else ""),
+      source = if (isTRUE(clipped)) .GRID_DEGREES_SOURCE else ""))
+  args$remedy <- sprintf(paste0(
+    "Pass a projected `crs` and a `cellsize` in its units, or size the grid by %s, ",
+    "which lays it in a projected CRS and returns it in degrees, and call %s() again%s."),
+    count, caller,
+    if (site == "boundary")
+      "; `boundary` is then repaired in that CRS with sf::st_make_valid(), which splits crossing edges"
+    else "")
+  if (!isTRUE(call_it)) return(args)
+  .raise_cells_degenerate(parent, rows, reasons, n, caller, args$layer, args$task,
+                          again = NULL, of = args$of, s2_forced = s2_forced,
+                          source = args$source, remedy = args$remedy, site = site)
+}
+
+# Where cells of a grid laid in degrees get two corners s2 reads as one
+# point, for the error .grid_refused() raises.
+.GRID_DEGREES_SOURCE <- paste0(
+  "A grid laid in degrees and clipped to `boundary` can hold such corners where ",
+  "the clip cuts a cell within rounding of one of its corners or edges. A corner ",
+  "listed twice in a row, or within 1e-12 degrees of the one before it, is ",
+  "dropped before this check, unless that leaves the cell fewer than three corners. ")
+
+# Two corners of a clipped cell in degrees no farther apart than this, in x
+# and in y, are read as one (.drop_repeated_vertices()): the clip writes
+# corners 7e-15 degrees apart, which s2 reads as one point.  1e-12 degrees
+# is under a micrometre on the ground.
+.GRID_SAME_CORNER <- 1e-12
+
+
 #' Create square or hexagonal grid polygons over a boundary
 #'
 #' Lays a regular grid of equal-area cells over `boundary` and clips it to that
@@ -1211,7 +2087,23 @@ create_voronoi_polygons <- function(
 #' units) or `n` (a fixed number of columns and rows). See `@param cellsize`
 #' for what happens when more than one is given.
 #'
-#' @param boundary Polygonal sf or sfc object.
+#' @param boundary Polygonal sf or sfc object. One that mixes XY and XYZ (or
+#'   XYM) geometries is read without Z and M, since sf reads a layer in the
+#'   dimension of its first geometry. So is one whose
+#'   geometries carry M (XYM or XYZM), which GEOS refuses.
+#'   A row that is empty, or has a coordinate that is not finite or lies
+#'   beyond 1e150 (read as given, and again after any move into another
+#'   CRS), covers no ground and is left out; a boundary with no such row
+#'   left is refused with an error that says so. A boundary in a geographic
+#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+#'   the Earth, is refused with an error of class
+#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
+#'   its CRS.
+#'   A row the repair of `boundary` leaves without a polygon (a ring with no
+#'   height: every vertex on one line, or in degrees on one parallel) is
+#'   left out as well, and a boundary with no polygon left is refused.
+#'   A boundary without a CRS that `crs` stamps with a geographic CRS is
+#'   tested for its latitude in the same way.
 #' @param target_cells Optional approximate desired number of cells.  The cell
 #'   \emph{size} is derived from it as \code{sqrt(area / target_cells)}, where
 #'   \code{area} is that of the boundary's bounding box, so square grids get
@@ -1234,6 +2126,18 @@ create_voronoi_polygons <- function(
 #'   one of `target_cells`, `cellsize` and `n`.  For `type = "hex"` a hexagon
 #'   is defined by a single edge-to-edge distance, so only `cellsize[1]` is
 #'   used and a differing `cellsize[2]` is ignored with a logged warning.
+#'   A side of the boundary's bounding box that exceeds a whole number of
+#'   square cells, of this size or of the size derived from `target_cells`,
+#'   by no more than a margin of one part in 1e10 of the largest coordinate
+#'   of the boundary, at most a millionth of the diagonal of its bounding
+#'   box and at least four times the spacing of doubles at that coordinate,
+#'   gets that number of cells, so a box of 9000 by 6000 at 1000 gets 9 by 6
+#'   cells in any unit or origin, where rounding could add a row or column.
+#'   A boundary so far from the origin of its coordinates that doubles there
+#'   are spaced more than a millionth of its extent apart (0.125 at 1e15,
+#'   beside a boundary a few kilometres across) has its grid lines rounded to
+#'   that spacing; the grid is laid, and a warning of class
+#'   `"spatialkit_xy_imprecise"` gives the spacing and the extent.
 #' @param n Optional grid resolution (integer, length 1 or 2) giving the number
 #'   of columns and rows to divide the boundary's bounding box into; the cell
 #'   size is derived from it. [sf::st_make_grid()] derives hexagon placement
@@ -1243,7 +2147,15 @@ create_voronoi_polygons <- function(
 #'   warning) when `cellsize` is also supplied. Passing both would otherwise
 #'   truncate the grid to `n[1]` x `n[2]` cells anchored at the bounding-box
 #'   corner, covering only part of the boundary.
-#' @param clip Logical; clip grid to boundary.
+#' @param clip Logical; clip grid to boundary. In a projected or CRS-less
+#'   grid, a cell that meets the boundary only within a margin of the cell's
+#'   edge (the margin `cellsize` gives: one part in 1e10 of the largest
+#'   coordinate of the boundary, within its bounds; a
+#'   cell whose edge lies on the boundary's edge but for rounding) is
+#'   dropped, rather than kept as a sliver. The call stops when the clip
+#'   leaves no cell, as it does when the lattice has none: in degrees with
+#'   s2 on, a boundary edge that spans more than 180 degrees of longitude is
+#'   read as the shorter great-circle arc, the other way round the globe.
 #' @param crs Optional target CRS: anything [sf::st_crs()] accepts, including
 #'   an sf or sfc layer, whose CRS is used. When `NULL` (default) a lon/lat
 #'   boundary is projected with [ensure_projected()], which changes the CRS of the returned
@@ -1257,7 +2169,20 @@ create_voronoi_polygons <- function(
 #'   projected CRS and then transformed, with long edges densified. A
 #'   `cellsize` is in the units of `crs`, so with a geographic `crs` it is in
 #'   degrees and the grid is laid in degrees, as asked; such cells are not
-#'   equal-area.
+#'   equal-area. With [sf::sf_use_s2()] on (the default) such a grid is
+#'   clipped with sf's spherical engine s2, and s2 measures and joins its
+#'   cells after; s2 refuses a polygon that is not valid on the sphere. The
+#'   rows of `boundary` and the cells are checked with s2 whatever
+#'   [sf::sf_use_s2()] says. Before the clip, a row of `boundary` that s2
+#'   refuses is repaired, with crossing edges split. A cell that lists a
+#'   corner twice in a row, or two corners within 1e-12 degrees of each
+#'   other, which s2 reads as one point, is returned with one of them, which
+#'   moves no corner and changes the cell's area by rounding. A row of
+#'   `boundary`, or a cell, that s2 refuses even then (a cell of a grid laid
+#'   past latitude 90, say) stops the call with an error of class
+#'   `"spatialkit_cells_degenerate"` that names its rows and s2's reason, and
+#'   says to pass a projected `crs` or to size the grid by `target_cells` or
+#'   `n`.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
@@ -1297,7 +2222,18 @@ create_grid_polygons <- function(
                 .tess_hint(x, "$boundary"), "."))
   }
 
-  boundary <- .as_sf(boundary)
+  # A boundary that mixes XY and XYZ (or XYM) geometries is read in XY: sf
+  # reads a layer in the dimension of its first geometry, and GEOS stopped on
+  # an XYZ ring among XY ones.  So is a boundary whose polygons carry M, on
+  # which GEOS stopped (.xy_if_mixed_or_m()).
+  boundary <- .xy_if_mixed_or_m(.as_sf(boundary))
+  # A row of `boundary` without a location (empty, or a vertex at Inf or
+  # beyond 1e150) covers no ground and is left out, read as given
+  # (.boundary_located()): at Inf the grid was laid over a box it moved.  A
+  # boundary with no row left, or in degrees with a latitude beyond 90 (a
+  # grid laid on the far meridian), is refused.
+  nothing <- "no cell can be built in it"
+  boundary <- .boundary_located(boundary, "create_grid_polygons", nothing)
   # A layer as `crs` means its CRS; passed on as it was, it stopped with "the
   # condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
@@ -1307,7 +2243,16 @@ create_grid_polygons <- function(
 
   crs_out <- NULL
   if (!is.null(crs)) {
-    boundary <- .transform_or_stamp(boundary, crs, "boundary", "create_grid_polygons")
+    stamped <- is.na(sf::st_crs(boundary))
+    # A boundary stamped with a geographic `crs` and a y between 90 and 180
+    # reaches the test below, which names its row (lat_max = 180).
+    boundary <- .transform_or_stamp(boundary, crs, "boundary", "create_grid_polygons",
+                                    lat_max = 180)
+    # A boundary without a CRS is stamped with `crs`: its coordinates are
+    # those given, now read in that CRS, so a geographic one is tested for a
+    # latitude beyond 90 here, before any move (.boundary_located()).
+    if (stamped)
+      boundary <- .boundary_located(boundary, "create_grid_polygons", nothing)
     # A geographic `crs` is where the grid is RETURNED.  Laid in degrees the
     # cells were neither square nor equal-area, and clipping them under s2
     # often stopped with "Edge 0 is degenerate" or left points inside the
@@ -1324,13 +2269,36 @@ create_grid_polygons <- function(
       .msg("create_grid_polygons(): projecting `boundary` to a local projected ",
            "CRS; the returned grid uses that CRS. Pass `crs` to control it.")
   }
-  boundary <- .safe_make_valid(boundary)
+  # The moves above empty a row they cannot place.
+  boundary <- .boundary_located(boundary, "create_grid_polygons", nothing, moved = TRUE)
+  # A row the repair leaves without a polygon (a ring with no height) is
+  # left out (.boundary_repaired()): the clip read it as a line.
+  boundary <- .boundary_repaired(boundary, "create_grid_polygons", nothing)
+  # A grid sized by `cellsize` with a geographic `crs` is laid in degrees,
+  # and its clip to `boundary` and every measure on its cells run with s2.
+  # In degrees, with s2 on, .safe_make_valid() is s2's rebuild, which
+  # leaves crossing edges as they are: a bowtie boundary stopped the clip
+  # with s2's bare "Loop 0 is not valid: Edge 0 crosses edge 2", where a
+  # projected one is split by GEOS.  The rows s2 refuses are rebuilt with those edges split
+  # (.boundary_mend()); a row s2 refuses even then stops the call with the
+  # error .grid_refused() builds.  With clip = FALSE only the bounding box of
+  # `boundary` is read, so it is left as it is.
+  in_degrees <- .is_longlat(boundary)
+  if (in_degrees && isTRUE(clip))
+    boundary <- .boundary_mend(boundary, refuse = function(...)
+      .grid_refused(..., site = "boundary", caller = "create_grid_polygons"),
+      caller = "create_grid_polygons", nothing = nothing)
 
   bb <- sf::st_bbox(boundary)
   w  <- as.numeric(bb["xmax"] - bb["xmin"])
   h  <- as.numeric(bb["ymax"] - bb["ymin"])
   if (!(is.finite(w) && is.finite(h) && w > 0 && h > 0))
     stop("create_grid_polygons(): boundary bbox has non-positive extent.")
+  # The grid's lines are laid at the coordinates' size, a corner plus a
+  # multiple of the cell's side, and rounded to the spacing of doubles
+  # there; where that is more than a millionth of the boundary's extent it
+  # is said (.warn_xy_imprecise()).
+  .warn_xy_imprecise(bb, "create_grid_polygons", "boundary")
   env <- sf::st_as_sfc(bb, crs = sf::st_crs(boundary))
 
   # Parse and validate `n` once, up front, so an invalid value is rejected the
@@ -1509,8 +2477,24 @@ create_grid_polygons <- function(
   #
   # For hex grids sf short-circuits to make_hex_grid() and reads `cellsize`
   # only, so the extra argument is inert there.
+  #
+  # Where `n` is not forwarded (a caller's `cellsize`, or the square side
+  # derived from `target_cells`), sf counts the cells per side as
+  # ceiling(w / cellsize) on the exact extent.  A side that is a whole number
+  # of cells then gained a row or column whenever rounding put the quotient
+  # a hair over that number (9.0000000000001741 for a 9000 m box at 1000 m
+  # with the false origin moved by 0.1 m), and the clip kept that row or
+  # column as cells of 1e-8 m^2.  A side that exceeds a whole number of
+  # cells by no more than the margin of an edge is that number here
+  # (.grid_side_counts()), and that count is passed with the cell size for a
+  # square grid.  Hexagons are placed from `cellsize` alone; their slivers
+  # are dropped after the clip (.drop_edge_slivers()).
   if (!is.null(cellsize)) grid_args$cellsize <- cellsize
-  if (!is.null(n) && !cellsize_supplied) grid_args$n <- n
+  if (!is.null(n) && !cellsize_supplied) {
+    grid_args$n <- n
+  } else if (identical(type, "square") && !is.null(cellsize)) {
+    grid_args$n <- .grid_side_counts(c(w, h), cellsize, bb)
+  }
   grid_sfc <- do.call(sf::st_make_grid, grid_args)
   if (length(grid_sfc) == 0L)
     stop("create_grid_polygons(): st_make_grid() produced zero cells.")
@@ -1523,14 +2507,152 @@ create_grid_polygons <- function(
     # cells into one row per boundary feature and graft the boundary's
     # attribute columns onto the grid.
     clip_to <- sf::st_union(sf::st_geometry(boundary))
-    grid_sf <- suppressWarnings(sf::st_intersection(.safe_make_valid(grid_sf), clip_to))
+    lattice <- .safe_make_valid(grid_sf)
+    # In degrees s2 clips, and stopped with its bare message on a cell of the
+    # lattice it refuses (a lattice laid past latitude 90).
+    grid_sf <- withCallingHandlers(
+      suppressWarnings(sf::st_intersection(lattice, clip_to)),
+      error = function(e) {
+        if (!in_degrees) return()
+        a <- .grid_refused(NULL, integer(0), character(0), nrow(lattice),
+                           site = "lattice", call_it = FALSE)
+        .stop_cells_degenerate(e, lattice, "create_grid_polygons", a$layer, a$task,
+                               NULL, of = a$of, source = a$source, remedy = a$remedy,
+                               site = "lattice")
+      })
     # st_intersection can produce non-polygon slivers, and collections that
     # hold a cell's area; keep the polygonal part of each.
     grid_sf <- .keep_polygonal(grid_sf)
+    # A cell whose edge lies on the boundary's edge but for rounding meets
+    # the boundary only within the margin of that edge, and the clip kept
+    # the part as a cell of 1e-8 m^2, in some units and origins and not in
+    # others.  Such parts are dropped; a point on that edge is in the cell
+    # beside it, within the margin (.build_point_cell_index()).
+    if (!in_degrees)
+      grid_sf <- .drop_edge_slivers(grid_sf, lattice, .edge_tol(bb))
     grid_sf$poly_id <- seq_len(nrow(grid_sf))
+    # The refusal of zero cells holds after the clip as it does before it:
+    # in degrees a boundary whose edges span more than 180 degrees of
+    # longitude is clipped as a strip the lattice can miss whole, and the
+    # grid came back with no row and nothing said.
+    if (nrow(grid_sf) == 0L)
+      stop(paste0(
+        "create_grid_polygons(): the clip to `boundary` left zero cells.",
+        if (in_degrees && isTRUE(sf::sf_use_s2()))
+          paste0(" In degrees s2 reads each edge of `boundary` as the shorter ",
+                 "great-circle arc, so an edge that spans more than 180 degrees of ",
+                 "longitude runs the other way round the globe and the boundary s2 ",
+                 "clips with lies outside the grid. Pass a projected `crs` and a ",
+                 "`cellsize` in its units, or size the grid by `target_cells` or `n`, ",
+                 "which lays it in a projected CRS and returns it in degrees.")
+        else ""), call. = FALSE)
+  }
+  # The clip in degrees writes cells that list a corner twice in a row (a
+  # ring that ends on its first vertex twice), which s2 refuses: on a plain
+  # 0.5 degree square at cellsize 0.1 one square cell of 25 and three
+  # hexagons of 39, and build_tessellation() then stopped with s2's bare
+  # "Edge 5 is degenerate (duplicate vertex)".  The cells s2 refuses are
+  # returned without the vertices that repeat the one before them, which
+  # leaves their points in degrees and their areas as they were
+  # (.s2_mend()).  The clip also writes two corners that differ by rounding
+  # (7e-15 degrees on that square at cellsize 0.05, hexagon 128), which s2
+  # reads as one point or as edges that cross; a cell s2 still refuses is
+  # returned without the corners that lie within .GRID_SAME_CORNER degrees
+  # of the one kept before them, which moves no corner and changes its area
+  # by rounding.  A cell s2 refuses even then stops the call with the error
+  # .grid_refused() builds, before anything measures it.  Cells s2 accepts
+  # are returned as they were.
+  if (in_degrees && nrow(grid_sf)) {
+    s2_forced <- !isTRUE(sf::sf_use_s2())
+    g <- sf::st_geometry(grid_sf)
+    m <- .with_s2(.s2_mend(g, split = FALSE))
+    for (i in m$refused) {
+      d <- tryCatch(.drop_repeated_vertices(m$g[i], tol = .GRID_SAME_CORNER),
+                    error = function(e) NULL)
+      if (!is.null(d) && !length(.with_s2(.s2_refused(d)))) {
+        m$g[i]   <- d
+        m$mended <- sort(c(m$mended, i))
+        m$refused <- setdiff(m$refused, i)
+      }
+    }
+    if (length(m$refused)) {
+      sub    <- m$g[m$refused]
+      parent <- .with_s2(tryCatch({ suppressMessages(sf::st_as_s2(sub)); NULL },
+                                  error = function(e) e))
+      if (is.null(parent)) parent <- simpleError("s2 refuses the cell")
+      why <- .with_s2(.s2_refused_rows(sub))
+      .grid_refused(parent, m$refused,
+                    if (!is.null(why) && length(why$rows) == length(m$refused)) why$reasons
+                    else rep(conditionMessage(parent), length(m$refused)),
+                    length(g), s2_forced, site = "grid", caller = "create_grid_polygons",
+                    clipped = isTRUE(clip))
+    }
+    if (length(m$mended)) sf::st_geometry(grid_sf) <- m$g
   }
   .to_output_crs(grid_sf, crs_out)
 }
+
+#' The number of square cells along each side of a grid
+#'
+#' \code{sf::st_make_grid()} counts \code{ceiling(span / cellsize)} cells on
+#' a side, so a side that is a whole number of cells but for rounding gains a
+#' row or column.  A side that exceeds a whole number of cells by no more
+#' than the margin of an edge (\code{.edge_tol(bb)}) is that number here,
+#' the rule \code{.block_occupied_fast()} applies to a quotient.  The margin
+#' is absolute, so the strip of the boundary such a count leaves outside the
+#' grid is never wider than the margin \code{.build_point_cell_index()}
+#' joins a point to a cell with, however many cells the side holds.
+#'
+#' @param span The width and height of the bounding box.
+#' @param cellsize The cell width and height.
+#' @param bb The bounding box the margin is taken from.
+#' @return Integer vector of two counts, each at least 1.
+#' @keywords internal
+#' @noRd
+.grid_side_counts <- function(span, cellsize, bb) {
+  q <- span / cellsize
+  f <- floor(q)
+  q <- ifelse(is.finite(q) & q - f <= .edge_tol(bb) / cellsize, f, q)
+  as.integer(pmax(1, ceiling(q)))
+}
+
+#' Drop the parts of grid cells that lie within the margin of the cell's edge
+#'
+#' After the clip of a lattice to a boundary, a cell whose edge lies on the
+#' boundary's edge but for rounding meets the boundary in a strip no wider
+#' than that rounding.  Such a part lies wholly within \code{tol} of the
+#' cell's edge, so it does not meet the cell shrunk by \code{tol}.  Only
+#' parts whose area is at most the cell's bounding-box perimeter times
+#' \code{tol} can be such strips, and only those are shrunk and tested.
+#'
+#' @param parts The clipped cells, with the \code{poly_id} of the lattice
+#'   cell each came from.
+#' @param lattice The lattice before the clip, with \code{poly_id}.
+#' @param tol The margin of an edge (\code{.edge_tol()}).
+#' @return \code{parts} without those strips.
+#' @keywords internal
+#' @noRd
+.drop_edge_slivers <- function(parts, lattice, tol) {
+  if (!nrow(parts) || !(tol > 0)) return(parts)
+  bb  <- sf::st_bbox(sf::st_geometry(lattice)[1L])
+  per <- 2 * (as.numeric(bb[["xmax"]] - bb[["xmin"]]) +
+                as.numeric(bb[["ymax"]] - bb[["ymin"]]))
+  # In the CRS's unit squared, as the bound is: sf::st_area() gives square
+  # metres for a unit it has no name for, and a strip was kept in a unit of
+  # 3.28 m that was dropped in metres (.planar_area()).
+  a <- suppressWarnings(.planar_area(parts))
+  cand <- which(is.finite(a) & a <= 1.01 * per * tol)
+  if (!length(cand)) return(parts)
+  cells <- sf::st_geometry(lattice)[match(parts$poly_id[cand], lattice$poly_id)]
+  inner <- suppressWarnings(sf::st_buffer(cells, -tol))
+  reach <- vapply(seq_along(cand), function(i)
+    !sf::st_is_empty(inner[i]) &&
+      lengths(sf::st_intersects(sf::st_geometry(parts)[cand[i]], inner[i])) > 0L,
+    logical(1))
+  drop <- cand[!reach]
+  if (length(drop)) parts[-drop, , drop = FALSE] else parts
+}
+
 
 # -----------------------------------------------------------------------------
 # Unified Tessellation Builder
@@ -1556,8 +2678,15 @@ create_grid_polygons <- function(
 #' axis-aligned artefacts of squares and have uniform neighbour distances.
 #' \code{"triangles"} returns the Delaunay triangulation, useful for
 #' interpolation and adjacency work; it is not meant as an aggregation unit.
-#' \code{\link{determine_optimal_levels}()} will suggest a cell count from the
-#' spatial structure of the data.
+#' Points on one circle, such as the four corners of each square of a
+#' lattice, have more than one Delaunay triangulation; they are triangulated
+#' in coordinates centred on the middle of their bounding box, divided by its
+#' diagonal and rounded to 2^-30 of it, so they are split the same way in any
+#' unit or origin, but for a point that lies within its own rounding noise of
+#' the middle of such a step.
+#' \code{\link{determine_optimal_levels}()} suggests a cell count from the
+#' elbow of the WSS curve of the points' k-means clustering, and returns
+#' \code{NA}, which \code{approx_n_cells} refuses, when the curve has none.
 #'
 #' \code{"voronoi"} and \code{"triangles"} are built on the points' vertices:
 #' a MULTIPOINT feature with several vertices gets one cell (or triangle
@@ -1565,7 +2694,9 @@ create_grid_polygons <- function(
 #' \code{cell_id} among the cells it touches.  See
 #' \code{\link{create_voronoi_polygons}()}.
 #'
-#' @param points_sf An sf object with POINT/MULTIPOINT geometry.
+#' @param points_sf An sf object with POINT/MULTIPOINT geometry. Points that
+#'   mix XY and XYZ (or XYM), or that carry M, are read in x and y, since sf
+#'   reads a layer in the dimension of its first geometry and GEOS refuses M.
 #' @param boundary Polygonal sf/sfc study area. **Required** for
 #'   `method = "hex"` and `method = "square"`, which have no extent of their
 #'   own to lay a grid over and error without it; supply the study-area polygon,
@@ -1587,7 +2718,23 @@ create_grid_polygons <- function(
 #'   of [ensure_projected()]: taken as EPSG:4326 and projected when the points
 #'   look like degrees (a boundary whose coordinates do not fit the lon/lat
 #'   envelope is then refused with an error), otherwise left in the same
-#'   unnamed planar space.
+#'   unnamed planar space. A boundary that mixes XY and XYZ (or XYM)
+#'   geometries is read without Z and M, since sf reads a layer in the
+#'   dimension of its first geometry. So is one whose
+#'   geometries carry M (XYM or XYZM), which GEOS refuses.
+#'   A row that is empty, or has a coordinate that is not finite or lies
+#'   beyond 1e150 (read as given, and again after any move into another
+#'   CRS), covers no ground and is left out; a boundary with no such row
+#'   left is refused with an error that says so. A boundary in a geographic
+#'   CRS with a vertex at a latitude beyond 90 degrees, which is no place on
+#'   the Earth, is refused with an error of class
+#'   `"spatialkit_cells_degenerate"` that names its rows and says to check
+#'   its CRS.
+#'   A row the repair of `boundary` leaves without a polygon (a ring with no
+#'   height: every vertex on one line, or in degrees on one parallel) is
+#'   left out as well, and a boundary with no polygon left is refused.
+#'   A boundary without a CRS that `crs` stamps with a geographic CRS is
+#'   tested for its latitude in the same way.
 #' @param method One of "voronoi", "triangles", "hex", "square".
 #' @param approx_n_cells Approximate number of cells.  Read by
 #'   \code{method = "hex"} and \code{"square"} only: \code{"voronoi"} grows
@@ -1602,7 +2749,8 @@ create_grid_polygons <- function(
 #'   clipping to an irregular boundary may differ noticeably.  Besides a
 #'   number, this accepts what the level-selection step returned: the integer
 #'   vector of ranked candidates from \code{\link{determine_optimal_levels}()}
-#'   (its first element is used), a \code{\link{select_resolution}()} result
+#'   (its first element is used; its \code{NA} is refused with a note on
+#'   where it came from), a \code{\link{select_resolution}()} result
 #'   (its \code{$best}), or a \code{\link{resolution_profile}()}.  A profile
 #'   built without an \code{estimate} is read with
 #'   \code{select_resolution()} by \code{cp}; one built with
@@ -1631,7 +2779,9 @@ create_grid_polygons <- function(
 #'   \code{get_voronoi_seeds(method = "kmeans", n = <the selection>, sample_points = <the points>)}:
 #'   given the \code{select_resolution()} result or the profile itself, it
 #'   returns the centres of the partition the profile scored, whose Voronoi
-#'   cells are the cells the criteria judged.  Seeds made that way carry the
+#'   cells are the cells the criteria judged (refitted to every point when
+#'   the profile, without an estimate, was fitted to a subsample).  Seeds
+#'   made that way carry the
 #'   hull of \code{sample_points} as their cover, so the cells built on them
 #'   hold every point; made with neither \code{sample_points} nor a boundary,
 #'   they carry the hull of the points the profile was computed on.
@@ -1640,7 +2790,16 @@ create_grid_polygons <- function(
 #'   that it was ignored.  When both \code{cellsize} and \code{approx_n_cells}
 #'   are given, \code{cellsize} wins and \code{approx_n_cells} is ignored with
 #'   a logged warning; supply one or the other.  With a geographic \code{crs}
-#'   it is in that CRS's degrees, and the grid is laid in degrees.
+#'   it is in that CRS's degrees, and the grid is laid in degrees, as
+#'   [create_grid_polygons()] lays it; where s2 refuses a row of
+#'   \code{boundary} or a cell even repaired, the call stops with an error of
+#'   class \code{"spatialkit_cells_degenerate"} that says to pass a projected
+#'   \code{crs} or to size the grid by \code{approx_n_cells}.  A side of the
+#'   boundary's bounding box that exceeds a whole number of square cells by
+#'   no more than a margin of one part in 1e10 of the largest coordinate of
+#'   the boundary, at most a millionth of the diagonal of its bounding
+#'   box and at least four times the spacing of doubles at that coordinate,
+#'   gets that number of cells (see [create_grid_polygons()]).
 #' @param cover Optional sf or sfc layer the cells have to hold: the
 #'   observations (points), or a polygon. Read by `method = "voronoi"` when
 #'   there is no `boundary`: the boundary is then derived from the cover (the
@@ -1657,8 +2816,11 @@ create_grid_polygons <- function(
 #'   transformed. With a `boundary` (and for the other methods) the cover
 #'   sizes nothing: when it is a point layer, the number of its points that
 #'   fall outside every cell is returned as `params$cover_outside`, with a
-#'   warning of class `"spatialkit_unassigned"` when it is not 0. See
-#'   [create_voronoi_polygons()].
+#'   warning of class `"spatialkit_unassigned"` when it is not 0. A cover,
+#'   given or attached, that mixes XY and XYZ (or XYM) geometries, or that
+#'   carries M, is read in x and y. A row of the cover with a coordinate
+#'   that is not finite or lies beyond 1e150, read as given before any move,
+#'   is read as an empty row. See [create_voronoi_polygons()].
 #' @param expand Buffer distance, in the working CRS's units, by which the
 #'   Voronoi boundary is grown before the diagram is built. Applied by
 #'   `method = "voronoi"` only; the `"hex"`, `"square"` and `"triangles"`
@@ -1667,10 +2829,14 @@ create_grid_polygons <- function(
 #'   boundary, which is the one returned as `boundary`: cells reach `expand`
 #'   beyond the study area, and a point up to `expand` outside it is indexed.
 #' @param clip Logical; clip to boundary.
-#' @param keep_duplicates Logical. Has no effect on the cells or the index:
-#'   coincident points are merged before a Voronoi diagram or a Delaunay
-#'   triangulation is built either way, and every one of them is indexed to
-#'   the cell they share.
+#' @param keep_duplicates Logical. With \code{FALSE} (the default), points
+#'   are merged before a Voronoi diagram or a Delaunay triangulation is built
+#'   when they round to one point in coordinates centred on the middle of
+#'   their bounding box, divided by its diagonal and rounded to 2^-30 of it,
+#'   so points within about a billionth of the extent of each other count as
+#'   coincident in any unit or origin. With \code{TRUE} only points at
+#'   exactly one location are merged. Every point is indexed to the cell
+#'   that holds it.
 #' @param crs Optional target CRS: anything [sf::st_crs()] accepts, including
 #'   an sf or sfc layer, whose CRS is used. A projected CRS is the working
 #'   CRS. A geographic one (EPSG:4326, say) is the CRS the result is returned
@@ -1698,7 +2864,10 @@ create_grid_polygons <- function(
 #'   cells built in another projected CRS, named here, are the nearest-seed
 #'   cells of that CRS, so a row near a boundary can fall in the
 #'   neighbouring cell, and [summarize_by_cell()] then reports that the
-#'   cells are not the ones scored.
+#'   cells are not the ones scored. Voronoi cells returned in a geographic
+#'   `crs` can hold two corners at one point where four seeds stand the same
+#'   distance from a corner (gridded locations), which sf's spherical engine
+#'   (s2) refuses; [create_voronoi_polygons()] says what still stops on them.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
@@ -1709,21 +2878,52 @@ create_grid_polygons <- function(
 #'       carry `poly_id`, which holds the same values.}
 #'     \item{`index`}{Integer vector of `cell_id` values, one per row of
 #'       `points_sf`, and `NA` for a point that falls inside no cell, that is,
-#'       one outside the study area. Only a point within a thousandth of the
-#'       median cell width of a cell is snapped to it. That covers points
-#'       sitting exactly on a shared edge, and leaves points outside the study
-#'       area as `NA`. A summary built from `index` therefore counts only the
+#'       one outside the study area. A point within a margin of one part in
+#'       1e10 of the largest coordinate of the cells from a cell's edge, at
+#'       most a millionth of the diagonal of their bounding box and at
+#'       least four times the spacing of doubles at that coordinate, is in
+#'       that cell, and a point in two or more cells (on a shared edge, or
+#'       within that margin of it) takes the smallest `cell_id` among them, so
+#'       a lattice point on a cell edge takes the same cell in any unit or
+#'       origin. A point outside every cell is snapped to the nearest cell
+#'       only when it is within a thousandth of the median cell width of it,
+#'       and a point the same distance from two cells, to one part in ten
+#'       million, takes the smaller `cell_id`. For cells in degrees the
+#'       distances of the snap are taken on the sphere, in metres, whatever
+#'       [sf::sf_use_s2()] says, and the width is taken as an arc of the
+#'       sphere, as the margin is. That leaves points outside the
+#'       study area as `NA`. A summary built from `index` therefore counts only the
 #'       points the tessellation actually covers. When any point is `NA`, a
 #'       warning of class `"spatialkit_unassigned"` gives the number
 #'       (`tryCatch(spatialkit_unassigned = )` catches it; the condition
-#'       carries `n` and `total`).}
+#'       carries `n` and `total`). For `"voronoi"` and seeds (a layer a
+#'       seeding function returned, the seeds of a [select_resolution()]
+#'       result, or points given with a `cover`), `index` holds the cell each
+#'       seed generates, whether the seed lies inside the boundary or not: a
+#'       k-means seed outside a boundary that is not convex has its cell,
+#'       the part of the study area nearer it than any other seed. Only a
+#'       seed whose cell the clip removed whole, or without a location (an
+#'       empty geometry, or a coordinate that is not finite or lies beyond
+#'       1e150), is `NA`, and the warning then names seeds. See
+#'       [create_voronoi_polygons()]. For `"voronoi"` and `"triangles"`,
+#'       points so far from the origin of their CRS that doubles there are
+#'       spaced more than a millionth of their extent apart (0.125 at 1e15,
+#'       beside a layer a few kilometres across) have the cells' edges and
+#'       their own cells read at that rounding; the cells are built, and a
+#'       warning of class `"spatialkit_xy_imprecise"` gives the spacing and
+#'       the extent. For `"hex"` and `"square"` the grid's warning says the
+#'       same of the boundary (see [create_grid_polygons()]).}
 #'     \item{`boundary`}{The boundary used (possibly derived and/or
 #'       reprojected, and for `"voronoi"` grown by `expand`).}
 #'     \item{`method`}{The method actually used.}
 #'     \item{`params`}{The parameters the tessellation was built with, plus
 #'       `snapped`, the record of that nearest-cell repair: a list with `n`,
 #'       `which` (row positions in `points_sf`) and `distance` (how far
-#'       outside every cell each sat, in CRS units); `n_outside`, the number
+#'       outside every cell each sat, in CRS units, and in metres for cells
+#'       in degrees; a point within the margin
+#'       of an edge is in that cell and is not listed), which for seeds lists
+#'       only those whose `index` entry is the cell they were snapped to;
+#'       `n_outside`, the number
 #'       of points of `points_sf` that fall in no cell (the `NA`s of
 #'       `index`); and `cover_outside`, the number of `cover` points in no
 #'       cell when a point `cover` was checked against the cells (`NULL`
@@ -1745,7 +2945,8 @@ create_grid_polygons <- function(
 #'       [select_resolution()] result, or seeds [get_voronoi_seeds()] or
 #'       [voronoi_seeds_kmeans()] placed from one): the record as the seeds
 #'       carry it, whose `scored_cells` says whether these are the cells the
-#'       profile scored. For `"hex"` and `"square"`, when `approx_n_cells`
+#'       profile scored, and `FALSE` when the seeds are fewer or more than
+#'       its count. For `"hex"` and `"square"`, when `approx_n_cells`
 #'       is a selection that carries a record, or a profile built with an
 #'       `estimate`, and no `cellsize` is given: that record with
 #'       `scored_cells` `FALSE`, since a lattice at that count is not the
@@ -1771,6 +2972,10 @@ build_tessellation <- function(
     clip = TRUE, keep_duplicates = FALSE, crs = NULL, quiet = FALSE,
     cover = NULL
 ) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("build_tessellation", "points_sf")
+  on.exit(tie_end(returnValue(tie_end), points_sf), add = TRUE)
   .msg <- function(...) if (!quiet) message(...)
   method <- match.arg(method)
   # Polygon or line features are refused here, although make_folds(),
@@ -1792,6 +2997,38 @@ build_tessellation <- function(
   .check_boundary_arg(boundary, "build_tessellation")
   .check_boundary_arg(cover, "build_tessellation", label = "cover",
                       what = "point or polygon")
+  # The points, the boundary and the cover are read in XY when they mix XY
+  # and XYZ (or XYM) geometries or carry M (.xy_if_mixed_or_m()), before
+  # any of them is moved, read or handed on: sf reads a layer in the
+  # dimension of its first geometry, so the transform, the index and the
+  # read of the coordinates stopped with sf's, GEOS's or base R's message,
+  # and GEOS stopped on M.  The cells are new geometry and none of the three
+  # is returned, so nothing is said.  A layer XY or XYZ throughout takes its
+  # old path.  Points in an sfc_GEOMETRY column are read as the same points
+  # in sfc_POINT, or sfc_MULTIPOINT (.typed_points()): sf::st_coordinates()
+  # refuses that class, and on the column sf::st_cast() returns the union
+  # and the joins stop with "Not compatible with STRSXP".  A cover of such
+  # points is read the same way.
+  points_sf <- .xy_if_mixed_or_m(.typed_points(points_sf))
+  if (!is.null(boundary)) boundary <- .xy_if_mixed_or_m(boundary)
+  if (!is.null(cover)) cover <- .xy_if_mixed_or_m(.typed_points(cover))
+  # A point with a coordinate that is not finite or lies beyond 1e150 has no
+  # location.  It is read as given, before any move, and emptied
+  # (.empty_unlocated()), so every method reads it as an empty point: it
+  # takes no part in the cells and is NA in `index`, counted with the empty
+  # points.  A move into another CRS can put a northing of 1e200 at a
+  # finite place.  A row of the cover is read the same way: one point at
+  # Inf or 1e200 set the whole cover aside, and a polygon with such a vertex
+  # was moved as a smaller shape, or one far larger.
+  points_sf <- .empty_unlocated(points_sf)
+  if (!is.null(cover)) cover <- .empty_unlocated(cover)
+  # A row of `boundary` without a location is left out (.boundary_located()),
+  # read as given: an empty row came out of the repair below as an empty
+  # line, and the hex and square grids refused a square beside it as "not
+  # polygonal".  A boundary with no row left, or in degrees with a latitude
+  # beyond 90, is refused.
+  nothing_b <- "no cell can be built in it"
+  boundary <- .boundary_located(boundary, "build_tessellation", nothing_b)
   # A layer as `crs` means its CRS (as ensure_projected(target_crs =) reads
   # it); passed on as it was, it stopped with "the condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
@@ -1802,12 +3039,16 @@ build_tessellation <- function(
   points_in  <- points_sf
   cover_attr <- attr(points_sf, "cover", exact = TRUE)
   cover_geom <- if (!is.null(cover)) sf::st_geometry(cover)
-                else if (inherits(cover_attr, c("sf", "sfc"))) sf::st_geometry(cover_attr)
+                else if (inherits(cover_attr, c("sf", "sfc")))
+                  .empty_unlocated(.xy_if_mixed_or_m(sf::st_geometry(cover_attr)))
                 else NULL
 
   # The level-selection step's own answer is accepted here, so the count
   # need not be carried between the two calls by hand.
-  n_cells <- .resolve_cell_count(approx_n_cells, "approx_n_cells", "build_tessellation")
+  # Only the count is read here, never the seeds, so a selection off a
+  # profile fitted to a subsample refits nothing (.without_refit()).
+  n_cells <- .without_refit(
+    .resolve_cell_count(approx_n_cells, "approx_n_cells", "build_tessellation"))
   approx_n_cells      <- if (is.null(n_cells)) NULL else n_cells$n
   approx_n_cells_from <- if (is.null(n_cells)) NULL else n_cells$from
 
@@ -1862,12 +3103,22 @@ build_tessellation <- function(
   # ensure_projected() picks a CRS for the seeds' own extent, which on a
   # wide lon/lat layer is not the one it picked for the points profiled, and
   # seeds placed in a boundary's CRS arrive in that one.
-  scored_crs <- if (identical(method, "voronoi")) .scored_crs(.count_rule_get(points_sf))
+  scored_crs <- if (identical(method, "voronoi")) .scored_crs(.seeds_count_rule(points_sf))
                 else NULL
   if (!is.null(crs)) {
     points_sf <- .transform_or_stamp(points_sf, crs, "points_sf", "build_tessellation")
-    if (!is.null(boundary))
-      boundary <- .transform_or_stamp(boundary, crs, "boundary", "build_tessellation")
+    if (!is.null(boundary)) {
+      stamped <- is.na(sf::st_crs(boundary))
+      # A y between 90 and 180 reaches the test below, which names its row
+      # (lat_max = 180).
+      boundary <- .transform_or_stamp(boundary, crs, "boundary", "build_tessellation",
+                                      lat_max = 180)
+      # A boundary without a CRS is stamped with `crs`, and a geographic one
+      # is tested for a latitude beyond 90 before it is moved
+      # (.boundary_located()), as a boundary given in it is.
+      if (stamped)
+        boundary <- .boundary_located(boundary, "build_tessellation", nothing_b)
+    }
     # A geographic `crs` names the CRS the result is RETURNED in; the cells
     # are built in metres.  st_voronoi(), st_make_grid() and the hull buffer
     # all work on raw coordinates, so in degrees Voronoi cells stopped being
@@ -1886,7 +3137,9 @@ build_tessellation <- function(
       points_sf   <- if (is.null(scored_crs)) ensure_projected(points_sf)
                      else sf::st_transform(points_sf, scored_crs)
       lonlat_work <- TRUE
-      if (!is.null(boundary)) boundary <- .align_crs(boundary, points_sf)
+      if (!is.null(boundary))
+        boundary <- .align_crs(boundary, points_sf, caller = "build_tessellation",
+                               arg = "boundary")
     }
   } else {
     # ONE decision for points and boundary together.  A CRS-less layer goes
@@ -1922,7 +3175,8 @@ build_tessellation <- function(
       projected_msg <- TRUE
       if (!is.null(boundary)) {
         boundary <- .resolve_crsless_pair(seeds_in, boundary, "build_tessellation")$boundary
-        boundary <- .align_crs(boundary, points_sf)
+        boundary <- .align_crs(boundary, points_sf, caller = "build_tessellation",
+                               arg = "boundary")
       }
     } else if (!is.null(boundary)) {
       # Only a POSITIVE assumption is a CRS.  ensure_projected() records
@@ -1943,7 +3197,8 @@ build_tessellation <- function(
       pair <- .resolve_crsless_pair(points_sf, boundary, "build_tessellation")
       points_sf <- pair$points; boundary <- pair$boundary
       if (lonlat_work) boundary_ll <- boundary
-      boundary <- .align_crs(boundary, points_sf)
+      boundary <- .align_crs(boundary, points_sf, caller = "build_tessellation",
+                             arg = "boundary")
     }
   }
   finish <- function(res) {
@@ -1957,9 +3212,14 @@ build_tessellation <- function(
     res
   }
   if (!is.null(boundary)) {
+    # The moves above empty a row they cannot place.
+    boundary <- .boundary_located(boundary, "build_tessellation", nothing_b, moved = TRUE)
     if (!any(sf::st_geometry_type(boundary) %in% c("POLYGON", "MULTIPOLYGON")))
       stop("build_tessellation(): `boundary` must be polygonal.")
-    boundary <- .safe_make_valid(boundary)
+    # A row the repair leaves without a polygon (a ring with no height) is
+    # left out (.boundary_repaired()): the hex and square grids refused a
+    # square beside it as "not polygonal".
+    boundary <- .boundary_repaired(boundary, "build_tessellation", nothing_b)
   }
 
   # A lattice over lon/lat data is laid where create_grid_polygons() would lay
@@ -1999,7 +3259,10 @@ build_tessellation <- function(
     # CRS, degrees and all.  A point `cover` goes as points, so its hull is
     # taken in the working CRS and holds them exactly.
     cover_now <- if (is.null(cover_geom)) NULL else
-      tryCatch(.cover_follow(cover_geom, points_in, points_sf),
+      tryCatch(.cover_follow(cover_geom, points_in, points_sf,
+                             caller = "build_tessellation",
+                             label = if (!is.null(cover)) "`cover`"
+                                     else "the cover the seeds carry"),
                error = function(e) NULL)
     if (!is.null(cover_geom) && is.null(cover_now) && is.null(boundary))
       .warn_classed("spatialkit_no_cover", paste0(
@@ -2021,11 +3284,23 @@ build_tessellation <- function(
     # the record of how their count was set; it is put back here as the
     # points arrived with it, whatever a projection did with it.
     pts_v <- .count_rule_put(pts_v, .count_rule_get(points_in))
-    res <- create_voronoi_polygons(
+    # Points that had a location as given and lost it in the move above (a
+    # latitude beyond 90 moved to EPSG:3857) are refused here, in words
+    # that say the move: create_voronoi_polygons() would read them as given
+    # to it, empty, and say they were empty points.
+    if (!any(.located_rows(pts_v)) && any(.located_rows(points_in)))
+      stop(paste0("build_tessellation(voronoi): the move of `points_sf` to the CRS the ",
+                  "cells are built in placed none of its points, so no cell can be built."),
+           call. = FALSE)
+    # The worker of create_voronoi_polygons(), so the warnings that count
+    # points or seeds in no cell name build_tessellation(), the function
+    # called.
+    res <- .voronoi_polygons(
       points_sf = pts_v, boundary = boundary, expand = expand,
       clip = clip, keep_duplicates = keep_duplicates,
       crs = crs_arg, quiet = quiet,
-      cover = if (is.null(cover)) NULL else cover_now
+      cover = if (is.null(cover)) NULL else cover_now,
+      caller = "build_tessellation"
     )
     return(finish(res))
   }
@@ -2037,15 +3312,28 @@ build_tessellation <- function(
     # Pass the points' CRS through: without it create_grid_polygons() would
     # re-project the boundary on its own, leaving grid and points in different
     # CRSs and breaking the st_intersects() below.
-    grid <- create_grid_polygons(
-      boundary = boundary, target_cells = approx_n_cells,
-      type = method, cellsize = cellsize, clip = clip,
-      # NA (not NULL) when the points are CRS-less: keep the boundary in the
-      # points' unnamed space instead of letting create_grid_polygons() run
-      # its own projection heuristic on it.
-      crs = if (is.null(crs_arg)) sf::NA_crs_ else crs_arg,
-      quiet = quiet
-    )
+    # A grid laid in degrees (a `cellsize` with a geographic `crs`) whose
+    # boundary or cells s2 refuses stops create_grid_polygons() with an error
+    # that names its arguments; it is raised again here in this function's
+    # words, which name `approx_n_cells`.
+    grid <- tryCatch(
+      create_grid_polygons(
+        boundary = boundary, target_cells = approx_n_cells,
+        type = method, cellsize = cellsize, clip = clip,
+        # NA (not NULL) when the points are CRS-less: keep the boundary in the
+        # points' unnamed space instead of letting create_grid_polygons() run
+        # its own projection heuristic on it.
+        crs = if (is.null(crs_arg)) sf::NA_crs_ else crs_arg,
+        quiet = quiet
+      ),
+      spatialkit_cells_degenerate = function(e) {
+        # A refusal of a latitude beyond 90 is not s2's, so it is not raised
+        # again as one.
+        if (is.null(e$site) || identical(e$cause, "latitude")) stop(e)
+        .grid_refused(e$parent, e$rows, e$reasons, e$n, isTRUE(e$s2_forced),
+                      site = e$site, caller = "build_tessellation",
+                      clipped = isTRUE(clip))
+      })
     # Build point-to-cell index for grid tessellations
     id_col <- if ("poly_id" %in% names(grid)) "poly_id" else "cell_id"
     if (!id_col %in% names(grid)) {
@@ -2059,7 +3347,20 @@ build_tessellation <- function(
     if (id_col != "cell_id") {
       grid$cell_id <- grid[[id_col]]
     }
-    index   <- .build_point_cell_index(points_sf, grid)
+    # In degrees the index is s2's join, which stopped with s2's bare
+    # message on a cell it refuses; such a cell gets the error that names it
+    # (.stop_cells_degenerate()).
+    index <- withCallingHandlers(
+      .build_point_cell_index(points_sf, grid),
+      error = function(e) {
+        a <- .grid_refused(NULL, integer(0), character(0), nrow(grid),
+                           site = "grid", caller = "build_tessellation",
+                           clipped = isTRUE(clip), call_it = FALSE)
+        .stop_cells_degenerate(e, grid, "build_tessellation", a$layer,
+                               "the index of the points in the cells", NULL,
+                               of = a$of, source = a$source, remedy = a$remedy,
+                               site = "grid")
+      })
     snapped <- attr(index, "snapped")
     attr(index, "snapped") <- NULL
 
@@ -2117,6 +3418,13 @@ build_tessellation <- function(
   if (identical(method, "triangles")) {
     pts <- if (isTRUE(keep_duplicates)) points_sf else .dedup_points(points_sf)
     if (nrow(pts) < 3L) stop("build_tessellation(triangles): need at least 3 unique points.")
+    # A layer that mixes POINT and MULTIPOINT is held by sf in an
+    # sfc_GEOMETRY column, whose coordinates sf::st_coordinates() refuses
+    # ("not implemented for objects of class sfc_GEOMETRY").  Its vertices
+    # are read from the same features in sfc_MULTIPOINT, as a MULTIPOINT
+    # layer's are: only the coordinates and the CRS of `pts` are read below.
+    if (inherits(sf::st_geometry(pts), "sfc_GEOMETRY"))
+      pts <- sf::st_cast(pts, "MULTIPOINT")
     coords <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
     # An EMPTY point (a null geometry read from a file) is an all-NA row here,
     # and the rank check below stopped on it with R's "NA/NaN/Inf in foreign
@@ -2151,10 +3459,16 @@ build_tessellation <- function(
       # Delaunay triangulation.  The shift is the bbox midpoint, not the
       # mean: min and max do not depend on row order, so a permuted layer
       # hands qhull bit-identical coordinates and gets the same triangles
-      # and cell_ids, as before.  Rings below use the original coordinates,
-      # so the output coordinates are untouched.
-      ctr <- (apply(coords, 2L, min) + apply(coords, 2L, max)) / 2
-      tri_idx <- try(geometry::delaunayn(sweep(coords, 2L, ctr)), silent = TRUE)
+      # and cell_ids, as before.  The centred points are also divided by
+      # the diagonal of their bounding box and rounded to .KMEANS_STEP of
+      # it (.kmeans_frame()): the four corners of each square of a lattice
+      # lie on one circle, qhull splits the square by the last bits of the
+      # coordinates, and those bits move with the unit and the origin, so
+      # the same lattice in US feet or with the false origin moved by 0.1 m
+      # was split into other triangles, some of them flat.  In the frame the
+      # lattice is the same in every unit and origin.  Rings below use the
+      # original coordinates, so the output coordinates are untouched.
+      tri_idx <- try(geometry::delaunayn(.kmeans_frame(coords)$z), silent = TRUE)
       why_geos <- if (inherits(tri_idx, "try-error"))
         sprintf("geometry::delaunayn() failed (%s)",
                 trimws(conditionMessage(attr(tri_idx, "condition"))))
@@ -2187,10 +3501,10 @@ build_tessellation <- function(
         "co-circular) configurations may be resolved differently."), why_geos)
       # st_triangulate() accepts a MULTIPOINT and returns the true Delaunay
       # triangulation of it.  Triangulating the convex-hull POLYGON instead
-      # (as this used to) discards every interior point.
-      tri_sfc <- sf::st_triangulate(sf::st_union(sf::st_geometry(pts)))
-      tri_sfc <- sf::st_collection_extract(tri_sfc, "POLYGON", warn = FALSE)
-      tri_sfc <- sf::st_sfc(tri_sfc, crs = sf::st_crs(pts))
+      # (as this used to) discards every interior point.  GEOS, like qhull,
+      # is handed the points in the frame of .kmeans_frame(), and each
+      # triangle is drawn on the original coordinates of its corners.
+      tri_sfc <- .triangulate_in_frame(coords, sf::st_crs(pts))
       if (length(tri_sfc) == 0L)
         stop("build_tessellation(triangles): the Delaunay triangulation of ",
              "these points is empty (they are collinear to within rounding). ",
@@ -2210,7 +3524,12 @@ build_tessellation <- function(
     }
     tri_sf$cell_id <- seq_len(nrow(tri_sf))
 
-    # Build point-to-cell index for triangles
+    # Build point-to-cell index for triangles.  The triangles' edges are
+    # drawn at the coordinates' size and the points read against them with
+    # the margin of .edge_tol(), as the Voronoi cells are; where doubles at
+    # the points do not hold a millionth of their extent it is said.
+    .warn_xy_imprecise(points_sf, "build_tessellation", "points_sf",
+                       reads = "so the cells' edges and the points' cells are read at that rounding")
     index   <- .build_point_cell_index(points_sf, tri_sf)
     snapped <- attr(index, "snapped")
     attr(index, "snapped") <- NULL

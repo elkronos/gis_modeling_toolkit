@@ -236,11 +236,25 @@ test_that("a feature s2 refuses after the second repair is measured in the plane
 
   # A layer that arrives in lon/lat has no plane of its own to fall back to
   # but its degrees; the plane route must not send it back to s2 (the call
-  # that stopped) or to lwgeom (not a dependency) to measure it.
-  ll_in <- .sce_run(sf::st_transform(cells, 4326))
-  expect_length(ll_in$warnings, 1L)
-  expect_match(ll_in$warnings, "plane geometry in the layer's own CRS instead: 1\\.")
+  # that stopped) or to lwgeom (not a dependency) to measure it.  With
+  # make_valid = FALSE the refused cell goes straight to that route.
+  ll <- sf::st_transform(cells, 4326)
+  ll_raw <- .sce_run(ll, make_valid = FALSE)
+  expect_length(ll_raw$warnings, 1L)
+  expect_match(ll_raw$warnings, "plane geometry in the layer's own CRS instead: 1\\.")
+  expect_equal(ll_raw$out$src, ref$src)
+  # With the repair on, the cell that crosses itself in lon/lat is invalid
+  # under s2 and GEOS, and s2's rebuild leaves its crossing edges, so it is
+  # repaired by GEOS on its coordinates (BUG-195).  It comes back valid
+  # under both and is keyed on the sphere: no feature is refused, and the
+  # IDs are the same.  (This part expected the cell to be keyed in the plane
+  # before, when it came back invalid.)
+  ll_in <- .sce_run(ll)
+  expect_length(ll_in$warnings, 0L)
   expect_equal(ll_in$out$src, ref$src)
+  back <- sf::st_geometry(ll_in$out)[ll_in$out$src == .sce_bad_cell]
+  expect_true(.sce_with_s2(TRUE, sf::st_is_valid(back)))
+  expect_true(sf::st_is_valid(sf::st_set_crs(back, NA)))
 })
 
 
@@ -348,22 +362,38 @@ test_that(".s2_refused() finds every refused feature, wherever it sits", {
 })
 
 
-test_that("an error that is not s2's is raised again as it was", {
+test_that("an error that is not s2's leads to the features being measured one by one", {
+  # Turned round in batch grid-bug-217 (BUG-218): the error used to be
+  # raised again as it was, which ended ensure_stable_poly_id() with GEOS's
+  # message about a ring of its own sort copy.  The features are now
+  # measured one at a time, so each gets the key the one call gives it, and
+  # only a feature that stops alone is keyed by its box.
   cells <- .sce_cells()
   bad   <- which(cells$src == .sce_bad_cell)
   keyed <- spatialkit:::.sort_key_with_refusals
   boom  <- simpleError("not from s2")
+  same_key <- function(k, g) {
+    expect_identical(sf::st_coordinates(k$points),
+                     sf::st_coordinates(suppressWarnings(sf::st_centroid(g))))
+    expect_identical(k$area, suppressWarnings(as.numeric(sf::st_area(g))))
+  }
 
   # A sort copy that is not lon/lat never goes to s2.
-  expect_error(keyed(cells, cells, "centroid", boom, boom), "not from s2")
-  # Nor does a lon/lat one in which s2 refuses nothing have anything to guard.
+  k <- keyed(cells, cells, "centroid", boom, boom)
+  same_key(k, sf::st_geometry(cells))
+  # Nor does a lon/lat one in which s2 refuses nothing.
   ok <- sf::st_sf(geometry = .sce_sort_copy(cells[-bad, , drop = FALSE]))
-  expect_error(keyed(ok, cells[-bad, , drop = FALSE], "centroid", boom, boom),
-               "not from s2")
-  # The surface point is GEOS's, so its error is not one to work around
-  # even when s2 does refuse a feature.
+  k <- keyed(ok, cells[-bad, , drop = FALSE], "centroid", boom, boom)
+  same_key(k, sf::st_geometry(ok))
+  # The surface point is GEOS's: when s2 does refuse a feature, its error is
+  # met by taking the surface points again, and the refused feature's area
+  # goes the s2 route.
   ll <- sf::st_sf(geometry = .sce_sort_copy(cells))
-  expect_error(keyed(ll, cells, "surface_point", boom, boom), "not from s2")
+  expect_warning(k <- keyed(ll, cells, "surface_point", boom, boom),
+                 "s2 refused 1 of")
+  expect_identical(sf::st_coordinates(k$points),
+                   sf::st_coordinates(spatialkit:::.key_surface_points(sf::st_geometry(ll))))
+  expect_true(all(is.finite(k$area)))
 })
 
 

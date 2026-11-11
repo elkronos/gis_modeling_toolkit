@@ -9,9 +9,11 @@
 # trained on x 0-1000, had 13 times the in-extent RMSE at x 1500-2500 and
 # 84% of those points inside the AOA.
 #
-# Location now has an index of its own for those classes (and under
-# coords = "yes"): nearest training point in map space, thresholded by the
-# same rule and folds, and a point is inside only if inside on both.  It is
+# Location now has an index of its own for those classes, for a forest
+# fitted with include_coords = TRUE (whose coordinates also stay among the
+# predictors), and under coords = "yes": nearest training point in map
+# space, thresholded by the same rule and folds, and a point is inside only
+# if inside on both.  It is
 # kept apart from the covariates because as two more equally weighted
 # columns it is diluted: with 12 covariates 89% of points 200-500 units
 # beyond the extent still read as inside.
@@ -233,25 +235,29 @@ test_that("the location index needs geometry, and a projected CRS", {
                "should be one of")
 })
 
-test_that("a forest with the coordinates as predictors keeps its own path", {
+test_that("a forest with the coordinates as predictors keeps them and gains the location index", {
   skip_if_not_installed("ranger")
   trn <- loc_pts(200, 0, 1000, seed = 13)
   far <- loc_pts(100, 3000, 4000, seed = 14)
   rf  <- suppressWarnings(suppressMessages(
     fit_rf_model(trn, "z", "a1", num_trees = 100, include_coords = TRUE)))
   a <- area_of_applicability(far, model = rf)
-  expect_identical(a$params$coords, "predictors")
+  expect_identical(a$params$coords, "location index and predictors")
   expect_identical(a$predictor_vars, c("a1", "..x", "..y"))
-  expect_null(a$location)
-  expect_false("DI_location" %in% names(a$aoa))
+  expect_true(is.list(a$location))
+  expect_true("DI_location" %in% names(a$aoa))
+  expect_identical(a$location$n_outside, 100L)
   expect_identical(a$n_inside, 0L)
-  expect_identical(area_of_applicability(far, model = rf, coords = "yes")$aoa$DI,
-                   a$aoa$DI)
+  yes <- area_of_applicability(far, model = rf, coords = "yes")
+  expect_identical(yes$aoa$DI, a$aoa$DI)
+  expect_identical(yes$aoa$DI_location, a$aoa$DI_location)
   # coords = "no" turns it off for a forest too, and says so.
   lines <- capture_spatialkit_log(
     off <- area_of_applicability(far, model = rf, coords = "no"))
   expect_true(log_has(lines, "coords = \"no\", so location is not measured"))
   expect_identical(off$predictor_vars, "a1")
+  expect_null(off$location)
+  expect_false("DI_location" %in% names(off$aoa))
 })
 
 test_that("with blocked folds a gap narrower than the hold-out distance reads as inside", {

@@ -36,7 +36,8 @@ whether its predictions depend on location. Optional if \code{train_sf}
 and \code{predictor_vars} are given directly, which lets this be used
 with any model.}
 
-\item{train_sf}{Training data, if not taken from \code{model}.}
+\item{train_sf}{Training data, if not taken from \code{model}. When
+location is measured it is read in x and y, as \code{newdata} is.}
 
 \item{predictor_vars}{Predictor names, if not taken from \code{model}.}
 
@@ -49,10 +50,12 @@ equally and a logged note says why (see \emph{Weights}). \code{NULL} is
 the explicit request for equal weights. For a vector of your own, any
 positive scale works. When \code{model} was fitted with
 \code{include_coords = TRUE}, the coordinates \code{"..x"} and
-\code{"..y"} are measured as predictors too (see below), and you are not
-expected to supply importances for them: any you leave out default to the
-mean of the weights you did supply, so location counts about as much as a
-typical predictor. Naming them explicitly overrides that. An unnamed
+\code{"..y"} are measured as predictors too, besides the location index,
+which no weight changes (see \emph{Models whose predictions depend on
+location}). You are not expected to supply importances for them: any
+you leave out default to the mean of the weights you did supply, so in
+the predictor index the coordinates count about as much as a typical
+predictor. Naming them explicitly overrides that. An unnamed
 vector may have one value per predictor either with or without the two
 coordinate columns. Weights must be finite and non-negative, so pass
 permutation importance as \code{pmax(importance, 0)}. (A forest with no
@@ -73,7 +76,7 @@ list of \code{train}/\code{test} splits, or a vector of fold labels with
 one entry per training row. Default \code{NULL} (plain nearest neighbour).
 The folds you passed to \code{cv_*()}, built on the layer \code{model}
 was fitted from, may name rows that \code{prep_model_data()} removed
-(a missing or non-finite value, an empty geometry): as in \code{cv_*()},
+(a missing or non-finite value, or no location): as in \code{cv_*()},
 they are dropped from the folds, and a label vector with one entry per
 row of that layer loses theirs. Also
 as in \code{cv_*()}, a \code{make_folds()} result built on other data --
@@ -86,7 +89,10 @@ predictor index. The location index, when there is one, always takes its
 threshold from the rule.}
 
 \item{normalizer_max_n}{Subsample the training data to this many points when
-computing the mean pairwise distance, which is quadratic. Default 5000.}
+computing the mean pairwise distance, which is quadratic. Default 5000.
+The subsample is drawn from the training rows in a fixed order (by the
+predictors, and for the location index by the coordinates), so it does
+not depend on the row order of the training data.}
 
 \item{seed}{Seed for that subsample. Default 123.}
 
@@ -105,7 +111,9 @@ measures it for a model whose predictions depend on it (a
 \code{gwr_fit}, a \code{bayesian_fit}, a forest fitted with
 \code{include_coords = TRUE}) and not otherwise; \code{"yes"} measures
 it whatever the model, and with no \code{model}; \code{"no"} never
-does, and logs a caution for a model that depends on it. See
+does, and logs a caution for a model that depends on it (for a forest
+it also leaves \code{"..x"} and \code{"..y"} out of the predictor
+index). See
 \emph{Models whose predictions depend on location}.}
 
 \item{categorical}{What to do with factor and character predictors:
@@ -122,13 +130,15 @@ An object of class \code{aoa}: a list with
 \item \code{aoa}: \code{newdata} with a numeric \code{DI} column
 and a logical \code{AOA} column added, and between them a numeric
 \code{DI_location} column when location has an index of its own.
-For a forest fitted with \code{include_coords = TRUE} it is the
+For a forest fitted with \code{include_coords = TRUE}, unless
+\code{coords = "no"}, it is the
 object the computation ran on: \code{newdata} after pointizing, CRS
 reconciliation and the addition of the \code{"..x"} and \code{"..y"}
-columns. With a location index it is \code{newdata} as passed. A
-row whose predictors are not all finite gets \code{NA} in \code{DI},
-and a row outside the training range of a predictor in
-\code{dropped_vars}, or on a level no training row has, gets
+columns. In every other case it is \code{newdata} as passed, also
+when location has an index of its own. A row whose predictors are
+not all finite gets \code{NA} in \code{DI}, and a row outside the
+training range of a predictor in \code{dropped_vars}, or on a level
+no training row has, gets
 \code{DI = Inf} and \code{AOA = FALSE} (see \emph{Limitations}).
 \code{AOA} is \code{DI <= threshold}, and with a location index
 also \code{DI_location <= location$threshold}: a row outside on
@@ -184,7 +194,9 @@ index.
 passed a vector), \code{weights_source} (\code{"model importance"},
 \code{"supplied"} or \code{"equal"}), \code{weights_note} (the kind
 of importance, or why the weights are equal), \code{coords}
-(\code{"location index"}, \code{"predictors"} or \code{"none"}),
+(\code{"location index"}; \code{"location index and predictors"}
+for a forest fitted with \code{include_coords = TRUE}, whose
+coordinates are also among the predictors; or \code{"none"}),
 \code{categorical} and
 \code{seed}.  \code{folds_method} is the \code{method} of a
 \code{\link{make_folds}()} result (\code{"block_kfold"},
@@ -340,12 +352,16 @@ and a warning gives the count. \code{categorical = "drop"} leaves the
 categorical predictors out and computes the index on the others; a level
 the training data never has then goes unseen.
 
-Predictors whose variance is negligible \emph{relative
-to their own magnitude} (the test is
-\code{sd < sqrt(.Machine$double.eps) * max(abs(x))}, so the same variable in
-metres and in gigametres is treated identically) are dropped from the
-distance. A prediction point taking a value there outside the training
-range (with the same relative tolerance) is extrapolation along a direction
+Predictors whose training values do not vary beyond their rounding are
+dropped from the distance. A predictor is kept when
+\code{sd > sqrt(.Machine$double.eps) * max(abs(x))}, and otherwise when its
+standard deviation is more than 3 units in the last place of
+\code{max(abs(x))}. The same variable in metres and in gigametres is
+treated identically, and a predictor at an offset (a timestamp in seconds)
+is kept as it is at 0. A prediction point taking a value there outside the
+training range by more than 3 units in the last place of
+\code{max(abs(x))} (of 1 for a column of zeros) is extrapolation along a
+direction
 the training data never varied in: its scaled distance along it is
 infinite, so it gets \code{DI = Inf}, is outside the AOA, and a warning
 gives the count. A point missing that value is judged on the other
@@ -366,10 +382,12 @@ three; \code{coords = "no"} turns it off, with a logged caution;
 \code{coords = "yes"} measures it for any model, or for none.
 
 \strong{A geographically weighted regression} (\code{gwr_fit}) has
-coefficients that vary over the map, and \strong{a Bayesian spatial model}
-(\code{bayesian_fit}) has a Gaussian-process term in the coordinates. For
-these, and under \code{coords = "yes"}, location gets an index of its own,
-built like the predictor index but in map space: \code{DI_location} is the
+coefficients that vary over the map, \strong{a Bayesian spatial model}
+(\code{bayesian_fit}) has a Gaussian-process term in the coordinates, and
+\strong{a forest fitted with \code{include_coords = TRUE}} splits on the
+coordinates. For these, and under \code{coords = "yes"}, location gets an
+index of its own, built like the predictor index but in map space:
+\code{DI_location} is the
 distance to the nearest training point over the mean distance between
 training points; the training points' own values use the same folds; and
 the threshold is the same outlier-removed maximum. A prediction point is
@@ -404,21 +422,47 @@ blocked folds the location index says nothing about a gap narrower than
 about twice the cut-off; \code{location$threshold * location$normalizer}
 is the cut-off in map units, and \code{print()} shows it.
 
-\strong{A forest fitted with \code{include_coords = TRUE}} splits on the
-coordinates like on any other column, so there they join the predictor
-index as \code{"..x"} and \code{"..y"} and are centred, scaled and weighted
-with the rest.
+A forest splits on the coordinates like on any other column, so for a
+forest they also stay in the predictor index as \code{"..x"} and
+\code{"..y"}, centred, scaled and weighted with the rest. Under
+\code{weights = "auto"} that weight is the forest's importance, which is
+small for a forest that barely splits on its coordinates: in a test where
+half of 50 prediction points lay one half to one and a half extents beyond
+the data, 41 read as inside on the predictor index, 16 of them beyond the
+extent. The location index counts location whatever weight the
+coordinates get, and put none of the 25 inside.
 
-Either way geometry is needed on both sides, so \code{train_sf} and
+Geometry is needed on both sides, so \code{train_sf} and
 \code{newdata} must both be \code{sf} objects; a data.frame is refused
 rather than quietly measured without location. Non-\code{POINT}
 \code{newdata} (grid polygons, say) is reduced to representative points
 first, as \code{\link{coerce_to_points}} would. If exactly one side carries
 a CRS the other is brought into it: reprojected when its coordinates look
-like longitude/latitude, stamped otherwise, with a warning either way. This
+like longitude/latitude, stamped otherwise, with a warning either way; a
+CRS in longitude and latitude is not stamped on coordinates outside
+longitude -180 to 360 and latitude -90 to 90, which is refused. This
 is done because degrees fed into a metre-space index silently understate the
 distances. The location index is a map distance and refuses training data
-in a geographic CRS.
+in a geographic CRS. Both layers are read in x and y for the location: a
+layer whose geometries mix XY with XYZ or XYM (as \code{rbind()} of an XY
+and an XYZ layer gives), or carry M (XYM or XYZM), is read without its Z
+and M. Only one change reaches the result: for a forest fitted with
+\code{include_coords = TRUE}, \code{newdata} that mixes dimensions and is
+reprojected into the training CRS comes back in XY, with a warning of
+class \code{"spatialkit_zm_dropped"}, as \code{\link{ensure_projected}()}
+returns such a layer; the points that non-\code{POINT} \code{newdata} is
+reduced to are in XY when they would mix dimensions or carry M.
+
+A row without a location (an empty geometry, or a coordinate that is not
+finite or lies beyond 1e150) is read as one both as given and after a
+move into the other layer's CRS, which can bring a coordinate of 1e200
+back finite. Such a row of \code{newdata} gets \code{NA} in
+\code{DI_location}, and for a forest fitted with
+\code{include_coords = TRUE} in \code{"..x"} and \code{"..y"} and so in
+\code{DI}; such a training row is left out of the reference distances,
+with a log line. A row of \code{newdata} without a location as given that
+is reprojected into the training CRS comes back in \code{aoa} with an
+empty geometry.
 }
 
 \examples{

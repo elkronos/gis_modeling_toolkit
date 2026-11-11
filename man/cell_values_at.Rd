@@ -15,15 +15,22 @@ cell_values_at(
 }
 \arguments{
 \item{newdata}{The locations: an sf layer. A feature that is not a point
-is reduced to one with \code{\link[=coerce_to_points]{coerce_to_points(, "auto")}}.
-No column of it is read. With no CRS while \code{points} has one, the call
-stops.}
+is reduced to one with \code{\link[=coerce_to_points]{coerce_to_points(, "auto")}};
+a collection holding a polygon s2 cannot take a centroid of in
+longitude and latitude (edges that cross), or whose centroid GEOS puts
+outside it, stops the call with the error of class
+\code{spatialkit_features_degenerate}, raised in this function's name and
+naming its rows of \code{newdata}. No column of it is read. With no CRS
+while \code{points} has one, the call stops. A layer whose geometries mix dimensions or carry M (XYM or
+XYZM) is read in x and y (step 1).}
 
 \item{values}{The \code{\link[=summarize_by_cell]{summarize_by_cell()}} result for \code{points}. It must hold
 the ID column and a cell value of \code{response_var}: the pooled value
 (\code{estimate = "pooled"}) or the mean (the default \code{agg_funs}). With
 \code{seeds = NULL} it must also carry the cell polygons, which it does when
-it was made with \code{cells_sf}.}
+it was made with \code{cells_sf}. A \code{values} with no row, or whose IDs are
+all \code{NA}, stops the call, with or without \code{seeds}. Its polygons are
+read in x and y when they mix dimensions or carry M (XYM or XYZM).}
 
 \item{points}{The assigned layer \code{values} was computed from: an sf layer
 with the ID column and \code{response_var}, and at least one scored row.}
@@ -40,12 +47,30 @@ another column of the result (\code{value}, \code{estimate}, \code{obs_lo}, \cod
 \item{seeds}{\code{NULL}, or the seeds the cells were built on: an sf POINT
 layer with a column named as the ID column that gives each seed's cell.
 For cells from \code{tess <- build_tessellation(seeds)} that is
-\code{seeds$cell_id <- tess$index} when the ID column is \code{"cell_id"}, after
-which a seed outside a boundary that is not convex needs its cell's ID
-(see "Seeds outside the boundary"). Two
-seeds at different locations with one ID are an error; seeds that share
-a location share its cell, as \code{index} gives them. \code{NA} marks a seed
-without a cell.}
+\code{seeds$cell_id <- tess$index} when the ID column is \code{"cell_id"}. For
+seeds a seeding function returned and the seeds of a
+\code{\link[=select_resolution]{select_resolution()}} result, \code{index} gives each seed the cell it
+generates. Other points are indexed by the cell that holds them, and
+one outside the boundary is \code{NA}, or the ID of the nearest cell, which
+can be the cell of another seed, when it lies within a thousandth of
+the median cell width of it; with the cell polygons in \code{values} a seed
+that is \code{NA} is given its cell when step 3 can tell which it is (it is
+not when the points inside several cells no seed names find it as
+their nearest seed), and without them the locations nearest it have
+none. Passed through \code{get_voronoi_seeds(method = "provided", seeds = )} before the tessellation, points placed by hand
+are seeds (see \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}). Two seeds at different
+locations with one ID are an error; seeds that share a location share
+its cell, as \code{index} gives them. \code{NA} marks a seed without a cell.
+When no seed with a location has the ID of a cell of \code{values} (an ID
+column from another tessellation, IDs that are all \code{NA}, or the IDs of
+cells on seeds with an empty point or a coordinate that is not finite
+or lies beyond 1e150, as given or once placed in the working CRS, such
+as metres given EPSG:4326), counting the cells step 3 gives seeds outside
+the polygons, the call stops, since no location could take its own
+cell's value; one seed with such an ID and a location is enough, and a
+seed whose ID \code{values} has no row for stands for a cell without a
+value. Without a CRS beside \code{points} with one, the seeds are read as
+step 1 says.}
 }
 \value{
 A data frame with one row per row of \code{newdata}, in its order:
@@ -69,7 +94,8 @@ row, in the units of the working CRS.}
 scored rows sit on one location.}
 }
 A row of \code{newdata} with an empty geometry, or with a coordinate that is
-not finite or lies beyond 1e150, has \code{NA} in every column. The two ID
+not finite or lies beyond 1e150 as given or in the working CRS, has \code{NA}
+in every column. The two ID
 columns have the class of the ID column of \code{values}; when a cell that
 \code{values} has no row for has an ID that class cannot hold (a string
 beside numbers), both are character.
@@ -86,12 +112,20 @@ location),
 summary's record of how the cell count was set, or \code{NULL}). It describes
 the call: a subset of the frame's rows keeps it as it is.
 
-The function raises no classed warning of its own. It passes on what
-\code{\link[=coerce_to_points]{coerce_to_points()}}, a CRS transformation and
-\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} raise, but for one warning: the one
-that function raises when no location at all falls in a polygon is
-neither raised nor logged, since every such row has \code{filled = TRUE},
-which says the same row by row.
+The function raises no classed warning of its own; the warning that
+says how \code{seeds} without a CRS were read (step 1) and the one that
+counts the seeds outside the polygons of \code{values} left without a cell
+(step 3) are plain ones. It
+passes on what \code{\link[=coerce_to_points]{coerce_to_points()}}, a CRS transformation and
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} raise, but for one error and one
+warning. The error of class \code{spatialkit_features_degenerate} with which
+\code{\link[=coerce_to_points]{coerce_to_points()}} refuses a polygon s2 cannot take a centroid of, or
+a centroid GEOS puts outside its feature, is raised in this function's
+name, with the same class and fields, naming \code{newdata} or \code{points} and
+its rows. The warning
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} raises when no location at all falls in
+a polygon is neither raised nor logged, since every such row has
+\code{filled = TRUE}, which says the same row by row.
 }
 \description{
 Gives each location of \code{newdata} the value of the cell it lies in, read
@@ -109,30 +143,70 @@ The function works in six steps.
 else the one in \code{attr(values, "pooled")}, else the CRS of \code{points}
 when it is projected and the one \code{\link[=ensure_projected]{ensure_projected()}} picks for it
 when it is not. \code{points}, \code{newdata} and \code{seeds} are transformed to it.
+\code{newdata}, \code{seeds} and \code{points} are read in x and y: a layer whose
+points, or the points taken from its other features, do not all have
+the same dimensions (some with a Z or M coordinate) is read without its
+Z and M, since sf reads a layer in the dimension of its first point.
+So is a layer of points, polygons or lines in \code{newdata} or \code{points}
+whose geometries carry M (XYM or XYZM), which GEOS does not read.
+So are the polygons of \code{values} when they do not all have the same
+dimensions. Polygons of \code{values} whose geometries carry M are read in
+x and y as well.
 When neither \code{points} nor \code{newdata} has a CRS the coordinates are used
 as they are, unless those of \code{points} look like longitude and latitude:
 both are then read as EPSG:4326, as \code{\link[=summarize_by_cell]{summarize_by_cell()}} reads
-\code{points}, with \code{\link[=ensure_projected]{ensure_projected()}}'s warning.
+\code{points}, with \code{\link[=ensure_projected]{ensure_projected()}}'s warning; \code{newdata} or \code{seeds}
+with an x outside -180 to 360 or a y beyond 90 north or south cannot
+be in degrees, and stop the call. \code{seeds} without a CRS
+beside \code{points} with one are read as \code{\link[=build_tessellation]{build_tessellation()}} reads a
+boundary without a CRS, with a warning: beside a projected CRS,
+coordinates that look like longitude and latitude are taken as
+EPSG:4326 and transformed, and others are taken to be in the CRS of
+\code{points}; beside a geographic CRS, coordinates within the ranges of
+longitude and latitude are taken to be in it, and others stop the call.
+\code{newdata} without a CRS beside \code{points} with one stops the call.
 \item \emph{The scored rows.} The rows of \code{points} with a finite \code{response_var},
-a cell ID and finite coordinates. Their distinct locations are the
-observations every distance below is taken from.
+a cell ID and a location: a point whose coordinates are finite and
+within 1e150, as given and in the working CRS. Their distinct
+locations are the observations every distance below is taken from.
 \item \emph{The cell of a location.} With \code{seeds}, the cell of the nearest seed.
 That is the Voronoi cell before its clip to the cover, so every
-location has one, unless its nearest seed has an \code{NA} ID. A location
-nearest such a seed has no cell, even where the polygon that holds it
-has scored rows. \code{\link[=build_tessellation]{build_tessellation()}} gives \code{NA} in \code{index} to a
-seed that lies in no cell: one whose cell the clip removed, and one
-outside a boundary that is not convex, whose clipped cell exists
-(see "Seeds outside the boundary"). Without \code{seeds}, the polygon of
-\code{values} that holds the
-location, by \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} with its default
-\code{tie_break} and the summary's record of the count, so a location on
-the edge between two cells the profile scored is placed as that
-function places such a row (see "Ties"); a location in no polygon has
-no cell. Polygons without a
-CRS are read as that function read them for the rows of \code{points}: the
-locations are handed to it in the CRS of \code{points}, whatever CRS
-\code{newdata} arrived in.
+location has one, unless its nearest seed has an \code{NA} ID: a location
+nearest such a seed has no cell. \code{\link[=build_tessellation]{build_tessellation()}} gives each
+seed of a layer it takes for seeds (see \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}})
+the cell it generates, a seed outside a boundary that is not convex (a
+k-means centre over a bay) included, and \code{NA} only to a seed whose
+cell the clip removed whole. Other points, such as points placed by
+hand, are indexed by the cell that holds them, so one outside a
+boundary that is not convex is \code{NA} although its cell is built. One
+that lies in no cell but within a thousandth of the median cell width
+of a cell takes the ID of the nearest cell instead, which beside a
+boundary that is not convex can be the cell of another seed; two
+seeds with one ID stop the call (see \code{seeds}). When \code{values} carries
+the cell polygons, a seed that is \code{NA} is given its cell here: a
+seed with an \code{NA} ID that lies in no polygon of \code{values} takes the
+ID of the polygon, among those no seed names, that a point inside
+it finds as its nearest seed. That is the cell the seed generates,
+since every point of a Voronoi cell is nearer its own seed than any
+other. A seed that the points inside several such polygons find as
+their nearest seed generates at most one of them (the seeds of the
+others are missing from \code{seeds} or have no location), and nothing says
+which: it keeps its \code{NA} ID, with a warning, so the locations nearest
+it have no cell and are filled (step 5). A seed with an \code{NA} ID inside
+a polygon keeps it, and so does one whose cell \code{values} does not hold.
+Without \code{seeds}, the polygon of
+\code{values} that holds the location, by \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}
+with its default \code{tie_break} and the summary's record of the count, so
+a location on the edge between two cells the profile scored is placed
+as that function places such a row (see "Ties"); a location in no
+polygon has no cell. Polygons without a CRS are read as that function
+read them for the rows of \code{points}: the locations are handed to it in
+the CRS of \code{points}, whatever CRS \code{newdata} arrived in. Where that
+join runs on the sphere and s2 refuses a polygon of \code{values} (see
+Details in \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}), the call stops with an
+error of class \code{"spatialkit_cells_degenerate"} that gives the rows of
+\code{values} s2 refuses (\code{rows} on the condition), names the cause and
+says to transform \code{values} to a projected CRS.
 \item \emph{The value.} The cell's pooled value of \code{response_var},
 \verb{..pooled_<prefix><response_var>} with the prefix \code{resp_} or \code{pred_},
 when \code{values} has that column; otherwise its mean,
@@ -165,57 +239,54 @@ IDs of all three are written out as text before any match, and both ID
 columns returned have the class of the ID column of \code{values} wherever
 that class can hold every ID (see Value).
 }
-\section{Seeds outside the boundary}{
-
-A k-means seed can lie outside a boundary that is not convex, in a bay or
-a bend of a coast (see \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}). Its cell, clipped to the
-boundary, holds ground and observations, but the seed lies in no cell, so
-\code{seeds$cell_id <- tess$index} gives it \code{NA}. The locations nearest it then
-have \code{NA} in the ID column and are filled from the cell of their nearest
-scored row, which can be another cell than the one that holds them.
-Every point of a Voronoi cell is nearer its own seed than any other, so a
-point inside each cell that no seed lies in finds that cell's seed. In a
-projected CRS:
-
-\if{html}{\out{<div class="sourceCode">}}\preformatted{seeds$cell_id <- tess$index
-own  <- tess$cells[!tess$cells$cell_id \%in\% tess$index, ]
-near <- sf::st_nearest_feature(sf::st_point_on_surface(sf::st_geometry(own)),
-                               seeds)
-seeds$cell_id[near] <- own$cell_id
-}\if{html}{\out{</div>}}
-
-Each location inside the boundary then has the cell that holds it, and
-none is filled for want of a seed. A seed whose cell the clip removed
-keeps \code{NA}.
-}
-
 \section{Ties}{
 
-A location the same distance from two seeds takes the one that comes
-first in \code{seeds}. For the seeds of a \code{\link[=select_resolution]{select_resolution()}} result that is
-the lower-numbered centre, the rule \code{\link[=resolution_profile]{resolution_profile()}} scores with.
-When the summary's record of the count holds the centres the profile
-scored and \code{seeds} are those centres (the seeds a selection carries, or
-those a seeding function returns for it), in any order and any CRS, the
-distances are taken to the centres as the record holds them, a tie goes
-to the lower-numbered centre, and each centre gives the ID of the seed
+A distance to a seed, a centre or a scored location counts as the same as
+the least when its square is no more than the square of the least distance
+lengthened by a margin, plus one part in ten million of the least squared
+distance. The margin is one part in 1e10 of the largest coordinate of the
+seeds, centres or scored locations searched, at most a millionth of the
+diagonal of their bounding box and at least four times the spacing of
+doubles at that coordinate. A location the same distance from two seeds takes the one
+that comes first in \code{seeds}. For the seeds of a \code{\link[=select_resolution]{select_resolution()}}
+result that is the lower-numbered centre, the rule \code{\link[=resolution_profile]{resolution_profile()}}
+scores with. When the summary's record of the count holds the centres the
+profile scored and \code{seeds} are those centres (the seeds a selection
+carries, or those a seeding function returns for it), in any order and any
+CRS, the distances are taken to the centres as the record holds them, a tie
+goes to the lower-numbered centre, and each centre gives the ID of the seed
 that stands at it. Seeds count as the centres when they are as many and
 each lies at a different centre, within a thousandth of its distance from
 the next nearest one, so a seed that came back from another CRS with its
 coordinates rounded, or seeds sorted by their cell, do not settle a tie
-another way. A location on the edge between two such cells then takes
-the cell \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} gives a row there, with \code{seeds}
-and without. Other seeds, among them a subset of the centres, are
-searched as given. A
-location the same distance from two locations of scored rows takes the
-one with the lower x coordinate, then the lower y; among scored rows at
-one location that lie in different cells, the cell that comes first in
-the order of the IDs (ascending for numbers, the C-locale order for
-strings, the order of the levels for a factor). Neither rule depends on
-the order of the rows of \code{points}, or on whether the \pkg{FNN} package is
-installed. A tie is a tie between distances computed from the coordinates
-in the working CRS, so on gridded locations the same layer in another CRS
-or unit can put a location on a boundary in the other cell.
+another way. A location on the edge between two such cells then takes the
+cell \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} gives a row there, with \code{seeds} and
+without. Other seeds, among them a subset of the centres, are searched as
+given. A location the same distance from two locations of scored rows takes
+the one in the lower column (x values within one part in ten million of the
+diagonal of the scored locations' bounding box, or within one part in 1e10
+of their largest coordinate (at most a millionth of that diagonal,
+and at least four times the spacing of doubles at that coordinate) where
+that is more, counting as one), then the
+one lower in y, y values read the same way; among scored rows at one
+location that lie in different cells, the cell that comes first in the
+order of the IDs (ascending for numbers, the C-locale order for strings,
+the order of the levels for a factor), and the same among locations in one
+column and one row (two records of one station that differ only in the
+last bits of their coordinates, which are the same distance from any
+location, however near, while they lie within the margin of each
+other). Neither rule depends on the order of
+the rows of \code{points}, or on whether the \pkg{FNN} package is installed. A
+tie is a tie between distances computed from the coordinates in the working
+CRS, so on gridded locations the same layer in another projected CRS can
+put a location on a boundary in the other cell; another unit or origin of
+the same CRS moves only the last bits of the distances and settles the ties
+the same way, but for one case. The margin grows with the largest
+coordinate (about 0.46 mm at a UTM northing near 4,550 km, about half a
+micrometre once the origin lies next to data 5 km across), so a location
+whose distances to two of them differ by less than the margin with one
+origin and by more with another is a tie with the first, settled as
+above, and takes the nearer with the second.
 }
 
 \section{Away from the observations}{
@@ -250,8 +321,10 @@ of field.
 \section{Without the FNN package}{
 
 The function makes three nearest-neighbour searches: each location's
-nearest scored location, each location's nearest seed, and each scored
-location's nearest other one (for the spacing). With \pkg{FNN} each uses
+nearest scored location, each location's nearest seed (and that of a
+point inside each cell no seed names, when a seed with an \code{NA} ID lies
+outside every cell; see step 3), and each scored location's nearest
+other one (for the spacing). With \pkg{FNN} each uses
 a kd-tree. Without it each compares every pair, and a search that would
 compare more than \code{getOption("spatialkit.exact_pairs_max", 2e9)} pairs
 stops the call first, with an error of class \code{spatialkit_work_limit}
