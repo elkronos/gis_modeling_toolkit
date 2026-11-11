@@ -454,11 +454,22 @@ with the lower index in the full grid (\code{params$blocks$source_row};
 the grid is numbered along each row from the bottom left, so the cell to
 the left or below).  A point is on an edge
 while it lies within one part in 1e10 of the largest coordinate of the
-points and the blocks from it (0.44 mm at a UTM northing of 4,400 km), so
-points on the grid lines of a lattice are blocked alike in any unit or
-origin.  A point in no cell of a clipped grid goes to the cell with the
-nearest centroid, and to the lower of two whose centroids are as near to
-one part in ten million or that margin.
+points and the blocks from it (0.44 mm at a UTM northing of 4,400 km), at
+most a millionth of the diagonal of their bounding box and at least
+four times the spacing of doubles at that coordinate, so points on the
+grid lines of a lattice are blocked alike in any unit or origin.  A point
+in no cell of a clipped grid goes to the cell with the nearest centroid,
+and to the lower of two whose centroids are as near to one part in ten
+million or that margin.
+
+Points so far from the origin of their coordinates that doubles there are
+spaced more than a millionth of the points' extent apart (0.125 at 1e15,
+beside a layer a few kilometres across) are held to that spacing, and so
+are the edges of the blocks laid over them, so a point that lies within
+it of an edge near the origin can fall in the next block.  With
+\code{method = "block_kfold"} or \code{"buffered_loo"} the folds are
+made, and a warning of class \code{"spatialkit_xy_imprecise"} gives the
+spacing and the extent.
 
 \strong{Fold methods.}
 \code{"random_kfold"} ignores geography: a held-out point keeps most of
@@ -711,7 +722,8 @@ blocks are then brought into the CRS the folds are built in.
 A point inside more than one block is given the first (lowest row) that
 contains it, as for a point on the shared edge of two grid cells, and a
 point within the same margin of a block's edge (one part in 1e10 of the
-largest coordinate of the points and the blocks) counts as inside it.  When the
+largest coordinate of the points and the blocks, within the bounds
+above) counts as inside it.  When the
 blocks that caught such a point share area instead of an edge, the layer
 overlaps and is not a partition, and this is warned about.  A point
 inside no block is assigned to the nearest one, by distance to the polygon

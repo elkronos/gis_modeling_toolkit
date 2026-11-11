@@ -126,7 +126,9 @@ class \code{"spatialkit_cells_degenerate"} that says to pass a projected
 \code{crs} or to size the grid by \code{approx_n_cells}.  A side of the
 boundary's bounding box that exceeds a whole number of square cells by
 no more than a margin of one part in 1e10 of the largest coordinate of
-the boundary gets that number of cells (see \code{\link[=create_grid_polygons]{create_grid_polygons()}}).}
+the boundary, at most a millionth of the diagonal of its bounding
+box and at least four times the spacing of doubles at that coordinate,
+gets that number of cells (see \code{\link[=create_grid_polygons]{create_grid_polygons()}}).}
 
 \item{expand}{Buffer distance, in the working CRS's units, by which the
 Voronoi boundary is grown before the diagram is built. Applied by
@@ -214,7 +216,9 @@ carry \code{poly_id}, which holds the same values.}
 \item{\code{index}}{Integer vector of \code{cell_id} values, one per row of
 \code{points_sf}, and \code{NA} for a point that falls inside no cell, that is,
 one outside the study area. A point within a margin of one part in
-1e10 of the largest coordinate of the cells from a cell's edge is in
+1e10 of the largest coordinate of the cells from a cell's edge, at
+most a millionth of the diagonal of their bounding box and at
+least four times the spacing of doubles at that coordinate, is in
 that cell, and a point in two or more cells (on a shared edge, or
 within that margin of it) takes the smallest \code{cell_id} among them, so
 a lattice point on a cell edge takes the same cell in any unit or
@@ -238,7 +242,14 @@ the part of the study area nearer it than any other seed. Only a
 seed whose cell the clip removed whole, or without a location (an
 empty geometry, or a coordinate that is not finite or lies beyond
 1e150), is \code{NA}, and the warning then names seeds. See
-\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}.}
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}. For \code{"voronoi"} and \code{"triangles"},
+points so far from the origin of their CRS that doubles there are
+spaced more than a millionth of their extent apart (0.125 at 1e15,
+beside a layer a few kilometres across) have the cells' edges and
+their own cells read at that rounding; the cells are built, and a
+warning of class \code{"spatialkit_xy_imprecise"} gives the spacing and
+the extent. For \code{"hex"} and \code{"square"} the grid's warning says the
+same of the boundary (see \code{\link[=create_grid_polygons]{create_grid_polygons()}}).}
 \item{\code{boundary}}{The boundary used (possibly derived and/or
 reprojected, and for \code{"voronoi"} grown by \code{expand}).}
 \item{\code{method}}{The method actually used.}

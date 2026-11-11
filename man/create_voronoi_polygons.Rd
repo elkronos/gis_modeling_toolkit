@@ -126,7 +126,13 @@ when it is positive), and farther than a thousandth of the median cell
 width from the nearest cell, so a summary built from it counts only the points
 the tessellation actually covers.  Such points are counted in
 \code{params$n_outside}, and a warning of class
-\code{"spatialkit_unassigned"} gives their number.  For seeds (see
+\code{"spatialkit_unassigned"} gives their number.  Points so far from
+the origin of their CRS that doubles there are spaced more than a
+millionth of their extent apart (0.125 at 1e15, beside a layer a few
+kilometres across) have the cells' edges and their own cells read at
+that rounding, so two points that close can fall in one cell; the cells
+are built, and a warning of class \code{"spatialkit_xy_imprecise"}
+gives the spacing and the extent.  For seeds (see
 "Details") \code{index} holds the cell each seed generates, whether the
 seed lies inside the boundary or not, and \code{NA} only for a seed whose
 cell the clip removed whole or without a location (an empty geometry,

@@ -180,7 +180,7 @@
   if (nrow(xy) != K || K < 2L || !all(is.finite(xy[, 1:2]))) return(NULL)
   two <- .two_nearest(xy[, 1L], xy[, 2L], cen[, 1L], cen[, 2L], use_fnn)
   if (anyDuplicated(two$first)) return(NULL)
-  tol <- .edge_tol(c(range(cen[, 1L]), range(cen[, 2L])))
+  tol <- .edge_tol(.xy_box(cen[, 1L], cen[, 2L]))
   if (!all(sqrt(two$d1) <= pmax(1e-3 * sqrt(two$d2), tol))) return(NULL)
   of <- integer(K)
   of[two$first] <- seq_len(K)
@@ -204,15 +204,89 @@
 #' (\code{.seeds_as_centres()}), so rounding the seeds took on through
 #' another CRS does not move their edges.
 #'
-#' @param bb A bounding box (\code{sf::st_bbox()}), in the CRS the distance
-#'   is taken in.
+#' The margin is at most \code{.EDGE_REACH} (a millionth) of the diagonal
+#' of the coordinates' extent, the bound beyond which the package says the
+#' coordinates lose their precision (\code{.warn_xy_imprecise()}).  A layer
+#' far from the origin of its coordinates has a largest coordinate far
+#' larger than its extent: at an offset of 1e12 one part in 1e10 is 100 m
+#' on a 4 km layer, whose points within 100 m of an edge then went to the
+#' lower block or polygon, and at 1e15 it was 100 km, more than the layer.
+#' With the cap, a layer at an offset gives the folds, the join and the
+#' cells it gives near the origin for every point farther than a millionth
+#' of its diagonal from an edge.  Where the diagonal is at least a
+#' ten-thousandth of the largest coordinate (400 m at a UTM northing of
+#' 4,000 km) the cap does not act.  A cap of a ten-millionth of the
+#' diagonal, the reach of the package's tie rule, is too small: across a
+#' cell 1 km high it is 0.19 mm, less than the 0.2 to 0.3 mm between a
+#' meridian and the straight line a projected CRS draws for it, and points
+#' that a move through degrees leaves on that meridian then fall to the
+#' polygons, not to their nearest scored centre (test-core-gridded-ties.R).  The margin is at
+#' least \code{.EDGE_ULPS} units in the last place of the largest
+#' coordinate, so that it still covers the rounding of an edge computed at
+#' that size (0.5 m at 1e15, where doubles are 0.125 apart).
+#'
+#' @param bb The coordinates the margin is taken from, in the CRS the
+#'   distance is taken in: a bounding box (\code{sf::st_bbox()}), several
+#'   joined with \code{c()}, or \code{.xy_box()} of coordinates; their x
+#'   and y are read by the names \code{xmin}, \code{xmax}, \code{ymin} and
+#'   \code{ymax}.  Numbers without those names give no diagonal, and the
+#'   margin is then one part in 1e10 of the largest of them (with the
+#'   floor).
 #' @return One number, in the units of that CRS: 0 when every coordinate is
 #'   0 or none is finite.
 #' @keywords internal
 #' @noRd
 .edge_tol <- function(bb) {
-  m <- suppressWarnings(max(abs(as.numeric(bb)), na.rm = TRUE))
-  1e-10 * if (is.finite(m)) m else 0
+  v <- suppressWarnings(as.numeric(bb))
+  m <- suppressWarnings(max(abs(v), na.rm = TRUE))
+  if (!is.finite(m) || !(m > 0)) return(0)
+  tol <- 1e-10 * m
+  d <- .bb_diagonal(bb)
+  if (is.finite(d)) tol <- min(tol, .EDGE_REACH * d)
+  max(tol, .EDGE_ULPS * .ulp_of(m))
+}
+
+# The box of coordinates x and y, named as sf::st_bbox() names it, for
+# .edge_tol().
+.xy_box <- function(x, y) {
+  c(xmin = min(x), ymin = min(y), xmax = max(x), ymax = max(y))
+}
+
+# The share of the diagonal of the coordinates' extent .edge_tol() takes at
+# most.
+.EDGE_REACH <- 1e-6
+
+# The units in the last place of the largest coordinate that .edge_tol()
+# keeps at least: an edge computed at the coordinates' size (a corner plus a
+# multiple of a block's side) is rounded by one or two of them.  On a layer
+# 4 km across shifted to 1e15, margins of 0 to 4 of them give the folds and
+# the join of the layer at the origin; 64 of them (8 m there) move 26 of its
+# 60 rows to other folds.
+.EDGE_ULPS <- 4
+
+#' The diagonal of the coordinates a margin is taken from
+#'
+#' @param bb As for \code{.edge_tol()}.
+#' @return The length of the diagonal of the box that holds every finite
+#'   coordinate, computed without overflow; \code{NA} when \code{bb} has no
+#'   x or no y named.
+#' @keywords internal
+#' @noRd
+.bb_diagonal <- function(bb) {
+  nm <- names(bb)
+  if (is.null(nm)) return(NA_real_)
+  v <- suppressWarnings(as.numeric(bb))
+  x <- v[nm %in% c("xmin", "xmax")]
+  y <- v[nm %in% c("ymin", "ymax")]
+  x <- x[is.finite(x)]
+  y <- y[is.finite(y)]
+  if (!length(x) || !length(y)) return(NA_real_)
+  dx <- max(x) - min(x)
+  dy <- max(y) - min(y)
+  big <- max(dx, dy)
+  if (!is.finite(big)) return(NA_real_)
+  if (big == 0) return(0)
+  big * sqrt(1 + (min(dx, dy) / big)^2)
 }
 
 

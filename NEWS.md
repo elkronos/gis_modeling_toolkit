@@ -1886,6 +1886,72 @@ old behaviour where there is a way.
   a target of real size, or an `expand` of 1 or more, which is taken as the
   radius; `?clip_target_for` says the same.
 
+* **Block folds, the join to polygons, the Voronoi cells and the fill of
+  `cell_values_at()` changed with the origin of the coordinates.**  A point
+  counts as on an edge while it lies within a margin of it, one part in
+  1e10 of the largest coordinate: 0.44 mm at a UTM northing of 4,400 km,
+  but 100 m on a 4 km layer shifted to 1e12 and 100 km at 1e15.  At 1e12
+  points within 100 m of a block edge went to the lower block, so
+  `make_folds()` and the functions that make folds with it
+  (`cv_spatial()` and `compare_models_cv()` without `folds`,
+  `fold_separation()`, `cv_block_size_sweep()`, `kriging_adequacy()`,
+  `area_of_applicability()` and `select_features_forward()`) gave other
+  folds than at the origin; `assign_features_to_polygons()` gave points
+  tens of metres inside a polygon to its neighbour; the 60 points of a
+  layer fell in 39 Voronoi cells of `create_voronoi_polygons()` and
+  `build_tessellation(method = "voronoi")`; and `cell_values_at()` gave
+  other IDs.  At 1e15 `make_folds()` refused with a false "single block"
+  and the join called every point a tie.  The margin is now at most a
+  millionth of the diagonal of the coordinates' bounding box, and at
+  least four times the spacing of doubles at the largest coordinate, so
+  at any offset where doubles hold the layer these results are the ones
+  near the origin for every point farther than that from an edge.  Where
+  the diagonal is at least a ten-thousandth of the largest coordinate
+  (400 m at a UTM northing of 4,000 km) the margin is unchanged; on a
+  smaller layer it is the millionth of its diagonal (28 micrometres on a
+  layer 20 m across).  The help pages that state the margin say so.
+
+* **Coordinates so far from their origin that doubles cannot hold the
+  layer were read without a word.**  At 1e15 doubles are 0.125 apart, more
+  than a millionth of a layer a few kilometres across, and the edges
+  `make_folds()` lays for blocks and `create_grid_polygons()` lays for its
+  grid are rounded to that spacing, so a point near an edge could fall in
+  the next block with nothing said, and two points 0.25 m apart fell in one
+  Voronoi cell.  `make_folds()` (`"block_kfold"` and `"buffered_loo"`),
+  `assign_features_to_polygons()`, `create_grid_polygons()`,
+  `create_voronoi_polygons()` and `build_tessellation()` (`"voronoi"` and
+  `"triangles"`; `"hex"` and `"square"` through the grid) now warn once, with class
+  `spatialkit_xy_imprecise`, where the spacing of doubles at the
+  coordinates is more than a millionth of the layer's extent; the warning
+  gives both and says to shift the layer nearer the origin or project it.
+  A function that makes folds several times on one layer says it once.
+
+* **`clip_target_for()` drew its buffer around points on one line or at
+  one location at the rounding of their coordinates, without a word.**
+  With no `boundary`, GEOS draws the buffer at the size of the
+  coordinates: at an offset of 1e15, where doubles are 0.125 apart, the
+  1-metre disk around one location had an area of 2.6875 for pi, and two
+  points 0.5 m apart on a line got an empty LINESTRING for a target.  The
+  function now warns, with class `spatialkit_xy_imprecise`, where the
+  spacing of doubles at the points is more than a millionth of the
+  target's extent, and refuses, with an error of class
+  `spatialkit_xy_imprecise_error`, where the buffer comes back empty or
+  with no area; both give the spacing and the radius and say to shift the
+  layer nearer the origin or pass `boundary`.  `quiet = TRUE` does not
+  silence the warning.
+
+* **`clip_target_for()` returned a point, a MULTIPOINT, an empty line or a
+  disk of subnormal area for points less than about 3e-153 apart.**  With
+  no `boundary`, points on one line were buffered by 5 percent of their
+  spread, and a radius whose square is below the smallest normal double
+  (about 1.5e-154) gave GEOS a disk whose area underflowed: points 1e-320,
+  1e-310 and 1e-160 apart got a MULTIPOINT, an empty LINESTRING and a
+  disk of area 1.6e-322, with the message "using small buffer around
+  points"; a box 1e-320 on a side came back as a POINT with no message.
+  A side of the box, or a share of the spread, below that length now
+  counts as none, so such points get the disk of radius 1 unit of the CRS
+  that points at one location get, and the message gives their spread.
+
 * **`summarize_by_cell(area = TRUE)` stopped on cells that carry M.**  Cells
   that are XYM or XYZM throughout reached GEOS, which does not read M, and
   the call stopped with GEOS's "GEOS does not support XYM or XYZM

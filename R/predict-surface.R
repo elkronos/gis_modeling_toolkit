@@ -116,8 +116,9 @@
 #' (\code{.near_columns()}: first coordinates within \code{.TIE_TOL} of the
 #' extent are one column), then in the lowest row by the same rule read on
 #' y, then the lower row of the layer.  The extent is the diagonal of the
-#' points' box, or one part in 1e10 of their largest coordinate over
-#' \code{.TIE_TOL} where that is more (\code{.near_points_extent()}): two
+#' points' box, or the margin of an edge at their largest coordinate
+#' (\code{.edge_tol()}) over \code{.TIE_TOL} where that is more
+#' (\code{.near_points_extent()}): two
 #' records of one station that differ in their last bits, alone in the
 #' layer, have a box whose diagonal is last-bits small, and a raw y read
 #' after the column let those bits choose, which move with the unit and the
@@ -156,8 +157,8 @@
   if (!length(live)) return(out)
   cx <- cxy[live, 1L]; cy <- cxy[live, 2L]
   # By column, then by row read the same way on y, then row of the layer:
-  # order() keeps the row order among ties.  The step is never less than one
-  # part in 1e10 of the largest coordinate (.near_points_extent()): points
+  # order() keeps the row order among ties.  The step is never less than the
+  # margin of an edge (.near_points_extent(), .edge_tol()): points
   # that all lie within the last bits of each other have a last-bits small
   # box.
   ex <- .near_points_extent(cx, cy)
@@ -341,7 +342,9 @@
 #'   (squared distances within one part in ten million of the least) takes
 #'   the one lowest in x, x values within one part in ten million of the
 #'   diagonal of the points' bounding box, or within one part in 1e10 of
-#'   their largest coordinate where that is more, counting as one, then the
+#'   their largest coordinate (at most a millionth of that diagonal, and
+#'   at least four times the spacing of doubles at that coordinate) where
+#'   that is more, counting as one, then the
 #'   one lowest in y, y values read the same way, then the first in row
 #'   order, so a grid laid between the points of a lattice takes the same
 #'   covariates in another unit or with another origin, and with or without
@@ -356,7 +359,9 @@
 #'   polygons, or of one that mixes them with points (on the edge two
 #'   polygons share, say: distances within one part in ten million of the
 #'   least, plus one part in 1e10 of the largest coordinate of
-#'   \code{covariates}, count as the same) takes the one whose bounding-box
+#'   \code{covariates}, at most a millionth of the diagonal of its
+#'   bounding box and at least four times the spacing of doubles at that
+#'   coordinate, count as the same) takes the one whose bounding-box
 #'   centre is lowest in x, then lowest in y, x values and y values within
 #'   one part in ten million of the diagonal of the bounding box of
 #'   \code{covariates} counting as one, then the first in row order.  For a

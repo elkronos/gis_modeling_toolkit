@@ -14,7 +14,15 @@ A point that is empty, or has a coordinate that is not finite or lies
 beyond 1e150, has no location and takes no part in the bounding box.
 With no \code{boundary}, points none of which has a location (as given, or
 after the move of lon/lat points into a projected CRS) are refused with
-an error that says so.}
+an error that says so.
+Points that take the buffer, so far from the origin of their CRS that
+doubles there are spaced more than a millionth of the target's size
+apart (0.125 at 1e15, beside a disk of radius 1), give a buffer drawn
+at that rounding, with a warning of class \code{"spatialkit_xy_imprecise"}
+that gives the spacing and the radius. Where the buffer comes back
+empty or with no area, as a radius below that spacing can make it, the
+call stops with an error of class \code{"spatialkit_xy_imprecise_error"}.
+Shift such points nearer the origin, or pass \code{boundary}.}
 
 \item{boundary}{Optional polygonal sf object. One with no CRS, given with
 points that have one, is interpreted in the points' own CRS, with a
@@ -60,11 +68,14 @@ that boundary (optionally buffered by \code{expand}); without one it is the
 axis-aligned bounding box of \code{points_sf} (the rectangle in the working
 CRS), again optionally buffered, or a small buffer around the points when
 they all share one x or one y, or nearly so (the short side of their
-bounding box below a millionth of the long side). When every point sits
-at one location the box has no extent to take a share of, and the target
-is a disk of radius 1 unit of the CRS around it (1 m in a metre CRS, 1 km
-in a kilometre CRS), unless \code{expand} is 1 or more, which is then the
-radius; the message says so. Pass \code{boundary} for a target of real size.
+bounding box below a millionth of the long side, or below about 1.5e-154,
+a length whose square doubles cannot hold). When every point sits at one
+location, or the share of their spread the buffer would take (5 percent,
+or a fractional \code{expand}) is below that length, the box has no extent to
+take a share of, and the target is a disk of radius 1 unit of the CRS
+around it (1 m in a metre CRS, 1 km in a
+kilometre CRS), unless \code{expand} is 1 or more, which is then the radius;
+the message says so. Pass \code{boundary} for a target of real size.
 Reach for this function to build the \code{boundary} that
 \code{method = "hex"} and \code{"square"} require, to check that a study-area
 polygon actually contains the observations before tessellating, or to

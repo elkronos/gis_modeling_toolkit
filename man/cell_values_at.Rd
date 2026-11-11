@@ -258,7 +258,9 @@ without. Other seeds, among them a subset of the centres, are searched as
 given. A location the same distance from two locations of scored rows takes
 the one in the lower column (x values within one part in ten million of the
 diagonal of the scored locations' bounding box, or within one part in 1e10
-of their largest coordinate where that is more, counting as one), then the
+of their largest coordinate (at most a millionth of that diagonal,
+and at least four times the spacing of doubles at that coordinate) where
+that is more, counting as one), then the
 one lower in y, y values read the same way; among scored rows at one
 location that lie in different cells, the cell that comes first in the
 order of the IDs (ascending for numbers, the C-locale order for strings,

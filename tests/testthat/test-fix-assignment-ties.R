@@ -115,23 +115,28 @@ test_that("the lattice on the edges is assigned by the stated rule, and the cont
 
 test_that("a point within the margin of a shared edge is in both cells, and one beyond it in one", {
   cells <- .at_two_cells()
-  # The margin: one part in 1e10 of the largest coordinate, 4e-4 m here.
-  dx <- c(-1e-5, 0, 1e-5, 3e-4, 1e-3, -1e-3)
+  # The margin: one part in 1e10 of the largest coordinate (4e-4 m here), at
+  # most a millionth of the diagonal of the cells' box (2.24e-4 m for the
+  # 200 m x 100 m pair).  A point 2e-4 m east of the edge is within it; one
+  # 3e-4 m east of it, which the margin of the largest coordinate alone
+  # took in, lies in C2 alone (BUG-225).
+  dx <- c(-1e-5, 0, 1e-5, 2e-4, 1e-3, -1e-3, 3e-4)
   pts <- sf::st_sf(r = seq_along(dx), geometry = sf::st_sfc(
     lapply(dx, function(d) sf::st_point(c(500100 + d, 4000050))), crs = 32617))
   for (ord in list(1:2, 2:1)) {
     a <- .at_quiet(assign_features_to_polygons(pts, cells[ord, ], polygon_id_col = "pid"))
-    expect_identical(a$pid, c("C1", "C1", "C1", "C1", "C2", "C1"), info = paste(ord, collapse = ""))
+    expect_identical(a$pid, c("C1", "C1", "C1", "C1", "C2", "C1", "C2"),
+                     info = paste(ord, collapse = ""))
     expect_identical(attr(a, "ties")$which, 1:4)
     f <- .at_quiet(assign_features_to_polygons(pts, cells[ord, ], polygon_id_col = "pid",
                                                tie_break = "first"))
-    expect_identical(f$pid, c(rep(cells$pid[ord][1], 4), "C2", "C1"))
+    expect_identical(f$pid, c(rep(cells$pid[ord][1], 4), "C2", "C1", "C2"))
   }
   # Another predicate is applied as given, with no margin.
   w <- .at_quiet(assign_features_to_polygons(pts, cells, polygon_id_col = "pid",
                                              predicate = sf::st_within,
                                              keep_unassigned = TRUE))
-  expect_identical(w$pid, c("C1", NA, "C2", "C2", "C2", "C1"))
+  expect_identical(w$pid, c("C1", NA, "C2", "C2", "C2", "C1", "C2"))
 })
 
 test_that("in degrees with s2 on a point a hair either side of a meridian edge is a tie", {
@@ -284,7 +289,9 @@ test_that("?assign_features_to_polygons and NEWS state the rule", {
   # The centres and means are compared within the margin itself, also where
   # the predicate's margin is none (degrees with s2 off, another predicate).
   expect_match(rd, paste0("centres and means within one part in 1e10 of the largest coordinate ",
-                          "of the polygons (with any \\code{predicate}, and in longitude and ",
+                          "of the polygons, at most a millionth of the diagonal of their ",
+                          "bounding box and at least four times the spacing of doubles at that ",
+                          "coordinate (with any \\code{predicate}, and in longitude and ",
                           "latitude whatever \\code{sf::sf_use_s2()} says)"), fixed = TRUE)
   expect_false(grepl("within the margin of \\code{predicate}", rd, fixed = TRUE))
   news <- read("NEWS.md")

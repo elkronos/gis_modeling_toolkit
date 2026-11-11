@@ -75,6 +75,14 @@
 #' geometry: with the CRS they were given, or moved from lon/lat with
 #' [sf::st_transform()], which keeps their M.
 #'
+#' Layers so far from the origin of their coordinates that doubles there are
+#' spaced more than a millionth of the extent of the two layers apart (0.125
+#' at 1e15, beside a layer a few kilometres across) are joined with their
+#' edges and points held to that spacing, so a point that lies within it of
+#' an edge near the origin can fall in the polygon beside it. The join runs,
+#' and a warning of class `"spatialkit_xy_imprecise"` gives the spacing and
+#' the extent (the condition carries them as `spacing` and `extent`).
+#'
 #' @param features_sf An sf object containing features to assign. A layer
 #'   whose geometries mix dimensions or carry M (XYM or XYZM) is joined in x
 #'   and y, and the rows returned keep their Z and M (see Details).
@@ -106,7 +114,9 @@
 #'   a POINT or MULTIPOINT feature with a point within a margin of a
 #'   polygon is in it: one part in 1e10
 #'   of the largest coordinate of the polygons, 0.44 mm at a UTM northing of
-#'   4,400 km (in longitude and latitude, that many degrees of arc on the
+#'   4,400 km, at most a millionth of the diagonal of their bounding box
+#'   and at least four times the spacing of doubles at that coordinate (in
+#'   longitude and latitude, that many degrees of arc on the
 #'   sphere while \code{sf::sf_use_s2()} is on, and no margin while it is
 #'   off). A point on the edge two polygons share is then in both in any
 #'   unit and origin of the coordinates, and \code{tie_break} decides it,
@@ -147,7 +157,9 @@
 #'   leftmost (the two triangles of a split square share a bounding box),
 #'   so the choice does not depend on the order of the rows. Areas are
 #'   compared to 9 significant digits, and centres and means within one part
-#'   in 1e10 of the largest coordinate of the polygons (with any
+#'   in 1e10 of the largest coordinate of the polygons, at most a
+#'   millionth of the diagonal of their bounding box and at least four
+#'   times the spacing of doubles at that coordinate (with any
 #'   \code{predicate}, and in longitude and latitude whatever
 #'   \code{sf::sf_use_s2()} says), so the choice does not depend on the unit
 #'   or the origin of the coordinates either. Where polygons equal on every
@@ -259,12 +271,14 @@
 #'   its count was scored on, and [summarize_by_cell()]'s check of them reads
 #'   `"match"`. A point counts as on the edge when it lies within a margin of
 #'   both cells: one part in 1e10 of the largest coordinate of the cells,
-#'   0.44 mm at a UTM northing of 4,400 km. For a point that two centres tie
+#'   0.44 mm at a UTM northing of 4,400 km, at most a millionth of the
+#'   diagonal of their bounding box and at least four times the spacing of
+#'   doubles at that coordinate. For a point that two centres tie
 #'   for while the cell holding it is that of the strictly nearer one, the
 #'   margin also takes in the point's distance from the boundary between the
 #'   two, measured in the CRS the record names: midway between centres far
 #'   apart the tie reaches about 1.25e-8 of their distance from the boundary,
-#'   which can exceed one part in 1e10 of the coordinates.
+#'   which can exceed that margin.
 #'   [build_tessellation()] draws such cells in the CRS the record names,
 #'   around the centres as the record holds them, whatever CRS the seeds came
 #'   back in (unless its `crs` names another projected CRS), so their corners
@@ -564,10 +578,16 @@ assign_features_to_polygons <- function(
   # polygons it refused as they arrived (.stop_join_degenerate()).
   f_in <- f
   p_in <- p_sel
+  # The edges of the polygons, and the points read against them, are held
+  # to the spacing of doubles at the coordinates' size; where that is more
+  # than a millionth of the layers' extent it is said (.warn_xy_imprecise()).
+  .warn_xy_imprecise(list(f, p_sel), "assign_features_to_polygons",
+                     c("features_sf", "polygons_sf"))
   # The margin within which a point lies on a polygon's edge, and within
   # which the tie-break's bounding-box centres and vertex means count as
-  # equal: one part in 1e10 of the largest coordinate of the polygons
-  # (.edge_tol()), the margin of the edge rule of cells a profile scored.
+  # equal: one part in 1e10 of the largest coordinate of the polygons, at
+  # most a millionth of their diagonal (.edge_tol()), the margin of the
+  # edge rule of cells a profile scored.
   bb_p    <- sf::st_bbox(p_sel)
   tie_tol <- .edge_tol(bb_p)
   if (use_largest) s2_if_sphere({

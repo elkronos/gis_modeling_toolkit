@@ -10,6 +10,11 @@
 # said "degenerate bbox; using small buffer around points." for a disk of
 # radius 1 unit of the CRS.  The message now gives that radius in the
 # layer's unit and the ways to another size; the target is unchanged.
+# BUG-271: points closer together than about 3e-153 were buffered by a
+# share of their spread whose square is not a normal double, and GEOS gave
+# a MULTIPOINT, an empty LINESTRING or a disk of subnormal area; a box
+# 1e-320 on a side came back as a POINT.  Such points now get the disk of
+# radius 1 unit of the CRS, with the message that gives their spread.
 # ---------------------------------------------------------------------------
 
 .tm_box <- function(w) sf::st_sf(geometry = sf::st_as_sfc(sf::st_bbox(
@@ -195,6 +200,53 @@ test_that("clip_target_for() says how far apart points are whose spread has no s
   expect_equal(as.numeric(sf::st_area(r$value)), pi, tolerance = 1e-3)
 })
 
+test_that("clip_target_for() gives the disk of radius 1 to points whose spread squares below doubles", {
+  # The share of the spread the buffer would take (5 percent) is below
+  # sqrt(.Machine$double.xmin), about 1.5e-154, so its square is not a
+  # normal double: the points have no extent to take a share of.  The disk
+  # of radius 1 m is drawn at the origin, so its area is pi to the
+  # tolerance of GEOS's 30 segments a quadrant, as in the tests above.
+  # Each spread is the diagonal of the points' box, formatted as given.
+  line <- function(d) sf::st_as_sf(data.frame(x = c(0, d), y = c(0, 0)),
+                                   coords = c("x", "y"), crs = 32617)
+  box <- function(d) sf::st_as_sf(data.frame(x = c(0, d), y = c(0, d)),
+                                  coords = c("x", "y"), crs = 32617)
+  cases <- list(list(pts = line(1e-320), spread = 1e-320),
+                list(pts = line(1e-310), spread = 1e-310),
+                list(pts = line(1e-160), spread = 1e-160),
+                list(pts = line(1e-155), spread = 1e-155),
+                list(pts = box(1e-320), spread = 1e-320 * sqrt(1 + 1)),
+                list(pts = box(1e-160), spread = 1e-160 * sqrt(1 + 1)))
+  for (cs in cases) {
+    lab <- format(cs$spread)
+    r <- .tm_msgs(clip_target_for(cs$pts))
+    expect_identical(r$msgs, paste0(
+      "clip_target_for(): degenerate bbox: the points lie within ", format(cs$spread),
+      " of each other, so the box has no extent to take a share of; using a disk of ",
+      "radius 1 metre (1 unit of the CRS) around them. Pass `boundary` for a target of ",
+      "real size, or an `expand` of 1 or more, which is taken as the radius in the units ",
+      "of the CRS.\n"), info = lab)
+    g <- sf::st_geometry(r$value)
+    expect_identical(as.character(sf::st_geometry_type(g)), "POLYGON", info = lab)
+    expect_equal(as.numeric(sf::st_area(g)), pi, tolerance = 1e-3, info = lab)
+  }
+  # A spread of 1e-150, whose share squares to a normal double, keeps the
+  # buffer and the box it had: the same geometry st_buffer() and the
+  # bounding box give, with the same message, or none for the box.
+  p <- line(1e-150)
+  r <- .tm_msgs(clip_target_for(p))
+  expect_identical(r$msgs, "clip_target_for(): degenerate bbox; using small buffer around points.\n")
+  want <- spatialkit:::.safe_make_valid(suppressWarnings(
+    sf::st_buffer(sf::st_union(sf::st_geometry(p)), dist = 0.05 * 1e-150)))
+  expect_identical(sf::st_geometry(r$value), want)
+  expect_gt(as.numeric(sf::st_area(r$value)), 0)
+  p <- box(1e-150)
+  r <- .tm_msgs(clip_target_for(p))
+  expect_identical(r$msgs, character())
+  expect_identical(sf::st_geometry(r$value), spatialkit:::.safe_make_valid(
+    sf::st_as_sfc(sf::st_bbox(p))))
+})
+
 test_that("clip_target_for() keeps its message and target for points on one line", {
   pts <- sf::st_as_sf(data.frame(x = 5e5 + c(0, 100, 200), y = rep(4e6, 3)),
                       coords = c("x", "y"), crs = 32617)
@@ -209,7 +261,9 @@ test_that("?clip_target_for says what the target is for points at one location",
   rd <- if (file.exists(file)) tools::parse_Rd(file)
         else tools::Rd_db("spatialkit")[["clip_target_for.Rd"]]
   txt <- gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
-  expect_match(txt, paste0("When every point sits at one location the box has no extent to take ",
+  expect_match(txt, paste0("When every point sits at one location, or the share of their spread ",
+                           "the buffer would take (5 percent, or a fractional expand) is below ",
+                           "that length, the box has no extent to take ",
                            "a share of, and the target is a disk of radius 1 unit of the CRS ",
                            "around it (1 m in a metre CRS, 1 km in a kilometre CRS), unless ",
                            "expand is 1 or more, which is then the radius; the message says so. ",

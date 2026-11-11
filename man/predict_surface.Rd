@@ -84,7 +84,9 @@ point the same distance from several points of \code{covariates}
 (squared distances within one part in ten million of the least) takes
 the one lowest in x, x values within one part in ten million of the
 diagonal of the points' bounding box, or within one part in 1e10 of
-their largest coordinate where that is more, counting as one, then the
+their largest coordinate (at most a millionth of that diagonal, and
+at least four times the spacing of doubles at that coordinate) where
+that is more, counting as one, then the
 one lowest in y, y values read the same way, then the first in row
 order, so a grid laid between the points of a lattice takes the same
 covariates in another unit or with another origin, and with or without
@@ -99,7 +101,9 @@ point the same distance from several features of a layer of lines or
 polygons, or of one that mixes them with points (on the edge two
 polygons share, say: distances within one part in ten million of the
 least, plus one part in 1e10 of the largest coordinate of
-\code{covariates}, count as the same) takes the one whose bounding-box
+\code{covariates}, at most a millionth of the diagonal of its
+bounding box and at least four times the spacing of doubles at that
+coordinate, count as the same) takes the one whose bounding-box
 centre is lowest in x, then lowest in y, x values and y values within
 one part in ten million of the diagonal of the bounding box of
 \code{covariates} counting as one, then the first in row order.  For a

@@ -798,11 +798,14 @@
 #' axis-aligned bounding box of `points_sf` (the rectangle in the working
 #' CRS), again optionally buffered, or a small buffer around the points when
 #' they all share one x or one y, or nearly so (the short side of their
-#' bounding box below a millionth of the long side). When every point sits
-#' at one location the box has no extent to take a share of, and the target
-#' is a disk of radius 1 unit of the CRS around it (1 m in a metre CRS, 1 km
-#' in a kilometre CRS), unless `expand` is 1 or more, which is then the
-#' radius; the message says so. Pass `boundary` for a target of real size.
+#' bounding box below a millionth of the long side, or below about 1.5e-154,
+#' a length whose square doubles cannot hold). When every point sits at one
+#' location, or the share of their spread the buffer would take (5 percent,
+#' or a fractional `expand`) is below that length, the box has no extent to
+#' take a share of, and the target is a disk of radius 1 unit of the CRS
+#' around it (1 m in a metre CRS, 1 km in a
+#' kilometre CRS), unless `expand` is 1 or more, which is then the radius;
+#' the message says so. Pass `boundary` for a target of real size.
 #' Reach for this function to build the `boundary` that
 #' `method = "hex"` and `"square"` require, to check that a study-area
 #' polygon actually contains the observations before tessellating, or to
@@ -826,6 +829,14 @@
 #'   With no `boundary`, points none of which has a location (as given, or
 #'   after the move of lon/lat points into a projected CRS) are refused with
 #'   an error that says so.
+#'   Points that take the buffer, so far from the origin of their CRS that
+#'   doubles there are spaced more than a millionth of the target's size
+#'   apart (0.125 at 1e15, beside a disk of radius 1), give a buffer drawn
+#'   at that rounding, with a warning of class `"spatialkit_xy_imprecise"`
+#'   that gives the spacing and the radius. Where the buffer comes back
+#'   empty or with no area, as a radius below that spacing can make it, the
+#'   call stops with an error of class `"spatialkit_xy_imprecise_error"`.
+#'   Shift such points nearer the origin, or pass `boundary`.
 #' @param boundary Optional polygonal sf object. One with no CRS, given with
 #'   points that have one, is interpreted in the points' own CRS, with a
 #'   warning. With points in a projected CRS it is read as [harmonize_crs()]
@@ -984,19 +995,28 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   # y = 4e6, was called degenerate and got disks around the points.  A box
   # with no extent (span 0) is degenerate; points none of which has a
   # location never reach here (refused above).
+  # A side shorter than a length whose square is a normal double
+  # (.SQRT_XMIN, about 1.5e-154) counts as no side: the area of such a box
+  # underflows, and .safe_make_valid() turned a box 1e-320 on a side into a
+  # POINT.
   dx <- as.numeric(bb$xmax - bb$xmin)
   dy <- as.numeric(bb$ymax - bb$ymin)
   span <- max(dx, dy)
-  zero_w <- !isTRUE(dx > 1e-6 * span)
-  zero_h <- !isTRUE(dy > 1e-6 * span)
+  zero_w <- !isTRUE(dx > 1e-6 * span) || !isTRUE(dx >= .SQRT_XMIN)
+  zero_h <- !isTRUE(dy > 1e-6 * span) || !isTRUE(dy >= .SQRT_XMIN)
 
   if (zero_w || zero_h) {
     dist_use <- .expand_distance(points_sf, if (expand == 0) 0.05 else expand)
-    if (dist_use <= 0) {
+    # A share whose square is not a normal double is no length to buffer by:
+    # GEOS drew a disk whose area underflowed, or a MULTIPOINT, or an empty
+    # line, for points 1e-160, 1e-320 or 1e-310 apart.  Such points have no
+    # extent to take a share of, as points at one location have none.
+    if (!isTRUE(dist_use >= .SQRT_XMIN)) {
       # A box with no extent (every point at one location) has no length to
       # take a share of, so the disk has a radius of 1 unit of the CRS: 1 m
       # in a metre CRS, 1 km in a kilometre one.  The message gives that
-      # size in the layer's unit and the ways to another one.
+      # size in the layer's unit and the ways to another one, and how far
+      # apart the points are: the diagonal of their box.
       dist_use <- 1
       u <- if (is.na(crs_pts)) NA_character_
            else tryCatch(suppressWarnings(crs_pts$units_gdal), error = function(e) NULL)
@@ -1010,14 +1030,50 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
         "target of real size, or an `expand` of 1 or more, which is taken as the ",
         "radius in the units of %s."),
         if (span == 0) "the points sit at one location"
-        else sprintf("the points lie within %s of each other", format(span)),
+        else sprintf("the points lie within %s of each other", format(.bb_diagonal(bb))),
         unit, if (span == 0) "it" else "them",
         if (is.na(crs_pts)) "the coordinates" else "the CRS"))
     } else {
       .msg("clip_target_for(): degenerate bbox; using small buffer around points.")
     }
+    # GEOS draws the buffer at the coordinates' size, where doubles are
+    # spaced .ulp_of() apart: at 1e15, 0.125 apart, the disk of radius 1
+    # had an area of 2.6875.  Where that spacing is more than a millionth of
+    # the target's extent it is said (.warn_xy_imprecise()); `quiet` does
+    # not silence it.
+    spacing <- .warn_xy_imprecise(
+      pts_geom, "clip_target_for", "points_sf", extent = span + 2 * dist_use,
+      of = "the target's extent",
+      reads = sprintf("so the buffer of radius %s around the points is drawn at that rounding",
+                      format(signif(dist_use, 3))),
+      remedy = "Shift the layer nearer the origin, or pass `boundary`.")$spacing
     tgt <- suppressWarnings(sf::st_buffer(sf::st_union(pts_geom), dist = dist_use))
     tgt <- .safe_make_valid(tgt)
+    # A buffer whose radius is below that spacing can come back empty, or as
+    # points or a line, with no area: two points 0.5 m apart at 1e15 gave
+    # an empty LINESTRING.  No target is identified, and the call is refused
+    # rather than return something that is not a polygon of positive area.
+    area <- suppressWarnings(as.numeric(sum(sf::st_area(sf::st_set_crs(tgt, NA)))))
+    if (all(sf::st_is_empty(tgt)) || !isTRUE(area > 0)) {
+      got <- if (all(sf::st_is_empty(tgt))) "empty"
+             else paste("a", paste(unique(as.character(sf::st_geometry_type(tgt))),
+                                   collapse = "/"))
+      msg <- if (isTRUE(spacing > dist_use))
+        sprintf(paste0(
+          "clip_target_for(): `points_sf` lies so far from the origin%s that its ",
+          "coordinates lose their precision: they are rounded to %s, more than the ",
+          "radius %s of the buffer around the points, which comes back %s with no ",
+          "area, so no clip target can be drawn. Shift the layer nearer the origin, ",
+          "or pass `boundary`."),
+          if (is.na(crs_pts)) "" else " of its CRS",
+          format(signif(spacing, 3)), format(signif(dist_use, 3)), got)
+      else
+        sprintf(paste0(
+          "clip_target_for(): the buffer of radius %s around the points in ",
+          "`points_sf` comes back %s with no area, so no clip target can be drawn. ",
+          "Pass `boundary`."), format(signif(dist_use, 3)), got)
+      stop(errorCondition(msg, class = "spatialkit_xy_imprecise_error", call = NULL))
+    }
     sf::st_crs(tgt) <- crs_pts
     return(sf::st_sf(geometry = sf::st_geometry(tgt)))
   }
@@ -1454,7 +1510,13 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   width from the nearest cell, so a summary built from it counts only the points
 #'   the tessellation actually covers.  Such points are counted in
 #'   \code{params$n_outside}, and a warning of class
-#'   \code{"spatialkit_unassigned"} gives their number.  For seeds (see
+#'   \code{"spatialkit_unassigned"} gives their number.  Points so far from
+#'   the origin of their CRS that doubles there are spaced more than a
+#'   millionth of their extent apart (0.125 at 1e15, beside a layer a few
+#'   kilometres across) have the cells' edges and their own cells read at
+#'   that rounding, so two points that close can fall in one cell; the cells
+#'   are built, and a warning of class \code{"spatialkit_xy_imprecise"}
+#'   gives the spacing and the extent.  For seeds (see
 #'   "Details") \code{index} holds the cell each seed generates, whether the
 #'   seed lies inside the boundary or not, and \code{NA} only for a seed whose
 #'   cell the clip removed whole or without a location (an empty geometry,
@@ -1836,7 +1898,14 @@ create_voronoi_polygons <- function(
 
   # Build point → cell index using cell_id values.  The snapping record rides
   # on `params`, not on `index`, so `index` stays a plain integer vector.
-  # Seeds raise their own warning below.
+  # Seeds raise their own warning below.  The cells' edges are laid at the
+  # coordinates' size and the points are read against them with a margin of
+  # at least four units in the last place (.edge_tol()): at 1e15, 0.5 m, so
+  # two points 0.25 m apart fell in one cell.  Where the spacing of doubles
+  # at the points is more than a millionth of their extent it is said
+  # (.warn_xy_imprecise()).
+  .warn_xy_imprecise(pts, caller, "points_sf",
+                     reads = "so the cells' edges and the points' cells are read at that rounding")
   index   <- .build_point_cell_index(pts, cells, warn = !seed_layer, caller = caller)
   snapped <- attr(index, "snapped")
   attr(index, "snapped") <- NULL
@@ -2060,9 +2129,15 @@ create_voronoi_polygons <- function(
 #'   A side of the boundary's bounding box that exceeds a whole number of
 #'   square cells, of this size or of the size derived from `target_cells`,
 #'   by no more than a margin of one part in 1e10 of the largest coordinate
-#'   of the boundary gets that number of cells, so a box of 9000 by 6000 at
-#'   1000 gets 9 by 6 cells in any unit or origin, where rounding could add
-#'   a row or column.
+#'   of the boundary, at most a millionth of the diagonal of its bounding
+#'   box and at least four times the spacing of doubles at that coordinate,
+#'   gets that number of cells, so a box of 9000 by 6000 at 1000 gets 9 by 6
+#'   cells in any unit or origin, where rounding could add a row or column.
+#'   A boundary so far from the origin of its coordinates that doubles there
+#'   are spaced more than a millionth of its extent apart (0.125 at 1e15,
+#'   beside a boundary a few kilometres across) has its grid lines rounded to
+#'   that spacing; the grid is laid, and a warning of class
+#'   `"spatialkit_xy_imprecise"` gives the spacing and the extent.
 #' @param n Optional grid resolution (integer, length 1 or 2) giving the number
 #'   of columns and rows to divide the boundary's bounding box into; the cell
 #'   size is derived from it. [sf::st_make_grid()] derives hexagon placement
@@ -2073,8 +2148,9 @@ create_voronoi_polygons <- function(
 #'   truncate the grid to `n[1]` x `n[2]` cells anchored at the bounding-box
 #'   corner, covering only part of the boundary.
 #' @param clip Logical; clip grid to boundary. In a projected or CRS-less
-#'   grid, a cell that meets the boundary only within a margin of one part in
-#'   1e10 of the largest coordinate of the boundary from the cell's edge (a
+#'   grid, a cell that meets the boundary only within a margin of the cell's
+#'   edge (the margin `cellsize` gives: one part in 1e10 of the largest
+#'   coordinate of the boundary, within its bounds; a
 #'   cell whose edge lies on the boundary's edge but for rounding) is
 #'   dropped, rather than kept as a sliver. The call stops when the clip
 #'   leaves no cell, as it does when the lattice has none: in degrees with
@@ -2218,6 +2294,11 @@ create_grid_polygons <- function(
   h  <- as.numeric(bb["ymax"] - bb["ymin"])
   if (!(is.finite(w) && is.finite(h) && w > 0 && h > 0))
     stop("create_grid_polygons(): boundary bbox has non-positive extent.")
+  # The grid's lines are laid at the coordinates' size, a corner plus a
+  # multiple of the cell's side, and rounded to the spacing of doubles
+  # there; where that is more than a millionth of the boundary's extent it
+  # is said (.warn_xy_imprecise()).
+  .warn_xy_imprecise(bb, "create_grid_polygons", "boundary")
   env <- sf::st_as_sfc(bb, crs = sf::st_crs(boundary))
 
   # Parse and validate `n` once, up front, so an invalid value is rejected the
@@ -2716,7 +2797,9 @@ create_grid_polygons <- function(
 #'   \code{crs} or to size the grid by \code{approx_n_cells}.  A side of the
 #'   boundary's bounding box that exceeds a whole number of square cells by
 #'   no more than a margin of one part in 1e10 of the largest coordinate of
-#'   the boundary gets that number of cells (see [create_grid_polygons()]).
+#'   the boundary, at most a millionth of the diagonal of its bounding
+#'   box and at least four times the spacing of doubles at that coordinate,
+#'   gets that number of cells (see [create_grid_polygons()]).
 #' @param cover Optional sf or sfc layer the cells have to hold: the
 #'   observations (points), or a polygon. Read by `method = "voronoi"` when
 #'   there is no `boundary`: the boundary is then derived from the cover (the
@@ -2796,7 +2879,9 @@ create_grid_polygons <- function(
 #'     \item{`index`}{Integer vector of `cell_id` values, one per row of
 #'       `points_sf`, and `NA` for a point that falls inside no cell, that is,
 #'       one outside the study area. A point within a margin of one part in
-#'       1e10 of the largest coordinate of the cells from a cell's edge is in
+#'       1e10 of the largest coordinate of the cells from a cell's edge, at
+#'       most a millionth of the diagonal of their bounding box and at
+#'       least four times the spacing of doubles at that coordinate, is in
 #'       that cell, and a point in two or more cells (on a shared edge, or
 #'       within that margin of it) takes the smallest `cell_id` among them, so
 #'       a lattice point on a cell edge takes the same cell in any unit or
@@ -2820,7 +2905,14 @@ create_grid_polygons <- function(
 #'       seed whose cell the clip removed whole, or without a location (an
 #'       empty geometry, or a coordinate that is not finite or lies beyond
 #'       1e150), is `NA`, and the warning then names seeds. See
-#'       [create_voronoi_polygons()].}
+#'       [create_voronoi_polygons()]. For `"voronoi"` and `"triangles"`,
+#'       points so far from the origin of their CRS that doubles there are
+#'       spaced more than a millionth of their extent apart (0.125 at 1e15,
+#'       beside a layer a few kilometres across) have the cells' edges and
+#'       their own cells read at that rounding; the cells are built, and a
+#'       warning of class `"spatialkit_xy_imprecise"` gives the spacing and
+#'       the extent. For `"hex"` and `"square"` the grid's warning says the
+#'       same of the boundary (see [create_grid_polygons()]).}
 #'     \item{`boundary`}{The boundary used (possibly derived and/or
 #'       reprojected, and for `"voronoi"` grown by `expand`).}
 #'     \item{`method`}{The method actually used.}
@@ -3428,7 +3520,12 @@ build_tessellation <- function(
     }
     tri_sf$cell_id <- seq_len(nrow(tri_sf))
 
-    # Build point-to-cell index for triangles
+    # Build point-to-cell index for triangles.  The triangles' edges are
+    # drawn at the coordinates' size and the points read against them with
+    # the margin of .edge_tol(), as the Voronoi cells are; where doubles at
+    # the points do not hold a millionth of their extent it is said.
+    .warn_xy_imprecise(points_sf, "build_tessellation", "points_sf",
+                       reads = "so the cells' edges and the points' cells are read at that rounding")
     index   <- .build_point_cell_index(points_sf, tri_sf)
     snapped <- attr(index, "snapped")
     attr(index, "snapped") <- NULL

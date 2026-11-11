@@ -198,13 +198,14 @@
 #'
 #' The diagonal of the points' bounding box, or \code{.edge_tol()} of that
 #' box divided by \code{.TIE_TOL}, whichever is more, so the step of
-#' \code{.near_columns()} is never less than one part in 1e10 of the largest
-#' coordinate, the margin of \code{.edge_tol()}.  Points that all lie within
-#' the last bits of each other (two records of one station, alone in the
-#' layer) have a box whose diagonal is itself last-bits small, and with that
-#' diagonal alone those bits, which move with the unit and the origin, would
-#' part them into two columns.  On a layer whose diagonal is more than a
-#' thousandth of its largest coordinate the extent is the diagonal.
+#' \code{.near_columns()} is never less than a ten-millionth of the diagonal
+#' or the margin of \code{.edge_tol()}.  That margin is one part in 1e10 of
+#' the largest coordinate, at most a millionth of the diagonal and at least
+#' four units in the last place of the largest coordinate.
+#' Points that all lie within the last bits of each other (two records of one
+#' station, alone in the layer) have a box whose diagonal is itself
+#' last-bits small, and with that diagonal alone those bits, which move with
+#' the unit and the origin, would part them into two columns.
 #'
 #' @param x,y Finite coordinates of the points.
 #' @return One number, in the units of the coordinates.
@@ -213,7 +214,7 @@
 .near_points_extent <- function(x, y) {
   if (!length(x)) return(0)
   rx <- range(x); ry <- range(y)
-  max(sqrt(diff(rx)^2 + diff(ry)^2), .edge_tol(c(rx, ry)) / .TIE_TOL)
+  max(sqrt(diff(rx)^2 + diff(ry)^2), .edge_tol(.xy_box(x, y)) / .TIE_TOL)
 }
 
 
@@ -620,7 +621,9 @@
 #' given. A location the same distance from two locations of scored rows takes
 #' the one in the lower column (x values within one part in ten million of the
 #' diagonal of the scored locations' bounding box, or within one part in 1e10
-#' of their largest coordinate where that is more, counting as one), then the
+#' of their largest coordinate (at most a millionth of that diagonal,
+#' and at least four times the spacing of doubles at that coordinate) where
+#' that is more, counting as one), then the
 #' one lower in y, y values read the same way; among scored rows at one
 #' location that lie in different cells, the cell that comes first in the
 #' order of the IDs (ascending for numbers, the C-locale order for strings,
@@ -1070,8 +1073,8 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
   # the same way), then by the first cell in ID order among the rows at each
   # location, then by exact y and x, so rows at one location stay together.
   # The extent is the diagonal of the scored locations' bounding box, or
-  # one part in 1e10 of their largest coordinate over .TIE_TOL where that is
-  # more (.near_points_extent()).  The search below gives a tie to the lower
+  # the margin of an edge (.edge_tol()) over .TIE_TOL where that is more
+  # (.near_points_extent()).  The search below gives a tie to the lower
   # location number, and in exact x or y order the last bits of the
   # coordinates, which move with the unit and the origin, chose between
   # two locations of a column (a lattice moved to another false origin) or

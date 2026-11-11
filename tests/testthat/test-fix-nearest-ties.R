@@ -275,7 +275,9 @@ test_that("the help pages state the tie rules", {
                       "(squared distances within one part in ten million of the least) takes ",
                       "the one lowest in x, x values within one part in ten million of the ",
                       "diagonal of the points' bounding box, or within one part in 1e10 of ",
-                      "their largest coordinate where that is more, counting as one, then the ",
+                      "their largest coordinate (at most a millionth of that diagonal, and ",
+                      "at least four times the spacing of doubles at that coordinate) where ",
+                      "that is more, counting as one, then the ",
                       "one lowest in y, y values read the same way, then the first in row ",
                       "order"), fixed = TRUE)
   # sf::st_nearest_feature() searches a layer in degrees with s2, not GEOS.

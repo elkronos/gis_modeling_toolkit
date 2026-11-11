@@ -221,16 +221,23 @@ test_that("cell_values_at() fills beside two scored locations within the last bi
   }
 })
 
-test_that(".near_points_extent() is the diagonal, or one part in 1e10 of the largest coordinate over .TIE_TOL", {
+test_that(".near_points_extent() is the diagonal, or the margin of an edge over .TIE_TOL", {
   # A layer wider than a thousandth of its largest coordinate: the diagonal.
   expect_identical(.near_points_extent(c(4.5e5, 4.53e5), c(4.55e6, 4.554e6)), 5000)
-  # Two points within the last bits of each other: the floor.
+  # Two points within the last bits of each other: the floor, the margin of
+  # .edge_tol(), which is four units in the last place of the largest
+  # coordinate where the diagonal is last-bits small (BUG-225: no longer one
+  # part in 1e10 of it, 455 m of extent and a step of 0.455 mm).  The two
+  # points, one unit in the last place apart in x and in y, are still one
+  # column.
+  ulp <- 2^(floor(log2(4.55e6)) - 52)
   ex <- .near_points_extent(c(4.5e5, 4.5e5 + 5.82e-11), c(4.55e6, 4.55e6 - 9.31e-10))
-  expect_equal(ex, 1e-10 * 4.55e6 / .TIE_TOL, tolerance = 1e-12)
+  expect_equal(ex, 4 * ulp / .TIE_TOL, tolerance = 1e-12)
   expect_identical(.near_columns(c(4.5e5, 4.5e5 + 5.82e-11), c(0, 0), ex), c(1L, 1L))
+  expect_identical(.near_columns(c(4.55e6, 4.55e6 - 9.31e-10), c(0, 0), ex), c(1L, 1L))
   # A layer at the origin, and one point.
   expect_identical(.near_points_extent(c(0, 0), c(0, 0)), 0)
-  expect_identical(.near_points_extent(5, 7), 1e-10 * 7 / .TIE_TOL)
+  expect_identical(.near_points_extent(5, 7), 4 * 2^(floor(log2(7)) - 52) / .TIE_TOL)
 })
 
 # Cells 1 and 2 side by side and cell 3 5 km east of cell 1, and the fill

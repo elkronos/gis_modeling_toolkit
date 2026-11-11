@@ -62,9 +62,15 @@ used and a differing \code{cellsize[2]} is ignored with a logged warning.
 A side of the boundary's bounding box that exceeds a whole number of
 square cells, of this size or of the size derived from \code{target_cells},
 by no more than a margin of one part in 1e10 of the largest coordinate
-of the boundary gets that number of cells, so a box of 9000 by 6000 at
-1000 gets 9 by 6 cells in any unit or origin, where rounding could add
-a row or column.}
+of the boundary, at most a millionth of the diagonal of its bounding
+box and at least four times the spacing of doubles at that coordinate,
+gets that number of cells, so a box of 9000 by 6000 at 1000 gets 9 by 6
+cells in any unit or origin, where rounding could add a row or column.
+A boundary so far from the origin of its coordinates that doubles there
+are spaced more than a millionth of its extent apart (0.125 at 1e15,
+beside a boundary a few kilometres across) has its grid lines rounded to
+that spacing; the grid is laid, and a warning of class
+\code{"spatialkit_xy_imprecise"} gives the spacing and the extent.}
 
 \item{n}{Optional grid resolution (integer, length 1 or 2) giving the number
 of columns and rows to divide the boundary's bounding box into; the cell
@@ -77,8 +83,9 @@ truncate the grid to \code{n[1]} x \code{n[2]} cells anchored at the bounding-bo
 corner, covering only part of the boundary.}
 
 \item{clip}{Logical; clip grid to boundary. In a projected or CRS-less
-grid, a cell that meets the boundary only within a margin of one part in
-1e10 of the largest coordinate of the boundary from the cell's edge (a
+grid, a cell that meets the boundary only within a margin of the cell's
+edge (the margin \code{cellsize} gives: one part in 1e10 of the largest
+coordinate of the boundary, within its bounds; a
 cell whose edge lies on the boundary's edge but for rounding) is
 dropped, rather than kept as a sliver. The call stops when the clip
 leaves no cell, as it does when the lattice has none: in degrees with

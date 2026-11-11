@@ -1399,12 +1399,14 @@ setOldClass(c("spatialkit_rows", "sf"))
   FALSE
 }
 
-# The three classed warnings prep_model_data() raises about a layer.  A
-# function that prepares one layer several times raises each once
-# (.once_per_run()).
+# The three classed warnings prep_model_data() raises about a layer, and
+# the one make_folds() raises about coordinates far from their origin
+# (.warn_xy_imprecise()).  A function that prepares one layer several times,
+# or makes folds on it several times, raises each once (.once_per_run()).
 .prep_warning_classes <- c("spatialkit_rows_dropped",
                            "spatialkit_response_imprecise",
-                           "spatialkit_constant_predictor")
+                           "spatialkit_constant_predictor",
+                           "spatialkit_xy_imprecise")
 
 
 #' Warn where a response lies so far from zero that doubles there do not
@@ -1459,4 +1461,94 @@ setOldClass(c("spatialkit_rows", "sf"))
     caller, arg, format(signif(u, 3)), format(signif(s, 3)),
     data = list(spacing = u, spread = s))
   invisible(TRUE)
+}
+
+
+# The least length whose square is a normal double (about 1.49e-154).  A
+# buffer by a shorter distance, or a box with a shorter side, has an area
+# that underflows.
+.SQRT_XMIN <- sqrt(.Machine$double.xmin)
+
+
+#' Warn where coordinates lie so far from their origin that doubles there do
+#' not hold a millionth of the layer's extent
+#'
+#' At 1e15 doubles are 0.125 apart, so a layer 4 km across stored there is
+#' rounded to eighths of a metre, and so is every edge computed at that size:
+#' the edges of blocks (a corner plus a multiple of a block's side), the
+#' lines of a grid and the buffer drawn around points.  A point that lies
+#' within that rounding of an edge near the origin can then fall on the
+#' other side of it.  The coordinates are what the caller gave and are not
+#' refused; this says once per call that the result reads that rounding,
+#' where one unit in the last place of the largest coordinate
+#' (\code{.ulp_of()}) is more than a millionth of the extent, the bound of
+#' the package's precision rule.  A layer with no extent (every location at
+#' one point) has no spread to resolve and is left to the caller's own
+#' tests.  Rows without a location (\code{.located_rows()}) are not read.
+#' In a run of calls (\code{.once_per_run()}) the same text is said once.
+#'
+#' @param x The layer (sf or sfc), or a bounding box of its located
+#'   coordinates in a form \code{.edge_tol()} reads.  A list of layers is
+#'   read as one, all of them in one CRS.
+#' @param caller The function that reads it, named in the message.
+#' @param arg The names of the arguments \code{x} holds, named in the
+#'   message.
+#' @param extent The extent the spacing is compared with; by default the
+#'   diagonal of the located coordinates' bounding box.
+#' @param of What \code{extent} is, in the message.
+#' @param reads What reads the rounding, in the message.
+#' @param remedy The remedy, in the message.
+#' @return The spacing of doubles at the coordinates and the extent, in a
+#'   list, with \code{warned} \code{TRUE} when it warned (invisibly).
+#' @keywords internal
+#' @noRd
+.warn_xy_imprecise <- function(x, caller, arg, extent = NULL,
+                               of = if (length(arg) > 1L) "their extent" else "its extent",
+                               reads = "so edges and ties are read at that rounding",
+                               remedy = "Shift the layer nearer the origin, or project it.") {
+  out <- list(warned = FALSE, spacing = NA_real_, extent = NA_real_)
+  layers <- if (inherits(x, c("sf", "sfc")) || !is.list(x)) list(x) else x
+  boxes <- lapply(layers, function(l) {
+    if (!inherits(l, c("sf", "sfc"))) return(l)
+    g <- sf::st_geometry(l)
+    if (!length(g)) return(NULL)
+    # The box of the whole layer leaves out empty rows; rows with a
+    # coordinate that is not finite or lies beyond the bound are left out
+    # only where the box shows one, so a layer of a million cells is not
+    # read row by row.
+    bb <- unclass(sf::st_bbox(g))
+    if (all(is.finite(bb)) && max(abs(bb)) <= .POOL_XY_MAX) return(bb)
+    g <- g[.located_rows(g)]
+    if (!length(g)) return(NULL)
+    unclass(sf::st_bbox(g))
+  })
+  boxes <- Filter(Negate(is.null), boxes)
+  if (!length(boxes)) return(invisible(out))
+  bb <- unlist(boxes)
+  v <- suppressWarnings(as.numeric(bb))
+  v <- v[is.finite(v)]
+  if (!length(v)) return(invisible(out))
+  u <- .ulp_of(v)
+  d <- if (is.null(extent)) .bb_diagonal(bb) else extent
+  out$spacing <- u
+  out$extent  <- d
+  if (!(is.finite(d) && d > 0 && u > 1e-6 * d)) return(invisible(out))
+  crs_of <- vapply(layers, function(l)
+    inherits(l, c("sf", "sfc", "bbox")) && !is.na(sf::st_crs(l)), logical(1))
+  who <- if (length(arg) > 1L)
+    paste0(paste0("`", arg[-length(arg)], "`", collapse = ", "), " and `",
+           arg[length(arg)], "` lie")
+  else paste0("`", arg, "` lies")
+  .warn_classed(
+    "spatialkit_xy_imprecise",
+    paste0("%s(): %s so far from the origin%s that %s coordinates lose ",
+           "their precision: they are rounded to %s, more than a millionth of ",
+           "%s (%s), %s. %s"),
+    caller, who,
+    if (!any(crs_of)) "" else if (length(arg) > 1L) " of their CRS" else " of its CRS",
+    if (length(arg) > 1L) "their" else "its",
+    format(signif(u, 3)), of, format(signif(d, 3)), reads, remedy,
+    data = list(spacing = u, extent = d))
+  out$warned <- TRUE
+  invisible(out)
 }

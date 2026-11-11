@@ -970,7 +970,9 @@ test_that("on the cells of scored centres a point on an edge goes to the lowest-
 test_that("a point rounding put a hair inside a cell is on its edge; one a little farther is not", {
   sq <- .gt_squares()
   tol <- .edge_tol(sf::st_bbox(sq))
-  expect_equal(tol, 1e-10 * (5e6 + 20))
+  # A layer 20 m across at a northing of 5,000 km: a millionth of its
+  # diagonal (2.8e-5 m), below one part in 1e10 of the northing (BUG-225).
+  expect_equal(tol, 1e-6 * sqrt(20^2 + 20^2), tolerance = 1e-12)
   # Centres moved right by 2e-5: the edge between their cells lies 2e-5 east
   # of the squares' edge, so a point 1e-5 east of it is nearer the left centre
   # and inside the right square, within the margin of its edge.  The polygons
