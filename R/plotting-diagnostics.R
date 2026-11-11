@@ -655,6 +655,22 @@ plot_calibration <- function(cv, ...) {
 }
 
 
+#' Why a ladder of sizes is not supported, in the words of a subtitle
+#'
+#' @param sizes The sizes of the ladder, \code{bounds$obs_per_cell}.
+#' @return The end of the subtitle when the finest size gives fewer than two
+#'   cells: that size named as the default (the default size, or the finest
+#'   of the default sizes) or as the size asked for (\code{.size_is_default()}).
+#' @keywords internal
+#' @noRd
+.too_few_size_text <- function(sizes) {
+  if (!.size_is_default(sizes)) return("; fewer than two cells of the size asked for")
+  sprintf("; fewer than two cells of the size (obs_per_cell = %s, %s)",
+          format(min(sizes)),
+          if (length(sizes) == 1L) "the default" else "the finest of the default sizes")
+}
+
+
 #' Plot a resolution profile
 #'
 #' The criteria of a \code{\link{resolution_profile}()} against the number of
@@ -811,8 +827,11 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
             if (isTRUE(bounds$supported)) ""
             else if (identical(bounds$ceiling_from, "fewer than two supported cells"))
               sprintf("; fewer than two cells meet min_cell_n = %s", format(bounds$min_cell_n))
+            # The finest size is named by its value, as the selection's print
+            # names a size: the default size, or the finest of the default
+            # ladder, is the default whoever named it (.size_is_default()).
             else if (identical(bounds$ceiling_from, "fewer than two cells of the size"))
-              "; fewer than two cells of the size asked for"
+              .too_few_size_text(bounds$obs_per_cell)
             else "; the floor exceeds the ceiling")
   else NULL
   caption <- if (one_size)

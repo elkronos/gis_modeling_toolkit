@@ -721,9 +721,11 @@ print.spatialkit_count_rule <- function(x, ...) {
     sprintf("%s %s%s", format(k), what, if (isTRUE(k == 1L)) "" else "s")
 
   # ---- the count and what set it ----------------------------------------------
+  # The default size is called that whoever named it, as the selection's
+  # print and note call it; any other size is one the caller asked for.
   asked <- x$obs_per_cell_asked
   how <- c(if (identical(x$rule, "size") && is.numeric(asked) && one(asked))
-             paste(.per_cell_text(asked), "asked"),
+             paste0(.per_cell_text(asked), .size_source_text(asked)),
            if (is.numeric(x$n) && one(x$n))
              sprintf("%s / %s = %.2f", count(x$n, "row"), count(x$cells, "cell"),
                      x$n / x$cells))

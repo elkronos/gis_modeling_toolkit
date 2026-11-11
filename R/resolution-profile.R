@@ -326,6 +326,38 @@
 }
 
 
+#' Whether a size is the default, by its value
+#'
+#' The prints, the notes and the plot of a profile name where a size came
+#' from by its value: 4.5 rows per cell, or the seven sizes of the plain
+#' mean's ladder, is the default whoever named it, and any other size is one
+#' the caller asked for.  The record of a count keeps the value and not who
+#' gave it, so the value is all there is to go by.
+#'
+#' @param x A size, or every size of a ladder (never one size of a longer
+#'   ladder).
+#' @return \code{TRUE} or \code{FALSE}; \code{FALSE} for \code{NA},
+#'   \code{NULL} or anything not numeric.
+#' @keywords internal
+#' @noRd
+.size_is_default <- function(x) {
+  if (!is.numeric(x) || !length(x) || anyNA(x)) return(FALSE)
+  x <- sort(as.numeric(x), decreasing = TRUE)
+  if (length(x) == 1L) x == .OBS_PER_CELL_DEFAULT
+  else length(x) == length(.OBS_PER_CELL_LADDER) && all(x == .OBS_PER_CELL_LADDER)
+}
+
+
+#' Where a size came from, in the words of a print
+#'
+#' @param x A size.
+#' @return \code{", the default"} or \code{" asked"}, to follow the size in
+#'   a line (\code{.size_is_default()}).
+#' @keywords internal
+#' @noRd
+.size_source_text <- function(x) if (.size_is_default(x)) ", the default" else " asked"
+
+
 #' The finest level of a ladder of sizes
 #'
 #' The count the finest size gives, held to the most centres k-means can
@@ -4544,13 +4576,16 @@ select_resolution <- function(profile,
     criterion <- if (identical(est_value, "pooled")) "size"
                  else if (identical(est_value, "mean")) "loo"
                  else "cp"
+  # "auto" is the default, and match.arg() gives it whether the caller named
+  # it or not, so it is called the default and not something asked for, as
+  # the default size is (.size_source_text()).
   if (!is.null(obs_per_cell) && criterion != "size")
     stop(sprintf(paste0("select_resolution(): `obs_per_cell` is read by criterion = \"size\" ",
-                        "only, and criterion = \"%s\" was asked for%s."),
-                 asked,
+                        "only, and %s."),
                  if (asked == "auto")
-                   sprintf(", which reads this profile by \"%s\"", criterion)
-                 else ""),
+                   sprintf("criterion = \"auto\", the default, reads this profile by \"%s\"",
+                           criterion)
+                 else sprintf("criterion = \"%s\" was asked for", asked)),
          call. = FALSE)
   # `[` keeps the class, so a subset arrives here looking like a profile.  An
   # empty one or a column subset missing the criterion used to fall through to
@@ -5203,7 +5238,7 @@ select_resolution <- function(profile,
   # the caller gave, here or to the profile.
   note <- c(size = sprintf("the count is set by obs_per_cell = %s, %s; no criterion chose it.",
                            format(size),
-                           if (size == .OBS_PER_CELL_DEFAULT) "the default"
+                           if (.size_is_default(size)) "the default"
                            else "the caller's choice"))
   if (held)
     note <- c(note, held = sprintf(
@@ -5555,12 +5590,13 @@ print.resolution_selection <- function(x, ...) {
   # rows per cell the count leaves.
   if (by_size) {
     # The default size is called that whoever named it, as the selection's
-    # note calls it; any other size is one the caller asked for.
+    # note and the count record's print call it; any other size is one the
+    # caller asked for (.size_source_text()).
     asked <- x$obs_per_cell_asked %||% NA_real_
     n_div <- if (is.null(rec)) NA_integer_ else rec$n
     cat(sprintf("  size        : %s%s (obs_per_cell); %s rows / %d cells = %.2f\n",
                 paste(format(asked), if (isTRUE(asked == 1)) "row per cell" else "rows per cell"),
-                if (isTRUE(asked == .OBS_PER_CELL_DEFAULT)) ", the default" else " asked",
+                .size_source_text(asked),
                 format(n_div), x$best, x$value))
   } else {
     cat(sprintf("  flat region : %s (%d of %d level%s)\n",

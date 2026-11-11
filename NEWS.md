@@ -7988,6 +7988,24 @@ old behaviour where there is a way.
   allow)", which offers no remedy. `attr(, "bounds")$ceiling_from` is
   unchanged.
 
+* **Three texts called a default something the caller asked for.**  On a
+  call that names no size, `print(sel$count_rule)` (and the print of the
+  count record on the seeds and on a summary) read "set by size (4.5 rows
+  per cell asked; ...)" while `print(sel)` read "4.5 rows per cell, the
+  default"; it now reads "4.5 rows per cell, the default". The subtitle of
+  `plot()` of a profile whose finest size gives fewer than two cells read
+  "fewer than two cells of the size asked for"; it now names the default
+  size as "(obs_per_cell = 4.5, the default)" and the finest of the plain
+  mean's default sizes as "(obs_per_cell = 2, the finest of the default
+  sizes)". `select_resolution(profile, obs_per_cell = ...)` with
+  `criterion` left at "auto", on a profile it reads by "loo" or "cp", said
+  that criterion = "auto" "was asked for"; it now says that "auto", the
+  default, reads the profile by that criterion. As in the selection's
+  print, a size or a criterion is named by its value: 4.5, the ladder of
+  the seven default sizes and "auto" are the default whoever names them,
+  and any other is the one asked for. The refusal, the counts and the records do
+  not change.
+
 ## Documentation
 
 * The README, the vignettes, the help's examples, the scripts in

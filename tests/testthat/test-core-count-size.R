@@ -1097,14 +1097,16 @@ test_that("obs_per_cell is NULL or one number of at least 1, and is read by \"si
                      sprintf(paste0("select_resolution(): `obs_per_cell` is read by criterion = ",
                                     "\"size\" only, and criterion = \"%s\" was asked for."), cr))
   }
-  # "auto" that does not resolve to "size" says what it resolved to.
+  # "auto" that does not resolve to "size" says what it resolved to, and
+  # calls itself the default, named or not.
   e <- .cs_error(select_resolution(.cs_mean7(), criterion = "auto", obs_per_cell = 4.5))
   expect_identical(conditionMessage(e),
                    paste0("select_resolution(): `obs_per_cell` is read by criterion = \"size\" ",
-                          "only, and criterion = \"auto\" was asked for, which reads this ",
+                          "only, and criterion = \"auto\", the default, reads this ",
                           "profile by \"loo\"."))
   e <- .cs_error(select_resolution(.cs_plain(), criterion = "auto", obs_per_cell = 4.5))
-  expect_match(conditionMessage(e), "which reads this profile by \"cp\".", fixed = TRUE)
+  expect_match(conditionMessage(e), "\"auto\", the default, reads this profile by \"cp\".",
+               fixed = TRUE)
   # And one that does is read.
   expect_identical(select_resolution(.cs_pooled7(), criterion = "auto", obs_per_cell = 9)$best,
                    rung_k(600L, 9))
@@ -2261,12 +2263,12 @@ test_that("plot() draws loo like a count criterion, and a ladder of one size as 
   expect_false("GeomVline" %in% geoms(g))
   expect_identical(g$labels$subtitle, "1 level of 133 cells (floor 2, ceiling 133)")
   # A size too coarse for the layer: the subtitle says why the profile is not
-  # supported.  Six rows at 4.5 a cell.
+  # supported.  Six rows at 4.5 a cell, the default size.
   few <- suppressWarnings(.cs_profile(.cs_600()[1:6, ]))
   expect_false(attr(few, "bounds")$supported)
   expect_identical(plot(few, criteria = "wss")$labels$subtitle,
                    paste0("1 level of 2 cells (floor 2, ceiling 2); fewer than two ",
-                          "cells of the size asked for"))
+                          "cells of the size (obs_per_cell = 4.5, the default)"))
 })
 
 test_that("a profile of one level that is not a ladder of one size is summarised and drawn as today", {
@@ -2314,4 +2316,72 @@ test_that("plot() marks a level on a ladder of several sizes, and draws no line 
     expect_identical(.cs_geoms(g), "GeomPoint")
     expect_false(any(grepl(one, .cs_drawn(g), fixed = TRUE)))
   }
+})
+
+
+# ---- Where a size or a criterion came from --------------------------------------
+
+test_that("a size is the default by its value", {
+  # 4.5 alone, or the plain mean's seven sizes in any order, is the default;
+  # any other size or ladder is the caller's.
+  expect_true(.size_is_default(4.5))
+  expect_true(.size_is_default(c(18, 12, 9, 6, 4.5, 3, 2)))
+  expect_true(.size_is_default(c(2, 3, 4.5, 6, 9, 12, 18)))
+  for (x in list(6, 2, c(6, 4.5), c(18, 12, 9, 6, 4.5, 3), NA_real_, NULL, "4.5",
+                 numeric(0)))
+    expect_false(.size_is_default(x))
+  expect_identical(.size_source_text(4.5), ", the default")
+  expect_identical(.size_source_text(6), " asked")
+  expect_identical(.size_source_text(NA_real_), " asked")
+  # The default is 4.5 exactly: a size near it is the caller's, so the print
+  # never calls a named 4.6 or 4.4 the default.
+  expect_false(.size_is_default(4.6))
+  expect_false(.size_is_default(4.5 + 1e-9))
+  expect_identical(.size_source_text(4.4), " asked")
+  # sort() drops NA, so an NA beside the default size or the default ladder
+  # must not read as the default.
+  expect_false(.size_is_default(c(4.5, NA)))
+  expect_false(.size_is_default(c(18, 12, 9, 6, 4.5, 3, 2, NA)))
+})
+
+test_that("a size beside the default criterion is refused without calling the default asked for", {
+  # The caller names no criterion; "auto" is the default, and the refusal
+  # used to say it "was asked for".
+  for (case in list(list(p = .cs_mean7(), by = "loo"), list(p = .cs_plain(), by = "cp"))) {
+    e <- .cs_error(select_resolution(case$p, obs_per_cell = 4.5))
+    expect_identical(conditionMessage(e), sprintf(paste0(
+      "select_resolution(): `obs_per_cell` is read by criterion = \"size\" only, and ",
+      "criterion = \"auto\", the default, reads this profile by \"%s\"."), case$by))
+    expect_false(grepl("asked", conditionMessage(e), fixed = TRUE))
+  }
+  # A criterion the caller named is one asked for.
+  e <- .cs_error(select_resolution(.cs_mean7(), criterion = "loo", obs_per_cell = 4.5))
+  expect_identical(conditionMessage(e), paste0(
+    "select_resolution(): `obs_per_cell` is read by criterion = \"size\" only, and ",
+    "criterion = \"loo\" was asked for."))
+})
+
+test_that("the plot's subtitle names a size too coarse for the layer by where it came from", {
+  skip_if_not_installed("ggplot2")
+  six <- .cs_600()[1:6, ]
+  sub_of <- function(p) plot(p)$labels$subtitle
+  head <- "1 level of 2 cells (floor 2, ceiling 2); fewer than two cells of the size"
+  # The default size, left to "auto" or named.
+  dflt <- paste0(head, " (obs_per_cell = 4.5, the default)")
+  expect_identical(sub_of(suppressWarnings(resolution_profile(six, "z", seed = 1))), dflt)
+  expect_identical(sub_of(suppressWarnings(.cs_profile(six))), dflt)
+  # A size, or a ladder, the caller named; the ladder ends at 4.5 and is
+  # still the caller's.
+  expect_identical(sub_of(suppressWarnings(.cs_profile(six, obs_per_cell = 5))),
+                   paste0(head, " asked for"))
+  expect_identical(sub_of(suppressWarnings(.cs_profile(six, obs_per_cell = c(6, 4.5)))),
+                   paste0(head, " asked for"))
+  # The plain mean's default ladder, too coarse at its finest size on two
+  # rows with a response.
+  two <- six
+  two$z[3:6] <- NA
+  pm <- suppressWarnings(resolution_profile(two, "z", estimate = "mean", seed = 1))
+  expect_identical(attr(pm, "bounds")$obs_per_cell, c(18, 12, 9, 6, 4.5, 3, 2))
+  expect_identical(sub_of(pm),
+                   paste0(head, " (obs_per_cell = 2, the finest of the default sizes)"))
 })

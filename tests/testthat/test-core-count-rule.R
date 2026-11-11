@@ -462,7 +462,7 @@ test_that("where centres hold no scored row the count is the centres, and the re
   # So does the print, with the cells that hold a scored row on their line.
   out <- .cr_print(attr(r$value, "count_rule"))
   expect_identical(out[1L],
-    "Count: 66 cells, set by size (4.5 rows per cell asked; 299 rows / 66 cells = 4.53)")
+    "Count: 66 cells, set by size (4.5 rows per cell, the default; 299 rows / 66 cells = 4.53)")
   expect_match(out[6L], sprintf("on 299 rows in %d cells (one cell: ", occupied), fixed = TRUE)
   # Rows removed are reported against the occupied cells and the rows scored.
   r <- .cr_sum(G$asg[!is.na(G$asg$z), ][-(1:20), ], G$tess$cells, "pooled")
@@ -1198,7 +1198,7 @@ test_that("a record prints the count, the estimate, the cells and what the profi
   # The errors are written as the record of the pooled columns writes them.
   expect_match(scored_line, "loo [0-9]\\.[0-9]{2}e[+-][0-9]{2} on 600 rows in 133 cells \\(one cell: [0-9]\\.[0-9]{2}e[+-][0-9]{2}\\)")
   head <- c(
-    "Count: 133 cells, set by size (4.5 rows per cell asked; 600 rows / 133 cells = 4.51)",
+    "Count: 133 cells, set by size (4.5 rows per cell, the default; 600 rows / 133 cells = 4.51)",
     "  chosen for  : the pooled value",
     "  cells       : density, 3 density-weighted k-means++ starts (power 1, 8",
     "                neighbours; seed 123), fitted to every row;")
@@ -1229,7 +1229,7 @@ test_that("a record prints the count, the estimate, the cells and what the profi
   single$scored$cells <- 1L
   out1 <- .cr_print(single)
   expect_identical(out1[1L],
-    "Count: 1 cell, set by size (4.5 rows per cell asked; 1 row / 1 cell = 1.00)")
+    "Count: 1 cell, set by size (4.5 rows per cell, the default; 1 row / 1 cell = 1.00)")
   expect_match(out1[6L], " on 1 row in 1 cell (one cell: ", fixed = TRUE)
 
   # A mismatch, rows that differ, a check that was skipped.
@@ -1271,7 +1271,7 @@ test_that("the print names the rule, the kind, the seed and the rows the centres
   r <- rec_km; r$n_fit <- NA_integer_
   expect_identical(.cr_print(r)[3L], "  cells       : k-means, 25 k-means++ starts (seed 123);")
   r <- rec_km; r$n <- NA_integer_; r$obs_per_cell <- NA_real_
-  expect_identical(.cr_print(r)[1L], "Count: 133 cells, set by size (4.5 rows per cell asked)")
+  expect_identical(.cr_print(r)[1L], "Count: 133 cells, set by size (4.5 rows per cell, the default)")
   r$rule <- "loo"
   expect_identical(.cr_print(r)[1L], "Count: 133 cells, set by loo")
 
@@ -1315,4 +1315,36 @@ test_that("the print names the rule, the kind, the seed and the rows the centres
   r$scored$share_alone <- NA_real_
   expect_identical(.cr_print(r)[5L],
                    "  scored      : loo NA on 600 rows in 133 cells (one cell: NA)")
+})
+
+
+# ---- Where the size came from ---------------------------------------------------
+
+test_that("the record's print names the size as the selection's print does", {
+  # The default size is the default whoever named it, and any other size is
+  # one the caller asked for: the record's print said "4.5 rows per cell
+  # asked" on a call that named no size, beside the selection's "the default".
+  dflt <- "Count: 133 cells, set by size (4.5 rows per cell, the default; 600 rows / 133 cells = 4.51)"
+  for (sel in list(.cr_size(), select_resolution(.cr_pooled()))) {
+    expect_identical(.cr_print(sel)[2L], paste0(
+      "  size        : 4.5 rows per cell, the default (obs_per_cell); ",
+      "600 rows / 133 cells = 4.51"))
+    expect_identical(.cr_print(sel$count_rule)[1L], dflt)
+    expect_identical(.cr_print(attr(sel$seeds, "count_rule"))[1L], dflt)
+  }
+  # A size of the caller's is one asked for, in both prints.
+  six <- select_resolution(suppressWarnings(.cr_profile(.cr_600(), obs_per_cell = 6)),
+                           criterion = "size")
+  expect_identical(.cr_print(six)[2L],
+    "  size        : 6 rows per cell asked (obs_per_cell); 600 rows / 100 cells = 6.00")
+  asked6 <- "Count: 100 cells, set by size (6 rows per cell asked; 600 rows / 100 cells = 6.00)"
+  expect_identical(.cr_print(six$count_rule)[1L], asked6)
+  expect_identical(.cr_print(attr(six$seeds, "count_rule"))[1L], asked6)
+  # One row a cell keeps its singular; a record with no size prints none.
+  rec <- .cr_size()$count_rule
+  one <- rec; one$obs_per_cell_asked <- 1
+  expect_match(.cr_print(one)[1L], "set by size (1 row per cell asked; 600 rows", fixed = TRUE)
+  none <- rec; none$obs_per_cell_asked <- NA_real_
+  expect_identical(.cr_print(none)[1L],
+                   "Count: 133 cells, set by size (600 rows / 133 cells = 4.51)")
 })
