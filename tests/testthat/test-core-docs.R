@@ -1470,3 +1470,200 @@ test_that("the getting-started vignette gives the distance errors nc.shp's proje
   # The zone first, then the projection chosen, as the sentence reads.
   expect_identical(unname(shown), logged[c(3L, 2L)])
 })
+
+test_that("?sac_nugget and ?estimate_sac_range give nugget_at_bound's bound as a share of the sill", {
+  bound <- function(page) .docs_squash(.docs_flat(.docs_rd(page)))
+  nug <- bound("sac_nugget")
+  est <- bound("estimate_sac_range")
+  # "Within 1e-4 of the sill" reads as a nugget close to the sill, or 1e-4
+  # from it in the response's units; the code marks a share of the sill.
+  expect_identical(.docs_count(nug, "within 1e-4"), 0L)
+  expect_identical(.docs_count(est, "within 1e-4"), 0L)
+  expect_identical(.docs_count(nug, paste0(
+    "is TRUE when the fit put the nugget at its lower bound (0, or at most 10^{-4} ",
+    "of the sill): that is the bound and not an estimate")), 1L)
+  expect_identical(.docs_count(est, paste0(
+    "nugget_at_bound (TRUE when the nugget is at its lower bound, 0 or at most ",
+    "10^{-4} of the sill, and so is not an estimate)")), 1L)
+  # The wording ?resolution_profile uses for the same mark.
+  expect_identical(.docs_count(bound("resolution_profile"),
+                               "A nugget of 0, or of at most 10^{-4} of the sill"), 1L)
+
+  # The code: the mark is nugget <= 1e-4 * sill, so it does not move with the
+  # unit of the response.  A field with no noise has its nugget at 0, marked at
+  # every scale; the same field with noise of sd 0.2 has a nugget near 8
+  # percent of the sill, marked at none, although at a scale of 1e-3 it lies
+  # within 1e-4 of the sill in the response's units.
+  set.seed(5)
+  n  <- 300
+  xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+  L  <- t(chol(exp(-as.matrix(stats::dist(xy)) / 120) + diag(1e-8, n)))
+  z1 <- rnorm(n); z2 <- rnorm(n)
+  p  <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  p$A <- drop(L %*% z2)
+  p$B <- drop(L %*% z1) + 0.2 * z2
+  for (v in c("A", "B")) for (k in c(1, 1e-3, 1e3)) {
+    p$zk <- p[[v]] * k
+    r <- NULL
+    capture_spatialkit_log(r <- estimate_sac_range(p, "zk"), level = logger::WARN)
+    sill <- sum(attr(r, "variogram_model")$psill)
+    expect_identical(attr(r, "nugget_at_bound"), sac_nugget(r) <= 1e-4 * sill,
+                     info = paste(v, k))
+    expect_identical(attr(r, "nugget_at_bound"), v == "A", info = paste(v, k))
+  }
+})
+
+test_that("estimate_sac_range() advises a larger `cutoff` for a range past the lags only where one is accepted", {
+  # A linear trend: the variogram rises with no sill at every cutoff.
+  set.seed(4)
+  n  <- 300
+  xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+  xy$t <- xy$x / 50 + rnorm(n, sd = 0.3)
+  p  <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  over <- function(cutoff, ...) {
+    r <- NULL
+    log <- capture_spatialkit_log(r <- estimate_sac_range(p, "t", cutoff = cutoff, ...),
+                                  level = logger::WARN)
+    expect_true(is.na(r))
+    expect_identical(attr(r, "rejected_reason"), "fitted range exceeds the largest lag fitted")
+    line <- grep("exceeds the largest lag the variogram was fitted over", log,
+                 value = TRUE, fixed = TRUE)
+    expect_length(line, 1L)
+    paste(line, collapse = "\n")
+  }
+  # At cutoff = 1 the lags already run to the farthest pair, and a larger
+  # value is refused: the advice is to detrend or set a block size.
+  at_one <- over(1)
+  expect_false(grepl("Raise `cutoff`", at_one, fixed = TRUE))
+  expect_true(grepl(paste0("Returning NA. The lags already run to the farthest pair of ",
+                           "points (`cutoff` = 1); supply `predictor_vars` to detrend, or ",
+                           "set a block size explicitly."), at_one, fixed = TRUE))
+  expect_error(estimate_sac_range(p, "t", cutoff = 1.01),
+               "a single number above 0 and at most 1", fixed = TRUE)
+  # Detrended on a predictor that does not carry the trend, the advice to
+  # try other predictors stands without the larger cutoff.
+  p$noise <- rnorm(n)
+  at_one_dt <- over(1, predictor_vars = "noise")
+  expect_false(grepl("Raise `cutoff`", at_one_dt, fixed = TRUE))
+  expect_true(grepl("(`cutoff` = 1); try predictors that carry the trend", at_one_dt,
+                    fixed = TRUE))
+  # Below 1 a larger cutoff is accepted, and the advice keeps it.
+  for (cf in c(0.5, 0.9, 0.99))
+    expect_true(grepl(paste0("Returning NA. Raise `cutoff` to fit longer lags, supply ",
+                             "`predictor_vars` to detrend, or set a block size explicitly."),
+                      over(cf), fixed = TRUE), info = paste("cutoff", cf))
+})
+
+test_that("the over-cutoff warning names the n_max subsample at cutoff = 1", {
+  # With n above n_max the lags run to the farthest pair of the subsample,
+  # not of every point, and the warning says which.
+  set.seed(4)
+  n  <- 300
+  xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+  xy$t <- xy$x / 50 + rnorm(n, sd = 0.3)
+  p  <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  r <- NULL
+  log <- capture_spatialkit_log(r <- estimate_sac_range(p, "t", cutoff = 1, n_max = 100),
+                                level = logger::WARN)
+  expect_true(is.na(r))
+  expect_identical(attr(r, "rejected_reason"), "fitted range exceeds the largest lag fitted")
+  expect_true(any(grepl(paste0("The lags already run to the farthest pair of the `n_max` ",
+                                  "subsample of points (`cutoff` = 1)"), log, fixed = TRUE)))
+  log_all <- capture_spatialkit_log(estimate_sac_range(p, "t", cutoff = 1), level = logger::WARN)
+  expect_false(any(grepl("subsample", log_all, fixed = TRUE)))
+})
+
+test_that("a range inside the lags refused by range_frac below 1 is not said to run past them", {
+  # An exponential field of scale 150 m on a 1 km square: its variogram sills
+  # inside the lags at both cutoffs.  A range_frac of 0.2 refuses that range
+  # although it lies within the largest lag fitted, so the warning must not
+  # say it exceeds that lag or that the variogram never reached a sill, and
+  # the remedy is a larger range_frac, not a larger cutoff.  The help of
+  # range_frac says the bound is the longest lag only at its default.
+  est <- .docs_squash(.docs_flat(.docs_rd("estimate_sac_range")))
+  expect_identical(.docs_count(est, paste0(
+    "range_frac * cutoff * max_dist (at the default of 1, beyond the longest lag the ",
+    "empirical variogram was actually fitted over) is treated as unidentified")), 1L)
+  expect_identical(.docs_count(est, "(that is, beyond the longest lag"), 0L)
+  set.seed(5)
+  n  <- 300
+  xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+  L  <- t(chol(exp(-as.matrix(stats::dist(xy)) / 150) + diag(1e-8, n)))
+  p  <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  p$A <- drop(L %*% rnorm(n))
+  for (cf in c(0.5, 1)) {
+    ok <- NULL
+    capture_spatialkit_log(ok <- estimate_sac_range(p, "A", cutoff = cf), level = logger::WARN)
+    expect_true(is.finite(ok), info = paste("cutoff", cf))
+    r <- NULL
+    log <- capture_spatialkit_log(r <- estimate_sac_range(p, "A", cutoff = cf, range_frac = 0.2),
+                                  level = logger::WARN)
+    # The value and the reason are as before: only the text changes.
+    expect_true(is.na(r), info = paste("cutoff", cf))
+    expect_identical(attr(r, "rejected_reason"),
+                     "fitted range exceeds the largest lag fitted", info = paste("cutoff", cf))
+    expect_equal(attr(r, "rejected_range"), as.numeric(ok), info = paste("cutoff", cf))
+    expect_lte(attr(r, "rejected_range"), attr(r, "cutoff_dist"))
+    expect_gt(attr(r, "rejected_range"), 0.2 * attr(r, "cutoff_dist"))
+    line <- grep("estimate_sac_range(): fitted range", log, value = TRUE, fixed = TRUE)
+    expect_length(line, 1L)
+    expect_false(grepl("never reached a sill", line, fixed = TRUE), info = paste("cutoff", cf))
+    expect_false(grepl("exceeds the largest lag", line, fixed = TRUE), info = paste("cutoff", cf))
+    expect_false(grepl("Raise `cutoff`", line, fixed = TRUE), info = paste("cutoff", cf))
+    expect_true(grepl(sprintf(paste0(
+      "fitted range (%.0f) exceeds the largest range `range_frac` accepts (%.4g = 0.2 x ",
+      "the largest lag fitted, %.0f), although it lies within that lag. Returning NA"),
+      attr(r, "rejected_range"), 0.2 * attr(r, "cutoff_dist"), attr(r, "cutoff_dist")),
+      line, fixed = TRUE), info = paste("cutoff", cf))
+    expect_true(grepl("Raise `range_frac` (at 1 it accepts any range within the lags), or set a block size explicitly.",
+                      line, fixed = TRUE), info = paste("cutoff", cf))
+  }
+  # A range past the largest lag keeps the old text with range_frac below 1.
+  set.seed(4)
+  xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+  xy$t <- xy$x / 50 + rnorm(n, sd = 0.3)
+  q  <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  r <- NULL
+  log <- capture_spatialkit_log(r <- estimate_sac_range(q, "t", range_frac = 0.5),
+                                level = logger::WARN)
+  expect_gt(attr(r, "rejected_range"), attr(r, "cutoff_dist"))
+  expect_true(any(grepl("exceeds the largest lag the variogram was fitted over", log, fixed = TRUE)))
+  expect_true(any(grepl("never reached a sill", log, fixed = TRUE)))
+  expect_true(any(grepl("Raise `cutoff` to fit longer lags", log, fixed = TRUE)))
+})
+
+test_that("?sac_nugget says a nugget at a floor of at most 1e-4 of the sill is marked", {
+  txt <- .docs_squash(.docs_flat(.docs_rd("sac_nugget")))
+  expect_identical(.docs_count(txt, paste0(
+    "A nugget equal to its floor is the variance between visits, a measurement, ",
+    "and nugget_at_bound stays FALSE for it unless the floor itself is at most ",
+    "10^{-4} of the sill.")), 1L)
+  # The code: 600 locations visited twice, on a field with no noise, so the
+  # fit puts the nugget at its floor, the variance between visits.  With a
+  # visit sd of 1e-3 that floor is about 1e-6 of the sill and the nugget is
+  # marked; with 0.05 it is about 2.5e-3 of the sill and it is not.
+  one <- function(visit_sd) {
+    set.seed(5203)
+    n <- 600L
+    x <- runif(n, 0, 400e3); y <- runif(n, 0, 300e3)
+    D <- as.matrix(stats::dist(cbind(x, y)))
+    f <- drop(crossprod(chol(exp(-3 * D / 30e3) + diag(1e-8, n)), rnorm(n)))
+    set.seed(1)
+    d <- rbind(data.frame(x = 5e5 + x, y = 4e6 + y, z = f + rnorm(n, 0, visit_sd)),
+               data.frame(x = 5e5 + x, y = 4e6 + y, z = f + rnorm(n, 0, visit_sd)))
+    r <- NULL
+    capture_spatialkit_log(
+      r <- estimate_sac_range(sf::st_as_sf(d, coords = c("x", "y"), crs = 32615), "z"),
+      level = logger::WARN)
+    r
+  }
+  for (vs in c(1e-3, 0.05)) {
+    r <- one(vs)
+    sill <- sum(attr(r, "variogram_model")$psill)
+    flo  <- attr(r, "nugget_floor")
+    expect_gt(flo, 0)
+    expect_equal(sac_nugget(r), flo, tolerance = 1e-12, info = paste("visit sd", vs))
+    expect_identical(attr(r, "nugget_at_bound"), flo <= 1e-4 * sill, info = paste("visit sd", vs))
+    expect_identical(attr(r, "nugget_at_bound"), vs == 1e-3, info = paste("visit sd", vs))
+  }
+})

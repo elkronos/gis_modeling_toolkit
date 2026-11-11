@@ -8115,6 +8115,24 @@ old behaviour where there is a way.
   and any other is the one asked for. The refusal, the counts and the records do
   not change.
 
+* **`estimate_sac_range(cutoff = 1)` advised raising `cutoff` for a range
+  past the fitted lags, and a `cutoff` above 1 is refused.**  At
+  `cutoff = 1` the lags already run to the farthest pair of points (of
+  the `n_max` subsample, when there is one), and the warning now says so
+  and keeps the rest of its advice: detrend, or set a block size. Below 1
+  it still advises a larger `cutoff`. The value (NA) and `rejected_reason`
+  do not change.
+
+* **With `range_frac` below 1, `estimate_sac_range()` said a range inside
+  the fitted lags exceeded the largest lag and that the variogram never
+  reached a sill.**  The bound is `range_frac` times the largest lag, so a
+  range between the two is refused although it lies within the lags. The
+  warning now says the range exceeds the largest range `range_frac`
+  accepts but lies within the largest lag, and advises a larger
+  `range_frac` or a block size set explicitly, as `plot()`'s caption
+  already did. A range past the largest lag keeps the old warning. The
+  value (NA), `rejected_range` and `rejected_reason` do not change.
+
 ## Documentation
 
 * The README, the vignettes, the help's examples, the scripts in
@@ -8568,6 +8586,18 @@ old behaviour where there is a way.
   `nc.shp` by 0.20 percent at worst, where `ensure_projected()` measures
   and logs 0.21 percent.  The vignette now writes both figures from
   `attr(counties, "crs_choice")`, rounded as the log rounds them.
+
+* `?estimate_sac_range` and `?sac_nugget` said `nugget_at_bound` marks a
+  nugget "within 1e-4 of the sill".  It marks a nugget of 0, or of at most
+  10^-4 of the sill, and both pages now say so, as `?resolution_profile`
+  does.
+
+* `?sac_nugget` said a nugget equal to its floor, the variance between
+  visits, keeps `nugget_at_bound` `FALSE`.  The mark does not read the
+  floor: a nugget at a floor of at most 10^-4 of the sill is marked
+  `TRUE`, and the page now says so.  `?estimate_sac_range` described a
+  range past `range_frac * cutoff * max_dist` as one beyond the longest
+  lag fitted, which holds only at `range_frac = 1`; it now says so.
 
 # spatialkit 2.0.0
 

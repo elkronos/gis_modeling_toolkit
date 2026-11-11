@@ -32,8 +32,8 @@ bin is then counted as nugget.
 \details{
 Three more attributes say how far to trust it.
 \code{attr(x, "nugget_at_bound")} is \code{TRUE} when the fit put the
-nugget at its lower bound (0, or within 1e-4 of the sill): that is the
-bound and not an estimate, and a criterion that uses it as a noise
+nugget at its lower bound (0, or at most \eqn{10^{-4}} of the sill): that
+is the bound and not an estimate, and a criterion that uses it as a noise
 variance has no penalty left.  \code{attr(x, "short_lag_semivariance")}
 is the semivariance of nearest-neighbour pairs, computed with no model:
 each location is paired with the nearest other location (of several
@@ -61,7 +61,8 @@ floor).  With \code{detrend = "reml"} the model is built from the REML
 parameters and takes no floor: its nugget can come out below the
 variance between visits, and \code{nugget_floor} is 0.
 A nugget equal to its floor is the variance between visits, a
-measurement, and \code{nugget_at_bound} stays \code{FALSE} for it.
+measurement, and \code{nugget_at_bound} stays \code{FALSE} for it unless
+the floor itself is at most \eqn{10^{-4}} of the sill.
 
 When \code{attr(x, "lag_fallback")} is \code{TRUE} the result is the
 equal-lag one although adaptive lags were asked for (see "The lags" in

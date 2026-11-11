@@ -900,5 +900,8 @@ test_that("a small sample refused as 'decreases with distance' says sampling noi
   big <- capture_spatialkit_log(suppressWarnings(estimate_sac_range(sac_test_field(), "z",
                                                                     range_frac = 1e-6)))
   expect_false(log_has(big, "short-lag bins are noisy"))
-  expect_true(log_has(big, "flat from the first lag"))
+  # range_frac = 1e-6 refuses a range that lies within the lags, and the
+  # warning says so: it does not claim the range ran past the lags.
+  expect_true(log_has(big, "exceeds the largest range `range_frac` accepts"))
+  expect_false(log_has(big, "never reached a sill"))
 })

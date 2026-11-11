@@ -78,9 +78,9 @@ farthest pair, found on the convex hull, and not the bounding-box
 diagonal, which depends on how the axes are oriented.  Default 0.5.}
 
 \item{range_frac}{Positive numeric.  A fitted range exceeding
-\code{range_frac * cutoff * max_dist} (that is, beyond the longest lag
-the empirical variogram was actually fitted over) is treated as
-unidentified and \code{NA_real_} is returned.
+\code{range_frac * cutoff * max_dist} (at the default of 1, beyond the
+longest lag the empirical variogram was actually fitted over) is treated
+as unidentified and \code{NA_real_} is returned.
 A model fit yields a finite number even when the
 variogram never reaches a sill, and such a value extrapolates past the
 observed lags instead of measuring a long autocorrelation range.  Passing
@@ -207,8 +207,8 @@ the units of the response's variance),
 or with \code{detrend = "reml"} one built from the REML
 parameters), \code{nugget} (that model's nugget variance; see
 \code{\link{sac_nugget}}), \code{nugget_at_bound} (\code{TRUE} when
-the nugget is at its lower bound, within 1e-4 of the sill, and so
-is not an estimate), \code{first_lag} (the mean separation in the
+the nugget is at its lower bound, 0 or at most \eqn{10^{-4}} of
+the sill, and so is not an estimate), \code{first_lag} (the mean separation in the
 first bin: the shortest lag resolved, from which the nugget is
 extrapolated), \code{bins_below_range} (how many bins lie inside
 the fitted range; with fewer than three the split between nugget

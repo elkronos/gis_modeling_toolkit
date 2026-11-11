@@ -3027,8 +3027,8 @@
 #'
 #' Three more attributes say how far to trust it.
 #' \code{attr(x, "nugget_at_bound")} is \code{TRUE} when the fit put the
-#' nugget at its lower bound (0, or within 1e-4 of the sill): that is the
-#' bound and not an estimate, and a criterion that uses it as a noise
+#' nugget at its lower bound (0, or at most \eqn{10^{-4}} of the sill): that
+#' is the bound and not an estimate, and a criterion that uses it as a noise
 #' variance has no penalty left.  \code{attr(x, "short_lag_semivariance")}
 #' is the semivariance of nearest-neighbour pairs, computed with no model:
 #' each location is paired with the nearest other location (of several
@@ -3056,7 +3056,8 @@
 #' parameters and takes no floor: its nugget can come out below the
 #' variance between visits, and \code{nugget_floor} is 0.
 #' A nugget equal to its floor is the variance between visits, a
-#' measurement, and \code{nugget_at_bound} stays \code{FALSE} for it.
+#' measurement, and \code{nugget_at_bound} stays \code{FALSE} for it unless
+#' the floor itself is at most \eqn{10^{-4}} of the sill.
 #'
 #' When \code{attr(x, "lag_fallback")} is \code{TRUE} the result is the
 #' equal-lag one although adaptive lags were asked for (see "The lags" in
@@ -3383,9 +3384,9 @@ sac_nugget <- function(x) {
 #'   farthest pair, found on the convex hull, and not the bounding-box
 #'   diagonal, which depends on how the axes are oriented.  Default 0.5.
 #' @param range_frac Positive numeric.  A fitted range exceeding
-#'   \code{range_frac * cutoff * max_dist} (that is, beyond the longest lag
-#'   the empirical variogram was actually fitted over) is treated as
-#'   unidentified and \code{NA_real_} is returned.
+#'   \code{range_frac * cutoff * max_dist} (at the default of 1, beyond the
+#'   longest lag the empirical variogram was actually fitted over) is treated
+#'   as unidentified and \code{NA_real_} is returned.
 #'   A model fit yields a finite number even when the
 #'   variogram never reaches a sill, and such a value extrapolates past the
 #'   observed lags instead of measuring a long autocorrelation range.  Passing
@@ -3547,8 +3548,8 @@ sac_nugget <- function(x) {
 #'       or with \code{detrend = "reml"} one built from the REML
 #'       parameters), \code{nugget} (that model's nugget variance; see
 #'       \code{\link{sac_nugget}}), \code{nugget_at_bound} (\code{TRUE} when
-#'       the nugget is at its lower bound, within 1e-4 of the sill, and so
-#'       is not an estimate), \code{first_lag} (the mean separation in the
+#'       the nugget is at its lower bound, 0 or at most \eqn{10^{-4}} of
+#'       the sill, and so is not an estimate), \code{first_lag} (the mean separation in the
 #'       first bin: the shortest lag resolved, from which the nugget is
 #'       extrapolated), \code{bins_below_range} (how many bins lie inside
 #'       the fitted range; with fewer than three the split between nugget
@@ -4851,18 +4852,41 @@ estimate_sac_range <- function(points_sf, response_var,
                          "for an ordinary field to show this shape as well."), n)
         else ""
       )
+    } else if (over_cutoff && isTRUE(effective_range <= cutoff_dist)) {
+      # The bound is range_frac x the largest lag, so a range_frac below 1
+      # refuses ranges that lie inside the lags.  Such a range does not run
+      # past the lags, so "never reached a sill" would be false, and the
+      # refusal is lifted by a larger range_frac, not by a larger cutoff.
+      # plot() captions the case the same way.
+      .log_warn(
+        paste0("estimate_sac_range(): fitted range (%.0f) exceeds the largest ",
+               "range `range_frac` accepts (%.4g = %s x the largest lag fitted, ",
+               "%.0f), although it lies within that lag. Returning NA: a range ",
+               "above that share of the lags is treated as unidentified. Raise ",
+               "`range_frac` (at 1 it accepts any range within the lags), or set ",
+               "a block size explicitly."),
+        effective_range, max_supported, format(range_frac), cutoff_dist
+      )
     } else if (over_cutoff) {
+      # A larger `cutoff` is advised only where one is accepted: at 1 the
+      # lags already run to the farthest pair of the points used, and a value
+      # above 1 is refused.  With n_max the points used are a subsample.
       .log_warn(
         paste0("estimate_sac_range(): fitted range (%.0f) exceeds the largest ",
                "lag the variogram was fitted over (%.4g = %s x cutoff %.0f); the ",
                "empirical variogram never reached a sill, so the range is ",
-               "unidentified rather than long. Returning NA. Raise `cutoff` to ",
-               "fit longer lags, %s, or set a block size explicitly. (A ",
-               "variogram that is flat from the first lag, with no spatial ",
-               "structure to find, can end here too: plot() the returned value ",
-               "to tell the two apart.)"),
+               "unidentified rather than long. Returning NA. %s, or set a ",
+               "block size explicitly. (A variogram that is flat from the ",
+               "first lag, with no spatial structure to find, can end here ",
+               "too: plot() the returned value to tell the two apart.)"),
         effective_range, max_supported, format(range_frac), cutoff_dist,
-        detrend_advice
+        if (cutoff < 1)
+          paste0("Raise `cutoff` to fit longer lags, ", detrend_advice)
+        else
+          paste0("The lags already run to the farthest pair of ",
+                 if (n_subsampled > 0L) "the `n_max` subsample of points"
+                 else "points",
+                 " (`cutoff` = 1); ", detrend_advice)
       )
     } else if (!is.null(reml_fit)) {
       .log_warn(
