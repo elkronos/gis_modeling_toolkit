@@ -139,7 +139,12 @@ the polygons' own ID column when that is read from a fallback such as
 falls inside any polygon
 the result is empty (or all-\code{NA} with \code{keep_unassigned = TRUE}) and a
 warning is raised, since the usual cause is two layers in different
-places (a CRS that could only be stamped, not reprojected).
+places (a CRS that could only be stamped, not reprojected). A layer
+without a CRS is brought into the other layer's CRS as
+\code{\link[=harmonize_crs]{harmonize_crs()}} does; beside a layer in longitude and latitude, one
+with an x outside -180 to 360 or a y beyond 90 north or south cannot be
+in degrees, and the call stops with an error that names \code{features_sf}
+or \code{polygons_sf} and gives its box.
 
 Features that fall inside no polygon are counted on the attribute
 \code{"unassigned"}: a list with \code{n}, \code{which} (their row positions in

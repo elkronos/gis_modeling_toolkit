@@ -2069,6 +2069,51 @@
   list(lonlat = isTRUE(has_large_extent || has_geo_precision), bb = bb)
 }
 
+#' Refuse a CRS in longitude and latitude for coordinates that cannot be in it
+#'
+#' A layer without a CRS is not stamped with a target CRS in longitude and
+#' latitude when its coordinates lie outside that envelope: an x outside
+#' -180 to 360, or a y beyond \code{lat_max} north or south.  The text is the
+#' one \code{.transform_or_stamp()} gives (R/utils.R), for the stamp paths of
+#' \code{harmonize_crs()}, \code{ensure_projected(target_crs =)},
+#' \code{assign_features_to_polygons()}, \code{.replay_crs_assumption()}
+#' (the predict methods and \code{predict_surface()}) and
+#' \code{cell_values_at()}, which do not go through that helper.
+#'
+#' @param bb The box \code{.looks_like_lonlat()} read: of the coordinates
+#'   that have a location, or \code{NULL} when none has one.
+#' @param crs The target CRS (anything \code{sf::st_crs()} reads).
+#' @param caller,what The function and the argument the refusal names.
+#' @param geo_remedy \code{NULL}, or words added after "Set the CRS of
+#'   `what` with sf::st_crs()".
+#' @param lat_max The largest latitude, north or south, read as possible.
+#' @return \code{invisible(NULL)}; stops when the coordinates cannot be in
+#'   \code{crs}.  A target that is not in longitude and latitude, one
+#'   \code{sf::st_crs()} cannot read, a box inside the envelope and a layer
+#'   with no located coordinate pass.
+#' @keywords internal
+#' @noRd
+.refuse_lonlat_stamp <- function(bb, crs, caller, what, geo_remedy = NULL,
+                                 lat_max = 90) {
+  tcrs <- tryCatch(sf::st_crs(crs), error = function(e) NULL)
+  if (is.null(tcrs) || is.na(tcrs) || !.is_longlat(tcrs)) return(invisible(NULL))
+  if (is.null(bb) || !all(is.finite(bb))) return(invisible(NULL))
+  if (!(bb[["xmin"]] < -180 || bb[["xmax"]] > 360 ||
+        bb[["ymin"]] < -lat_max || bb[["ymax"]] > lat_max))
+    return(invisible(NULL))
+  lbl <- tcrs$input
+  lbl <- if (is.character(lbl) && length(lbl) == 1L && !is.na(lbl) && nzchar(lbl))
+    sprintf("the target CRS ('%s')", lbl) else "the target CRS"
+  stop(sprintf(paste0(
+    "%s(): `%s` has no CRS and its coordinates lie outside longitude -180 ",
+    "to 360 and latitude -90 to 90 (xmin=%.6g, xmax=%.6g, ymin=%.6g, ",
+    "ymax=%.6g), so they cannot be in %s, which is in longitude and ",
+    "latitude. Set the CRS of `%s` with sf::st_crs()%s."),
+    caller, what, bb[["xmin"]], bb[["xmax"]], bb[["ymin"]], bb[["ymax"]],
+    lbl, what, if (is.null(geo_remedy)) "" else paste0(", ", geo_remedy)),
+    call. = FALSE)
+}
+
 
 #' Re-apply the CRS assumption a fit was built under to CRS-less new data
 #'
@@ -2086,7 +2131,8 @@
 #'   \code{boundary} too, and a message naming \code{newdata} there sends the
 #'   reader looking for an argument they did not pass.
 #' @return \code{newdata}: with a CRS set when a POSITIVE assumption was
-#'   replayed; marked \code{crs_assumed = "none"} when the fit itself had no
+#'   replayed (refused, by \code{.refuse_lonlat_stamp()}, when its coordinates
+#'   lie outside longitude -180 to 360 and latitude -90 to 90); marked \code{crs_assumed = "none"} when the fit itself had no
 #'   CRS, so that \code{ensure_projected()} leaves it in the space the fit used;
 #'   unchanged otherwise.
 #' @keywords internal
@@ -2115,6 +2161,13 @@
   }
 
   if (is.null(assumed) || identical(assumed, "none")) return(newdata)
+  # The assumption is not given to coordinates that cannot be in it (x
+  # outside -180 to 360, y beyond 90 north or south): newdata at x 5e5, y
+  # 4e6 after a fit on degrees was labelled EPSG:4326, and every prediction
+  # came back NA with ensure_projected()'s warning that its rows have a
+  # location in longitude and latitude.
+  .refuse_lonlat_stamp(.looks_like_lonlat(newdata)$bb, assumed, caller = caller,
+                       what = what)
   .warn_and_log(paste0("%s(): `%s` has no CRS; interpreting it as %s, the ",
                    "assumption the model was fitted under, so that it is placed ",
                    "where the training data were. Set the CRS explicitly to ",
@@ -2228,7 +2281,10 @@
 #'     warning), and anything else has the target **stamped on without
 #'     reprojection**. That is a relabel, logged only, so verify the
 #'     coordinates really are in that CRS. Set the CRS explicitly to suppress
-#'     either.}
+#'     either. A `target_crs` in longitude and latitude is not stamped on
+#'     coordinates that cannot be in it: an x outside -180 to 360 or a y
+#'     beyond 90 north or south, in the box of the coordinates that have a
+#'     location, stops the call with an error that gives the box.}
 #'   \item{Rows without a location}{A coordinate that is not finite or lies
 #'     beyond 1e150 has no location, and nor does a row whose geometry is
 #'     empty. The lon/lat test of a layer without a CRS reads the
@@ -2396,6 +2452,11 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
         attr(x, "crs_assumed") <- "EPSG:4326"
         return(x)
       }
+      # A target in longitude and latitude is not stamped on coordinates
+      # that cannot be in it (x outside -180 to 360, y beyond 90 north or
+      # south): x 5e5, y 4e6 came back as EPSG:4326 with a log line only.
+      .refuse_lonlat_stamp(ll$bb, tcrs, caller = "ensure_projected", what = "x",
+                           geo_remedy = "or pass a projected `target_crs`")
       .log_warn(
         "ensure_projected(): input has no CRS; stamping the supplied target CRS ('%s') WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set the input CRS explicitly with sf::st_crs().",
         tcrs$input %||% "unknown"
@@ -2529,7 +2590,11 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
 #' taken as EPSG:4326 and **reprojected** to the other object's CRS (or
 #' `target_crs`); coordinates that do not are *stamped* with
 #' [sf::st_set_crs()], which relabels without moving them.  Either way the
-#' assumption is announced with a warning.
+#' assumption is announced with a warning.  A CRS in longitude and latitude
+#' is not stamped on coordinates that cannot be in it: a layer with an x
+#' outside -180 to 360 or a y beyond 90 north or south, read on the
+#' coordinates that have a location, stops the call with an error that names
+#' `a` or `b`, its box and the target CRS.
 #'
 #' @param a,b Objects of class sf or sfc.
 #' @param prefer Which object's CRS to keep ("a" or "b").
@@ -2655,6 +2720,13 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
         ll$bb[["ymax"]], lbl)
       return(.safe_transform(sf::st_set_crs(x, 4326), to, which_obj))
     }
+    # A CRS in longitude and latitude is not stamped on coordinates that
+    # cannot be in it (x outside -180 to 360, y beyond 90 north or south):
+    # x 5e5, y 4e6 came back as EPSG:4326, and sf added its bare "bounding
+    # box has potentially an invalid value range for longlat data" later.
+    .refuse_lonlat_stamp(ll$bb, to, caller = "harmonize_crs", what = which_obj,
+                         geo_remedy = if (!is.null(target_crs))
+                           "or pass a projected `target_crs`")
     .warn_and_log(
       "harmonize_crs(): `%s` has no CRS and its coordinates do not look like lon/lat; stamping '%s' onto it WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set it explicitly with sf::st_crs().",
       which_obj, lbl

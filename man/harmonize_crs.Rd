@@ -59,7 +59,11 @@ identical data in the same place: coordinates that look like degrees are
 taken as EPSG:4326 and \strong{reprojected} to the other object's CRS (or
 \code{target_crs}); coordinates that do not are \emph{stamped} with
 \code{\link[sf:st_set_crs]{sf::st_set_crs()}}, which relabels without moving them.  Either way the
-assumption is announced with a warning.
+assumption is announced with a warning.  A CRS in longitude and latitude
+is not stamped on coordinates that cannot be in it: a layer with an x
+outside -180 to 360 or a y beyond 90 north or south, read on the
+coordinates that have a location, stops the call with an error that names
+\code{a} or \code{b}, its box and the target CRS.
 }
 \examples{
 library(sf)

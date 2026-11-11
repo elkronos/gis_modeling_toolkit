@@ -103,7 +103,15 @@
   }
   own <- sf::st_crs(pts)
   if (is.na(own)) {
-    if (as_lonlat) pts <- sf::st_transform(sf::st_set_crs(pts, 4326), crs)
+    if (as_lonlat) {
+      # Read as `points` was read, unless the coordinates cannot be in
+      # longitude and latitude (x outside -180 to 360, y beyond 90 north or
+      # south): `newdata` at x 5e5, y 4e6 beside `points` in degrees was
+      # labelled EPSG:4326 and every row came back NA, with no word about it.
+      .refuse_lonlat_stamp(.looks_like_lonlat(pts)$bb, 4326,
+                           caller = "cell_values_at", what = arg)
+      pts <- sf::st_transform(sf::st_set_crs(pts, 4326), crs)
+    }
     return(pts)
   }
   if (is.na(crs))
@@ -524,7 +532,9 @@
 #'    When neither `points` nor `newdata` has a CRS the coordinates are used
 #'    as they are, unless those of `points` look like longitude and latitude:
 #'    both are then read as EPSG:4326, as [summarize_by_cell()] reads
-#'    `points`, with [ensure_projected()]'s warning. `seeds` without a CRS
+#'    `points`, with [ensure_projected()]'s warning; `newdata` or `seeds`
+#'    with an x outside -180 to 360 or a y beyond 90 north or south cannot
+#'    be in degrees, and stop the call. `seeds` without a CRS
 #'    beside `points` with one are read as [build_tessellation()] reads a
 #'    boundary without a CRS, with a warning: beside a projected CRS,
 #'    coordinates that look like longitude and latitude are taken as

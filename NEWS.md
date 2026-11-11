@@ -2272,18 +2272,32 @@ old behaviour where there is a way.
   refused a CRS in longitude and latitude when it has an x outside -180
   to 360 or a y beyond 90 north or south.  The refusal names the
   argument, its coordinates' box and the target CRS, and asks for the
-  layer's CRS (or, in `plot_tessellation_map()`, a projected
-  `target_crs`).  It applies where a layer without a CRS is brought into
-  the CRS of another layer or argument by the shared alignment:
-  `plot_tessellation_map()`, `plot_folds()`, `make_folds()` and the
-  `cv_*()` functions, `area_of_applicability()`, `predict_surface()`,
+  layer's CRS (or, in `plot_tessellation_map()`, `harmonize_crs(target_crs
+  =)` and `ensure_projected(target_crs =)`, a projected `target_crs`).  It
+  applies where a layer without a CRS is brought into the CRS of another
+  layer or argument: `harmonize_crs()`,
+  `ensure_projected(target_crs =)`, `assign_features_to_polygons()` (which
+  names `features_sf` or `polygons_sf`; features in metres beside cells in
+  degrees fell in no polygon, and polygons in metres stopped on an s2
+  refusal), `plot_tessellation_map()`, `plot_folds()`, `make_folds()` and
+  the `cv_*()` functions, `area_of_applicability()`, `predict_surface()`,
   `fold_separation()`, `kriging_adequacy()`, `resolution_profile()`,
   `summarize_by_cell()`, `cell_values_at()`,
   `create_voronoi_polygons()`, `create_grid_polygons()` and
-  `build_tessellation()`.  In `create_grid_polygons(crs =)` and
-  `build_tessellation(crs =)` a `boundary` with a y between 90 and 180 is
-  still stamped, and refused by the row's latitude as before.  A target
-  CRS that is projected is still stamped with a warning.
+  `build_tessellation()`.  It applies as well where a fit's reading of its
+  CRS-less training data as longitude and latitude is given to CRS-less
+  new data: `predict()` on a random forest, GWR or Bayesian fit, and the
+  `grid`, `boundary` and `covariates` of `predict_surface()`.  Every
+  prediction came back `NA` with a warning that the rows have a location
+  in longitude and latitude, and such a `boundary` held no grid point.
+  So does `cell_values_at()`'s reading of
+  `newdata` or `seeds` without a CRS beside `points` without one in
+  degrees, where every row came back `NA` with no word about `newdata`.
+  In `create_grid_polygons(crs =)` and `build_tessellation(crs =)` a
+  `boundary` with a y between 90 and 180 is still stamped, and refused by
+  the row's latitude as before.  A target CRS that is projected is still
+  stamped, with a warning (with a log line in
+  `ensure_projected(target_crs =)`).
 
 * **A row of a lon/lat layer with a vertex at a latitude beyond 90 shaped
   the projection `ensure_projected()` chose for the other rows.**  No CRS

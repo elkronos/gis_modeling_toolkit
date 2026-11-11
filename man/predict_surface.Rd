@@ -24,7 +24,9 @@ predict_surface(
 \code{NULL}, a regular grid is built over the training extent.  Must have
 at least one row.  It is brought into the fit's CRS first: a CRS-less grid
 is given the interpretation the training data got (the assumption recorded
-on the fit), with a warning, and then reprojected.  Otherwise a CRS-less
+on the fit), with a warning, and then reprojected; when that is longitude
+and latitude, a grid with an x outside -180 to 360 or a y beyond 90 north
+or south cannot be in it, and the call stops.  Otherwise a CRS-less
 grid can land thousands of kilometres from the covariates and every cell
 takes the same nearest feature.  A grid still without a CRS after that
 is treated as \code{boundary} is: taken as EPSG:4326 and reprojected

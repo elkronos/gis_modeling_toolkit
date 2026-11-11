@@ -197,7 +197,12 @@
 #'   falls inside any polygon
 #'   the result is empty (or all-`NA` with `keep_unassigned = TRUE`) and a
 #'   warning is raised, since the usual cause is two layers in different
-#'   places (a CRS that could only be stamped, not reprojected).
+#'   places (a CRS that could only be stamped, not reprojected). A layer
+#'   without a CRS is brought into the other layer's CRS as
+#'   [harmonize_crs()] does; beside a layer in longitude and latitude, one
+#'   with an x outside -180 to 360 or a y beyond 90 north or south cannot be
+#'   in degrees, and the call stops with an error that names `features_sf`
+#'   or `polygons_sf` and gives its box.
 #'
 #'   Features that fall inside no polygon are counted on the attribute
 #'   `"unassigned"`: a list with `n`, `which` (their row positions in
@@ -402,6 +407,18 @@ assign_features_to_polygons <- function(
   # empty, or without the vertices it cannot place, and is said in this
   # function's words, naming `features_sf` or `polygons_sf`, in place of
   # harmonize_crs()'s, which names `a` or `b`.
+  # A layer without a CRS beside one in longitude and latitude is not given
+  # that CRS when its coordinates cannot be in it (x outside -180 to 360, y
+  # beyond 90 north or south), and the refusal names `features_sf` or
+  # `polygons_sf`, not harmonize_crs()'s `a` or `b`.  Stamped, features in
+  # metres fell in no polygon, and polygons in metres stopped on an s2
+  # refusal that blamed the lon/lat reading the stamp had made.
+  if (is.na(sf::st_crs(features_xy)) && .is_longlat(polygons_xy))
+    .refuse_lonlat_stamp(.looks_like_lonlat(features_xy)$bb, sf::st_crs(polygons_xy),
+                         caller = "assign_features_to_polygons", what = "features_sf")
+  if (is.na(sf::st_crs(polygons_xy)) && .is_longlat(features_xy))
+    .refuse_lonlat_stamp(.looks_like_lonlat(polygons_xy)$bb, sf::st_crs(features_xy),
+                         caller = "assign_features_to_polygons", what = "polygons_sf")
   done <- .answer_for_classed("spatialkit_rows_unplaced")
   hh <- tryCatch(harmonize_crs(features_xy, polygons_xy,
                                prefer = if (join_in_p) "b" else "a"),

@@ -139,7 +139,10 @@ coordinates are read as EPSG:4326 and reprojected to the target (a real
 warning), and anything else has the target \strong{stamped on without
 reprojection}. That is a relabel, logged only, so verify the
 coordinates really are in that CRS. Set the CRS explicitly to suppress
-either.}
+either. A \code{target_crs} in longitude and latitude is not stamped on
+coordinates that cannot be in it: an x outside -180 to 360 or a y
+beyond 90 north or south, in the box of the coordinates that have a
+location, stops the call with an error that gives the box.}
 \item{Rows without a location}{A coordinate that is not finite or lies
 beyond 1e150 has no location, and nor does a row whose geometry is
 empty. The lon/lat test of a layer without a CRS reads the

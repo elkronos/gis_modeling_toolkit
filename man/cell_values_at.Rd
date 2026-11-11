@@ -155,7 +155,9 @@ x and y as well.
 When neither \code{points} nor \code{newdata} has a CRS the coordinates are used
 as they are, unless those of \code{points} look like longitude and latitude:
 both are then read as EPSG:4326, as \code{\link[=summarize_by_cell]{summarize_by_cell()}} reads
-\code{points}, with \code{\link[=ensure_projected]{ensure_projected()}}'s warning. \code{seeds} without a CRS
+\code{points}, with \code{\link[=ensure_projected]{ensure_projected()}}'s warning; \code{newdata} or \code{seeds}
+with an x outside -180 to 360 or a y beyond 90 north or south cannot
+be in degrees, and stop the call. \code{seeds} without a CRS
 beside \code{points} with one are read as \code{\link[=build_tessellation]{build_tessellation()}} reads a
 boundary without a CRS, with a warning: beside a projected CRS,
 coordinates that look like longitude and latitude are taken as
