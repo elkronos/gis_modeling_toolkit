@@ -62,7 +62,13 @@ bandwidth, the distance to the \code{bandwidth}-th nearest neighbour)
 and 0 to the others; an observation whose squared distance is within
 one part in ten million of the edge counts as at the edge, and inside,
 so on a regular grid every neighbour tied with the last one is in the
-window whatever the unit or origin of the coordinates.}
+window in any unit and at any origin where the doubles hold the
+coordinates to better than about one part in 1e8 of the distances
+between neighbours.  Farther from the origin the doubles round the
+coordinates more coarsely, and where a neighbour lies past the edge by
+less than that rounding the call warns, with class
+\code{"spatialkit_xy_imprecise"}; the windows are those the
+coordinates as stored give.}
 
 \item{.already_prepped}{Logical (internal). If \code{TRUE}, skip the
 \code{prep_model_data()} call because the caller has already projected,

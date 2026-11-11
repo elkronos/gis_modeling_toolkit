@@ -418,6 +418,10 @@ million of the k-th's, share its slot's weight equally, as in
 \code{\link{residual_morans_i}()}, so the graphs do not depend on the
 unit or the origin of the coordinates wherever the doubles hold them to
 better than about one part in 1e8 of the distances between neighbours.
+Where they do not, and a distance lies past a tie by less than that
+rounding, the call warns, with class \code{"spatialkit_xy_imprecise"};
+the same holds for the nearest other location of the short-lag
+semivariances.  The results are those the coordinates as stored give.
 When that adjusted p-value is
 not below \code{structure_alpha}, the result is \code{NA} with
 \code{rejected_reason} \code{"no spatial structure detected at the

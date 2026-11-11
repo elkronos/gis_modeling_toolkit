@@ -382,6 +382,10 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
                              k = 5L, seed = 123L, nmax = 50L,
                              max_neighbours = 2000L, max_box_ratio = 1000,
                              quiet = TRUE) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("kriging_adequacy", "assigned_points_sf")
+  on.exit(tie_end(returnValue(tie_end), assigned_points_sf), add = TRUE)
   .msg <- function(...) if (!quiet) message(...)
   if (!requireNamespace("gstat", quietly = TRUE))
     stop("kriging_adequacy(): package 'gstat' is required.", call. = FALSE)
@@ -1075,6 +1079,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
     # is kriged in its split's one call, by gstat's own nmax search; one whose
     # nmax-th nearest ties with the next is kriged on its own from the nmax
     # the package's tie rule picks (.tie_pick()), as the cells are.
+    rnd_cv <- .tie_rounding(xy_loc)
     kcv <- tryCatch({
       pred <- pvar <- rep(NA_real_, nrow(kk))
       kdf <- data.frame(x = xy_loc[, 1L], y = xy_loc[, 2L], ..z = kk$..z)
@@ -1083,8 +1088,9 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
         tr <- sort(s$train); te <- s$test
         xt <- xy_loc[tr, 1L]; yt <- xy_loc[tr, 2L]
         own_set <- lapply(te, function(i) {
-          p <- .tie_pick((xt - xy_loc[i, 1L])^2 + (yt - xy_loc[i, 2L])^2,
-                         as.integer(nmax), xt, yt)
+          d2i <- (xt - xy_loc[i, 1L])^2 + (yt - xy_loc[i, 2L])^2
+          .tie_pick_note(d2i, as.integer(nmax), rnd_cv)
+          p <- .tie_pick(d2i, as.integer(nmax), xt, yt)
           if (p$tied) tr[p$sel] else NULL
         })
         one <- vapply(own_set, is.null, logical(1))
@@ -1203,13 +1209,20 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   cen <- sp::coordinates(sf::as_Spatial(sf::st_set_crs(
     sf::st_geometry(cells)[todo], sf::NA_crs_)))
   xy <- sf::st_coordinates(kk)[, 1:2, drop = FALSE]
+  # The rounding of the coordinates, for a tie it can have parted
+  # (.tie_note()).
+  rnd <- .tie_rounding(c(xy, cen))
   for (j in seq_along(todo)) {
     ci <- todo[j]; own <- own_of[[ci]]
     d2 <- (xy[, 1] - cen[j, 1])^2 + (xy[, 2] - cen[j, 2])^2
     # The nmax nearest hold every location of the cell, counted with the
     # tolerance of the tie rule, so that a cell is enlarged or not in any
-    # unit and with any origin.
+    # unit and with any origin.  Where locations the rounding of the
+    # coordinates can have parted from that tie would tip the count past
+    # nmax, it is noted for the caller's warning (.tie_note()).
+    if (length(own) && !is.null(rnd)) .tie_count_note(d2, max(d2[own]), nmax, rnd)
     if (!length(own) || sum(d2 <= max(d2[own]) * (1 + .TIE_TOL)) <= nmax) {
+      .tie_pick_note(d2, nmax, rnd)
       p <- .tie_pick(d2, nmax, xy[, 1], xy[, 2])
       if (p$tied) { tied[ci] <- TRUE; sel[[ci]] <- p$sel }
       next
@@ -1221,6 +1234,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
       next
     }
     d2[own] <- Inf
+    .tie_pick_note(d2, n_out, rnd)
     sel[[ci]] <- sort(c(own, .tie_pick(d2, n_out, xy[, 1], xy[, 2])$sel))
     enlarged[ci] <- TRUE; n_used[ci] <- size[ci]
   }
@@ -1263,6 +1277,58 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   cand <- which(d2 <= s[k] * (1 + .TIE_TOL))
   pick <- .knn_pick_rows(matrix(d2[cand], 1L), matrix(cand, 1L), k, .TIE_TOL, x, y)
   list(tied = TRUE, sel = sort(cand[pick]))
+}
+
+
+#' Note a count within a tie that rounding can have tipped
+#'
+#' A cell of \code{kriging_adequacy()} is enlarged when more than
+#' \code{nmax} locations lie within the tie of its farthest own location
+#' (squared distance \code{a}).  Locations past that tie by less than the
+#' rounding of the coordinates (\code{.tie_lost_by_rounding()}) can be ones
+#' it parted; where counting them would tip the count past \code{nmax},
+#' \code{a} and the least of them are handed to \code{.tie_note()}.
+#' Nothing it returns changes.
+#'
+#' @param d2 Squared distances from the cell's centre.
+#' @param a The squared distance of the cell's farthest own location.
+#' @param nmax The count.
+#' @param rnd \code{.tie_rounding()} of the coordinates, or \code{NULL}.
+#' @return \code{TRUE} (invisibly) when a tie may have been lost.
+#' @keywords internal
+#' @noRd
+.tie_count_note <- function(d2, a, nmax, rnd) {
+  if (is.null(rnd) || !is.finite(a)) return(invisible(FALSE))
+  line <- a * (1 + .TIE_TOL)
+  n_in <- sum(d2 <= line)
+  if (n_in > nmax) return(invisible(FALSE))
+  past <- d2[d2 > line & is.finite(d2)]
+  lost <- past[.tie_lost_by_rounding(rep(a, length(past)), past, r = rnd$r)]
+  if (!length(lost) || n_in + length(lost) <= nmax) return(invisible(FALSE))
+  .tie_note(a, min(lost), rnd)
+}
+
+
+#' Note a tie of \code{.tie_pick()} that rounding can have parted
+#'
+#' The k-th squared distance and the next one past its tie are handed to
+#' \code{.tie_note()}, which flags a pair the rounding of the coordinates
+#' can have parted, for the warning of \code{kriging_adequacy()}.  Called
+#' beside \code{.tie_pick()} on the same distances; nothing it returns
+#' changes.
+#'
+#' @param d2,k As for \code{.tie_pick()}.
+#' @param rnd \code{.tie_rounding()} of the coordinates, or \code{NULL}.
+#' @return \code{TRUE} (invisibly) when a tie may have been lost.
+#' @keywords internal
+#' @noRd
+.tie_pick_note <- function(d2, k, rnd) {
+  if (is.null(rnd)) return(invisible(FALSE))
+  fin <- which(d2 < Inf)
+  if (k >= length(fin)) return(invisible(FALSE))
+  dk <- sort(d2, partial = k)[k]
+  past <- d2[d2 > dk * (1 + .TIE_TOL)]
+  .tie_note(dk, if (length(past)) min(past) else Inf, rnd)
 }
 
 

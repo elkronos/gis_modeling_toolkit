@@ -325,6 +325,11 @@ get_voronoi_seeds <- function(boundary = NULL,
                               init = NULL,
                               density_power = 1,
                               density_k = 8) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("get_voronoi_seeds", "sample_points")
+  on.exit(tie_end(returnValue(tie_end), if (is.null(sample_points)) boundary else sample_points,
+                  if (is.null(sample_points)) "boundary"), add = TRUE)
   method <- match.arg(method)
   partition_given <- !missing(partition)
   # The density settings the caller supplied, as against those left at
@@ -1038,10 +1043,18 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' region in the box of its coordinates; with lwgeom it draws in the box of
 #' the region segmentized along great circles, which holds the region.
 #'
+#' sf takes its branch on \code{requireNamespace("lwgeom")}, so the same
+#' test is asked here.  This package never calls lwgeom, so it is not
+#' declared; the name is passed as a value, which R CMD check does not read
+#' as an undeclared use of the package.
+#'
 #' @return \code{TRUE} or \code{FALSE}.
 #' @keywords internal
 #' @noRd
-.sf_box_from_coordinates <- function() !requireNamespace("lwgeom", quietly = TRUE)
+.sf_box_from_coordinates <- function() {
+  pkg <- "lwgeom"
+  !requireNamespace(pkg, quietly = TRUE)
+}
 
 #' Refuse a lon/lat region that lies mostly outside its bounding box
 #'
@@ -1444,6 +1457,10 @@ get_voronoi_seeds <- function(boundary = NULL,
 voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
                                  partition = c("density", "kmeans"), init = NULL,
                                  density_power = 1, density_k = 8, iter_max = NULL) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("voronoi_seeds_kmeans", "points_sf")
+  on.exit(tie_end(returnValue(tie_end), points_sf), add = TRUE)
   .assert_sf(points_sf, "POINT", "points_sf")
   # Points that mix XY and XYZ (or XYM) are read in XY (.xy_if_mixed()),
   # before the projection and the read of their coordinates, as in

@@ -1186,13 +1186,20 @@
 #' @param q The locations to search for, as rows of \code{u}.
 #' @param use_fnn Whether to use \pkg{FNN}.
 #' @param caller Name of the exported function, for the work guard's message.
+#' @param rnd \code{NULL}, or the rounding the ties are compared with
+#'   (\code{.tie_rounding()}): the least squared distance of each location
+#'   and the next one past its tie are handed to \code{.tie_note()}, which
+#'   flags a tie the rounding of the coordinates can have parted.  A caller
+#'   that reads only the distance, which a tie does not change, passes
+#'   none.  The result does not change.
 #' @return For each of \code{q} the row of \code{u} nearest it and not it; a
 #'   tie goes to the lower first coordinate, then the lower second (first
 #'   coordinates within \code{.TIE_TOL} of the distance counting as equal),
 #'   which is the lower row.
 #' @keywords internal
 #' @noRd
-.nearest_location_search <- function(u, q, use_fnn, caller = "resolution_profile") {
+.nearest_location_search <- function(u, q, use_fnn, caller = "resolution_profile",
+                                     rnd = NULL) {
   U  <- nrow(u)
   nq <- length(q)
   if (!isTRUE(use_fnn)) {
@@ -1200,7 +1207,7 @@
                 caller = caller,
                 search = sprintf("finding the nearest other location of %d of %d locations",
                                  nq, U))
-    return(.knn_exact_rows(u[, 1L], u[, 2L], q, 1L, tol = .TIE_TOL)[, 1L])
+    return(.knn_exact_rows(u[, 1L], u[, 2L], q, 1L, tol = .TIE_TOL, rnd = rnd)[, 1L])
   }
   kq <- min(3L, U)
   nn <- matrix(FNN::get.knnx(u, u[q, , drop = FALSE], k = kq)$nn.index, nq, kq)
@@ -1215,7 +1222,12 @@
   # three hold one.
   second <- if (kq > 2L) pmin(d2[, 1L], d2[, 2L], d2[, 3L]) else rep(Inf, nq)
   redo <- which(rowSums(own) != 1L | !(second > best * (1 + .TIE_TOL + 1e-9)))
-  if (length(redo)) out[redo] <- .knn_tied_rows(u, q[redo], 1L, tol = .TIE_TOL)[, 1L]
+  if (!is.null(rnd)) {
+    clear <- setdiff(seq_len(nq), redo)
+    .tie_note(best[clear], second[clear], rnd)
+  }
+  if (length(redo))
+    out[redo] <- .knn_tied_rows(u, q[redo], 1L, tol = .TIE_TOL, rnd = rnd)[, 1L]
   out
 }
 
@@ -1228,20 +1240,21 @@
 #' another share their searches.  The cache holds the locations it was filled
 #' for and starts again when it is handed others.
 #'
-#' @param u,q,use_fnn,caller As for \code{.nearest_location_search()}.
+#' @param u,q,use_fnn,caller,rnd As for \code{.nearest_location_search()}.
 #' @param cache \code{NULL}, or an environment.
 #' @return As \code{.nearest_location_search()}.
 #' @keywords internal
 #' @noRd
-.nearest_location <- function(u, q, use_fnn, cache = NULL, caller = "resolution_profile") {
-  if (is.null(cache)) return(.nearest_location_search(u, q, use_fnn, caller))
+.nearest_location <- function(u, q, use_fnn, cache = NULL, caller = "resolution_profile",
+                              rnd = NULL) {
+  if (is.null(cache)) return(.nearest_location_search(u, q, use_fnn, caller, rnd))
   if (!identical(cache$u, u)) {
     cache$u <- u
     cache$nearest <- rep(NA_integer_, nrow(u))
   }
   todo <- q[is.na(cache$nearest[q])]
   if (length(todo))
-    cache$nearest[todo] <- .nearest_location_search(u, todo, use_fnn, caller)
+    cache$nearest[todo] <- .nearest_location_search(u, todo, use_fnn, caller, rnd)
   cache$nearest[q]
 }
 
@@ -1276,6 +1289,9 @@
 #' @param cache \code{NULL}, or an environment in which the nearest other
 #'   location of each location searched is kept (\code{.nearest_location()}).
 #' @param caller Name of the exported function, for the work guard's message.
+#' @details A tie between locations that the rounding of the coordinates can
+#'   have parted is noted (\code{.tie_note()}) for the warning of the
+#'   exported call.
 #' @return For each of \code{rows}, a row of \code{xy} that is not it;
 #'   \code{NA} when \code{xy} has one row.
 #' @keywords internal
@@ -1304,7 +1320,7 @@
   }
   if (!all(shared) && nrow(u) > 1L) {
     q  <- sort(unique(L[!shared]))
-    nl <- .nearest_location(u, q, use_fnn, cache, caller)
+    nl <- .nearest_location(u, q, use_fnn, cache, caller, rnd = .tie_rounding(u))
     ans[!shared] <- head[nl[match(L[!shared], q)]]
   }
   o[ans]

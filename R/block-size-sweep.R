@@ -153,6 +153,10 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
                                 metric = "RMSE", include_random = TRUE,
                                 max_fits = 60L, sac = NULL, seed = 123L,
                                 quiet = FALSE, ...) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("cv_block_size_sweep", "data_sf")
+  on.exit(tie_end(returnValue(tie_end), data_sf), add = TRUE)
   .msg <- function(...) if (!quiet) message(...)
   if (!inherits(data_sf, "sf"))
     stop("cv_block_size_sweep(): `data_sf` must be an sf object.", call. = FALSE)

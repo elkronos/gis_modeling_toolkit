@@ -762,6 +762,10 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
                                 dmat_max_n = 2000L,
                                 quiet = TRUE,
                                 .engine = .gwr_ms_engine) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("gwr_model_selection", "data_sf")
+  on.exit(tie_end(returnValue(tie_end), data_sf), add = TRUE)
   if (!inherits(data_sf, "sf"))
     stop("gwr_model_selection(): `data_sf` must be an sf object.", call. = FALSE)
   if (!is.character(response_var) || length(response_var) != 1L)

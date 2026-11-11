@@ -674,10 +674,15 @@
 #'   tie; 0, the default, for exact ties alone.
 #' @param num With \code{tol} above 0, the number of each location that the
 #'   last step of the rule takes the lowest of: the row, by default.
+#' @param rnd With \code{tol} above 0, the rounding the ties are compared
+#'   with (\code{.tie_rounding()}), or \code{NULL}: each row's \code{k}-th
+#'   squared distance and the next one past its tie are handed to
+#'   \code{.tie_note()}, which flags a tie the rounding of the coordinates
+#'   can have parted.  The result does not change.
 #' @return An integer matrix, \code{length(rows) x k}.
 #' @keywords internal
 #' @noRd
-.knn_exact_rows <- function(x, y, rows, k, tol = 0, num = seq_along(x)) {
+.knn_exact_rows <- function(x, y, rows, k, tol = 0, num = seq_along(x), rnd = NULL) {
   n <- length(x)
   out <- matrix(0L, length(rows), k)
   if (!length(rows)) return(out)
@@ -700,6 +705,14 @@
       pick <- .knn_pick_rows(matrix(d2[cbind(rep(seq_len(nr), w), as.vector(cand))], nr, w),
                              cand, k, tol, x, y, num)
       out[at, ] <- matrix(cand[cbind(rep(seq_len(nr), k), as.vector(pick))], nr, k)
+      if (!is.null(rnd)) {
+        # The furthest pick, and the least squared distance past its tie.
+        got <- cbind(rep(seq_len(nr), k), as.vector(out[at, , drop = FALSE]))
+        a   <- apply(matrix(d2[got], nr, k), 1L, max)
+        d2[got] <- Inf
+        d2[d2 <= a * (1 + tol)] <- Inf
+        .tie_note(a, apply(d2, 1L, min), rnd)
+      }
     } else {
       # order() leaves ties in their original order: the lower row number first.
       out[at, ] <- t(apply(d2, 1L, function(v) order(v)[seq_len(k)]))
@@ -789,10 +802,13 @@
 #' @param tol As for \code{.knn_exact_rows()}: 0, the default, for exact ties
 #'   alone.
 #' @param num As for \code{.knn_exact_rows()}: the row, by default.
+#' @param rnd As for \code{.knn_exact_rows()}: \code{NULL}, or the rounding
+#'   each settled row's \code{k}-th squared distance and the next one past
+#'   its tie are handed to \code{.tie_note()} with.
 #' @return An integer matrix, \code{length(rows) x k}.
 #' @keywords internal
 #' @noRd
-.knn_tied_rows <- function(u, rows, k, tol = 0, num = seq_len(nrow(u))) {
+.knn_tied_rows <- function(u, rows, k, tol = 0, num = seq_len(nrow(u)), rnd = NULL) {
   n <- nrow(u); x <- u[, 1L]; y <- u[, 2L]
   out  <- matrix(0L, length(rows), k)
   todo <- seq_along(rows)
@@ -815,6 +831,15 @@
       done <- q >= n - 1L | far > dk * (1 + tol + 1e-9)
       if (any(done))
         out[todo[done], ] <- matrix(cand[at], nr, k)[done, , drop = FALSE]
+      if (!is.null(rnd) && any(done)) {
+        # The least squared distance on the list past the tie of the
+        # furthest pick: a settled list holds it, or none is left.
+        past <- d2
+        past[at] <- Inf
+        past[past <= dk * (1 + tol)] <- Inf
+        nx <- past[cbind(seq_len(nr), max.col(-past, ties.method = "first"))]
+        .tie_note(dk[done], nx[done], rnd)
+      }
     } else {
       # Each row's candidates by distance, then by row number: column i of
       # `ord` is row i's, nearest first.
@@ -859,12 +884,18 @@
 #'   them).
 #' @param k Number of neighbours, below \code{nrow(u)}.
 #' @param use_fnn Whether to use \pkg{FNN}.
+#' @param rnd The rounding the ties are compared with
+#'   (\code{.tie_rounding()} of the layer, over the scale \code{u} is
+#'   divided by), or \code{NULL}: each row's \code{k}-th squared distance
+#'   and the next one past its tie are handed to \code{.tie_note()}, which
+#'   flags a tie the rounding of the layer's coordinates can have parted.
 #' @return A list: \code{idx} (an \code{nrow(u) x k} matrix of row numbers;
 #'   the set matters, the order within a row does not) and \code{d} (the
 #'   distance to the furthest of them, the \code{k}-th nearest).
 #' @keywords internal
 #' @noRd
-.knn_locations <- function(u, k, use_fnn = requireNamespace("FNN", quietly = TRUE)) {
+.knn_locations <- function(u, k, use_fnn = requireNamespace("FNN", quietly = TRUE),
+                           rnd = NULL) {
   n <- nrow(u); x <- u[, 1L]; y <- u[, 2L]
   d2_of <- function(idx) matrix((x[idx] - x)^2 + (y[idx] - y)^2, n, ncol(idx))
   if (isTRUE(use_fnn)) {
@@ -873,15 +904,19 @@
     d2  <- d2_of(idx)
     dk  <- do.call(pmax, lapply(seq_len(k), function(j) d2[, j]))
     close <- if (kq > k) which(d2[, kq] <= dk * (1 + .TIE_TOL + 1e-9)) else integer(0)
+    if (kq > k && !is.null(rnd)) {
+      clear <- setdiff(seq_len(n), close)
+      .tie_note(dk[clear], d2[clear, kq], rnd)
+    }
     idx <- idx[, seq_len(k), drop = FALSE]
     if (length(close)) {
-      idx[close, ] <- .knn_tied_rows(u, close, k, tol = .TIE_TOL)
+      idx[close, ] <- .knn_tied_rows(u, close, k, tol = .TIE_TOL, rnd = rnd)
       d2 <- d2_of(idx)
       dk <- do.call(pmax, lapply(seq_len(k), function(j) d2[, j]))
     }
     return(list(idx = idx, d = sqrt(dk)))
   }
-  idx <- .knn_exact_rows(x, y, seq_len(n), k, tol = .TIE_TOL)
+  idx <- .knn_exact_rows(x, y, seq_len(n), k, tol = .TIE_TOL, rnd = rnd)
   d2  <- d2_of(idx)
   list(idx = idx, d = sqrt(do.call(pmax, lapply(seq_len(k), function(j) d2[, j]))))
 }
@@ -961,10 +996,18 @@
 #' @param cx,cy Coordinates of the centres.
 #' @param tol The length margin, \code{.centres_tol()} of all the centres
 #'   of the search.
+#' @param rnd \code{NULL}, or the rounding of a layer that the points and
+#'   centres are a frame of (\code{.tie_rounding()}): each point's least
+#'   squared distance and the least one past its tie bound are then handed
+#'   to \code{.tie_note()}, which flags a tie the rounding of the layer's
+#'   coordinates can have parted.  In the layer's own units the margin
+#'   \code{tol}, at least four units in the last place of the largest
+#'   coordinate, holds more than that rounding can move a distance, and no
+#'   caller passes it.  The result does not change.
 #' @return Integer vector: the centre of each point.
 #' @keywords internal
 #' @noRd
-.nearest_exact <- function(x, y, cx, cy, tol = .centres_tol(cx, cy)) {
+.nearest_exact <- function(x, y, cx, cy, tol = .centres_tol(cx, cy), rnd = NULL) {
   best <- (x - cx[1L])^2 + (y - cy[1L])^2
   for (j in seq_along(cx)[-1L]) best <- pmin.int(best, (x - cx[j])^2 + (y - cy[j])^2)
   # Not "replace when nearer by more than the tolerance" in one pass: with
@@ -975,6 +1018,15 @@
   for (j in seq_along(cx)) {
     hit <- is.na(idx) & (x - cx[j])^2 + (y - cy[j])^2 <= lim
     idx[hit] <- j
+  }
+  if (!is.null(rnd)) {
+    nx <- rep.int(Inf, length(x))
+    for (j in seq_along(cx)) {
+      d <- (x - cx[j])^2 + (y - cy[j])^2
+      past <- d > lim & d < nx
+      nx[past] <- d[past]
+    }
+    .tie_note(best, nx, rnd)
   }
   idx
 }
@@ -997,15 +1049,17 @@
 #' @param use_fnn Whether to use \pkg{FNN}.
 #' @param tol The length margin of the tie, \code{.centres_tol()} of all
 #'   the centres of the search.
+#' @param rnd As for \code{.nearest_exact()}: \code{NULL}, or the rounding
+#'   of the layer the points and centres are a frame of.
 #' @return Integer vector: the centre of each point.
 #' @keywords internal
 #' @noRd
 .nearest_centre <- function(x, y, cx, cy,
                             use_fnn = requireNamespace("FNN", quietly = TRUE),
-                            tol = .centres_tol(cx, cy)) {
+                            tol = .centres_tol(cx, cy), rnd = NULL) {
   K <- length(cx)
   if (K == 1L) return(rep.int(1L, length(x)))
-  if (!isTRUE(use_fnn) || K <= 16L) return(.nearest_exact(x, y, cx, cy, tol))
+  if (!isTRUE(use_fnn) || K <= 16L) return(.nearest_exact(x, y, cx, cy, tol, rnd))
   nn <- FNN::get.knnx(cbind(cx, cy), cbind(x, y), k = 2L)$nn.index
   a <- nn[, 1L]; b <- nn[, 2L]
   da <- (x - cx[a])^2 + (y - cy[a])^2
@@ -1014,7 +1068,11 @@
   swap <- db < da
   out[swap] <- b[swap]
   close <- which(pmax(da, db) <= .tie_bound(pmin(da, db), tol, slack = 1e-9))
-  if (length(close)) out[close] <- .nearest_exact(x[close], y[close], cx, cy, tol)
+  if (!is.null(rnd)) {
+    clear <- setdiff(seq_along(x), close)
+    .tie_note(pmin(da, db)[clear], pmax(da, db)[clear], rnd)
+  }
+  if (length(close)) out[close] <- .nearest_exact(x[close], y[close], cx, cy, tol, rnd)
   out
 }
 
@@ -1042,15 +1100,17 @@
 #' @param power The power, from 0 to 2.
 #' @param k_nn Number of neighbours.
 #' @param use_fnn Whether to use \pkg{FNN}.
+#' @param rnd The rounding of the layer in the units of \code{u}
+#'   (\code{.tie_rounding()}), or \code{NULL}, for \code{.knn_locations()}.
 #' @return The weight of one point at each location.  All one when
 #'   \code{power} is 0 or there is one location.
 #' @keywords internal
 #' @noRd
-.density_weights <- function(u, m, power, k_nn, use_fnn) {
+.density_weights <- function(u, m, power, k_nn, use_fnn, rnd = NULL) {
   n_u <- nrow(u)
   if (power == 0 || n_u < 2L) return(rep(1, n_u))
   kk  <- min(as.integer(k_nn), n_u - 1L)
-  nn  <- .knn_locations(u, kk, use_fnn)
+  nn  <- .knn_locations(u, kk, use_fnn, rnd)
   d   <- pmax(nn$d, .DENSITY_FLOOR_REL)
   cnt <- (m - 1) + rowSums(matrix(m[nn$idx], n_u, kk))
   w   <- (cnt / (pi * d^2))^power
@@ -1223,7 +1283,10 @@
                           "step. FNN, which installs with spatialkit, could not be loaded; ",
                           "reinstalling it gives the same result sooner."),
                    n_u)
-  w  <- .density_weights(cbind(zx, zy), m, power, k_nn, use_fnn)
+  # The rounding of the layer's coordinates, in the units of the frame, for
+  # the ties of the neighbour and nearest-centre searches (.tie_note()).
+  rnd <- .tie_rounding(loc$u, scale = extent)
+  w  <- .density_weights(cbind(zx, zy), m, power, k_nn, use_fnn, rnd)
   W  <- m * w
   zw <- cbind(W, zx * W, zy * W)
 
@@ -1242,7 +1305,7 @@
     it <- 0L; moved <- Inf
     while (it < iter.max) {
       it <- it + 1L
-      a  <- .nearest_centre(zx, zy, cx, cy, use_fnn)
+      a  <- .nearest_centre(zx, zy, cx, cy, use_fnn, rnd = rnd)
       s  <- rowsum(zw, a, reorder = TRUE)
       id <- as.integer(rownames(s))
       nx <- cx; ny <- cy
@@ -1253,7 +1316,7 @@
       if (moved < .DENSITY_TOL_REL) break
     }
     # The cells are those of the centres as they now stand.
-    a   <- .nearest_centre(zx, zy, cx, cy, use_fnn)
+    a   <- .nearest_centre(zx, zy, cx, cy, use_fnn, rnd = rnd)
     obj <- sum(W * ((zx - cx[a])^2 + (zy - cy[a])^2))
     if (!is.finite(obj) || !all(is.finite(cx)) || !all(is.finite(cy))) next
     objs[r] <- obj

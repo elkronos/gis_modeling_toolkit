@@ -1506,8 +1506,10 @@
           }),
         error = function(e) list(escaped = conditionMessage(e)))
       # .cv_fit_one_fold() returns NULL for an unusable fold; NULL cannot
-      # carry an attribute, so wrap the pair instead.
-      list(res = res, fold_warnings = caught)
+      # carry an attribute, so wrap the pair instead.  The ties the fold's
+      # searches noted for a watch open in the parent go back with them
+      # (.tie_carry()).
+      list(res = res, fold_warnings = caught, ties = .tie_carry())
     }
     # mc.preschedule = FALSE: one fork per fold.  Prescheduled, mclapply()
     # hands each core a chunk of folds, copies one fold's try-error to every
@@ -1522,6 +1524,7 @@
     )
     relayed <- do.call(c, lapply(results, function(z)
       if (!inherits(z, "try-error")) as.list(z$fold_warnings)))
+    for (z in results) if (is.list(z) && !inherits(z, "try-error")) .tie_merge(z$ties)
     said <- character(0)
     for (w in relayed) {
       classed <- inherits(w, "condition")
@@ -2866,12 +2869,18 @@
     nn <- FNN::get.knn(xy, k = kq)
   }
   tie_r <- sqrt(1 + .TIE_TOL)
+  # Where the rounding of the coordinates at their offset can have parted a
+  # tie at a graph's edge, .tie_note() records it for the caller's warning
+  # (.tie_watch()); .knn_pairs() does the same on its own path.
+  rnd <- .tie_rounding(xy)
   weights_for <- function(k) {
     if (!is.null(nn) && k < ncol(nn$nn.dist) &&
-        !any(nn$nn.dist[, k + 1L] <= nn$nn.dist[, k] * tie_r))
+        !any(nn$nn.dist[, k + 1L] <= nn$nn.dist[, k] * tie_r)) {
+      .tie_note(nn$nn.dist[, k]^2, nn$nn.dist[, k + 1L]^2, rnd)
       return(Matrix::sparseMatrix(i = rep(seq_len(n), k),
                                   j = as.integer(nn$nn.index[, seq_len(k)]),
                                   x = 1 / k, dims = c(n, n), repr = "C"))
+    }
     .build_knn_weights(xy, k = k)
   }
   rows <- lapply(ks, function(k) {
@@ -2993,9 +3002,12 @@
   u  <- unname(xy[loc$first, , drop = FALSE])
   o  <- order(u[, 1L], u[, 2L])
   us <- u[o, , drop = FALSE]
+  # A tie the rounding of the coordinates can have parted is noted for the
+  # caller's warning (.tie_note()).
+  rnd  <- .tie_rounding(us)
   near <- if (.has_backend("FNN"))
-    .nearest_location_search(us, seq_len(G), TRUE, caller = "estimate_sac_range")
-  else .knn_exact_rows(us[, 1L], us[, 2L], seq_len(G), 1L, tol = .TIE_TOL)[, 1L]
+    .nearest_location_search(us, seq_len(G), TRUE, caller = "estimate_sac_range", rnd = rnd)
+  else .knn_exact_rows(us[, 1L], us[, 2L], seq_len(G), 1L, tol = .TIE_TOL, rnd = rnd)[, 1L]
   i <- seq_len(G); j <- integer(G); j[o] <- o[near]
   a <- pmin(i, j); b <- pmax(i, j)
   keep <- !duplicated(cbind(a, b))
@@ -3193,6 +3205,10 @@ sac_nugget <- function(x) {
 #' \code{\link{residual_morans_i}()}, so the graphs do not depend on the
 #' unit or the origin of the coordinates wherever the doubles hold them to
 #' better than about one part in 1e8 of the distances between neighbours.
+#' Where they do not, and a distance lies past a tie by less than that
+#' rounding, the call warns, with class \code{"spatialkit_xy_imprecise"};
+#' the same holds for the nearest other location of the short-lag
+#' semivariances.  The results are those the coordinates as stored give.
 #' When that adjusted p-value is
 #' not below \code{structure_alpha}, the result is \code{NA} with
 #' \code{rejected_reason} \code{"no spatial structure detected at the
@@ -3731,6 +3747,10 @@ estimate_sac_range <- function(points_sf, response_var,
                                lags = c("adaptive", "equal"),
                                n_lags = 15L,
                                structure_alpha = 0.05) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("estimate_sac_range", "points_sf")
+  on.exit(tie_end(returnValue(tie_end), points_sf), add = TRUE)
   detrend <- match.arg(detrend)
   lags    <- match.arg(lags)
   if (!is.numeric(reml_max_n) || length(reml_max_n) != 1L ||
@@ -6000,6 +6020,10 @@ make_folds <- function(points_sf, k,
                        buffer = NULL, min_train = 0.5, phi = NULL,
                        drop_empty_blocks = TRUE, blocks = NULL,
                        balance_tol = 3, max_test = NULL) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("make_folds", "points_sf")
+  on.exit(tie_end(returnValue(tie_end), points_sf), add = TRUE)
   method <- match.arg(method)
 
   cleanup <- .with_seed(seed)
@@ -8357,14 +8381,17 @@ make_folds <- function(points_sf, k,
 #' @param q Number of clusters asked for, at most \code{nrow(xy_u)}.
 #' @param use_fnn Whether to use \pkg{FNN}.
 #' @param iter_max Passes.
+#' @param rnd The rounding of the layer's coordinates in the units of the
+#'   frame (\code{.tie_rounding()}), or \code{NULL}: a point whose tie
+#'   between two centres it can have parted is noted (\code{.tie_note()}).
 #' @return Integer cluster labels \code{1..q'}, one per row of \code{xy}.
 #' @keywords internal
 #' @noRd
-.knndm_kmeans <- function(xy, xy_u, q, use_fnn, iter_max = 10L) {
+.knndm_kmeans <- function(xy, xy_u, q, use_fnn, iter_max = 10L, rnd = NULL) {
   cen <- xy_u[sample.int(nrow(xy_u), q), , drop = FALSE]
   cl <- integer(0)
   for (it in seq_len(iter_max)) {
-    new <- .nearest_centre(xy[, 1L], xy[, 2L], cen[, 1L], cen[, 2L], use_fnn)
+    new <- .nearest_centre(xy[, 1L], xy[, 2L], cen[, 1L], cen[, 2L], use_fnn, rnd = rnd)
     new <- match(new, sort(unique(new)))
     if (identical(new, cl)) break
     cl <- new
@@ -8506,7 +8533,11 @@ make_folds <- function(points_sf, k,
     # which does not move with the unit or the origin: on a lattice Ward's
     # merges and the k-means assignments tie exactly, and the last bits of
     # the coordinates as given settled them.
-    z <- .kmeans_frame(xy)$z
+    fr <- .kmeans_frame(xy)
+    z  <- fr$z
+    # The rounding of the coordinates as given, in the units of the frame,
+    # for the ties of the k-means step (.tie_note()).
+    rnd <- if (use_ward) NULL else .tie_rounding(xy, scale = fr$scale)
     if (use_ward) {
       tree <- stats::hclust(stats::dist(z), method = "ward.D2")
       groups <- NULL; n_groups <- n
@@ -8514,7 +8545,7 @@ make_folds <- function(points_sf, k,
       # Too many points for the n by n distance matrix: k-means reduces them
       # to at most `ward_max` groups and Ward's method carries on from those.
       z_u    <- z[distinct, , drop = FALSE]
-      groups <- .knndm_kmeans(z, z_u, min(ward_max, nrow(z_u) - 1L), use_fnn)
+      groups <- .knndm_kmeans(z, z_u, min(ward_max, nrow(z_u) - 1L), use_fnn, rnd = rnd)
       n_groups <- max(groups)
       tree <- if (n_groups >= 2L) .ward_from_groups(z, groups) else NULL
     }
@@ -8523,7 +8554,7 @@ make_folds <- function(points_sf, k,
             else if (!is.null(tree) && q <= n_groups)
               stats::cutree(tree, k = q)[groups]
             # More clusters than groups: k-means at that count.
-            else .knndm_kmeans(z, z_u, q, use_fnn)
+            else .knndm_kmeans(z, z_u, q, use_fnn, rnd = rnd)
       sizes <- tabulate(cl)
       if (length(sizes) < k) {
         cand[[length(cand) + 1L]] <- one("clusters", length(sizes), integer(0),
@@ -9043,6 +9074,10 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
                    block_size = NULL, auto_range = FALSE,
                    parallel = FALSE, metrics = NULL) {
   if (!inherits(data_sf, "sf")) stop("cv_gwr(): `data_sf` must be an sf object.")
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("cv_gwr", "data_sf")
+  on.exit(tie_end(returnValue(tie_end), data_sf), add = TRUE)
   metrics <- .check_metrics_fn(metrics, "cv_gwr")
   if (!requireNamespace("sp", quietly = TRUE))
     stop("cv_gwr(): package 'sp' is required (a GWR fit keeps its local ",

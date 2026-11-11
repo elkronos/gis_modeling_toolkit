@@ -1151,6 +1151,10 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
                                                     "combined"),
                                      select_on = c("all", "split"),
                                      on_no_elbow = c("na", "warn", "error")) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("determine_optimal_levels", "data_sf")
+  on.exit(tie_end(returnValue(tie_end), data_sf), add = TRUE)
   if (!inherits(data_sf, "sf"))
     stop("determine_optimal_levels(): `data_sf` must be an sf object.")
 

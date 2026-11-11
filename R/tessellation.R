@@ -2972,6 +2972,10 @@ build_tessellation <- function(
     clip = TRUE, keep_duplicates = FALSE, crs = NULL, quiet = FALSE,
     cover = NULL
 ) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("build_tessellation", "points_sf")
+  on.exit(tie_end(returnValue(tie_end), points_sf), add = TRUE)
   .msg <- function(...) if (!quiet) message(...)
   method <- match.arg(method)
   # Polygon or line features are refused here, although make_folds(),

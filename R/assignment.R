@@ -3190,6 +3190,10 @@ summarize_by_cell <- function(assigned_points_sf,
                               area           = FALSE,
                               estimate       = c("pooled", "mean"),
                               obs_level      = NULL) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("summarize_by_cell", "assigned_points_sf")
+  on.exit(tie_end(returnValue(tie_end), assigned_points_sf), add = TRUE)
   .msg <- function(...) if (!quiet) message(...)
   estimate <- match.arg(estimate)
   if (!is.null(conf_level) &&

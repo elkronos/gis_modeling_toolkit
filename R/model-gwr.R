@@ -438,7 +438,13 @@
 #'   and 0 to the others; an observation whose squared distance is within
 #'   one part in ten million of the edge counts as at the edge, and inside,
 #'   so on a regular grid every neighbour tied with the last one is in the
-#'   window whatever the unit or origin of the coordinates.
+#'   window in any unit and at any origin where the doubles hold the
+#'   coordinates to better than about one part in 1e8 of the distances
+#'   between neighbours.  Farther from the origin the doubles round the
+#'   coordinates more coarsely, and where a neighbour lies past the edge by
+#'   less than that rounding the call warns, with class
+#'   \code{"spatialkit_xy_imprecise"}; the windows are those the
+#'   coordinates as stored give.
 #' @param .already_prepped Logical (internal). If \code{TRUE}, skip the
 #'   \code{prep_model_data()} call because the caller has already projected,
 #'   coerced, and filtered the data.  Used by the CV internals to avoid a
@@ -812,6 +818,10 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
                           kernel = c("bisquare", "gaussian", "tricube",
                                      "boxcar", "exponential"),
                           .already_prepped = FALSE) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("fit_gwr_model", "data_sf")
+  on.exit(tie_end(returnValue(tie_end), data_sf), add = TRUE)
   if (!inherits(data_sf, "sf"))
     stop("fit_gwr_model(): `data_sf` must be an sf object.")
   # GWmodel is not needed: the local regressions, the bandwidth search and
@@ -1636,8 +1646,11 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 #' \code{d^2 <= h^2 (1 + .TIE_TOL)}: a squared distance within one part in
 #' ten million of the kernel's edge is at the edge, the tie rule of the
 #' package's other nearest-point searches, so the points tied with the
-#' \code{bw}-th neighbour on a regular grid are all inside whatever the
-#' unit or origin of the coordinates.  Compared as \code{d <= h sqrt(1 +
+#' \code{bw}-th neighbour on a regular grid are all inside in any unit and
+#' at any origin where the doubles hold the coordinates to better than about
+#' one part in 1e8 of the distances; farther out \code{.gwr_local_solve()}
+#' notes a point past the edge by less than their rounding
+#' (\code{.tie_note()}).  Compared as \code{d <= h sqrt(1 +
 #' .TIE_TOL)}, the same test, so that no square overflows or vanishes.  A
 #' zero-width kernel (\code{h = 0}) keeps the points at distance 0, as
 #' \code{!(d > h)} does.
@@ -1885,6 +1898,12 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     else diag(inv_s, p, p)
 
   todo <- which(usable)
+  # The boxcar's edge is a tie (.gw_boxcar_inside()): where the rounding of
+  # the coordinates at their offset can have parted a point from it, the
+  # window's edge and the least squared distance past it are noted for the
+  # caller's warning (.tie_note()).  The other kernels weigh a point at
+  # their edge 0, or are continuous there.
+  rnd <- if (kernel == "boxcar") .tie_rounding(c(cx, cy, rx[usable], ry[usable])) else NULL
   # A kernel that weights every row: the score of the windows that are far
   # from rank deficient comes from their cross-products, a block at a time
   # (.gwr_score_dense()); the loop below takes the others.
@@ -1913,6 +1932,10 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     # rows, rank 0 and nothing estimable.
     win  <- .gw_window(d, h, kernel)
     rows <- win$rows
+    if (!is.null(rnd) && is.finite(h)) {
+      past <- d[which(!.gw_boxcar_inside(d, h))]
+      if (length(past)) .tie_note(h^2, min(past)^2, rnd)
+    }
     mk <- length(rows)
     nw[i] <- mk
     if (!mk) next

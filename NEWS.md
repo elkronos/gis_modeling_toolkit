@@ -5518,6 +5518,41 @@ old behaviour where there is a way.
   share a slot, and a point a few units in the last place from two
   co-located points no longer shares their slot at k = 1.
 
+* **Ties lost to the rounding of coordinates far from their origin were read
+  in silence.**  The neighbour searches tie two squared distances within one
+  part in ten million of each other, which holds while the doubles hold the
+  coordinates to about one part in 1e8 of the distances between neighbours.
+  An 8 x 8 lattice at a spacing of 100.1 m moved by 1e11 is stored rounded
+  to 1.5e-5 m, so its nominally tied neighbours are stored apart and which
+  of them a row takes follows the rounding.  The k-nearest-neighbour
+  weights, the structure test of `estimate_sac_range()` (Moran's I 0.4117
+  at 1e11 where the origin gives 0.4136), the density partition, the
+  nearest other location of the pooling and of the short-lag
+  semivariances, the k-means step of `make_folds(method = "knndm")` on
+  large samples, the kriging neighbourhoods of `kriging_adequacy()` and
+  the edge of a GWR's boxcar window moved with the origin, with no
+  warning (on a 10 x 10 lattice at 100.1 m, the fitted values of an
+  adaptive boxcar GWR moved by up to 0.15 at 1e11).  Each of these
+  searches now compares the distance past a row's tie with the rounding,
+  and `residual_morans_i()`, `estimate_sac_range()`,
+  `determine_optimal_levels()`, `fit_bayesian_spatial_model()`,
+  `resolution_profile()`, `select_resolution()`, `get_voronoi_seeds()`,
+  `voronoi_seeds_kmeans()`, `build_tessellation()`, `make_folds()`,
+  `summarize_by_cell()`, `kriging_adequacy()`, `fit_gwr_model()`,
+  `predict()` on its fit, `cv_gwr()`, `gwr_model_selection()` and
+  `cv_block_size_sweep()` warn once, with class
+  `"spatialkit_xy_imprecise"`, where some neighbour distances lie past a
+  tie by less than that rounding, naming the rounding, the distance and
+  the remedy.  A call that has already said, in that class, that its
+  coordinates are rounded by more than a millionth of their extent says
+  nothing more.  Results do not change.  A lattice whose ties hold at its
+  offset (whole metres at 1e15) raises nothing; at 1e15, where the rounding
+  is wider than the gaps between their distances, points off a lattice can
+  raise it too.  The nearest-row search of `cell_values_at()` and
+  `predict_surface()` keeps a lattice's ties at these offsets (its margin is
+  at least four units in the last place of the largest coordinate) and says
+  nothing.
+
 * **The checks that folds and fits describe the same data passed other data
   at a large offset.**  On a layer with no CRS, the check that `folds`
   passed to a `cv_*()` function, `area_of_applicability()`,

@@ -1200,6 +1200,12 @@ predict.gwr_fit <- function(object, newdata = NULL, se.fit = FALSE, ...) {
 #' @noRd
 .gwr_predict_rows <- function(object, newdata = NULL, se.fit = FALSE,
                               centred = FALSE) {
+  # A tie of a window's edge that the rounding of the coordinates can have
+  # parted is said once, when the call returns (.tie_watch()): by
+  # predict.gwr_fit(), as its other warnings are, or by the exported call
+  # that predicts.
+  tie_end <- .tie_watch("predict.gwr_fit", "`newdata` and the data of `object`", plural = TRUE)
+  on.exit(tie_end(returnValue(tie_end), object$data_sf), add = TRUE)
   if (centred) se.fit <- FALSE
   if (!is.logical(se.fit) || length(se.fit) != 1L || is.na(se.fit))
     stop("predict.gwr_fit(): `se.fit` must be TRUE or FALSE.", call. = FALSE)

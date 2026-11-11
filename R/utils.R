@@ -1550,5 +1550,212 @@ setOldClass(c("spatialkit_rows", "sf"))
     format(signif(u, 3)), of, format(signif(d, 3)), reads, remedy,
     data = list(spacing = u, extent = d))
   out$warned <- TRUE
+  # The exported call has said that its coordinates are rounded: a tie
+  # that rounding parted is not said again in another text (.tie_watch()).
+  if (isTRUE(.tie_state$open)) .tie_state$said <- TRUE
   invisible(out)
+}
+
+
+# ---------------------------------------------------------------------------
+# Ties lost to the rounding of the coordinates
+# ---------------------------------------------------------------------------
+# The neighbour searches call two squared distances within .TIE_TOL of each
+# other a tie (R/pool.R).  That holds at any origin while the doubles hold
+# the coordinates to about .TIE_TOL / 4 of the distances compared.  Far from
+# the origin the spacing of doubles is coarser: a lattice whose coordinates
+# are not on that spacing (100.1 m at 1e11) is stored rounded, its distances
+# differ by the rounding, nominally tied neighbours lie more than .TIE_TOL
+# apart, and which of them a row takes follows the rounding.  The extent
+# bound of .warn_xy_imprecise() does not reach it: there the spacing is
+# 1.5e-8 to 2.8e-7 of the extent.  A search that settles a row's k-th
+# neighbour, or a nearest location, hands the k-th squared distance and the
+# next one past the tie to .tie_note(); the exported function that runs the
+# search opens a watch (.tie_watch()) and says it once, when it returns.
+# Results do not change.
+
+# The open watch: `open`, and the largest spacing of doubles and the least
+# neighbour distance of the ties found, in the units of the layer.
+.tie_state <- new.env(parent = emptyenv())
+
+
+#' Whether the rounding of the coordinates can have parted a tie
+#'
+#' \code{a} is the squared distance of a row's \code{k}-th neighbour (or its
+#' nearest), \code{b} the next squared distance past the tie.  Rounding each
+#' coordinate to the spacing of doubles \code{r} moves a squared distance by
+#' up to about \code{2 sqrt(2) r} times the distance, so where \code{b} lies
+#' past the tie line \code{a (1 + .TIE_TOL)} by no more than
+#' \code{8 r (sqrt(a) + sqrt(b))} the two can be one distance that the
+#' rounding parted.  The rule is one-sided: a pair that is tied (within
+#' \code{.TIE_TOL}) stays tied whatever the rounding did, and an exact
+#' lattice at an offset that holds it raises nothing.  A squared distance
+#' that is not finite (one that overflows, or no next one) is not read.
+#'
+#' @param a,b Squared distances, \code{b} the farther; vectors of one
+#'   length.
+#' @param M The largest absolute coordinate of the layer searched.
+#' @param r The spacing of doubles at the coordinates, in the units of
+#'   \code{sqrt(a)}: one unit in the last place of \code{M}
+#'   (\code{.ulp_of()}, \code{2^(floor(log2 M) - 52)}) by default; a search
+#'   in a frame divided by a scale passes that over the scale.
+#' @return A logical vector, \code{TRUE} where the tie may have been lost.
+#' @keywords internal
+#' @noRd
+.tie_lost_by_rounding <- function(a, b, M, r = .ulp_of(M)) {
+  line <- a * (1 + .TIE_TOL)
+  out  <- is.finite(a) & is.finite(b) & b > line
+  if (any(out))
+    out[out] <- (b - line)[out] <= 8 * r * (sqrt(a[out]) + sqrt(b[out]))
+  out
+}
+
+
+#' The rounding a search compares its ties with, while a watch is open
+#'
+#' @param xy The coordinates of the layer searched, in its own units (a
+#'   matrix or vector; values that are not finite are left out), or its
+#'   largest absolute coordinate.
+#' @param scale The scale the search's frame divides the layer by (1 when
+#'   it searches the layer as it is).
+#' @return \code{NULL} when no watch is open or no coordinate is finite,
+#'   so the search reads nothing; else a list of \code{r}, the spacing of
+#'   doubles in the frame's units, \code{spacing}, the same in the layer's,
+#'   and \code{scale}.
+#' @keywords internal
+#' @noRd
+.tie_rounding <- function(xy, scale = 1) {
+  if (!isTRUE(.tie_state$open)) return(NULL)
+  v <- as.numeric(xy)
+  v <- v[is.finite(v)]
+  if (!length(v) || !(is.finite(scale) && scale > 0)) return(NULL)
+  u <- .ulp_of(v)
+  if (!(u > 0)) return(NULL)
+  list(r = u / scale, spacing = u, scale = scale)
+}
+
+
+#' Note the ties a search may have lost to rounding
+#'
+#' Called by each neighbour search with the squared distance of every row's
+#' \code{k}-th neighbour (or nearest) and the next one past the tie.  Builds
+#' no condition: it records, for the watch open, the spacing of doubles and
+#' the least such neighbour distance, in the layer's units.
+#'
+#' @param a,b As for \code{.tie_lost_by_rounding()}, in the search's units.
+#' @param rnd \code{.tie_rounding()}; \code{NULL} reads nothing.
+#' @return \code{TRUE} (invisibly) when a tie may have been lost.
+#' @keywords internal
+#' @noRd
+.tie_note <- function(a, b, rnd) {
+  if (is.null(rnd) || !isTRUE(.tie_state$open) || !length(a)) return(invisible(FALSE))
+  hit <- .tie_lost_by_rounding(a, b, r = rnd$r)
+  if (!any(hit)) return(invisible(FALSE))
+  .tie_state$spacing <- max(.tie_state$spacing, rnd$spacing)
+  .tie_state$dist <- min(.tie_state$dist, sqrt(min(a[hit])) * rnd$scale)
+  invisible(TRUE)
+}
+
+
+#' Open a watch for ties lost to rounding, for one exported call
+#'
+#' The exported function that runs a neighbour search opens it on entry and
+#' registers the function returned with \code{on.exit()}:
+#' \code{on.exit(tie_end(returnValue(tie_end), layer), add = TRUE)}.  When
+#' the call returns and a search noted a tie its rounding may have parted
+#' (\code{.tie_note()}), it warns once, with class
+#' \code{"spatialkit_xy_imprecise"} (\code{.warn_xy_imprecise()}'s class,
+#' and so said once in a run of calls), naming the argument, the spacing of
+#' doubles at the coordinates and the least neighbour distance concerned.
+#' A call that stops says nothing, and neither does a call that has said
+#' with \code{.warn_xy_imprecise()} that its coordinates are rounded, so
+#' that one call raises one warning of the class.  A watch opened while
+#' another is open leaves the call to the outer one, which says it once for
+#' both.
+#'
+#' @param caller The exported function, named in the message.
+#' @param arg The argument whose coordinates are searched, named in the
+#'   message in backticks; text that holds a backtick already (\code{"the
+#'   data of `fit`"}) is used as it is.
+#' @param plural Whether \code{arg} names more than one thing (\code{"the
+#'   points of `profile`"}), for the verb and the pronouns of the message.
+#' @return The function that closes the watch.  It takes the call's return
+#'   value, or itself when the call stops; the layer, or its CRS, read only
+#'   when it warns, for whether it has a CRS; and \code{named}, an argument
+#'   to name in place of \code{arg} (read only when it warns), or
+#'   \code{NULL}.
+#' @keywords internal
+#' @noRd
+.tie_watch <- function(caller, arg, plural = FALSE) {
+  if (isTRUE(.tie_state$open)) {
+    inner <- function(value, layer = NULL, named = NULL) invisible(FALSE)
+    return(inner)
+  }
+  .tie_state$open <- TRUE
+  .tie_state$said <- FALSE
+  .tie_state$spacing <- 0
+  .tie_state$dist <- Inf
+  end <- function(value, layer = NULL, named = NULL) {
+    sp <- .tie_state$spacing; d <- .tie_state$dist; said <- isTRUE(.tie_state$said)
+    .tie_state$open <- FALSE
+    .tie_state$said <- FALSE
+    .tie_state$spacing <- 0
+    .tie_state$dist <- Inf
+    if (identical(value, end) || said || !(sp > 0)) return(invisible(FALSE))
+    has_crs <- isTRUE(tryCatch(
+      if (inherits(layer, "crs")) !is.na(layer)
+      else inherits(layer, c("sf", "sfc")) && !is.na(sf::st_crs(layer)),
+      error = function(e) FALSE))
+    if (!is.null(named)) arg <- named
+    who <- if (grepl("`", arg, fixed = TRUE)) arg else paste0("`", arg, "`")
+    .warn_classed(
+      "spatialkit_xy_imprecise",
+      paste0("%s(): %s %s so far from the origin%s that %s coordinates are ",
+             "rounded to %s, and some neighbour distances near %s lie just past a ",
+             "tie by less than that rounding: which neighbour is taken there ",
+             "follows the rounding. Shift the layer nearer the origin, or ",
+             "project it."),
+      caller, who, if (plural) "lie" else "lies",
+      if (!has_crs) "" else if (plural) " of their CRS" else " of its CRS",
+      if (plural) "their" else "its",
+      format(signif(sp, 3)), format(signif(d, 3)),
+      data = list(spacing = sp, distance = d))
+    invisible(TRUE)
+  }
+  end
+}
+
+
+#' The ties a forked worker noted, for the watch of the process that forked it
+#'
+#' A forked child inherits the open watch (\code{.tie_watch()}) but not the
+#' way back: what its searches note (\code{.tie_note()}) dies with it.  The
+#' worker returns \code{.tie_carry()} beside its result, and the parent
+#' hands that to \code{.tie_merge()}.
+#'
+#' @return A list of the spacing and the least distance noted, and whether
+#'   the coordinates were said to be rounded, or \code{NULL} with no watch
+#'   open.
+#' @keywords internal
+#' @noRd
+.tie_carry <- function() {
+  if (!isTRUE(.tie_state$open)) return(NULL)
+  list(spacing = .tie_state$spacing, dist = .tie_state$dist,
+       said = isTRUE(.tie_state$said))
+}
+
+#' Add the ties a forked worker noted to the open watch
+#'
+#' @param x What \code{.tie_carry()} returned in the worker, or \code{NULL}.
+#' @return \code{NULL}, invisibly.
+#' @keywords internal
+#' @noRd
+.tie_merge <- function(x) {
+  if (!isTRUE(.tie_state$open) || !is.list(x)) return(invisible(NULL))
+  if (is.numeric(x$spacing) && length(x$spacing) == 1L && x$spacing > 0) {
+    .tie_state$spacing <- max(.tie_state$spacing, x$spacing)
+    .tie_state$dist <- min(.tie_state$dist, x$dist)
+  }
+  if (isTRUE(x$said)) .tie_state$said <- TRUE
+  invisible(NULL)
 }

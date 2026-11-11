@@ -144,7 +144,10 @@
 #' at any origin and in any unit wherever the doubles hold the coordinates
 #' to better than about one part in 1e8 of the distances between
 #' neighbours.  At an offset whose rounding is coarser than that, a lattice
-#' can lose its ties.
+#' can lose its ties: each row's k-th distance and the next one past the tie
+#' are handed to \code{.tie_note()}, which flags a pair the rounding can
+#' have parted, and the exported call warns (\code{.tie_watch()}).  The
+#' weights do not change.
 #'
 #' The kd-tree path asks \pkg{FNN} for more than \code{k} neighbours, drops
 #' any self-match (FNN returns a point's own index among exact duplicates),
@@ -158,14 +161,19 @@
 #' @param k Integer neighbour count, already clamped to \code{n - 1}.
 #' @param use_fnn Logical; whether the neighbour lookup uses \pkg{FNN}'s
 #'   kd-tree or a dense \code{dist()} scan.
+#' @param rnd The rounding the ties are compared with
+#'   (\code{.tie_rounding()}): by default that of \code{coords} in their
+#'   own units, \code{NULL} when no watch is open.
 #' @return A list with integer vectors \code{i}, \code{j} and a numeric
 #'   vector \code{w} of equal length; \code{tapply(w, i, sum)} is 1 for every
 #'   row.
 #' @keywords internal
 #' @noRd
-.knn_pairs <- function(coords, k, use_fnn) {
+.knn_pairs <- function(coords, k, use_fnn, rnd = .tie_rounding(coords)) {
   n <- nrow(coords)
   k <- as.integer(k)
+  # Each row's k-th distance and the next one past its tie, for .tie_note().
+  t_k <- t_next <- rep(NA_real_, n)
 
   # Floating-point ties, by the package's one tie rule (.TIE_TOL): two
   # distances whose squares lie within .TIE_TOL of each other are one
@@ -195,7 +203,9 @@
     w[close] <- 1 / k
     w[tied]  <- (k - m) / (t * k)
     keep  <- close | tied
-    list(j = js[keep], w = w[keep])
+    past  <- ds[!keep]
+    list(j = js[keep], w = w[keep], dk = dk,
+         nx = if (length(past)) past[1L] else Inf)
   }
 
   dense_row <- function(i) {
@@ -204,7 +214,12 @@
     dk   <- sort(d, partial = k)[k]
     cand <- which(d < dk | tie_of(d, dk))          # at or within the k-th distance
     cand <- cand[cand != i]
-    row_weights(cand, d[cand])
+    rw   <- row_weights(cand, d[cand])
+    if (!is.null(rnd)) {
+      past  <- d[-c(cand, i)]
+      rw$nx <- if (length(past)) min(past) else Inf
+    }
+    rw
   }
 
   out_i <- vector("list", n); out_j <- vector("list", n); out_w <- vector("list", n)
@@ -271,6 +286,7 @@
         if (length(js) < n - 1L && G > 1L && tie_of(cd[length(cd)], dk)) next
         rw  <- row_weights(js, ds)
         out_i[[i]] <- rep.int(i, length(rw$j)); out_j[[i]] <- rw$j; out_w[[i]] <- rw$w
+        t_k[i] <- rw$dk; t_next[i] <- rw$nx
         need_dense[i] <- FALSE
       }
     }
@@ -280,8 +296,11 @@
     for (i in which(need_dense)) {
       rw <- dense_row(i)
       out_i[[i]] <- rep.int(i, length(rw$j)); out_j[[i]] <- rw$j; out_w[[i]] <- rw$w
+      t_k[i] <- rw$dk; t_next[i] <- rw$nx
     }
   }
+  # The squares of the distances, for the rule of .tie_lost_by_rounding().
+  .tie_note(t_k^2, t_next^2, rnd)
 
   list(i = as.integer(unlist(out_i, use.names = FALSE)),
        j = as.integer(unlist(out_j, use.names = FALSE)),
@@ -804,8 +823,16 @@
 #'   visits) share that slot's weight equally, with no tie-break by
 #'   row order or by which backend found them, so the matrix is a function
 #'   of the geometry alone.  A distance is tied with the k-th when their
-#'   squares are within one part in ten million of each other, whatever
-#'   the unit and the origin of the coordinates.  On distinct, untied
+#'   squares are within one part in ten million of each other, so the
+#'   matrix is the same in any unit and at any origin where the doubles
+#'   hold the coordinates to better than about one part in 1e8 of the
+#'   distances between neighbours.  Farther from the origin the doubles
+#'   round the coordinates more coarsely, and a lattice whose coordinates
+#'   are not on that rounding can lose its ties.  Where a distance lies
+#'   past a tie by less than that rounding, the call warns, with class
+#'   \code{"spatialkit_xy_imprecise"}, naming the rounding and the
+#'   distance; the matrix is the one the coordinates as stored give.  On
+#'   distinct, untied
 #'   coordinates it equals
 #'   \code{spdep}'s \code{knearneigh()} + \code{nb2listw(style = "W")}
 #'   exactly.
@@ -945,6 +972,10 @@ residual_morans_i <- function(fit,
                               k = 8L,
                               null = c("auto", "randomisation", "residual"),
                               keep_weights = FALSE) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("residual_morans_i", "the data of `fit`")
+  on.exit(tie_end(returnValue(tie_end), if (inherits(fit, "spatial_fit")) fit$data_sf), add = TRUE)
   alternative <- match.arg(alternative)
   # `k` reached .build_knn_weights() unvalidated, where min() collapses a
   # vector: k = c(4, 8) silently built the k = 4 matrix and returned a

@@ -1978,6 +1978,10 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                                density_power = 1, density_k = 8L,
                                iter_max = NULL,
                                estimate = "auto", obs_per_cell = "auto") {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("resolution_profile", "data_sf")
+  on.exit(tie_end(returnValue(tie_end), data_sf), add = TRUE)
   # Which of the arguments that describe the automatic ladder the caller
   # supplied.  Read first, before any of them is altered: `obs_per_cell` is
   # resolved against them below.  A value a wrapper passes on counts as
@@ -4561,6 +4565,10 @@ select_resolution <- function(profile,
                                             "moran_z", "loo", "size"),
                               tol = 0.02, range_floor = TRUE, diagnostic = FALSE,
                               obs_per_cell = NULL) {
+  # A tie of a neighbour search that the rounding of the coordinates can
+  # have parted is said once, when the call returns (.tie_watch()).
+  tie_end <- .tie_watch("select_resolution", "the points of `profile`", plural = TRUE)
+  on.exit(tie_end(returnValue(tie_end), attr(profile, "centres_crs", exact = TRUE)), add = TRUE)
   if (!inherits(profile, "resolution_profile"))
     stop("select_resolution(): `profile` must come from resolution_profile().",
          call. = FALSE)

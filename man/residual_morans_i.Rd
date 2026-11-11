@@ -32,8 +32,16 @@ at the k-th distance (every regular grid, every site with repeat
 visits) share that slot's weight equally, with no tie-break by
 row order or by which backend found them, so the matrix is a function
 of the geometry alone.  A distance is tied with the k-th when their
-squares are within one part in ten million of each other, whatever
-the unit and the origin of the coordinates.  On distinct, untied
+squares are within one part in ten million of each other, so the
+matrix is the same in any unit and at any origin where the doubles
+hold the coordinates to better than about one part in 1e8 of the
+distances between neighbours.  Farther from the origin the doubles
+round the coordinates more coarsely, and a lattice whose coordinates
+are not on that rounding can lose its ties.  Where a distance lies
+past a tie by less than that rounding, the call warns, with class
+\code{"spatialkit_xy_imprecise"}, naming the rounding and the
+distance; the matrix is the one the coordinates as stored give.  On
+distinct, untied
 coordinates it equals
 \code{spdep}'s \code{knearneigh()} + \code{nb2listw(style = "W")}
 exactly.
