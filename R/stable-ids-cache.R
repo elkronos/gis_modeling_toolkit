@@ -41,12 +41,25 @@
 #'   returned in XY, with a warning of class
 #'   \code{"spatialkit_zm_dropped"}. With \code{FALSE} the rows come back
 #'   with the geometry they arrived with, Z and M included. An empty polygon
-#'   in Z or M has no coordinates to drop and raises no warning.
+#'   in Z or M has no coordinates to drop and raises no warning. An empty
+#'   polygon is not repaired and comes back as it arrived. A ring of fewer
+#'   than four points encloses no area and is dropped before the repair: GEOS
+#'   stopped on a ring of two, and in degrees sf reads such a ring as the
+#'   whole globe. A
+#'   row the repair turns into a collection keeps its polygonal parts, and a
+#'   row it leaves with no polygon at all (a ring with no area, which GEOS
+#'   turns into lines or an empty collection) comes back as it arrived, with
+#'   one warning of class \code{"spatialkit_cells_degenerate"} that gives its
+#'   rows of \code{polygons_sf} (\code{rows}).
 #' @param transform_for_sort CRS used only for computing sort-key coordinates.
 #'   Default 4326. This is the whole mechanism by which the IDs are stable
 #'   (sorting in one common CRS is what makes the same layer get the same IDs
 #'   whichever projection it arrives in), so if the transform fails the
-#'   function says so rather than quietly sorting in the input's own CRS. The
+#'   function says so rather than quietly sorting in the input's own CRS. A
+#'   transform that cannot place every polygon with a location (a projected
+#'   layer far outside its CRS's area, whose rows PROJ returns empty) counts
+#'   as failed in the same way: the whole layer is sorted in its own CRS, and
+#'   the log says so. In a geographic CRS the
 #'   sort key is rounded to 7 decimal degrees (about 1 cm) before ordering, so
 #'   the floating-point noise of a round trip through a different projection
 #'   does not usually reverse two neighbouring cells. It can where two cells'
@@ -59,6 +72,16 @@
 #'   \code{sf::sf_use_s2()} is on, so the session setting does not change the
 #'   IDs. Set to NULL to sort in the input CRS, which gives IDs that are
 #'   reproducible but not comparable across projections.
+#'
+#'   A key in a CRS that is not geographic (with NULL, for a layer without a
+#'   CRS, after a failed transform, or in a projected sort CRS) is rounded to
+#'   a step that grows with the magnitude of the coordinates: the power of
+#'   two at or above 2^-44 of the layer's largest coordinate, never under
+#'   1e-7 of its unit, so a layer within about 1.7e6 units of its origin is
+#'   rounded to 7 decimals. Keys that tie at that step are ordered by keys
+#'   rounded at the step of each polygon's own largest coordinate. Cells 1e12
+#'   units out are then not ordered by the last bits of their centres, which
+#'   doubles do not hold there, and take the order they have at the origin.
 #' @details
 #' A feature that is valid in its own CRS is not always one s2 can measure.
 #' Only the vertices are transformed to the sort CRS, and on the sphere they
@@ -196,17 +219,54 @@ ensure_stable_poly_id <- function(polygons_sf,
     # rebuilt; the rebuild moved the corners of every valid row
     # (.make_valid_rows()).  A row with a latitude beyond 90 is not
     # repaired: it is returned as it came, after the Z and M above.
+    # A row the repair leaves with no polygon (GEOS gives a ring with no
+    # area back as lines, or as an empty collection) is returned as it
+    # arrived, with one warning that names its rows; an empty row is not
+    # repaired.  Both came back as LINESTRING or GEOMETRYCOLLECTION rows of
+    # a layer given as polygons, without a word.
     if (length(far)) {
       as_given <- sf::st_geometry(polygons_sf)[far]
-      polygons_sf <- .make_valid_rows(.empty_unlocated(polygons_sf, far, lat = TRUE))
+      mended <- .make_valid_rows(.empty_unlocated(polygons_sf, far, lat = TRUE),
+                                 report = TRUE)
+      polygons_sf <- mended$x
       g <- sf::st_geometry(polygons_sf)
       g[far] <- as_given
       sf::st_geometry(polygons_sf) <- g
     } else {
-      polygons_sf <- .make_valid_rows(polygons_sf)
+      mended <- .make_valid_rows(polygons_sf, report = TRUE)
+      polygons_sf <- mended$x
+    }
+    if (length(mended$no_area)) {
+      rows <- which(keep)[mended$no_area]
+      .warn_classed(
+        "spatialkit_cells_degenerate",
+        paste0("ensure_stable_poly_id(): %s of the %d of `polygons_sf` %s no area, ",
+               "and the repair with sf::st_make_valid() leaves no polygon of %s. ",
+               "%s returned as given, not repaired."),
+        .rows_text(rows), length(keep), if (length(rows) == 1L) "has" else "have",
+        if (length(rows) == 1L) "it" else "them",
+        if (length(rows) == 1L) "It is" else "They are",
+        data = list(rows = rows, n = length(keep),
+                    reasons = rep("has no area", length(rows)),
+                    site = "polygons_sf"))
     }
   }
   key_sf <- .empty_unlocated(.xy_if_mixed(polygons_sf), far, lat = TRUE)
+
+  # A ring of fewer than four points encloses no area.  GEOS stops on a ring
+  # of two ("Invalid number of points in LinearRing found 2"), and in degrees
+  # sf reads such a ring as the whole globe and stops on it ("To set the crs
+  # to NA, first remove the full polygons"), so the call ended in either
+  # message, with any method.  Such rings are dropped from the key copy, and
+  # a row left with none is keyed by the centre of the box of the points it
+  # arrived with, moved to the sort CRS, with area 0 (below).
+  short <- .drop_short_rings(sf::st_geometry(key_sf))
+  boxed <- short$gone
+  if (length(boxed))
+    boxed_pts <- sf::st_sfc(
+      lapply(boxed, function(i) .key_box_centre(sf::st_geometry(key_sf)[[i]])),
+      crs = sf::st_crs(key_sf))
+  if (length(short$rows)) sf::st_geometry(key_sf) <- short$g
 
   method <- match.arg(method)
 
@@ -231,19 +291,44 @@ ensure_stable_poly_id <- function(polygons_sf,
     on.exit(suppressMessages(sf::sf_use_s2(FALSE)), add = TRUE)
   }
   sort_sf <- key_sf
-  if (!is.null(transform_for_sort) && !is.na(sf::st_crs(sort_sf)))
-    sort_sf <- tryCatch(
-      sf::st_transform(sort_sf, transform_for_sort),
-      error = function(e) {
-        .log_warn(paste0("ensure_stable_poly_id(): could not transform to the ",
-                         "sort CRS (%s) -- %s. Sorting in the layer's own CRS ",
-                         "instead, so the IDs assigned here are NOT comparable ",
-                         "with IDs assigned to the same features in another ",
-                         "projection."),
-                  paste(format(transform_for_sort), collapse = " "),
-                  conditionMessage(e))
-        sort_sf
-      })
+  # PROJ does not always stop on a row it cannot move: a UTM layer shifted
+  # 1e8 m from its false origin came back from st_transform() as empty rows
+  # (NaN NaN), or a ring without the vertices PROJ could not place.  Every
+  # key was then NaN and the IDs followed the row order, or GEOS stopped on
+  # a ring left with two vertices.  A move that leaves a row with a
+  # location unplaced (.rows_unplaced()) takes the fallback a move that
+  # stops takes: the whole layer is keyed in its own CRS, so the keys of
+  # one call stay comparable with each other, and the log says why.
+  # A move that stops can first warn in GDAL's words ("GDAL Error 1: PROJ:
+  # proj_create: ... Unknown projection"), which reached the caller beside
+  # the log line that already gives the reason.  Its warnings are held and
+  # passed on only when the move does not stop.
+  fell_back <- FALSE
+  if (!is.null(transform_for_sort) && !is.na(sf::st_crs(sort_sf))) {
+    held  <- list()
+    moved <- tryCatch(
+      withCallingHandlers(sf::st_transform(sort_sf, transform_for_sort),
+                          warning = function(w) {
+                            held[[length(held) + 1L]] <<- w
+                            invokeRestart("muffleWarning")
+                          }),
+      error = function(e) e)
+    if (!inherits(moved, "error")) for (w in held) warning(w)
+    why <- if (inherits(moved, "error")) conditionMessage(moved)
+           else if (length(.rows_unplaced(sort_sf, moved)))
+             "the sort CRS cannot place every row"
+    if (is.null(why)) {
+      sort_sf <- moved
+    } else {
+      fell_back <- TRUE
+      .log_warn(paste0("ensure_stable_poly_id(): could not transform to the ",
+                       "sort CRS (%s) -- %s. Sorting in the layer's own CRS ",
+                       "instead, so the IDs assigned here are NOT comparable ",
+                       "with IDs assigned to the same features in another ",
+                       "projection."),
+                paste(format(transform_for_sort), collapse = " "), why)
+    }
+  }
 
   # Validity is a property of the geometry in the CRS it is being measured
   # in, so the make_valid above (in the layer's own CRS) does not carry over.
@@ -254,8 +339,18 @@ ensure_stable_poly_id <- function(polygons_sf,
   # aborted this function rather than returning IDs.  Only the sort copy is
   # repaired here; the rows that come back are the repair made above, or with
   # make_valid = FALSE the caller's own.
-  if (isTRUE(make_valid))
+  # A row the repair empties (a ring with no area, which s2's rebuild gives
+  # back as an empty collection) is keyed by the centre of its box before
+  # the repair, with area 0, below.  Keyed as an empty row, it sorted after
+  # every row with a location and took its place among such rows from the
+  # row order.
+  emptied <- integer(0)
+  if (isTRUE(make_valid)) {
+    unrepaired <- sf::st_geometry(sort_sf)
     sort_sf <- .safe_make_valid(sort_sf)
+    emptied <- which(sf::st_is_empty(sf::st_geometry(sort_sf)) &
+                     !sf::st_is_empty(unrepaired))
+  }
 
   # Representative points — all paths produce an sfc_POINT vector.  The
   # points and the area are each taken under tryCatch(), so that an error s2
@@ -267,10 +362,11 @@ ensure_stable_poly_id <- function(polygons_sf,
   # on a layer whose every row is empty (one polygon with a latitude beyond
   # 90, keyed as an empty one) they stopped with base R's "missing value
   # where TRUE/FALSE needed".  The points are the same for every other
-  # layer.
+  # layer.  sf's warning that a point on the surface in degrees "may not
+  # give correct results" is not passed on (.key_surface_points()).
   rep_sfc <- tryCatch(switch(method,
     centroid      = suppressWarnings(sf::st_centroid(sf::st_geometry(sort_sf))),
-    surface_point = sf::st_point_on_surface(.drop_empty_parts(sf::st_geometry(sort_sf))),
+    surface_point = .key_surface_points(sf::st_geometry(sort_sf)),
     bbox_center   = {
       geoms <- sf::st_geometry(sort_sf)
       sf::st_sfc(
@@ -307,6 +403,23 @@ ensure_stable_poly_id <- function(polygons_sf,
     rep_sfc <- key$points
     area    <- key$area
   }
+  if (length(emptied) || length(boxed)) {
+    pts <- lapply(seq_along(rep_sfc), function(i) rep_sfc[[i]])
+    pts[emptied] <- lapply(emptied, function(i) .key_box_centre(unrepaired[[i]]))
+    if (length(boxed)) {
+      # The box centres were taken in the layer's CRS; a point the sort CRS
+      # cannot place comes back empty and is keyed after every row with a
+      # location, as an empty row is.
+      if (sf::st_crs(boxed_pts) != sf::st_crs(sort_sf))
+        boxed_pts <- tryCatch(
+          suppressWarnings(sf::st_transform(boxed_pts, sf::st_crs(sort_sf))),
+          error = function(e) sf::st_sfc(lapply(boxed_pts, function(p) sf::st_point()),
+                                         crs = sf::st_crs(sort_sf)))
+      pts[boxed] <- lapply(seq_along(boxed), function(k) boxed_pts[[k]])
+    }
+    rep_sfc <- sf::st_sfc(pts, crs = sf::st_crs(rep_sfc))
+    area[c(emptied, boxed)] <- 0
+  }
 
   # Sort key: x, y, area, original index
   xy <- suppressWarnings(sf::st_coordinates(rep_sfc))
@@ -331,9 +444,31 @@ ensure_stable_poly_id <- function(polygons_sf,
   # one column near a central meridian) can still round apart in one CRS and
   # together in another -- 36 of 2,500 100 m cells did via EPSG:3035, and 6
   # decimals is no better -- which is why the documentation says "usually".
-  kx <- round(xy[, 1], 7L)
-  ky <- round(xy[, 2], 7L)
-  ord <- do.call(order, list(kx, ky, signif(area, 9L), idx0))
+  #
+  # A key in a CRS that is not geographic is in the layer's unit, and far
+  # from the origin the last bits of a centre are noise: GEOS's centroids of
+  # two cells of one grid column 1e12 m out differ in x by 1.2e-4 m, the
+  # spacing of doubles there, far more than 1e-7, so the cells of a column
+  # took their order from that noise and not from y, and the same grid got
+  # other IDs at 1e12 than at the origin.  Such a key is rounded to a step
+  # that grows with the magnitude of the coordinates (.key_steps(): the
+  # power of two at or above 2^-44 of the largest, 256 to 512 times the
+  # spacing of doubles there, never under 1e-7, which keeps 7 decimals for
+  # a layer within about 1.7e6 units of its origin).  The first key takes
+  # one step for the whole layer, so a column whose cells straddle a power
+  # of two is not rounded at two steps.  Keys that tie there are ordered by
+  # keys rounded at each feature's own step, so a polygon far out does not
+  # leave the others' order to the rows.
+  if (isTRUE(sf::st_is_longlat(sort_sf))) {
+    ord <- order(round(xy[, 1], 7L), round(xy[, 2], 7L), signif(area, 9L), idx0)
+  } else {
+    ext <- .key_extent(sf::st_geometry(sort_sf), xy)
+    own <- .key_steps(ext)
+    lay <- .key_steps(max(ext))
+    ord <- order(.key_round(xy[, 1], lay), .key_round(xy[, 2], lay),
+                 .key_round(xy[, 1], own), .key_round(xy[, 2], own),
+                 signif(area, 9L), idx0)
+  }
 
   out <- polygons_sf[ord, , drop = FALSE]
   out[[id_col]] <- seq_len(nrow(out))
@@ -361,11 +496,131 @@ ensure_stable_poly_id <- function(polygons_sf,
 #' clipped cells with this as well, to find each cell
 #' ensure_stable_poly_id() returns among them.
 #'
+#' The repair is kept only where it leaves a polygon.  An empty row is not
+#' repaired: GEOS gave \code{POLYGON EMPTY} back as \code{LINESTRING
+#' EMPTY}.  A row the repair turns into a collection keeps its polygonal
+#' parts, and a row it leaves with no polygon at all (a ring with no area
+#' gives lines, or an empty collection) is returned as it arrived, and its
+#' position is reported (\code{report = TRUE}) for the caller to name.
+#' A ring of fewer than four points encloses no area and is dropped before
+#' the repair (\code{.drop_short_rings()}): GEOS stopped the whole repair on
+#' a ring of two, and in degrees sf read one as the whole globe.  A row left
+#' with no ring is one the repair leaves with no polygon.
+#'
+#' @param x An sf or sfc object.
+#' @param report \code{TRUE} to return a list of \code{x} and
+#'   \code{no_area}, the positions of the rows the repair left with no
+#'   polygon.
+#' @return \code{x}, of the same class, with the rows repaired; with
+#'   \code{report = TRUE} a list as above.
+#' @keywords internal
+#' @noRd
+.make_valid_rows <- function(x, report = FALSE) {
+  g0    <- sf::st_geometry(x)
+  short <- .drop_short_rings(g0)
+  x_in  <- x
+  if (length(short$rows)) {
+    if (inherits(x, "sf")) sf::st_geometry(x_in) <- short$g else x_in <- short$g
+  }
+  out <- .make_valid_rows_all(x_in)
+  g   <- sf::st_geometry(out)
+  no_area <- integer(0)
+  if (length(g)) {
+    types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
+    empty <- sf::st_is_empty(g)
+    was_empty <- sf::st_is_empty(g0)
+    look <- which(was_empty | !(types %in% c("POLYGON", "MULTIPOLYGON")) | empty |
+                  seq_along(g) %in% short$rows)
+    # Rows already returned as they arrived need nothing.
+    look <- look[!vapply(look, function(i) identical(g[[i]], g0[[i]]), logical(1))]
+    if (length(look)) {
+      geoms <- lapply(seq_along(g), function(i) g[[i]])
+      for (i in look) {
+        if (was_empty[i]) {
+          geoms[[i]] <- g0[[i]]
+          next
+        }
+        parts <- if (types[i] == "GEOMETRYCOLLECTION")
+          suppressWarnings(sf::st_collection_extract(g[i], "POLYGON", warn = FALSE))
+        else if (types[i] %in% c("POLYGON", "MULTIPOLYGON")) g[i]
+        else NULL
+        if (!is.null(parts)) parts <- parts[!sf::st_is_empty(parts)]
+        if (length(parts)) {
+          geoms[[i]] <- if (length(parts) == 1L) parts[[1L]]
+                        else sf::st_combine(parts)[[1L]]
+        } else {
+          geoms[[i]] <- g0[[i]]
+          no_area <- c(no_area, i)
+        }
+      }
+      g <- sf::st_sfc(geoms, crs = sf::st_crs(g), precision = sf::st_precision(g))
+      if (inherits(out, "sf")) sf::st_geometry(out) <- g else out <- g
+    }
+  }
+  if (isTRUE(report)) list(x = out, no_area = no_area) else out
+}
+
+
+#' Drop the rings of fewer than four points
+#'
+#' A closed ring of two or three points encloses no area.  GEOS stops on a
+#' ring of two ("Invalid number of points in LinearRing found 2"), and with
+#' s2 on sf reads a polygon of one such ring in degrees as the whole globe
+#' (\code{sf::st_is_full()}).  A shell that short takes its holes with it;
+#' a polygon or a part left with no shell is dropped, so a row can be left
+#' empty, in its own type and dimension.
+#'
+#' @param g An sfc.
+#' @return A list: \code{g}, the sfc without those rings; \code{rows}, the
+#'   positions changed; \code{gone}, those of them left empty.
+#' @keywords internal
+#' @noRd
+.drop_short_rings <- function(g) {
+  none <- list(g = g, rows = integer(0), gone = integer(0))
+  if (!length(g)) return(none)
+  n <- rapply(unclass(g), nrow, classes = "matrix", how = "unlist")
+  if (!length(n) || all(n >= 4L)) return(none)
+  short <- function(m) nrow(m) < 4L
+  keep_polygon <- function(p) {
+    if (!length(p) || short(p[[1L]])) return(NULL)
+    p[!vapply(p, short, logical(1))]
+  }
+  geoms <- lapply(seq_along(g), function(i) g[[i]])
+  rows <- integer(0)
+  gone <- integer(0)
+  for (i in seq_along(geoms)) {
+    s <- geoms[[i]]
+    d <- class(s)[1L]
+    if (inherits(s, "POLYGON")) {
+      if (!any(vapply(s, short, logical(1)))) next
+      p <- keep_polygon(unclass(s))
+      new <- if (is.null(p)) sf::st_polygon(dim = d) else sf::st_polygon(p, dim = d)
+    } else if (inherits(s, "MULTIPOLYGON")) {
+      if (!any(unlist(lapply(s, function(p) vapply(p, short, logical(1))))))
+        next
+      parts <- Filter(Negate(is.null), lapply(unclass(s), keep_polygon))
+      new <- sf::st_multipolygon(parts, dim = d)
+    } else {
+      next
+    }
+    geoms[[i]] <- new
+    rows <- c(rows, i)
+    if (sf::st_is_empty(new)) gone <- c(gone, i)
+  }
+  if (!length(rows)) return(none)
+  list(g = sf::st_sfc(geoms, crs = sf::st_crs(g), precision = sf::st_precision(g)),
+       rows = rows, gone = gone)
+}
+
+
+#' The repair of every row, before the rows it leaves without a polygon are
+#' put back (see \code{.make_valid_rows()})
+#'
 #' @param x An sf or sfc object.
 #' @return \code{x}, of the same class, with the rows repaired.
 #' @keywords internal
 #' @noRd
-.make_valid_rows <- function(x) {
+.make_valid_rows_all <- function(x) {
   g <- sf::st_geometry(x)
   if (!length(g) || !.is_longlat(g) || !isTRUE(sf::sf_use_s2()))
     return(.safe_make_valid(x))
@@ -480,7 +735,10 @@ ensure_stable_poly_id <- function(polygons_sf,
 #' is measured as plane geometry in the layer's own CRS.  Every other
 #' feature is measured by the calls \code{ensure_stable_poly_id()} makes,
 #' feature by feature the same numbers, so its key does not change.  One
-#' warning says how many features took each route.
+#' warning says how many features took each route.  When s2 refuses none,
+#' the error was not s2's, and the features are measured one by one
+#' (\code{.sort_key_rowwise()}).  A feature whose point or area cannot be
+#' taken on any route is keyed by the centre of its box with area 0.
 #'
 #' @param sort_sf The sort copy: the layer in the sort CRS, repaired once
 #'   when \code{repair} is \code{TRUE}.
@@ -499,14 +757,19 @@ ensure_stable_poly_id <- function(polygons_sf,
   cause <- if (inherits(points, "error")) points else area
   g <- sf::st_geometry(sort_sf)
 
-  # Not every error is s2's, and one that is not is raised again as it was.
-  # sf sends lon/lat data to s2 and nothing else, and of the three kinds of
-  # representative point only the centroid is taken there:
-  # st_point_on_surface() is GEOS whatever the CRS, and the box centre is
-  # arithmetic on the coordinates.  The area is s2's for all three.
-  if (inherits(points, "error") && !identical(method, "centroid")) stop(points)
+  # Not every error is s2's.  sf sends lon/lat data to s2 and nothing else,
+  # and of the three kinds of representative point only the centroid is
+  # taken there: st_point_on_surface() is GEOS whatever the CRS, and the box
+  # centre is arithmetic on the coordinates.  The area is s2's for all
+  # three.  A feature whose point or area cannot be taken for another reason
+  # (GEOS stops on a ring with fewer than three distinct vertices, say) is
+  # keyed by the centre of its box in the copy's CRS with area 0, as an
+  # empty row is keyed, after the measurements below.  Raising GEOS's error
+  # again ended the call with a message about a ring the caller never saw,
+  # and with no key for any feature.
   refused <- if (isTRUE(sf::st_is_longlat(g))) .s2_refused(g) else integer(0)
-  if (!length(refused)) stop(cause)
+  if (!length(refused))
+    return(.sort_key_rowwise(g, method, points, area))
 
   # The second repair goes to the refused features alone and to a copy that
   # only s2 measures.  Repairing the whole layer a second time happened to
@@ -531,10 +794,19 @@ ensure_stable_poly_id <- function(polygons_sf,
   n    <- length(g)
   pts  <- vector("list", n)
   area <- rep(NA_real_, n)
+  # A feature whose area or centroid stops for a reason other than s2's
+  # refusal is measured alone and, where it stops again, left NA here and
+  # keyed by its box below (.key_area_rows(), .key_point_rows()).
+  failed <- logical(n)
   if (length(sphere)) {
-    area[sphere] <- suppressWarnings(as.numeric(sf::st_area(s2_g[sphere])))
-    if (identical(method, "centroid"))
-      pts[sphere] <- sf::st_centroid(s2_g[sphere])
+    a <- .key_area_rows(s2_g[sphere])
+    area[sphere] <- a$area
+    failed[sphere[a$failed]] <- TRUE
+    if (identical(method, "centroid")) {
+      p <- .key_point_rows(s2_g[sphere], "centroid")
+      pts[sphere] <- p$points
+      failed[sphere[p$failed]] <- TRUE
+    }
   }
 
   if (length(planar)) {
@@ -549,19 +821,40 @@ ensure_stable_poly_id <- function(polygons_sf,
     # call.
     own_g <- sf::st_geometry(own_sf)[planar]
     flat  <- sf::st_set_crs(own_g, NA)
-    area[planar] <- suppressWarnings(as.numeric(sf::st_area(flat)))
+    a <- .key_area_rows(flat)
+    area[planar] <- a$area
+    failed[planar[a$failed]] <- TRUE
     if (identical(method, "centroid")) {
-      ctr <- sf::st_set_crs(sf::st_centroid(flat), sf::st_crs(own_g))
-      if (sf::st_crs(ctr) != sf::st_crs(g))
-        ctr <- sf::st_transform(ctr, sf::st_crs(g))
-      pts[planar] <- ctr
+      p  <- .key_point_rows(flat, "centroid")
+      ok <- setdiff(seq_along(p$points), p$failed)
+      if (length(ok)) {
+        ctr <- sf::st_sfc(p$points[ok], crs = sf::st_crs(own_g))
+        if (sf::st_crs(ctr) != sf::st_crs(g))
+          ctr <- sf::st_transform(ctr, sf::st_crs(g))
+        pts[planar[ok]] <- ctr
+      }
+      failed[planar[p$failed]] <- TRUE
     }
   }
 
   # The surface point and the box centre never went near s2: they are the
-  # caller's, taken from the sort copy as on any other call.
-  if (identical(method, "centroid"))
-    points <- sf::st_sfc(pts, crs = sf::st_crs(g))
+  # caller's, taken from the sort copy as on any other call, or, when that
+  # call stopped, feature by feature.
+  if (identical(method, "centroid")) {
+    points <- pts
+  } else if (inherits(points, "error")) {
+    p <- .key_point_rows(g, method)
+    points <- p$points
+    failed[p$failed] <- TRUE
+  } else if (any(failed)) {
+    points <- lapply(seq_along(points), function(i) points[[i]])
+  }
+  for (i in which(failed)) {
+    points[[i]] <- .key_box_centre(g[[i]])
+    area[i] <- 0
+  }
+  if (!inherits(points, "sfc"))
+    points <- sf::st_sfc(points, crs = sf::st_crs(g))
 
   .warn_and_log(
     paste0("ensure_stable_poly_id(): s2 refused %d of %d feature(s) on the ",
@@ -596,6 +889,191 @@ ensure_stable_poly_id <- function(polygons_sf,
              "own CRS (see `make_valid`), not the copy keyed here.")
     else "the geometry returned is the caller's own.")
 
+  list(points = points, area = area)
+}
+
+#' The largest absolute coordinate of each feature of the sort copy
+#'
+#' The largest finite absolute value among a feature's coordinates and its
+#' representative point, 0 when it has none.  It sets the rounding step of
+#' the feature's key (\code{.key_steps()}).
+#'
+#' @param g The sort copy's geometry.
+#' @param xy The representative points' coordinates, row for row with
+#'   \code{g}.
+#' @return Numeric, one value per feature.
+#' @keywords internal
+#' @noRd
+.key_extent <- function(g, xy) {
+  big <- function(v) {
+    v <- as.numeric(v)
+    v <- abs(v[is.finite(v)])
+    if (length(v)) max(v) else 0
+  }
+  ext <- vapply(g, function(s) big(unlist(s)), numeric(1), USE.NAMES = FALSE)
+  pmax(ext, apply(xy[, 1:2, drop = FALSE], 1L, big))
+}
+
+
+#' Round sort keys to their steps
+#'
+#' A step of 1e-7 rounds as \code{round(x, 7)} does, so a key in a layer
+#' within about 1.7e6 units of its origin is the one it always was.
+#'
+#' @param x Numeric keys.
+#' @param step Numeric steps, one or one per key (\code{.key_steps()}).
+#' @return Numeric, the rounded keys.
+#' @keywords internal
+#' @noRd
+.key_round <- function(x, step) {
+  step <- rep_len(step, length(x))
+  ifelse(step == 1e-7, round(x, 7L), round(x / step) * step)
+}
+
+
+#' Rounding steps of sort keys in a CRS that is not geographic
+#'
+#' The power of two at or above 2^-44 of the largest absolute coordinate,
+#' never under 1e-7.  Powers of two make the features of one magnitude share
+#' a step and make the rounded keys exact multiples of it.
+#'
+#' @param extent Numeric, the largest absolute coordinate of each feature
+#'   (\code{.key_extent()}), or of the layer.
+#' @return Numeric steps, one per feature.
+#' @keywords internal
+#' @noRd
+.key_steps <- function(extent) {
+  e <- ifelse(is.finite(extent) & extent > 0, extent, 1)
+  pmax(1e-7, 2^(ceiling(log2(e)) - 44))
+}
+
+
+#' Points on the surface of the sort copy's features
+#'
+#' GEOS's point on the surface, planar in degrees on a lon/lat copy, taken of
+#' the geometry so that sf has no attributes to warn about.  sf's warning
+#' that such a point "may not give correct results for longitude/latitude
+#' data" is not passed on: the key is a sort order in degrees, which the
+#' help of \code{ensure_stable_poly_id()} states, and \code{.pooled_xy()}
+#' muffles the same text.  The points are those of
+#' \code{sf::st_point_on_surface()}, bit for bit.
+#'
+#' @param g An sfc of polygons.
+#' @return An sfc_POINT, row for row with \code{g}.
+#' @keywords internal
+#' @noRd
+.key_surface_points <- function(g) {
+  withCallingHandlers(
+    sf::st_point_on_surface(.drop_empty_parts(g)),
+    warning = function(w)
+      if (grepl("st_point_on_surface may not give correct results",
+                conditionMessage(w), fixed = TRUE))
+        invokeRestart("muffleWarning"))
+}
+
+
+#' The centre of a feature's box, the key of a feature that cannot be measured
+#'
+#' The same arithmetic as \code{method = "bbox_center"} of
+#' \code{ensure_stable_poly_id()}.  An empty feature gives an empty point,
+#' which sorts after every feature with a location.
+#'
+#' @param s An sfg.
+#' @return A POINT sfg.
+#' @keywords internal
+#' @noRd
+.key_box_centre <- function(s) {
+  bb <- sf::st_bbox(s)
+  sf::st_point(c((bb["xmin"] + bb["xmax"]) / 2,
+                 (bb["ymin"] + bb["ymax"]) / 2))
+}
+
+
+#' Areas of the sort copy, feature by feature where the whole call stops
+#'
+#' @param g An sfc.
+#' @return A list: \code{area}, numeric, row for row with \code{g}, NA
+#'   where the area cannot be taken; \code{failed}, the positions where it
+#'   cannot.
+#' @keywords internal
+#' @noRd
+.key_area_rows <- function(g) {
+  one <- function(x) tryCatch(suppressWarnings(as.numeric(sf::st_area(x))),
+                              error = function(e) NULL)
+  a <- one(g)
+  if (!is.null(a)) return(list(area = a, failed = integer(0)))
+  vals <- lapply(seq_along(g), function(i) one(g[i]))
+  bad  <- vapply(vals, is.null, logical(1))
+  list(area = vapply(vals, function(v) if (is.null(v)) NA_real_ else v, numeric(1)),
+       failed = which(bad))
+}
+
+
+#' Representative points of the sort copy, feature by feature where the
+#' whole call stops
+#'
+#' @param g An sfc.
+#' @param method The representative-point method of
+#'   \code{ensure_stable_poly_id()}.
+#' @return A list: \code{points}, a list of POINT sfg (\code{NULL} where
+#'   the point cannot be taken), row for row with \code{g}; \code{failed},
+#'   the positions where it cannot.
+#' @keywords internal
+#' @noRd
+.key_point_rows <- function(g, method) {
+  take <- function(x) tryCatch(switch(method,
+    centroid      = suppressWarnings(sf::st_centroid(x)),
+    surface_point = .key_surface_points(x),
+    bbox_center   = sf::st_sfc(lapply(x, .key_box_centre), crs = sf::st_crs(x))),
+    error = function(e) NULL)
+  as_list <- function(p) lapply(seq_along(p), function(i) p[[i]])
+  p <- take(g)
+  if (!is.null(p)) return(list(points = as_list(p), failed = integer(0)))
+  pts <- lapply(seq_along(g), function(i) {
+    q <- take(g[i])
+    if (is.null(q)) NULL else q[[1L]]
+  })
+  list(points = pts, failed = which(vapply(pts, is.null, logical(1))))
+}
+
+
+#' Sort-key points and areas when the one-call measurement stopped on a
+#' feature s2 does not refuse
+#'
+#' Each feature is measured alone; one whose point or area cannot be taken
+#' (GEOS stops on a ring with fewer than three distinct vertices, say) gets
+#' the centre of its box in the copy's CRS and area 0, as an empty row is
+#' keyed.  Every other feature gets the numbers the one call gives.  No
+#' warning: the order is total and the rows returned are not this copy.
+#'
+#' @param g The sort copy's geometry.
+#' @param method The representative-point method.
+#' @param points,area What the one call gave: an sfc and a numeric, or the
+#'   error either raised.
+#' @return A list of \code{points}, an sfc_POINT in the copy's CRS, and
+#'   \code{area}, numeric.
+#' @keywords internal
+#' @noRd
+.sort_key_rowwise <- function(g, method, points, area) {
+  failed <- logical(length(g))
+  if (inherits(area, "error")) {
+    a <- .key_area_rows(g)
+    area <- a$area
+    failed[a$failed] <- TRUE
+  }
+  if (inherits(points, "error")) {
+    p <- .key_point_rows(g, method)
+    points <- p$points
+    failed[p$failed] <- TRUE
+  } else if (any(failed)) {
+    points <- lapply(seq_along(points), function(i) points[[i]])
+  }
+  for (i in which(failed)) {
+    points[[i]] <- .key_box_centre(g[[i]])
+    area[i] <- 0
+  }
+  if (!inherits(points, "sfc"))
+    points <- sf::st_sfc(points, crs = sf::st_crs(g))
   list(points = points, area = area)
 }
 

@@ -39,13 +39,26 @@ geometries, and polygons that all carry Z or M, are repaired in XY and
 returned in XY, with a warning of class
 \code{"spatialkit_zm_dropped"}. With \code{FALSE} the rows come back
 with the geometry they arrived with, Z and M included. An empty polygon
-in Z or M has no coordinates to drop and raises no warning.}
+in Z or M has no coordinates to drop and raises no warning. An empty
+polygon is not repaired and comes back as it arrived. A ring of fewer
+than four points encloses no area and is dropped before the repair: GEOS
+stopped on a ring of two, and in degrees sf reads such a ring as the
+whole globe. A
+row the repair turns into a collection keeps its polygonal parts, and a
+row it leaves with no polygon at all (a ring with no area, which GEOS
+turns into lines or an empty collection) comes back as it arrived, with
+one warning of class \code{"spatialkit_cells_degenerate"} that gives its
+rows of \code{polygons_sf} (\code{rows}).}
 
 \item{transform_for_sort}{CRS used only for computing sort-key coordinates.
 Default 4326. This is the whole mechanism by which the IDs are stable
 (sorting in one common CRS is what makes the same layer get the same IDs
 whichever projection it arrives in), so if the transform fails the
-function says so rather than quietly sorting in the input's own CRS. The
+function says so rather than quietly sorting in the input's own CRS. A
+transform that cannot place every polygon with a location (a projected
+layer far outside its CRS's area, whose rows PROJ returns empty) counts
+as failed in the same way: the whole layer is sorted in its own CRS, and
+the log says so. In a geographic CRS the
 sort key is rounded to 7 decimal degrees (about 1 cm) before ordering, so
 the floating-point noise of a round trip through a different projection
 does not usually reverse two neighbouring cells. It can where two cells'
@@ -57,7 +70,17 @@ computed in different projections, join them on geometry rather than on
 the ID. The key is computed on the sphere (s2) whether or not
 \code{sf::sf_use_s2()} is on, so the session setting does not change the
 IDs. Set to NULL to sort in the input CRS, which gives IDs that are
-reproducible but not comparable across projections.}
+reproducible but not comparable across projections.
+
+A key in a CRS that is not geographic (with NULL, for a layer without a
+CRS, after a failed transform, or in a projected sort CRS) is rounded to
+a step that grows with the magnitude of the coordinates: the power of
+two at or above 2^-44 of the layer's largest coordinate, never under
+1e-7 of its unit, so a layer within about 1.7e6 units of its origin is
+rounded to 7 decimals. Keys that tie at that step are ordered by keys
+rounded at the step of each polygon's own largest coordinate. Cells 1e12
+units out are then not ordered by the last bits of their centres, which
+doubles do not hold there, and take the order they have at the origin.}
 }
 \value{
 An sf polygon layer re-ordered with sequential IDs in id_col.

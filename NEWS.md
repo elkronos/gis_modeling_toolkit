@@ -4265,6 +4265,63 @@ old behaviour where there is a way.
   given.  The warning now says so with `make_valid = TRUE`, and keeps its
   words with `make_valid = FALSE`.  No key, ID or row changes.
 
+* **`ensure_stable_poly_id(method = "surface_point")` passed on sf's
+  warning about longitude and latitude.**  The points on the surface are
+  taken on the copy in EPSG:4326 the sort key is measured on, so every
+  call warned "st_point_on_surface may not give correct results for
+  longitude/latitude data" in sf's words, on any polygon layer moved to
+  that CRS.  The key is a sort order in degrees, as
+  `?ensure_stable_poly_id` says, and the cell summaries already muffled the
+  same text.  The warning is no longer
+  passed on.  The points, the IDs and the rows are unchanged.
+
+* **`ensure_stable_poly_id()` numbered a layer far from its CRS's origin
+  by the row order.**  PROJ returns a row of a projected layer it cannot
+  move to the sort CRS (EPSG:4326 by default) as an empty row, or a ring
+  without the vertices it cannot place, instead of stopping.  A UTM layer
+  shifted by 1e8, 1e12 or 1e15 then had a NaN key for every row, and its
+  IDs followed the row order, so the same polygon took another ID when the
+  rows came in another order; with `method = "surface_point"` and a ring
+  left with two vertices the call stopped with GEOS's "Invalid number of
+  points in LinearRing".  `create_grid_polygons_cached()` numbered its
+  cells the same way at such offsets.  A move that cannot place every
+  polygon with a location now takes the documented fallback a failed move
+  takes: the whole layer is sorted in its own CRS, and the log says so.  A
+  move that stops no longer passes on GDAL's warning beside that log line.
+  A key in a CRS that is not geographic (this fallback, a layer without a
+  CRS, `transform_for_sort = NULL` or a projected sort CRS) is now rounded
+  to a step that grows with the magnitude of the coordinates: the power of
+  two at or above 2^-44 of the layer's largest, never under 1e-7 of its
+  unit, with ties ordered at the step of each polygon's own largest
+  coordinate.  Cells 1e12 m out were ordered by the last bits of their
+  centres, so a hex grid took other IDs there than at the origin, with or
+  without a CRS.  A layer within about 1.7e6 units of its origin is still
+  rounded to 7 decimals.
+  A feature whose point or area the sort copy cannot give is keyed by the
+  centre of its box with area 0, as an empty polygon is, where the call
+  stopped with GEOS's message.  A ring of fewer than four points encloses
+  no area and is dropped from the key and from the repair: GEOS stopped
+  the repair on a ring of two ("Invalid number of points in LinearRing"),
+  and in degrees sf read such a ring as the whole globe and every call
+  stopped with "To set the crs to NA, first remove the full polygons".  A
+  polygon left with no ring is keyed by the centre of the box of its points.
+  Layers keyed in degrees get the IDs they got; a layer keyed in its own
+  unit beyond about 1.7e6 units from its origin gets other IDs only where
+  two centres lie within the new step of each other.
+
+* **`ensure_stable_poly_id(make_valid = TRUE)` returned rows its repair
+  turned into lines.**  GEOS's repair gives an empty polygon back as
+  `LINESTRING EMPTY`, and a ring with no area (every vertex at one
+  latitude, or on one line) as a `GEOMETRYCOLLECTION` of lines or an
+  empty one, and those rows came back in a layer given as polygons,
+  without a word.  An empty polygon is no longer repaired and comes back
+  as it arrived.  A row the repair leaves with no polygon, a row of rings
+  of fewer than four points among them, comes back as it arrived, with one
+  warning of class `spatialkit_cells_degenerate` that gives its rows of
+  `polygons_sf`; a row the repair turns into a collection keeps its
+  polygonal parts.  Valid layers come back as they
+  did.
+
 * **Cells built on seeds placed from lon/lat points could leave observations
   near the edge of a wide layer in no cell.**  The seeding functions attach
   the convex hull of the points they cluster as the seeds' cover, and
