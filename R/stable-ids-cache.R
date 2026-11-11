@@ -86,6 +86,12 @@
 #' neighbour whose centre is that close to its own in longitude. Every other
 #' feature's key is unaffected, and the geometry returned is never the sort
 #' copy.
+#'
+#' A polygon of a layer in a geographic CRS with a vertex at a latitude
+#' beyond 90 degrees is no place on the Earth. It is keyed as an empty
+#' polygon is, after every polygon with a location, it is not repaired and
+#' comes back as it came, and a warning of class `spatialkit_lat_beyond_90`
+#' gives its rows of `polygons_sf` (`rows`).
 #' @return An sf polygon layer re-ordered with sequential IDs in id_col.
 #'   Non-polygonal rows are **dropped** (with a warning), so the result can
 #'   have fewer rows than the input; if no polygonal rows remain, an error is
@@ -133,6 +139,21 @@ ensure_stable_poly_id <- function(polygons_sf,
   if (nrow(polygons_sf) == 0L)
     stop("ensure_stable_poly_id(): no polygon rows found.")
 
+  # A polygon of a layer in a geographic CRS with a vertex at a latitude
+  # beyond 90 degrees is no place on the Earth.  Its copies are emptied
+  # before the repair and the key read them (.empty_unlocated(lat = TRUE)),
+  # so it is keyed as an empty polygon is, after every polygon with a
+  # location, and the row is returned as it came, with one warning that
+  # names its rows.  Read as given, s2's repair took the vertex for a point
+  # past the pole and the row was keyed and returned so, without a word, and
+  # with make_valid = FALSE sf's bare "bounding box has potentially an
+  # invalid value range for longlat data" was passed on.
+  far <- .beyond_pole_rows(polygons_sf)
+  .warn_beyond_pole(
+    far, nrow(polygons_sf), "ensure_stable_poly_id", "polygons_sf",
+    c("it is keyed as an empty polygon, after the polygons with a location, and returned as it came",
+      "they are keyed as empty polygons, after the polygons with a location, and returned as they came"))
+
   # Polygons that mix XY and XYZ (or XYM) are keyed in x and y: sf reads a
   # layer in the dimension of its first geometry, so GEOS stopped on the
   # repair, the transform stopped with "OGR error", and s2 refused rings it
@@ -173,10 +194,19 @@ ensure_stable_poly_id <- function(polygons_sf,
     }
     # In degrees with s2 on, only the rows s2 or GEOS calls invalid are
     # rebuilt; the rebuild moved the corners of every valid row
-    # (.make_valid_rows()).
-    polygons_sf <- .make_valid_rows(polygons_sf)
+    # (.make_valid_rows()).  A row with a latitude beyond 90 is not
+    # repaired: it is returned as it came, after the Z and M above.
+    if (length(far)) {
+      as_given <- sf::st_geometry(polygons_sf)[far]
+      polygons_sf <- .make_valid_rows(.empty_unlocated(polygons_sf, far, lat = TRUE))
+      g <- sf::st_geometry(polygons_sf)
+      g[far] <- as_given
+      sf::st_geometry(polygons_sf) <- g
+    } else {
+      polygons_sf <- .make_valid_rows(polygons_sf)
+    }
   }
-  key_sf <- .xy_if_mixed(polygons_sf)
+  key_sf <- .empty_unlocated(.xy_if_mixed(polygons_sf), far, lat = TRUE)
 
   method <- match.arg(method)
 
@@ -231,9 +261,16 @@ ensure_stable_poly_id <- function(polygons_sf,
   # points and the area are each taken under tryCatch(), so that an error s2
   # raises over one feature can be dealt with below rather than ending the
   # call; when neither stops, they are what they always were.
+  # The centroids and the points on the surface are taken of the geometry
+  # column: sf::st_centroid() and sf::st_point_on_surface() of the sf layer
+  # test st_dimension() of its rows, which is NA for an empty polygon, and
+  # on a layer whose every row is empty (one polygon with a latitude beyond
+  # 90, keyed as an empty one) they stopped with base R's "missing value
+  # where TRUE/FALSE needed".  The points are the same for every other
+  # layer.
   rep_sfc <- tryCatch(switch(method,
-    centroid      = suppressWarnings(sf::st_geometry(sf::st_centroid(sort_sf))),
-    surface_point = sf::st_geometry(sf::st_point_on_surface(.drop_empty_parts(sort_sf))),
+    centroid      = suppressWarnings(sf::st_centroid(sf::st_geometry(sort_sf))),
+    surface_point = sf::st_point_on_surface(.drop_empty_parts(sf::st_geometry(sort_sf))),
     bbox_center   = {
       geoms <- sf::st_geometry(sort_sf)
       sf::st_sfc(

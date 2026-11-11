@@ -995,8 +995,9 @@ does not tell the cell means from one mean (also \code{criterion = "loo"},
 \code{estimate = "pooled"}, and by column \code{n}, the cells, \code{one_cell}, \code{loo}
 and \code{structure_p}).
 \item \code{"spatialkit_pool_rows_skipped"}: rows with a value and a cell have no
-location: an empty point, or a coordinate that is not finite or lies
-beyond 1e150, as given or in the CRS the distances are measured in.
+location: an empty point, a coordinate that is not finite or lies
+beyond 1e150, as given or in the CRS the distances are measured in, or
+in a geographic CRS a vertex at a latitude beyond 90 degrees.
 They count in \code{n} and the plain columns and take no part in the pooled
 ones (\code{n}, \code{cells}).
 \item \code{"spatialkit_repeated_locations"}, with \code{obs_level}: rows with a value

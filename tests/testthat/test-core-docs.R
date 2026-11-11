@@ -1261,7 +1261,8 @@ test_that("no number stands in those texts but the simulation's figures, its set
       pairs, "1", "0", "0",            # the limit; own weights of 1 and of 0; tau2 is 0
       few, "0", "2", "0",              # 2 to 9 cells; tau2 at 0, cells 2 and own_weight 0
       num(.POOL_MIN_DF), level, needed,
-      sci(.POOL_XY_MAX)),              # a row beyond the bound has no location
+      sci(.POOL_XY_MAX),               # a row beyond the bound has no location
+      "90"),                           # nor has one at a latitude beyond 90 degrees
     "?summarize_by_cell: Confidence intervals, the two intervals" = level,
     "?summarize_by_cell: argument estimate" = c(
       "1", nb, num(.POOL_NEIGHBOURS + 2L)),        # fewer than 10 cells: all the others

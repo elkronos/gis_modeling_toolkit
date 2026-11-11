@@ -394,3 +394,124 @@ test_that("a collection the move empties is named, and a placed one is not", {
   expect_identical(r$warnings[[1L]]$rows, 2L)
   expect_identical(.rows_unplaced(x[1], sf::st_transform(x[1], 32646)), integer(0))
 })
+
+# ---------------------------------------------------------------------------
+# BUG-267.  The scored centres of a profile, passed as `n` or `k`, were
+# moved into the CRS of the boundary or the points, and the k-means cloud
+# into the centres' CRS, with plain sf::st_transform(): a seed or a cloud
+# point the target CRS cannot place came back empty, or was left out of
+# the record, without a word.
+# ---------------------------------------------------------------------------
+
+# A profile of 200 points in UTM zone 46 (central meridian 93), and the
+# selection at 10 cells, which carries the centres it scored.
+.mvu_store <- new.env(parent = emptyenv())
+.mvu_selection <- function() {
+  if (is.null(.mvu_store$sel)) {
+    set.seed(1)
+    n  <- 200L
+    xy <- cbind(stats::runif(n, 3e5, 7e5), stats::runif(n, -2e5, 2e5))
+    d  <- sf::st_sf(z = stats::rnorm(n) + xy[, 1L] / 1e5,
+                    geometry = sf::st_sfc(lapply(seq_len(n), function(i) sf::st_point(xy[i, ])),
+                                          crs = 32646))
+    prof <- suppressWarnings(suppressMessages(
+      resolution_profile(d, response_var = "z", levels = c(5, 10), sac = NULL)))
+    .mvu_store$sel <- suppressWarnings(suppressMessages(select_resolution(prof, criterion = "size")))
+  }
+  .mvu_store$sel
+}
+.mvu_ortho <- function() sf::st_crs("+proj=ortho +lon_0=-87 +lat_0=0 +datum=WGS84 +units=m")
+
+test_that("the k-means cloud of a profile's centres names a point the centres' CRS cannot place", {
+  sel <- .mvu_selection()
+  # Rows 1, 3 and 4 lie in zone 46; row 2, at (10, 0.1), the zone cannot place.
+  sp <- sf::st_sf(geometry = sf::st_sfc(sf::st_point(c(92, 0.1)), sf::st_point(c(10, 0.1)),
+                                        sf::st_point(c(94, 0.5)), sf::st_point(c(93, -0.5)),
+                                        crs = 4326))
+  r <- .mvu_catch(get_voronoi_seeds(n = sel, sample_points = sp))
+  expect_length(r$warnings, 1L)
+  w <- r$warnings[[1L]]
+  expect_identical(w$rows, 2L)
+  expect_identical(w$n, 4L)
+  expect_match(conditionMessage(w), paste0(
+    "^get_voronoi_seeds\\(\\): the move of `sample_points` to EPSG:32646 cannot place every ",
+    "vertex of row 2 of its 4, which has a location in longitude and latitude"))
+  # The seeds and the record are those the call returned before: row 2 is
+  # left out of the record, and the seeds are those of the cloud without it.
+  km <- attr(r$value, "kmeans")
+  expect_identical(km$rows, c(1L, 3L, 4L))
+  ctl <- .mvu_catch(get_voronoi_seeds(n = sel, sample_points = sp[c(1, 3, 4), ]))
+  expect_length(ctl$warnings, 0L)
+  expect_identical(sf::st_geometry(r$value), sf::st_geometry(ctl$value))
+  km0 <- attr(ctl$value, "kmeans")
+  for (f in c("cluster", "size", "withinss"))
+    expect_identical(km[[f]], km0[[f]], info = f)
+  # The same cloud without a CRS: its coordinates look like lon/lat, so it
+  # is read as EPSG:4326 and moved, and the move names row 2 the same way.
+  rn <- .mvu_catch(get_voronoi_seeds(n = sel, sample_points = sf::st_set_crs(sp, NA)))
+  expect_length(rn$warnings, 1L)
+  wn <- rn$warnings[[1L]]
+  expect_s3_class(wn, "spatialkit_rows_unplaced")
+  expect_identical(wn$rows, 2L)
+  expect_identical(wn$n, 4L)
+  expect_identical(conditionMessage(wn), conditionMessage(w))
+  expect_identical(attr(rn$value, "kmeans"), km)
+})
+
+test_that("the centres of `n` or `k` moved into a CRS that cannot place them are named", {
+  sel <- .mvu_selection()
+  own <- suppressWarnings(suppressMessages(get_voronoi_seeds(n = sel)))
+  expect_identical(sf::st_crs(own), sf::st_crs(32646))
+  ortho <- .mvu_ortho()
+  p_or <- sf::st_sf(geometry = sf::st_sfc(sf::st_point(c(0, 0)), sf::st_point(c(1e4, 0)),
+                                          crs = ortho))
+  r <- .mvu_catch(voronoi_seeds_kmeans(p_or, k = sel))
+  expect_length(r$warnings, 1L)
+  w <- r$warnings[[1L]]
+  expect_identical(w$rows, seq_len(10L))
+  expect_identical(w$n, 10L)
+  expect_match(conditionMessage(w), paste0(
+    "^voronoi_seeds_kmeans\\(\\): the move of the seeds of `k` to .*cannot place every vertex ",
+    "of rows 1, 2, 3, 4, 5, 6 and 4 more of its 10, which have a location in EPSG:32646"))
+  expect_match(conditionMessage(w),
+               "Pass `points_sf` in a CRS that holds the centres, or pass `k` as a number for a fresh fit.",
+               fixed = TRUE)
+  # The seeds are those returned before: each one empty.
+  expect_true(all(sf::st_is_empty(r$value)))
+  expect_identical(nrow(r$value), 10L)
+
+  b_or <- sf::st_sf(geometry = sf::st_sfc(sf::st_polygon(list(rbind(
+    c(-1e5, -1e5), c(1e5, -1e5), c(1e5, 1e5), c(-1e5, 1e5), c(-1e5, -1e5)))), crs = ortho))
+  r <- .mvu_catch(get_voronoi_seeds(boundary = b_or, n = sel))
+  expect_length(r$warnings, 1L)
+  w <- r$warnings[[1L]]
+  expect_identical(w$rows, seq_len(10L))
+  expect_match(conditionMessage(w), "^get_voronoi_seeds\\(\\): the move of the seeds of `n` to ")
+  expect_match(conditionMessage(w),
+               "Pass `boundary` in a CRS that holds the centres, or pass `n` as a number for a fresh fit.",
+               fixed = TRUE)
+  expect_true(all(sf::st_is_empty(r$value)))
+})
+
+test_that("centres and clouds the target places in full raise nothing new and move as before", {
+  sel <- .mvu_selection()
+  own <- suppressWarnings(suppressMessages(get_voronoi_seeds(n = sel)))
+  p16 <- sf::st_sf(geometry = sf::st_sfc(sf::st_point(c(5e5, 1e5)), sf::st_point(c(5.1e5, 1e5)),
+                                         crs = 32616))
+  r <- .mvu_catch(voronoi_seeds_kmeans(p16, k = sel))
+  expect_length(r$warnings, 0L)
+  expect_identical(sf::st_geometry(r$value), sf::st_transform(sf::st_geometry(own), 32616))
+  b16 <- sf::st_sf(geometry = sf::st_sfc(sf::st_polygon(list(rbind(
+    c(4e5, 0), c(6e5, 0), c(6e5, 2e5), c(4e5, 2e5), c(4e5, 0)))), crs = 32616))
+  r <- .mvu_catch(get_voronoi_seeds(boundary = b16, n = sel))
+  expect_length(r$warnings, 0L)
+  expect_identical(sf::st_geometry(r$value), sf::st_transform(sf::st_geometry(own), 32616))
+  # A lon/lat cloud the zone places in full: the seeds come back in degrees,
+  # and every point is in the record.
+  sp <- sf::st_sf(geometry = sf::st_sfc(sf::st_point(c(92, 0.1)), sf::st_point(c(94, 0.5)),
+                                        sf::st_point(c(93, -0.5)), crs = 4326))
+  r <- .mvu_catch(get_voronoi_seeds(n = sel, sample_points = sp))
+  expect_length(r$warnings, 0L)
+  expect_identical(sf::st_geometry(r$value), sf::st_transform(sf::st_geometry(own), 4326))
+  expect_identical(attr(r$value, "kmeans")$rows, 1:3)
+})

@@ -1064,6 +1064,10 @@
 #' Such a vertex has no place on the Earth, and no CRS places it.  Read on
 #' the second coordinate of each vertex, in degrees; a coordinate that is
 #' not finite does not count here (\code{.unlocated_features()} reads it).
+#' The features are read one by one only when some finite coordinate of the
+#' layer lies beyond 90.  That test reads the coordinates themselves, not
+#' \code{sf::st_bbox()}: sf keeps the box it stored on the column when a row
+#' is replaced with \code{[[<-}, so a row edited to latitude 95 passed.
 #'
 #' @param g An sfc in longitude and latitude, in degrees.
 #' @return A logical vector, one element per feature.
@@ -1073,9 +1077,8 @@
   n   <- length(g)
   out <- logical(n)
   if (!n) return(out)
-  bb <- sf::st_bbox(g)
-  if (all(is.finite(bb[c("ymin", "ymax")])) &&
-      bb[["ymin"]] >= -90 && bb[["ymax"]] <= 90) return(out)
+  v <- unlist(unclass(g), use.names = FALSE)
+  if (!length(v) || !any(is.finite(v) & abs(v) > 90)) return(out)
   far <- function(y) any(is.finite(y) & abs(y) > 90)
   # A POINT is a vector, a LINESTRING or MULTIPOINT a matrix, and the other
   # types (collections included) lists of those.
@@ -1085,6 +1088,51 @@
     length(s) >= 2L && far(s[2L])
   }
   vapply(unclass(g), bad, logical(1))
+}
+
+#' The rows of a lon/lat layer that only a latitude beyond 90 leaves without
+#' a location
+#'
+#' The rows \code{.unlocated_features(lat = TRUE)} adds to those it marks
+#' by default: rows of a layer in a geographic CRS with a vertex at a
+#' latitude beyond 90 degrees and no coordinate that is not finite or lies
+#' beyond 1e150.  Empty for a layer in any other CRS or none.
+#'
+#' @param x An sf or sfc object.
+#' @return The positions of those rows, possibly none.
+#' @keywords internal
+#' @noRd
+.beyond_pole_rows <- function(x) {
+  g <- sf::st_geometry(x)
+  if (!length(g) || !.is_longlat(g)) return(integer(0))
+  which(.beyond_pole_features(g) & !.unlocated_features(g))
+}
+
+#' Warn that rows of a lon/lat layer have a latitude beyond 90
+#'
+#' @param rows The rows (\code{.beyond_pole_rows()}).
+#' @param n The number of rows of the caller's layer.
+#' @param caller,arg The function and its argument the warning names.
+#' @param done What the call does with such rows, one clause for one row
+#'   and one for several.
+#' @return \code{NULL}, invisibly.  The warning, of class
+#'   \code{"spatialkit_lat_beyond_90"}, carries \code{rows} and \code{n}.
+#' @keywords internal
+#' @noRd
+.warn_beyond_pole <- function(rows, n, caller, arg, done) {
+  if (!length(rows)) return(invisible(NULL))
+  one <- length(rows) == 1L
+  .warn_classed(
+    "spatialkit_lat_beyond_90",
+    paste0("%s(): %s of the %d of `%s` %s a vertex at a latitude beyond 90 ",
+           "degrees, which is no place on the Earth, so %s. Coordinates in ",
+           "metres stamped with a geographic CRS, or x and y swapped, are the ",
+           "usual cause: check the CRS of `%s` (sf::st_crs()) and the order ",
+           "of its coordinates."),
+    caller, .rows_text(rows), n, arg, if (one) "has" else "have",
+    if (one) done[[1L]] else done[[2L]], arg,
+    data = list(rows = rows, n = n))
+  invisible(NULL)
 }
 
 
@@ -2203,7 +2251,14 @@
 #'     place the layer. The choice of a projection does not read a row with
 #'     a vertex at a latitude beyond 90 either: it is made on the other
 #'     rows, and a layer each row of which is empty, has no location or has
-#'     such a vertex gets Web Mercator (Equal Earth for `purpose = "area"`).}
+#'     such a vertex gets Web Mercator (Equal Earth for `purpose = "area"`).
+#'     The functions that read a lon/lat data layer row by row
+#'     ([coerce_to_points()], [prep_model_data()] and the fits, the k-means
+#'     seeders' points, the features of [assign_features_to_polygons()], the
+#'     pooled readers of [summarize_by_cell()] and [cell_values_at()], and
+#'     [ensure_stable_poly_id()]) read a row with a vertex at a latitude
+#'     beyond 90 as a row without a location, before anything else reads
+#'     it, and say so in the words they use for such a row.}
 #' }
 #'
 #' `target_crs` overrides all of this. Pass it whenever you need a specific,
@@ -2880,6 +2935,84 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   x
 }
 
+#' Longitudes read across 180
+#'
+#' \code{.lon_span()}: the span of the first coordinate of each geometry,
+#' over its finite values (0 for an empty one).  \code{.unwrap_lon()}: a
+#' geometry with the first coordinates below 0 read from 180 to 360.
+#' \code{.wrap_lon()}: a point brought back into -180 to 180.
+#' \code{.across_180()}: the geometries of a lon/lat layer, or of a layer
+#' without a CRS read as degrees, that span more than 180 degrees of
+#' longitude written as given and no more than 180 with their longitudes
+#' read from 0 to 360, such as a polygon written across longitude 180 from
+#' 179.5 to -179.5; with those geometries read so.  A geometry wider than
+#' 180 degrees in both readings (one around a pole) is not among them.
+#'
+#' @param g An sfc.
+#' @param s A geometry (sfg), or its unclassed list or matrix.
+#' @param p A POINT.
+#' @param assume_ll As for \code{.surface_points()}.
+#' @return \code{.lon_span()}: a numeric vector, one element per geometry.
+#'   \code{.across_180()}: a list with \code{rows}, the positions of those
+#'   geometries in \code{g}, and \code{unwrapped}, an sfc without a CRS
+#'   holding them with the longitudes read from 0 to 360.
+#' @keywords internal
+#' @noRd
+.lon_span <- function(g) {
+  xs <- function(s)
+    if (is.list(s)) unlist(lapply(s, xs), use.names = FALSE)
+    else if (is.matrix(s)) s[, 1L] else s[1L]
+  vapply(unclass(g), function(s) {
+    x <- xs(s)
+    x <- x[is.finite(x)]
+    if (length(x)) max(x) - min(x) else 0
+  }, numeric(1))
+}
+
+.unwrap_lon <- function(s) {
+  if (is.list(s)) return(structure(lapply(unclass(s), .unwrap_lon), class = class(s)))
+  if (is.matrix(s)) { s[, 1L] <- ifelse(s[, 1L] < 0, s[, 1L] + 360, s[, 1L]); return(s) }
+  if (length(s) && isTRUE(s[1L] < 0)) s[1L] <- s[1L] + 360
+  s
+}
+
+.wrap_lon <- function(p) {
+  if (isTRUE(p[1L] > 180)) p[1L] <- p[1L] - 360
+  p
+}
+
+.across_180 <- function(g, assume_ll = NULL) {
+  none <- list(rows = integer(0), unwrapped = NULL)
+  crs_given <- !is.na(sf::st_crs(g))
+  if (!length(g) || (crs_given && !.is_longlat(g)) ||
+      (!crs_given && is.null(assume_ll)))
+    return(none)
+  wide <- which(.lon_span(g) > 180)
+  if (!length(wide)) return(none)
+  if (!crs_given && !isTRUE(assume_ll())) return(none)
+  un <- lapply(unclass(g[wide]), .unwrap_lon)
+  ok <- .lon_span(un) <= 180
+  if (!any(ok)) return(none)
+  list(rows = wide[ok], unwrapped = sf::st_sfc(un[ok]))
+}
+
+#' Warn that rows of a layer without a CRS were read as EPSG:4326 across 180
+#'
+#' @param rows The rows of `x` that reading moves.
+#' @param given What each row is given, for one row and for several.
+#' @keywords internal
+#' @noRd
+.warn_crsless_across_180 <- function(rows, given) {
+  one <- length(rows) == 1L
+  .warn_and_log(
+    paste0("coerce_to_points(): `x` has no CRS and its coordinates look ",
+           "like lon/lat, so %s of `x`, which %s more than 180 degrees ",
+           "of longitude, %s read as EPSG:4326 and given %s. Set the CRS of ",
+           "`x` explicitly to say how to read it."),
+    .rows_text(rows), if (one) "spans" else "span",
+    if (one) "is" else "are", if (one) given[[1L]] else given[[2L]])
+}
+
 #' Points on the surface of geometries, read the same way by every caller
 #'
 #' GEOS's interior point of each geometry, after \code{.drop_empty_parts()}.
@@ -2930,15 +3063,7 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   if (!length(g) || (crs_given && !.is_longlat(g)) ||
       (!crs_given && is.null(assume_ll)))
     return(none)
-  xs <- function(s)
-    if (is.list(s)) unlist(lapply(s, xs), use.names = FALSE)
-    else if (is.matrix(s)) s[, 1L] else s[1L]
-  span <- vapply(unclass(g), function(s) {
-    x <- xs(s)
-    x <- x[is.finite(x)]
-    if (length(x)) max(x) - min(x) else 0
-  }, numeric(1))
-  wide <- which(span > 180)
+  wide <- which(.lon_span(g) > 180)
   if (!length(wide)) return(none)
   if (!crs_given && !isTRUE(assume_ll())) return(none)
   # Whether point i of `p` lies on geometry i of `s`, read on the sphere;
@@ -2953,17 +3078,8 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   }
   redo <- wide[!on_own(pos[wide], g[wide]) %in% TRUE]
   if (!length(redo)) return(none)
-  unwrap <- function(s) {
-    if (is.list(s)) return(structure(lapply(unclass(s), unwrap), class = class(s)))
-    if (is.matrix(s)) { s[, 1L] <- ifelse(s[, 1L] < 0, s[, 1L] + 360, s[, 1L]); return(s) }
-    if (length(s) && isTRUE(s[1L] < 0)) s[1L] <- s[1L] + 360
-    s
-  }
-  alt <- sf::st_point_on_surface(sf::st_sfc(lapply(unclass(g[redo]), unwrap)))
-  alt <- sf::st_sfc(lapply(unclass(alt), function(p) {
-    if (isTRUE(p[1L] > 180)) p[1L] <- p[1L] - 360
-    p
-  }), crs = sf::st_crs(g))
+  alt <- sf::st_point_on_surface(sf::st_sfc(lapply(unclass(g[redo]), .unwrap_lon)))
+  alt <- sf::st_sfc(lapply(unclass(alt), .wrap_lon), crs = sf::st_crs(g))
   took <- on_own(alt, g[redo]) %in% TRUE
   if (any(took)) pos[redo[took]] <- alt[took]
   list(points = pos, off = redo[!took], moved = redo[took])
@@ -3025,7 +3141,10 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' A geometry of any type with a coordinate that is not finite (`NA`,
 #' `NaN`, `Inf`) or lies beyond 1e150 has no location (see
 #' [ensure_projected()], "Rows without a location"), and gets an EMPTY
-#' POINT in every mode, as an empty geometry does.
+#' POINT in every mode, as an empty geometry does.  So does a geometry of a
+#' layer in a geographic CRS with a vertex at a latitude beyond 90 degrees,
+#' which is no place on the Earth, and a warning of class
+#' `spatialkit_lat_beyond_90` gives its rows of `x` (`rows`).
 #'
 #' Modes `"auto"` (for polygons) and `"point_on_surface"` take the point
 #' with GEOS, which reads a layer in longitude and latitude on the plane in
@@ -3044,6 +3163,21 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' read so too, as EPSG:4326, and a warning names the rows whose point that
 #' reading moves; the points keep the missing CRS.
 #'
+#' Mode `"bbox_center"`, and mode `"centroid"` (with the centroids
+#' `"line_midpoint"` takes of the rows that are not a LINESTRING, and
+#' `"auto"` of a MULTIPOINT and of the rows that are not points, lines or
+#' polygons, such as geometry collections) where GEOS takes the centroid on
+#' the plane in degrees (a lon/lat layer with s2 off), read a geometry
+#' written across longitude 180 the same way: one that spans more
+#' than 180 degrees of longitude as written, and no more than 180 with the
+#' longitudes below 0 read from 180 to 360, gets the centre of that box, or
+#' GEOS's centroid of the geometry so read, brought back into -180 to 180.
+#' A layer without a CRS that the lon/lat heuristic takes for degrees is
+#' read so too, with the same warning. A geometry wider than 180 degrees in
+#' both readings, such as one around a pole, keeps the centre of its box on
+#' the plane, or GEOS's planar centroid. The centroids s2 takes on the
+#' sphere are not changed.
+#'
 #' In mode `"auto"` a MULTILINESTRING gets the midpoint of its longest part.
 #' When several parts share the greatest length (to one part in ten
 #' million, measured in the projection used), their midpoints are taken
@@ -3060,7 +3194,7 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' Z and M are dropped, the points come back in XY, and a warning of class
 #' `spatialkit_zm_dropped` says so, with the rows that carried Z or M as its
 #' `rows`.  Mode `"bbox_center"` reads the box of each geometry and gives XY
-#' points for any layer, with no warning.  A layer in one dimension, XY or
+#' points for any layer, with no warning about Z or M.  A layer in one dimension, XY or
 #' XYZ throughout, is read as it is, and so is a layer whose only
 #' geometries of another dimension than the first are empty and not points.
 #'
@@ -3072,7 +3206,8 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' warning of class `spatialkit_zm_dropped` says so, with the rows whose
 #' geometry carries M as its `rows`.  Empty geometries are not counted.
 #' A POINT layer that carries M is returned as it is under `"auto"`, and
-#' `"bbox_center"` gives XY points with no warning, as for any layer.
+#' `"bbox_center"` gives XY points with no warning about M, as for any
+#' layer.
 #'
 #' On a layer in longitude and latitude with [sf::sf_use_s2()] on, sf takes
 #' centroids with s2 (under `"centroid"`, for the rows other than
@@ -3161,14 +3296,49 @@ coerce_to_points <- function(
   # the mode reads it, so it gets an EMPTY POINT in every mode.  Only lines
   # were read so: a polygon with such a vertex got a ring vertex under
   # "auto" and "point_on_surface", (Inf, y) or (5e199, y) under
-  # "bbox_center", and (Inf, y) under "centroid" at 1e200.
-  x <- .empty_unlocated(x)
+  # "bbox_center", and (Inf, y) under "centroid" at 1e200.  So is a
+  # geometry of a layer in a geographic CRS with a vertex at a latitude
+  # beyond 90 degrees, which is no place on the Earth, and the warning of
+  # class spatialkit_lat_beyond_90 names its rows: the box centre of a
+  # square at 35 N with one vertex at 95 was put at 65 N without a word, and
+  # the other modes passed on sf's bare "bounding box has potentially an
+  # invalid value range for longlat data".
+  far <- .beyond_pole_rows(x)
+  x <- .empty_unlocated(x, lat = TRUE)
+  .warn_beyond_pole(far, nrow(x), "coerce_to_points", "x",
+                    c("it has no location and gets an EMPTY POINT",
+                      "they have no location and get an EMPTY POINT"))
+
+  # A layer without a CRS is read as degrees across longitude 180 only when
+  # the test ensure_projected() applies takes it for lon/lat; the test is
+  # run only when some row spans more than 180 units (.across_180()).
+  assume_ll <- if (is.na(crs)) function() isTRUE(.looks_like_lonlat(x)$lonlat)
 
   # -- bbox_center ---
   # Read geometry by geometry, so a layer that mixes dimensions gives the
-  # boxes of its rows; the points are XY whatever the input.
+  # boxes of its rows; the points are XY whatever the input.  A geometry
+  # written across longitude 180 (from 179.5 to -179.5) has a box that spans
+  # the globe on the plane, and its centre lay near longitude 0, about
+  # 17,600 km from it at latitude 10, without a word.  Such a row of a
+  # lon/lat layer, or of a layer without a CRS read as degrees, gets the
+  # centre of its box with the longitudes below 0 read from 180 to 360,
+  # brought back into -180 to 180, when that box spans no more than 180
+  # degrees (.across_180()), as the points on the surface are read.
   if (mode == "bbox_center") {
-    return(sf::st_set_geometry(x, .bbox_center_sfc(x)))
+    pts <- .bbox_center_sfc(x)
+    am  <- .across_180(sf::st_geometry(x), assume_ll)
+    if (length(am$rows)) {
+      pts[am$rows] <- sf::st_sfc(lapply(am$unwrapped, function(s) {
+        bb <- sf::st_bbox(s)
+        .wrap_lon(sf::st_point(unname(c((bb[["xmin"]] + bb[["xmax"]]) / 2,
+                                        (bb[["ymin"]] + bb[["ymax"]]) / 2))))
+      }), crs = crs)
+      if (is.na(crs))
+        .warn_crsless_across_180(am$rows,
+                                 c("the centre of its box read across longitude 180",
+                                   "the centres of their boxes read across longitude 180"))
+    }
+    return(sf::st_set_geometry(x, pts))
   }
 
   # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y:
@@ -3248,7 +3418,27 @@ coerce_to_points <- function(
         paste0("Pass mode = \"point_on_surface\", which takes a point on each geometry ",
                "with GEOS, or repair the features with sf::st_make_valid() and call ",
                "coerce_to_points() again."))
-    sc$points
+    # GEOS takes the centroid on the plane in degrees (a lon/lat layer with
+    # s2 off, a layer without a CRS read as degrees), so a geometry written
+    # across longitude 180 got its centroid near longitude 0, about 17,600
+    # km from it at latitude 10, without a word.  Such a row gets GEOS's
+    # centroid of the geometry with the longitudes below 0 read from 180 to
+    # 360, brought back into -180 to 180, when it spans no more than 180
+    # degrees so (.across_180()).  s2 takes the centroid on the sphere, and
+    # its points are kept.
+    pts <- sc$points
+    if (is.na(crs) || !isTRUE(sf::sf_use_s2())) {
+      am <- .across_180(sub, assume_ll)
+      if (length(am$rows)) {
+        pts[am$rows] <- sf::st_sfc(lapply(unclass(sf::st_centroid(am$unwrapped)), .wrap_lon),
+                                   crs = crs)
+        if (is.na(crs))
+          .warn_crsless_across_180(rows[am$rows],
+                                   c("its centroid read across longitude 180",
+                                     "their centroids read across longitude 180"))
+      }
+    }
+    pts
   }
 
   # Points on the surface of the rows `rows` (positions in g; sub is
@@ -3266,19 +3456,11 @@ coerce_to_points <- function(
   # across 180 kept GEOS's point on the far side of the globe.
   surface_of <- function(sub, rows) {
     no_crs <- is.na(crs)
-    sp <- .surface_points(
-      sub, assume_ll = if (no_crs) function() isTRUE(.looks_like_lonlat(x)$lonlat))
-    if (no_crs && length(sp$moved)) {
-      one <- length(sp$moved) == 1L
-      .warn_and_log(
-        paste0("coerce_to_points(): `x` has no CRS and its coordinates look ",
-               "like lon/lat, so %s of `x`, which %s more than 180 degrees ",
-               "of longitude, %s read as EPSG:4326 and given a point on %s ",
-               "read on the sphere. Set the CRS of `x` explicitly to say how ",
-               "to read it."),
-        .rows_text(rows[sp$moved]), if (one) "spans" else "span",
-        if (one) "is" else "are", if (one) "it" else "them")
-    }
+    sp <- .surface_points(sub, assume_ll = assume_ll)
+    if (no_crs && length(sp$moved))
+      .warn_crsless_across_180(rows[sp$moved],
+                               c("a point on it read on the sphere",
+                                 "a point on them read on the sphere"))
     if (length(sp$off)) {
       one <- length(sp$off) == 1L
       .warn_classed(
@@ -3412,6 +3594,20 @@ coerce_to_points <- function(
   if (length(idx_mpt)) {
     for (i in idx_mpt) {
       out[[i]] <- suppressWarnings(sf::st_centroid(g[i]))[[1L]]
+    }
+    # Where GEOS takes the centroid on the plane in degrees, a MULTIPOINT
+    # written across longitude 180 is read as centroids_of() reads such a
+    # row: its two points at 179.5 and -179.5 got a centroid at longitude
+    # 0, about 17,700 km from either, without a word.
+    if (is.na(crs) || !isTRUE(sf::sf_use_s2())) {
+      am <- .across_180(g[idx_mpt], assume_ll)
+      if (length(am$rows)) {
+        out[idx_mpt[am$rows]] <- lapply(unclass(sf::st_centroid(am$unwrapped)), .wrap_lon)
+        if (is.na(crs))
+          .warn_crsless_across_180(idx_mpt[am$rows],
+                                   c("its centroid read across longitude 180",
+                                     "their centroids read across longitude 180"))
+      }
     }
   }
 

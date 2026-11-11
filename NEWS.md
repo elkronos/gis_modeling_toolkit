@@ -2150,7 +2150,8 @@ old behaviour where there is a way.
   the rows, the function called and the argument: `harmonize_crs()` (`a`
   or `b`, not after the `on_transform_error = "set_crs"` stamp),
   `ensure_projected(target_crs =)` from any CRS, the seeders and the
-  tessellation builders (`boundary`, `seeds`, `sample_points`, `cover`),
+  tessellation builders (`boundary`, `seeds`, `sample_points`, `cover`,
+  and the centres of a profile passed as `n` or `k`),
   `assign_features_to_polygons()` (`features_sf`, `polygons_sf`),
   `kriging_adequacy()`, `cell_values_at()` (`values`, and `newdata` where
   it is placed in the polygons of `values`), and the functions that move a
@@ -2233,6 +2234,35 @@ old behaviour where there is a way.
   `spatialkit_rows_unplaced` warning names it.  A layer each row of which
   has such a vertex gets the global fallback, and the log line says so.
   Layers with no latitude beyond 90 get the CRS they got.
+
+* **The readers of a lon/lat data layer read a row with a latitude beyond
+  90 as given.**  sf warns "bounding box has potentially an invalid value
+  range for longlat data" each time it reads the box of such a layer, and
+  that warning reached the caller in sf's words from `coerce_to_points()`,
+  `prep_model_data()` and the fits on polygons, the k-means seeders
+  (`get_voronoi_seeds(method = "kmeans", sample_points =)`,
+  `voronoi_seeds_kmeans()`) and `assign_features_to_polygons()` on its
+  features.  Where the row lasted to the end it was read where it was
+  written: a square at 35 N with one vertex at 95 got a box centre at
+  65 N under `pointize = "bbox_center"`, about 3,300 km from its other
+  vertices, and `ensure_stable_poly_id()` keyed it and returned it after
+  s2's repair, without a word.  Such a row of a layer in a geographic CRS
+  now has no location in these readers, as a row with a coordinate beyond
+  1e150: `coerce_to_points()` gives it an EMPTY POINT in every mode,
+  `prep_model_data()` and the fits drop it and count it, the seeders drop
+  it from the cloud, `assign_features_to_polygons()` leaves it unassigned,
+  and `summarize_by_cell()` and `cell_values_at()` leave it out of the
+  pooled and scored rows, each in the words they use for a row without a
+  location, which now name "a latitude beyond 90 degrees" for a lon/lat
+  layer.  `coerce_to_points()` and `ensure_stable_poly_id()` say so with a
+  warning of class `spatialkit_lat_beyond_90` that names the rows;
+  `ensure_stable_poly_id()` keys such a row as an empty polygon, after the
+  polygons with a location, and returns it as it came.  A point layer with
+  such a row no longer gets the projection's warning that it cannot place
+  the row beside the drop line.  `ensure_stable_poly_id(method =
+  "centroid")` and `method = "surface_point"` on a layer whose every
+  polygon is empty stopped with base R's "missing value where TRUE/FALSE
+  needed"; they now give each row an ID.  Layers with no latitude beyond 90 give the same results.
 
 * **`ensure_projected()` stopped with "invalid crs" on a lon/lat layer
   whose box has no height and whose centre lies within 5 degrees of a
@@ -2384,6 +2414,27 @@ old behaviour where there is a way.
   read as EPSG:4326, is read the same way, and `coerce_to_points()` says
   which rows that reading moves. The labels of `plot_tessellation_map()`
   on such cells are placed on them too.
+
+* **`coerce_to_points(mode = "bbox_center")`, and `mode = "centroid"` with
+  s2 off, put a lon/lat geometry written across longitude 180 near
+  longitude 0.**  The box of a square from 179.5 to -179.5 spans the globe
+  on the plane, and its centre, and GEOS's centroid in degrees, lay at
+  longitude 0, about 17,600 km from it at latitude 10, with nothing said.
+  `prep_model_data(pointize = "bbox_center")` then read a layer of such
+  squares as one that circles the North Pole and projected it in a Lambert
+  azimuthal centred on the pole, where `"auto"` centres the projection on
+  longitude 180.  Such a geometry now gets the centre of its box, or GEOS's
+  centroid, with the longitudes below 0 read from 180 to 360, brought back
+  into -180 to 180, as the points on the surface are read; a geometry
+  wider than 180 degrees in both readings keeps the planar point.  A layer
+  without a CRS whose coordinates look like longitude and latitude is read
+  the same way, with the warning that names the rows that reading moves.
+  The same holds for the centroids `"line_midpoint"` takes of the rows
+  that are not a LINESTRING, and `"auto"` of a MULTIPOINT and of the rows
+  that are not points, lines or polygons, such as geometry collections: with
+  s2 off, `"auto"` put a MULTIPOINT of (179.5, 10) and (-179.5, 10.5) at
+  (0, 10.25).  The centroids s2 takes and every other row's point are
+  unchanged.
 
 * **`prep_model_data()` kept a row with a coordinate beyond 1e150 as a
   located row.**  It dropped a row whose geometry was empty or whose

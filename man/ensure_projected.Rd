@@ -162,7 +162,14 @@ latitude beyond 90; with a \code{target_crs}, wherever that CRS cannot
 place the layer. The choice of a projection does not read a row with
 a vertex at a latitude beyond 90 either: it is made on the other
 rows, and a layer each row of which is empty, has no location or has
-such a vertex gets Web Mercator (Equal Earth for \code{purpose = "area"}).}
+such a vertex gets Web Mercator (Equal Earth for \code{purpose = "area"}).
+The functions that read a lon/lat data layer row by row
+(\code{\link[=coerce_to_points]{coerce_to_points()}}, \code{\link[=prep_model_data]{prep_model_data()}} and the fits, the k-means
+seeders' points, the features of \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, the
+pooled readers of \code{\link[=summarize_by_cell]{summarize_by_cell()}} and \code{\link[=cell_values_at]{cell_values_at()}}, and
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}}) read a row with a vertex at a latitude
+beyond 90 as a row without a location, before anything else reads
+it, and say so in the words they use for such a row.}
 }
 
 \code{target_crs} overrides all of this. Pass it whenever you need a specific,

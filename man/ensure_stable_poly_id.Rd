@@ -97,6 +97,12 @@ feature measured in the plane can therefore sort on the other side of a
 neighbour whose centre is that close to its own in longitude. Every other
 feature's key is unaffected, and the geometry returned is never the sort
 copy.
+
+A polygon of a layer in a geographic CRS with a vertex at a latitude
+beyond 90 degrees is no place on the Earth. It is keyed as an empty
+polygon is, after every polygon with a location, it is not repaired and
+comes back as it came, and a warning of class \code{spatialkit_lat_beyond_90}
+gives its rows of \code{polygons_sf} (\code{rows}).
 }
 \examples{
 library(sf)

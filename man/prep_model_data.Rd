@@ -50,8 +50,9 @@ carrying missing or non-finite values in the modelling columns and of
 rows without a location.  What
 was removed is recorded on the attribute \code{"dropped"}, a list with
 \code{n} (rows dropped), \code{n_geometry} (how many of them for no
-location: an empty point, or a coordinate that is not finite or lies
-beyond 1e150), \code{which} (their positions in
+location: an empty point, a coordinate that is not finite or lies
+beyond 1e150, or a latitude beyond 90 degrees in a geographic CRS),
+\code{which} (their positions in
 \code{data_sf}), \code{row_id} (their \code{..row_id} values when the
 layer carries that column, else \code{NULL}) and \code{reason} (one per
 dropped row: \code{"geometry"}, \code{"missing"} or
@@ -92,7 +93,9 @@ data are planar.
 Ensures point geometry, projected CRS, and removes rows with missing or
 non-finite values in modeling columns, \emph{including} rows without a
 location: an empty geometry, or a coordinate that is not finite or lies
-beyond 1e150, which no model backend can use.  The bound is read on the
+beyond 1e150, which no model backend can use, and in a layer with a
+geographic CRS a vertex at a latitude beyond 90 degrees, which is no place
+on the Earth.  The bound is read on the
 coordinates as given, before the projection, and again after it: a move
 between CRSs can bring a coordinate beyond it back finite, and that point
 is not a place the caller gave.  All non-POINT geometries (including

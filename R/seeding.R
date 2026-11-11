@@ -157,8 +157,9 @@
 #'   it is ignored there with a warning. Only
 #'   the first two coordinate columns are clustered, so a Z or M dimension does
 #'   not join the distance calculation and dominate it; rows without a
-#'   location (an empty point, or a coordinate that is not finite or lies
-#'   beyond 1e150, read as given before any move) are dropped with a warning,
+#'   location (an empty point, a coordinate that is not finite or lies
+#'   beyond 1e150, or in a geographic CRS a latitude beyond 90 degrees, read
+#'   as given before any move) are dropped with a warning,
 #'   so they never reach `stats::kmeans()`, which fails on them without
 #'   naming a cause. A lon/lat
 #'   cloud, or one with no CRS whose coordinates look like lon/lat (the
@@ -411,8 +412,14 @@ get_voronoi_seeds <- function(boundary = NULL,
   # (.empty_unlocated()), so that it is dropped below as an empty point is:
   # moved into the boundary's CRS, a northing of 1e200 in EPSG:32616 came
   # back finite in EPSG:32617 and was clustered, and in the working CRS a
-  # coordinate of 1e200 left k-means with no partition.
-  if (!is.null(sample_points)) sample_points <- .empty_unlocated(sample_points)
+  # coordinate of 1e200 left k-means with no partition.  A point of a cloud
+  # in a geographic CRS at a latitude beyond 90 degrees has no location
+  # either (lat = TRUE): it was dropped below, but sf's bare "bounding box
+  # has potentially an invalid value range for longlat data" and the
+  # projection's warning that it cannot place the row came with it.
+  sample_ll <- !is.null(sample_points) && .is_longlat(sample_points)
+  if (!is.null(sample_points))
+    sample_points <- .empty_unlocated(sample_points, lat = TRUE)
 
   # A select_resolution() result or a resolution_profile() as `n` carries the
   # centres of the partition the profile scored at that count.  A k-means
@@ -434,6 +441,7 @@ get_voronoi_seeds <- function(boundary = NULL,
                              density_given = density_given)
     out <- .use_scored_seeds(n_res$seeds,
                              like  = if (!is.null(boundary)) boundary else sample_points,
+                             like_arg = if (!is.null(boundary)) "boundary" else "sample_points",
                              cloud = sample_points, caller = "get_voronoi_seeds",
                              cover = scored_cover, count_rule = n_res$count_rule)
     cov <- attr(out, "cover", exact = TRUE)
@@ -590,7 +598,7 @@ get_voronoi_seeds <- function(boundary = NULL,
       bad_xy <- is.na(.values_at_xy(cloud_for_km)[, 1L])
       if (any(bad_xy)) {
         .warn_and_log("get_voronoi_seeds(kmeans): dropping %d point(s) without a location (%s).",
-                      sum(bad_xy), .UNLOCATED_WHAT)
+                      sum(bad_xy), .unlocated_what(sample_ll))
         xy <- xy[!bad_xy, , drop = FALSE]
       }
       if (nrow(xy) < 2L)
@@ -1165,8 +1173,9 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' degrees; so is input with no CRS whose coordinates look like lon/lat (the
 #' heuristic [ensure_projected()] applies, with its warning), and the seeds
 #' come back in the input's own coordinates. Rows without a location (an
-#' empty point, or a coordinate that is not finite or lies beyond 1e150, read
-#' as given before the projection) are dropped with a warning, and `k` is
+#' empty point, a coordinate that is not finite or lies beyond 1e150, or in
+#' a geographic CRS a latitude beyond 90 degrees, read as given before the
+#' projection) are dropped with a warning, and `k` is
 #' clamped to the number of distinct positions or one fewer than the number
 #' of points, whichever is smaller, and not below 1.
 #'
@@ -1363,7 +1372,8 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
                                density_given = density_given)
       out <- .use_scored_seeds(k_res$seeds, like = points_sf, cloud = NULL,
                                caller = "voronoi_seeds_kmeans", cover = points_sf,
-                               count_rule = k_res$count_rule)
+                               count_rule = k_res$count_rule, arg = "k",
+                               like_arg = "points_sf")
       attr(out, "n_from") <- k_res$from
       return(out)
     }
@@ -1403,8 +1413,13 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
   # location.  It is read as given, before the projection, and emptied
   # (.empty_unlocated()), so that it takes no part in the lon/lat test or the
   # choice of the CRS and is dropped below as an empty point is: a northing
-  # of 1e200 left k-means with no partition.
-  points_sf  <- .empty_unlocated(points_sf)
+  # of 1e200 left k-means with no partition.  A point of a layer in a
+  # geographic CRS at a latitude beyond 90 degrees has no location either
+  # (lat = TRUE): it was dropped below, but sf's bare "bounding box has
+  # potentially an invalid value range for longlat data" and the
+  # projection's warning that it cannot place the row came with it.
+  points_ll  <- .is_longlat(points_sf)
+  points_sf  <- .empty_unlocated(points_sf, lat = TRUE)
   crs_in     <- sf::st_crs(points_sf)
   pts_for_km <- points_sf
   pts_is_ll  <- .is_longlat(points_sf) ||
@@ -1423,7 +1438,7 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
   n_drop <- sum(!finite_rows)
   if (n_drop > 0L) {
     .warn_and_log("voronoi_seeds_kmeans(): dropping %d point(s) without a location (%s).",
-              n_drop, .UNLOCATED_WHAT)
+              n_drop, .unlocated_what(points_ll))
     coords <- coords[finite_rows, , drop = FALSE]
   }
   n <- nrow(coords)
@@ -2041,7 +2056,8 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #'   and \code{FALSE} when they were refitted.
 #' @keywords internal
 #' @noRd
-.use_scored_seeds <- function(seeds, like, cloud, caller, cover = NULL, count_rule = NULL) {
+.use_scored_seeds <- function(seeds, like, cloud, caller, cover = NULL, count_rule = NULL,
+                              arg = "n", like_arg = "boundary", cloud_arg = "sample_points") {
   nstart <- attr(seeds, "nstart", exact = TRUE)
   # The kind that built the scored partition, when the profile recorded one.
   rec <- attr(seeds, "partition", exact = TRUE)
@@ -2049,7 +2065,7 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   # subsample (select_resolution()).
   refit <- attr(seeds, "refit", exact = TRUE)
   if (is.null(cover)) cover <- attr(seeds, "cover", exact = TRUE)
-  moved  <- .seeds_in_crs_of(seeds, like)
+  moved  <- .seeds_in_crs_of(seeds, like, caller = caller, arg = arg, like_arg = like_arg)
   out <- sf::st_sf(seed_id = seq_len(nrow(moved)), method = "kmeans",
                    geometry = sf::st_geometry(moved))
   if (!is.null(refit))
@@ -2071,7 +2087,9 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
                      "than running a new one, so their Voronoi cells are the cells the ",
                      "criteria judged. Pass the count as a number for a fresh run."),
               caller, nrow(out), rec$kind, .partition_label(rec, nstart))
-  if (!is.null(cloud)) attr(out, "kmeans") <- .scored_seeds_record(cloud, seeds, nstart)
+  if (!is.null(cloud))
+    attr(out, "kmeans") <- .scored_seeds_record(cloud, seeds, nstart,
+                                                caller = caller, arg = cloud_arg)
   if (!is.null(rec)) attr(out, "partition") <- rec
   if (!is.null(refit)) attr(out, "refit") <- refit
   # These are the centres the profile scored at the count, so their Voronoi
@@ -2240,22 +2258,43 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #' heuristic the profile's own \code{ensure_projected()} applied), otherwise
 #' the profile's own numbers, CRS-less.
 #'
+#' A seed the target CRS cannot place in full comes back empty
+#' (\code{.transform_keep_unlocated()}), and a warning of class
+#' \code{"spatialkit_rows_unplaced"} names it as one of "the seeds of `n`"
+#' (or of `k`), in the words of the function called, as \code{.align_crs()}
+#' words the move of seeds it is given.  Moved with plain
+#' \code{sf::st_transform()}, the centres of a profile in UTM zone 46 came
+#' back empty in a CRS centred on longitude -87, without a word.
+#'
+#' @param caller,arg The function called and the argument the seeds came
+#'   from (\code{"n"} or \code{"k"}).
+#' @param like_arg The argument \code{like} is, for the warning's remedy.
 #' @keywords internal
 #' @noRd
-.seeds_in_crs_of <- function(seeds, like) {
+.seeds_in_crs_of <- function(seeds, like, caller = "get_voronoi_seeds", arg = "n",
+                             like_arg = "boundary") {
   if (is.null(like)) return(seeds)
   to <- sf::st_crs(like); from <- sf::st_crs(seeds)
   if (is.na(from)) return(seeds)
+  moved <- function(crs) {
+    out <- .transform_keep_unlocated(seeds, crs)
+    .warn_rows_unplaced(seeds, out, caller = caller, arg = arg,
+                        label = sprintf("the seeds of `%s`", arg),
+                        remedy = sprintf(paste0("Pass `%s` in a CRS that holds the centres, ",
+                                                "or pass `%s` as a number for a fresh fit."),
+                                         like_arg, arg))
+    out
+  }
   if (is.na(to)) {
     # A projected seed with a coordinate beyond .LONLAT_MOVE_MAX comes out
-    # empty (.lonlat_of_placed()): at x = 1e20 in EPSG:3857 the move never
-    # came back from PROJ.
+    # empty (.lonlat_of_placed(), which .transform_keep_unlocated() calls):
+    # at x = 1e20 in EPSG:3857 the move never came back from PROJ.
     if (isTRUE(.looks_like_lonlat(like)$lonlat))
-      seeds <- .lonlat_of_placed(seeds)
+      seeds <- moved(4326)
     return(sf::st_set_crs(seeds, NA))
   }
   # The same for a `like` in degrees with its own CRS.
-  if (from == to) seeds else .lonlat_of_placed(seeds, to)
+  if (from == to) seeds else moved(to)
 }
 
 
@@ -2268,21 +2307,37 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #' lower \code{seed_id}), with the sizes and within-cell sums of squares that
 #' assignment gives.  \code{iter} is \code{NA}: no k-means ran here.
 #'
+#' A cloud point the profile's CRS cannot place comes back empty and is left
+#' out of the record, and a warning of class \code{"spatialkit_rows_unplaced"}
+#' names it as a row of \code{arg}, in the words of \code{caller}; moved
+#' with plain \code{sf::st_transform()}, it was left out without a word.  A
+#' point without a location as given is emptied before the move and is not
+#' counted.
+#'
+#' @param caller,arg The function called and the argument the cloud came
+#'   from.
 #' @keywords internal
 #' @noRd
-.scored_seeds_record <- function(cloud, seeds, nstart) {
+.scored_seeds_record <- function(cloud, seeds, nstart, caller = "get_voronoi_seeds",
+                                 arg = "sample_points") {
   # A cloud point without a location, read as given, is emptied before the
   # move, which can put a northing of 1e200 at a finite place, and is left
   # out below with the empty points.
   cloud <- .empty_unlocated(cloud)
   scrs <- sf::st_crs(seeds); ccrs <- sf::st_crs(cloud)
+  moved <- function(before) {
+    out <- .transform_keep_unlocated(before, scrs)
+    .warn_rows_unplaced(before, out, caller = caller, arg = arg,
+                        remedy = .UNPLACED_REMEDY)
+    out
+  }
   if (!is.na(scrs)) {
     if (is.na(ccrs))
       cloud <- if (isTRUE(.looks_like_lonlat(cloud)$lonlat))
-        sf::st_transform(sf::st_set_crs(cloud, 4326), scrs)
+        moved(sf::st_set_crs(cloud, 4326))
       else sf::st_set_crs(cloud, scrs)
     else if (ccrs != scrs)
-      cloud <- sf::st_transform(cloud, scrs)
+      cloud <- moved(cloud)
   } else if (!is.na(ccrs)) {
     cloud <- sf::st_set_crs(cloud, NA)
   }

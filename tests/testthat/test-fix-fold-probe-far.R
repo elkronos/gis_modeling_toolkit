@@ -192,7 +192,8 @@ test_that("scored seeds moved to CRS-less degrees leave a projected seed beyond 
     coords = c("x", "y"), crs = 3857)
   ref <- sf::st_set_crs(sf::st_transform(seeds(-8.7e6), 4326), NA)
   for (x in c(1e20, 1e12)) {
-    s <- .seeds_in_crs_of(seeds(x), like)
+    # The move says it cannot place the seed (BUG-267): it comes back empty.
+    expect_warning(s <- .seeds_in_crs_of(seeds(x), like), class = "spatialkit_rows_unplaced")
     expect_true(is.na(sf::st_crs(s)), label = format(x))
     expect_true(sf::st_is_empty(s)[1L], label = format(x))
     expect_identical(sf::st_geometry(s)[2:3], sf::st_geometry(ref)[2:3], label = format(x))
@@ -306,7 +307,8 @@ test_that("scored seeds moved to a layer in EPSG:4326 leave a projected seed bey
     coords = c("x", "y"), crs = 3857)
   ref <- sf::st_transform(seeds(-8.7e6), 4326)
   for (x in c(1e20, -1e20, 1e12)) {
-    s <- .seeds_in_crs_of(seeds(x), like)
+    # The move says it cannot place the seed (BUG-267): it comes back empty.
+    expect_warning(s <- .seeds_in_crs_of(seeds(x), like), class = "spatialkit_rows_unplaced")
     expect_identical(sf::st_crs(s), sf::st_crs(4326), label = format(x))
     expect_true(sf::st_is_empty(s)[1L], label = format(x))
     expect_identical(sf::st_geometry(s)[2:3], sf::st_geometry(ref)[2:3], label = format(x))

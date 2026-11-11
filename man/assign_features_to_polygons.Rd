@@ -147,7 +147,8 @@ causes are a polygon layer that stops short of the data (a coastline
 drawn at another scale, a tessellation of seeds built without a
 \code{boundary} or \code{cover}; see \code{\link[=build_tessellation]{build_tessellation()}}) and points outside
 the study area. A feature with empty geometry, or with a coordinate
-that is not finite or lies beyond 1e150 (read as given, before any
+that is not finite or lies beyond 1e150, or in a geographic CRS a
+vertex at a latitude beyond 90 degrees (read as given, before any
 move into the polygons' CRS), has no location to assign: it matches no
 polygon, and the warning says how many of them there are. With
 \code{keep_unassigned = TRUE} they are kept with an

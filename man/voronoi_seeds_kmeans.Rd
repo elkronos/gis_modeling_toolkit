@@ -143,8 +143,9 @@ Lon/lat input is projected first so the k-means distances are metric and not
 degrees; so is input with no CRS whose coordinates look like lon/lat (the
 heuristic \code{\link[=ensure_projected]{ensure_projected()}} applies, with its warning), and the seeds
 come back in the input's own coordinates. Rows without a location (an
-empty point, or a coordinate that is not finite or lies beyond 1e150, read
-as given before the projection) are dropped with a warning, and \code{k} is
+empty point, a coordinate that is not finite or lies beyond 1e150, or in
+a geographic CRS a latitude beyond 90 degrees, read as given before the
+projection) are dropped with a warning, and \code{k} is
 clamped to the number of distinct positions or one fewer than the number
 of points, whichever is smaller, and not below 1.
 

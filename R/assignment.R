@@ -197,7 +197,8 @@
 #'   drawn at another scale, a tessellation of seeds built without a
 #'   `boundary` or `cover`; see [build_tessellation()]) and points outside
 #'   the study area. A feature with empty geometry, or with a coordinate
-#'   that is not finite or lies beyond 1e150 (read as given, before any
+#'   that is not finite or lies beyond 1e150, or in a geographic CRS a
+#'   vertex at a latitude beyond 90 degrees (read as given, before any
 #'   move into the polygons' CRS), has no location to assign: it matches no
 #'   polygon, and the warning says how many of them there are. With
 #'   `keep_unassigned = TRUE` they are kept with an
@@ -362,7 +363,15 @@ assign_features_to_polygons <- function(
   # of it is emptied below, so it matches no polygon and is counted with the
   # empty features: moved into the polygons' CRS, a northing of 1e200 in
   # EPSG:32616 came back finite in EPSG:32617 and was joined there.
-  unlocated_f <- .unlocated_features(sf::st_geometry(features_xy))
+  # A feature of a layer in a geographic CRS with a vertex at a latitude
+  # beyond 90 degrees has no location either (lat = TRUE).  Its copy is
+  # emptied here, before the move and the join read it: it fell in no
+  # polygon, but sf's bare "bounding box has potentially an invalid value
+  # range for longlat data" came with it, and the texts below called it a
+  # feature the polygons miss.
+  features_ll <- .is_longlat(features_xy)
+  unlocated_f <- .unlocated_features(sf::st_geometry(features_xy), lat = TRUE)
+  features_xy <- .empty_unlocated(features_xy, .beyond_pole_rows(features_xy), lat = TRUE)
   # A polygon with a vertex that is not finite or lies beyond 1e150, read as
   # given, has no location either, and its copy is emptied before the join:
   # read as it was, one with an NA or Inf vertex caught the points inside the
@@ -857,11 +866,11 @@ assign_features_to_polygons <- function(
                   n_features,
                   if (n_empty == n_features)
                     sprintf("They have no location (%s), so there is nothing to assign.",
-                            .UNLOCATED_WHAT)
+                            .unlocated_what(features_ll))
                   else paste0(
                     if (n_empty > 0L)
                       sprintf("%d of them %s no location (%s); for the rest, check", n_empty,
-                              if (n_empty == 1L) "has" else "have", .UNLOCATED_WHAT)
+                              if (n_empty == 1L) "has" else "have", .unlocated_what(features_ll))
                     else "Check",
                     " that the two layers cover the same ground -- a CRS that had to ",
                     "be stamped rather than reprojected is the usual ",
@@ -882,11 +891,11 @@ assign_features_to_polygons <- function(
                   if (n_empty == n_unassigned)
                     sprintf(paste0("They have no location (%s), so there is nothing ",
                                    "to assign; pass keep_unassigned = TRUE to keep them ",
-                                   "with an NA ID."), .UNLOCATED_WHAT)
+                                   "with an NA ID."), .unlocated_what(features_ll))
                   else paste0(
                     if (n_empty > 0L)
                       sprintf("%d of them %s no location (%s); for the rest, check", n_empty,
-                              if (n_empty == 1L) "has" else "have", .UNLOCATED_WHAT)
+                              if (n_empty == 1L) "has" else "have", .unlocated_what(features_ll))
                     else "Check",
                     " that the polygons cover ",
                     "the features (cells built from seeds need a ",
@@ -898,7 +907,7 @@ assign_features_to_polygons <- function(
               n_unassigned, n_features,
               if (n_empty > 0L) sprintf(" (%d of them %s no location: %s)", n_empty,
                                         if (n_empty == 1L) "has" else "have",
-                                        .UNLOCATED_WHAT) else "")
+                                        .unlocated_what(features_ll)) else "")
 
   if (!keep_unassigned) {
     joined <- joined[!is.na(joined[[polygon_id_col]]), , drop = FALSE]
@@ -2574,8 +2583,9 @@ assign_features_to_polygons <- function(
 #'   `estimate = "pooled"`, and by column `n`, the cells, `one_cell`, `loo`
 #'   and `structure_p`).
 #' * `"spatialkit_pool_rows_skipped"`: rows with a value and a cell have no
-#'   location: an empty point, or a coordinate that is not finite or lies
-#'   beyond 1e150, as given or in the CRS the distances are measured in.
+#'   location: an empty point, a coordinate that is not finite or lies
+#'   beyond 1e150, as given or in the CRS the distances are measured in, or
+#'   in a geographic CRS a vertex at a latitude beyond 90 degrees.
 #'   They count in `n` and the plain columns and take no part in the pooled
 #'   ones (`n`, `cells`).
 #' * `"spatialkit_repeated_locations"`, with `obs_level`: rows with a value
@@ -4578,14 +4588,27 @@ summarize_by_cell <- function(assigned_points_sf,
 #' column when a row is replaced with \code{[[<-}, so a row edited to
 #' \code{Inf} or \code{1e200} passed too.
 #'
+#' With \code{lat = TRUE}, a feature of a layer in a geographic CRS with a
+#' vertex at a latitude beyond 90 degrees (\code{.beyond_pole_features()})
+#' has no location either: no place on the Earth is there.  The readers of a
+#' caller's layer that empty its rows without a location before anything
+#' else reads them pass it (\code{.empty_unlocated(lat = TRUE)}).  The
+#' default reads the coordinates as numbers only, so the movers still
+#' compare such a row before and after a move and say the move cannot place
+#' it (\code{.rows_unplaced()}).
+#'
 #' @param g An sfc.
+#' @param lat \code{TRUE} to read a latitude beyond 90 degrees, in a layer
+#'   whose CRS is geographic, as no location.
 #' @return A logical vector, one element per feature.
 #' @keywords internal
 #' @noRd
-.unlocated_features <- function(g) {
+.unlocated_features <- function(g, lat = FALSE) {
   n   <- length(g)
   out <- logical(n)
   if (!n) return(out)
+  if (isTRUE(lat) && .is_longlat(g))
+    return(.unlocated_features(g) | .beyond_pole_features(g))
   # Empty polygons and lines hold no coordinate at all: v is then NULL.
   v <- unlist(unclass(g), use.names = FALSE)
   if (!length(v) || (!anyNA(v) && all(abs(v) <= .POOL_XY_MAX))) return(out)
@@ -4620,14 +4643,25 @@ summarize_by_cell <- function(assigned_points_sf,
 #' layer read with these rows emptied is read as the same layer with those
 #' rows empty to begin with.
 #'
+#' sf warns "bounding box has potentially an invalid value range for longlat
+#' data" whenever it reads the box of a lon/lat layer that holds a latitude
+#' beyond 90; with \code{lat = TRUE} that text is not passed on while the
+#' rows are emptied, and the layer returned no longer holds such a vertex,
+#' so sf has no reason to say it again.
+#'
 #' @param x An sf or sfc object.
 #' @param rows The rows to empty; \code{NULL} for the rows
 #'   \code{.unlocated_features()} finds.
+#' @param lat Passed to \code{.unlocated_features()}: \code{TRUE} empties
+#'   the rows of a lon/lat layer with a latitude beyond 90 degrees too.
 #' @return \code{x}, with those rows emptied; \code{x} itself when there are
 #'   none.
 #' @keywords internal
 #' @noRd
-.empty_unlocated <- function(x, rows = NULL) {
+.empty_unlocated <- function(x, rows = NULL, lat = FALSE) {
+  if (isTRUE(lat))
+    return(.muffle_lonlat_box(.empty_unlocated(
+      x, rows %||% which(.unlocated_features(sf::st_geometry(x), lat = TRUE)))))
   g <- sf::st_geometry(x)
   if (is.null(rows)) rows <- which(.unlocated_features(g))
   if (!length(rows)) return(x)
@@ -4641,6 +4675,26 @@ summarize_by_cell <- function(assigned_points_sf,
     else structure(list(), class = cls)
   }), crs = sf::st_crs(g))
   if (inherits(x, "sf")) sf::st_set_geometry(x, g) else g
+}
+
+# sf's text for a lon/lat box that reaches beyond the poles or past
+# longitude 360 (sf::st_is_longlat()).
+.LONLAT_BOX_TEXT <- "bounding box has potentially an invalid value range for longlat data"
+
+#' Evaluate an expression without passing on sf's lon/lat box warning
+#'
+#' Only that text is muffled; every other condition passes as it comes.
+#' Used where the rows sf warns about are read as rows without a location
+#' (\code{.empty_unlocated(lat = TRUE)}), so the caller says it in its own
+#' words.
+#'
+#' @param expr The expression.
+#' @return The value of \code{expr}.
+#' @keywords internal
+#' @noRd
+.muffle_lonlat_box <- function(expr) {
+  withCallingHandlers(expr, warning = function(w)
+    if (identical(conditionMessage(w), .LONLAT_BOX_TEXT)) invokeRestart("muffleWarning"))
 }
 
 #' The coordinates the pooled values are computed from
@@ -4700,6 +4754,12 @@ summarize_by_cell <- function(assigned_points_sf,
   # points in sfc_POINT (.typed_points()): sf::st_coordinates() refuses that
   # class.
   layer <- .xy_if_mixed_or_m(.typed_points(layer))
+  # A row of a layer in a geographic CRS with a vertex at a latitude beyond
+  # 90 degrees has no location (.unlocated_features(lat = TRUE)), and is
+  # emptied before the reduction to points: a polygon with such a vertex got
+  # a point from GEOS, with sf's bare "bounding box has potentially an
+  # invalid value range for longlat data", and was pooled there.
+  layer <- .empty_unlocated(layer, .beyond_pole_rows(layer), lat = TRUE)
   if (!all(sf::st_geometry_type(layer, by_geometry = TRUE) == "POINT"))
     layer <- .xy_if_mixed(
       if (is.null(caller)) coerce_to_points(layer, "auto")
@@ -4868,6 +4928,7 @@ summarize_by_cell <- function(assigned_points_sf,
     limit   = vapply(fits, function(r) as.numeric(r$limit), numeric(1)),
     skipped_rows  = sum(unlocated),
     skipped_cells = length(unique(id[unlocated])),
+    skipped_ll    = inherits(layer, "sf") && .is_longlat(layer),
     response      = resp_num)
   list(columns = columns, record = record, events = events, loc = loc)
 }
@@ -5068,10 +5129,9 @@ summarize_by_cell <- function(assigned_points_sf,
   # ---- rows left out, and what the interval rests on --------------------------
   if (ev$skipped_rows > 0L)
     .warn_classed("spatialkit_pool_rows_skipped", paste0(
-      "summarize_by_cell(): %d row(s) in %d cell(s) have no location (an empty point, ",
-      "or a coordinate that is not finite or lies beyond 1e150). They count in `n` and ",
-      "the plain columns and take no part in the pooled columns."),
-      ev$skipped_rows, ev$skipped_cells,
+      "summarize_by_cell(): %d row(s) in %d cell(s) have no location (%s). They count ",
+      "in `n` and the plain columns and take no part in the pooled columns."),
+      ev$skipped_rows, ev$skipped_cells, .unlocated_what(ev$skipped_ll),
       data = list(n = ev$skipped_rows, cells = ev$skipped_cells,
                   columns = cols[of("skipped", as.integer) > 0L]))
   if (!is.null(obs_level)) {

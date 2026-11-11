@@ -1919,6 +1919,16 @@
 .UNLOCATED_WHAT <- paste0("an empty point, or a coordinate that is not finite ",
                           "or lies beyond 1e150")
 
+# The same, for a layer in a geographic CRS read by a reader that also takes
+# a latitude beyond 90 degrees for no location (.unlocated_features(lat =
+# TRUE)): `ll` is TRUE for such a layer, and the text names the latitude.
+.unlocated_what <- function(ll = FALSE) {
+  if (isTRUE(ll))
+    paste0("an empty point, a coordinate that is not finite or lies beyond ",
+           "1e150, or a latitude beyond 90 degrees")
+  else .UNLOCATED_WHAT
+}
+
 #' The rows of a layer that have a location
 #'
 #' A row has a location when its geometry is not empty and no coordinate of

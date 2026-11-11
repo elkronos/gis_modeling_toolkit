@@ -3,7 +3,9 @@
 #' Ensures point geometry, projected CRS, and removes rows with missing or
 #' non-finite values in modeling columns, \emph{including} rows without a
 #' location: an empty geometry, or a coordinate that is not finite or lies
-#' beyond 1e150, which no model backend can use.  The bound is read on the
+#' beyond 1e150, which no model backend can use, and in a layer with a
+#' geographic CRS a vertex at a latitude beyond 90 degrees, which is no place
+#' on the Earth.  The bound is read on the
 #' coordinates as given, before the projection, and again after it: a move
 #' between CRSs can bring a coordinate beyond it back finite, and that point
 #' is not a place the caller gave.  All non-POINT geometries (including
@@ -54,8 +56,9 @@
 #'   rows without a location.  What
 #'   was removed is recorded on the attribute \code{"dropped"}, a list with
 #'   \code{n} (rows dropped), \code{n_geometry} (how many of them for no
-#'   location: an empty point, or a coordinate that is not finite or lies
-#'   beyond 1e150), \code{which} (their positions in
+#'   location: an empty point, a coordinate that is not finite or lies
+#'   beyond 1e150, or a latitude beyond 90 degrees in a geographic CRS),
+#'   \code{which} (their positions in
 #'   \code{data_sf}), \code{row_id} (their \code{..row_id} values when the
 #'   layer carries that column, else \code{NULL}) and \code{reason} (one per
 #'   dropped row: \code{"geometry"}, \code{"missing"} or
@@ -226,14 +229,20 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   # A feature with a vertex that is not finite or lies beyond .POOL_XY_MAX
   # has no location (.unlocated_features()), so it is emptied before the
   # coerce and comes back as an empty point, dropped below with the
-  # geometry count.
+  # geometry count.  So is a row of a layer in a geographic CRS with a vertex
+  # at a latitude beyond 90 degrees (lat = TRUE), points included: a polygon
+  # with such a vertex was kept, with sf's bare "bounding box has
+  # potentially an invalid value range for longlat data" or, under
+  # pointize = "bbox_center", at a box centre half way to the vertex, with
+  # nothing said.
   # Points held in a column of the general class sfc_GEOMETRY are read in
   # sfc_POINT (.typed_points()): sf::st_coordinates() below refuses that
   # class.
   data_sf <- .typed_points(data_sf)
+  ll_given <- .is_longlat(data_sf)
   if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")) {
     data_sf <- .xy_if_mixed(tryCatch(
-      coerce_to_points(.empty_unlocated(.xy_if_mixed_or_m(data_sf)), pointize),
+      coerce_to_points(.empty_unlocated(.xy_if_mixed_or_m(data_sf), lat = TRUE), pointize),
       spatialkit_features_degenerate = function(e)
         .pointize_refused(e, "prep_model_data", pointize)))
   }
@@ -256,8 +265,11 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   # prediction grid then read a place the caller never gave.  Those rows are
   # emptied, so they take no part in the projection and are dropped below
   # with the rows whose geometry is empty: the layer is read as it is read
-  # with those rows empty.
-  data_sf <- .empty_unlocated(data_sf)
+  # with those rows empty.  A point of a layer in a geographic CRS at a
+  # latitude beyond 90 degrees is emptied too (lat = TRUE): the move gave it
+  # ensure_projected()'s warning that it cannot place the row, beside the
+  # drop line below.
+  data_sf <- .empty_unlocated(data_sf, lat = TRUE)
 
   if (!is.null(boundary)) {
     bnd <- if (inherits(boundary, "sfc")) sf::st_as_sf(boundary) else boundary
@@ -401,22 +413,21 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
         "spatialkit_rows_dropped",
         paste0("prep_model_data(): dropped %d of %d row(s) (%.1f%%): %d with ",
                "a missing value, %d with a non-finite value and %d without a ",
-               "location (an empty point, or a coordinate that is not finite ",
-               "or lies beyond 1e150). Rows affected by column: %s.%s The ",
+               "location (%s). Rows affected by column: %s.%s The ",
                "fit uses the %d row(s) that remain; attr(, \"dropped\") lists ",
                "the rows removed."),
         dropped, nrow(data_sf), 100 * dropped / nrow(data_sf),
-        n_miss, n_nonf, dropped_geo, cols_txt, shift_txt, sum(keep))
+        n_miss, n_nonf, dropped_geo, .unlocated_what(ll_given), cols_txt,
+        shift_txt, sum(keep))
     } else {
       # Prediction mode.  Every predict() method returns NA at exactly these
       # rows, so the result itself says which they are; an R warning per call
       # would fire on every chunk of a predict_surface() grid with covariate
       # gaps.  The log line and the record stay.
       .log_warn(paste0("prep_model_data(): dropping %d row(s) with non-finite or ",
-                       "missing values (%d of them without a location: an ",
-                       "empty point, or a coordinate that is not finite or ",
-                       "lies beyond 1e150). Rows affected by column: %s."),
-                dropped, dropped_geo, cols_txt)
+                       "missing values (%d of them without a location: %s). ",
+                       "Rows affected by column: %s."),
+                dropped, dropped_geo, .unlocated_what(ll_given), cols_txt)
     }
   }
 

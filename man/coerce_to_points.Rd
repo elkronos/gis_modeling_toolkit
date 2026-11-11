@@ -50,7 +50,10 @@ part too.
 A geometry of any type with a coordinate that is not finite (\code{NA},
 \code{NaN}, \code{Inf}) or lies beyond 1e150 has no location (see
 \code{\link[=ensure_projected]{ensure_projected()}}, "Rows without a location"), and gets an EMPTY
-POINT in every mode, as an empty geometry does.
+POINT in every mode, as an empty geometry does.  So does a geometry of a
+layer in a geographic CRS with a vertex at a latitude beyond 90 degrees,
+which is no place on the Earth, and a warning of class
+\code{spatialkit_lat_beyond_90} gives its rows of \code{x} (\code{rows}).
 
 Modes \code{"auto"} (for polygons) and \code{"point_on_surface"} take the point
 with GEOS, which reads a layer in longitude and latitude on the plane in
@@ -69,6 +72,21 @@ coordinates for degrees, its polygons that span more than 180 units are
 read so too, as EPSG:4326, and a warning names the rows whose point that
 reading moves; the points keep the missing CRS.
 
+Mode \code{"bbox_center"}, and mode \code{"centroid"} (with the centroids
+\code{"line_midpoint"} takes of the rows that are not a LINESTRING, and
+\code{"auto"} of a MULTIPOINT and of the rows that are not points, lines or
+polygons, such as geometry collections) where GEOS takes the centroid on
+the plane in degrees (a lon/lat layer with s2 off), read a geometry
+written across longitude 180 the same way: one that spans more
+than 180 degrees of longitude as written, and no more than 180 with the
+longitudes below 0 read from 180 to 360, gets the centre of that box, or
+GEOS's centroid of the geometry so read, brought back into -180 to 180.
+A layer without a CRS that the lon/lat heuristic takes for degrees is
+read so too, with the same warning. A geometry wider than 180 degrees in
+both readings, such as one around a pole, keeps the centre of its box on
+the plane, or GEOS's planar centroid. The centroids s2 takes on the
+sphere are not changed.
+
 In mode \code{"auto"} a MULTILINESTRING gets the midpoint of its longest part.
 When several parts share the greatest length (to one part in ten
 million, measured in the projection used), their midpoints are taken
@@ -85,7 +103,7 @@ and the points of such a layer are returned in one dimension.
 Z and M are dropped, the points come back in XY, and a warning of class
 \code{spatialkit_zm_dropped} says so, with the rows that carried Z or M as its
 \code{rows}.  Mode \code{"bbox_center"} reads the box of each geometry and gives XY
-points for any layer, with no warning.  A layer in one dimension, XY or
+points for any layer, with no warning about Z or M.  A layer in one dimension, XY or
 XYZ throughout, is read as it is, and so is a layer whose only
 geometries of another dimension than the first are empty and not points.
 
@@ -97,7 +115,8 @@ are dropped from every geometry, the points come back in XY, and a
 warning of class \code{spatialkit_zm_dropped} says so, with the rows whose
 geometry carries M as its \code{rows}.  Empty geometries are not counted.
 A POINT layer that carries M is returned as it is under \code{"auto"}, and
-\code{"bbox_center"} gives XY points with no warning, as for any layer.
+\code{"bbox_center"} gives XY points with no warning about M, as for any
+layer.
 
 On a layer in longitude and latitude with \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} on, sf takes
 centroids with s2 (under \code{"centroid"}, for the rows other than

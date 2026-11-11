@@ -144,8 +144,9 @@ Method \code{"random"} places its seeds in \code{boundary} and does not read it;
 it is ignored there with a warning. Only
 the first two coordinate columns are clustered, so a Z or M dimension does
 not join the distance calculation and dominate it; rows without a
-location (an empty point, or a coordinate that is not finite or lies
-beyond 1e150, read as given before any move) are dropped with a warning,
+location (an empty point, a coordinate that is not finite or lies
+beyond 1e150, or in a geographic CRS a latitude beyond 90 degrees, read
+as given before any move) are dropped with a warning,
 so they never reach \code{stats::kmeans()}, which fails on them without
 naming a cause. A lon/lat
 cloud, or one with no CRS whose coordinates look like lon/lat (the

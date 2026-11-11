@@ -176,6 +176,12 @@ test_that("summarize_by_cell(estimate = \"pooled\") leaves a row of `points` bey
                     "point, or a coordinate that is not finite or lies beyond 1e150). They ",
                     "count in `n` and the plain columns and take no part in the pooled ",
                     "columns.")
+  # A layer in a geographic CRS: the text also names a latitude beyond 90
+  # (BUG-223), which the row in metres stamped EPSG:4326 has.
+  skipped_ll <- paste0("summarize_by_cell(): 1 row(s) in 1 cell(s) have no location (an empty ",
+                       "point, a coordinate that is not finite or lies beyond 1e150, or a ",
+                       "latitude beyond 90 degrees). They count in `n` and the plain columns ",
+                       "and take no part in the pooled columns.")
   cases <- list(list(32616, c(5e5, 1e200)), list(3857, c(5e5, -1e200)),
                 list(3413, c(1e200, 0)), list(32617, c(5e5, 1e200)),
                 # Metres stamped EPSG:4326: finite as given, off the globe once moved.
@@ -188,7 +194,7 @@ test_that("summarize_by_cell(estimate = \"pooled\") leaves a row of `points` bey
     expect_identical(.fm_classes(r), .fm_classes(e), info = tag)
     expect_identical(.fm_texts(r), .fm_texts(e), info = tag)
     expect_true("spatialkit_pool_rows_skipped" %in% .fm_classes(r), info = tag)
-    expect_true(skipped %in% .fm_texts(r), info = tag)
+    expect_true((if (cs[[1L]] == 4326) skipped_ll else skipped) %in% .fm_texts(r), info = tag)
     expect_identical(attr(r$value, "pooled")$columns$resp_z$skipped, 1L, info = tag)
     expect_identical(attr(r$value, "pooled")$columns$resp_z$n, 479L, info = tag)
   }
@@ -289,9 +295,10 @@ test_that("the warning's entry in the help names the bound", {
   rd <- read_rd("summarize_by_cell.Rd")
   expect_s3_class(rd, "Rd")
   txt <- gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
-  expect_match(txt, paste0("rows with a value and a cell have no location: an empty point, or ",
+  expect_match(txt, paste0("rows with a value and a cell have no location: an empty point, ",
                            "a coordinate that is not finite or lies beyond 1e150, as given or ",
-                           "in the CRS the distances are measured in."), fixed = TRUE)
+                           "in the CRS the distances are measured in, or in a geographic CRS a ",
+                           "vertex at a latitude beyond 90 degrees."), fixed = TRUE)
   rd <- read_rd("cell_values_at.Rd")
   expect_s3_class(rd, "Rd")
   txt <- gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
