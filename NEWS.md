@@ -754,6 +754,13 @@ before upgrading a running analysis.
   `floor_applied = FALSE`. The field is added in that case only, so the
   bounds of every other profile are as they were.
 
+* **`select_resolution(criterion = "reliability")` said nothing when the
+  range floor lay above every level.** `range_floor = TRUE` could not hold
+  the floor, so every level was read and the optimum was a count whose
+  cells are wider than the range, while `range_floor` in the result was
+  `NA` as when no floor is asked for. `note` now says so, in an element
+  named `floor`.
+
 ### Build the cells
 
 * **`build_tessellation()` with a geographic `crs` built every method in

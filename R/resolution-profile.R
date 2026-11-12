@@ -4326,7 +4326,10 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   the range floor in \code{attr(profile, "bounds")}.  It applies when the
 #'   layer supports the floor, some scored level
 #'   reaches it, and the profile built its own ladder (a ladder set with
-#'   \code{levels} is read as given).  \code{FALSE} reads every level.
+#'   \code{levels} is read as given).  A floor above every level scored
+#'   (above the ceiling, say) is not held: every level is read,
+#'   \code{range_floor} in the result is \code{NA}, and \code{note} says
+#'   so in an element named \code{floor}.  \code{FALSE} reads every level.
 #' @param diagnostic \code{criterion = "moran_z"} is refused, with an error
 #'   of class \code{spatialkit_diagnostic_criterion} that says what the
 #'   column measures, unless this is \code{TRUE}: \code{moran_z} is a
@@ -4384,14 +4387,18 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'       \code{NA}.}
 #'     \item{\code{note}}{What the flags mean, in words: a character vector,
 #'       one note an element; \code{NULL} when there is nothing to say.  The
-#'       notes written under \code{"loo"} and \code{"size"}, and for a
-#'       profile built with \code{estimate} or with one size, carry names:
+#'       notes written under \code{"loo"} and \code{"size"}, for a
+#'       profile built with \code{estimate} or with one size, and about the
+#'       range floor, carry names:
 #'       \code{size} (the size that set the count), \code{held} (a size the
 #'       profile held to the most cells k-means can place),
 #'       \code{structure} (why the count is not identified), \code{finest}
 #'       (the lowest error of pooled values is at the finest level scored),
 #'       \code{estimate} (\code{cp} scores plain means, on a profile of
-#'       pooled values) and \code{ladder} (the ladder is one size).  A note
+#'       pooled values), \code{ladder} (the ladder is one size) and
+#'       \code{floor} (under \code{reliability} with \code{range_floor =
+#'       TRUE}: the range floor lies above every level scored, so it was not
+#'       held; \code{structured} is \code{NA} there).  A note
 #'       of \code{cp} or \code{moran_z} about the criterion itself has no
 #'       name.  The warning of class \code{spatialkit_no_structure} that the
 #'       functions taking the selection as a count raise carries every note
@@ -4748,6 +4755,30 @@ select_resolution <- function(profile,
     ok <- ok & lv >= bounds$floor
     held_floor <- as.integer(bounds$floor)
   }
+  # A floor above every level scored cannot be held, and reliability is then
+  # read at every level, where its optimum is a count whose cells are wider
+  # than the range.  The result said nothing of it: `range_floor` was NA, as
+  # it is when the floor is not asked for.  A floor past the integer range
+  # is NA in the bounds and is read from the area and the range.
+  floor_note <- NULL
+  if (criterion == "reliability" && range_floor && is.na(held_floor) && is.list(bounds) &&
+      isFALSE(bounds$levels_given) && is.finite(bounds$range %||% NA_real_) &&
+      bounds$range > 0) {
+    fl <- if (is.finite(bounds$floor %||% NA_integer_)) as.numeric(bounds$floor)
+          else if (is.finite(bounds$area %||% NA_real_))
+            max(2, ceiling(bounds$area / bounds$range^2))
+          else NA_real_
+    if (is.finite(fl) && !any(ok & lv >= fl))
+      floor_note <- sprintf(
+        paste0("the range floor (%.0f cells, area / range^2) lies above every level %s, ",
+               "so it was not held: reliability was read at every level, and its ",
+               "optimum is a count whose cells are wider than the range."),
+        fl,
+        if (fl > max(lv))
+          sprintf("of the ladder (%d to %d cells)", as.integer(min(lv)), as.integer(max(lv)))
+        else sprintf("at which reliability is finite (the finest is %d cells)",
+                     as.integer(max(lv[ok]))))
+  }
   opt <- if (maximise) max(v[ok]) else min(v[ok])
   best <- lv[ok][if (maximise) which.max(v[ok]) else which.min(v[ok])]
   # Of levels with the same leave-one-out error, the one with the fewest
@@ -4939,6 +4970,7 @@ select_resolution <- function(profile,
              "from. Build the profile with obs_per_cell = NULL, or with several sizes, ",
              "for a ladder %s can choose on."),
       .got_text(ladder_sizes), criterion, criterion))
+  if (!is.null(floor_note)) note <- c(note, floor = floor_note)
   sel <- structure(list(best = as.integer(best), flat = sort(as.integer(flat)),
                  criterion = criterion, value = opt,
                  at_ceiling = at_ceiling, at_floor = at_floor, edge = edge,

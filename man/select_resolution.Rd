@@ -38,7 +38,10 @@ the ladder.  Under \code{"size"} there is no flat region, and
 the range floor in \code{attr(profile, "bounds")}.  It applies when the
 layer supports the floor, some scored level
 reaches it, and the profile built its own ladder (a ladder set with
-\code{levels} is read as given).  \code{FALSE} reads every level.}
+\code{levels} is read as given).  A floor above every level scored
+(above the ceiling, say) is not held: every level is read,
+\code{range_floor} in the result is \code{NA}, and \code{note} says
+so in an element named \code{floor}.  \code{FALSE} reads every level.}
 
 \item{diagnostic}{\code{criterion = "moran_z"} is refused, with an error
 of class \code{spatialkit_diagnostic_criterion} that says what the
@@ -100,14 +103,18 @@ leave-one-out error.}
 \code{NA}.}
 \item{\code{note}}{What the flags mean, in words: a character vector,
 one note an element; \code{NULL} when there is nothing to say.  The
-notes written under \code{"loo"} and \code{"size"}, and for a
-profile built with \code{estimate} or with one size, carry names:
+notes written under \code{"loo"} and \code{"size"}, for a
+profile built with \code{estimate} or with one size, and about the
+range floor, carry names:
 \code{size} (the size that set the count), \code{held} (a size the
 profile held to the most cells k-means can place),
 \code{structure} (why the count is not identified), \code{finest}
 (the lowest error of pooled values is at the finest level scored),
 \code{estimate} (\code{cp} scores plain means, on a profile of
-pooled values) and \code{ladder} (the ladder is one size).  A note
+pooled values), \code{ladder} (the ladder is one size) and
+\code{floor} (under \code{reliability} with \code{range_floor =
+      TRUE}: the range floor lies above every level scored, so it was not
+held; \code{structured} is \code{NA} there).  A note
 of \code{cp} or \code{moran_z} about the criterion itself has no
 name.  The warning of class \code{spatialkit_no_structure} that the
 functions taking the selection as a count raise carries every note

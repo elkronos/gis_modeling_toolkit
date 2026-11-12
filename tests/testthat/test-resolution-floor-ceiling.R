@@ -130,3 +130,35 @@ test_that("the bounds mark a floor above the ceiling as not applied", {
   expect_identical(min(off$levels), 2L)
   expect_false("floor_applied" %in% names(attr(off, "bounds")))
 })
+
+
+test_that("reliability says in its note that a floor above every level was not held", {
+  skip_if_not_installed("gstat")
+  for (r in list(data = .fc_data(), subsample = .fc_subsample(),
+                 data_off = .fc_data(FALSE))) {
+    p <- r$value
+    b <- attr(p, "bounds")
+    sel <- select_resolution(p, criterion = "reliability", range_floor = TRUE)
+    expect_identical(sel$range_floor, NA_integer_)
+    expect_true("floor" %in% names(sel$note))
+    expect_identical(unname(sel$note[["floor"]]), sprintf(paste0(
+      "the range floor (%d cells, area / range^2) lies above every level of the ladder ",
+      "(2 to %d cells), so it was not held: reliability was read at every level, and its ",
+      "optimum is a count whose cells are wider than the range."), b$floor, b$ceiling))
+    # Every level was read.
+    expect_identical(sel$best, as.integer(p$levels[which.max(p$reliability)]))
+    # Not asked for, nothing to say.
+    off <- select_resolution(p, criterion = "reliability", range_floor = FALSE)
+    expect_false("floor" %in% names(off$note))
+    expect_identical(off$best, sel$best)
+    # The note is about reliability alone.
+    expect_false("floor" %in% names(select_resolution(p, criterion = "cp")$note))
+  }
+  # A floor the ladder reaches is held, and nothing is said.
+  pts <- .fc_layer(300, 3000, 1)
+  p <- suppressWarnings(resolution_profile(pts, "z", sac = .fc_sac(pts, 40000), n_levels = 8,
+                                           nstart = 2))
+  sel <- select_resolution(p, criterion = "reliability")
+  expect_identical(sel$range_floor, attr(p, "bounds")$floor)
+  expect_false("floor" %in% names(sel$note))
+})
