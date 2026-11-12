@@ -1,7 +1,11 @@
 url: https://elkronos.github.io/gis_modeling_toolkit/
 
+# KaTeX draws the formulas of the articles and the reference pages. Under
+# pkgdown's default, MathML, a reference page shows its \eqn{} and \deqn{} as
+# LaTeX source.
 template:
   bootstrap: 5
+  math-rendering: katex
 
 # Figures in the reference examples and the articles. pkgdown's default is a
 # 7.3-inch-wide figure shown in a 700-pixel column, which leaves axis and
@@ -21,147 +25,171 @@ navbar:
       text: Get started
       href: articles/getting-started.html
 
-# Articles, in the order to read them. The fifth vignette is the end-to-end
-# run and the sixth, on reporting, covers what leaves the session; the three
-# between "Getting started" and the end-to-end run each take one topic.
+# Articles, in the order to read them. "Get started" is the short path through
+# the pipeline; the five "Step by step" articles take one step each, in
+# pipeline order; the worked example runs the pipeline on one layer; "Help"
+# holds the troubleshooting guide and the glossary.
 articles:
 - title: Get started
   navbar: ~
   contents:
   - getting-started
-- title: One topic at a time
-  navbar: One topic at a time
+- title: Step by step
+  navbar: Step by step
+  desc: One step of the pipeline per article, in the order you take them.
   contents:
   - resolution
+  - cells
   - spatial-cross-validation
-  - diagnostics
-- title: End to end
-  navbar: End to end
+  - models
+  - reporting
+- title: Worked example
+  navbar: Worked example
+  desc: The pipeline on one layer, start to finish.
   contents:
   - spatialkit_nc_demo
-  - reporting
+- title: Help
+  navbar: Help
+  desc: Pages to consult when a step fails or a term is unclear.
+  contents:
+  - troubleshooting
+  - glossary
 
-# The reference index follows the pipeline in ?spatialkit: resolution,
-# tessellate, assign, aggregate, fold, fit, validate, predict, check
-# applicability. Every documented topic must appear here or the site build
-# stops, which is the point: a new export has to be filed somewhere.
+# articles/diagnostics.html is the old address of the models article. Old
+# reference addresses need no entry: pkgdown writes a redirect page for each
+# topic alias that is not a topic's own file.
+redirects:
+- ["articles/diagnostics.html", "articles/models.html"]
+
+# The reference index follows the pipeline in ?spatialkit: prepare the data,
+# measure spatial autocorrelation, choose a resolution, build the cells,
+# assign and summarise, make folds, fit a model, cross-validate and compare,
+# choose predictors, predict a surface. "Use a fitted model" and "Check a fit
+# in sample" serve the fitting and cross-validation steps, and the last
+# section serves every step. Every documented topic must appear here or the
+# site build stops, so a new export has to be filed somewhere.
 reference:
-- title: Overview
+- title: Start here
+  desc: >
+    The pipeline in order, the function for each step, and where each default
+    comes from.
   contents:
   - spatialkit-package
 
 - title: Prepare the data
-  desc: Coordinate reference systems, geometry coercion, and the clip target.
+  desc: >
+    Put the observations in a projected CRS as points, and see how the
+    package reads input geometry.
   contents:
   - ensure_projected
   - harmonize_crs
   - coerce_to_points
-  - clip_target_for
   - prep_model_data
+  - "[.spatialkit_rows"
+  - spatialkit-geometry
 
-- title: Measure the spatial structure
+- title: Measure spatial autocorrelation
   desc: >
-    The distance over which observations stay correlated. It sizes both the
-    cells and the cross-validation blocks.
+    The distance over which observations stay correlated. It can size the
+    cross-validation blocks (`make_folds(auto_range = TRUE)`) and sets a floor
+    on the number of cells, which `select_resolution(criterion =
+    "reliability")` and `resolution_profile(range_floor = TRUE)` apply.
   contents:
   - estimate_sac_range
   - sac_nugget
-  - print.sac_range
   - plot.sac_range
 
 - title: Choose a resolution
-  desc: How many cells, and how sure that number is.
+  desc: >
+    How many cells the data support, and the counts the chosen criterion
+    scores within `tol` of its best (the flat region).
   contents:
-  - determine_optimal_levels
   - resolution_profile
   - select_resolution
   - summary.resolution_profile
-  - print.resolution_profile
   - plot.resolution_profile
+  - determine_optimal_levels
 
-- title: Tessellate
-  desc: Build the regions, with reproducible cell identifiers.
+- title: Build the cells
+  desc: >
+    Voronoi, hex, square and Delaunay cells. Start with
+    `build_tessellation()`. Hex and square cells need a boundary;
+    `clip_target_for()` builds one from the points. The seed functions place
+    the points Voronoi cells are drawn around, and the lower-level builders
+    draw cells of one kind or number them.
   contents:
   - build_tessellation
+  - clip_target_for
+  - plot_tessellation_map
+- subtitle: Place Voronoi seeds
+  contents:
   - get_voronoi_seeds
   - voronoi_seeds_kmeans
   - voronoi_seeds_random
+- subtitle: Lower-level builders and IDs
+  contents:
   - create_voronoi_polygons
   - create_grid_polygons
   - create_grid_polygons_cached
   - ensure_stable_poly_id
-  - plot_tessellation_map
 
-- title: Assign and aggregate
+- title: Assign and summarise
   desc: >
-    One row per cell, with a count and a standard error for every aggregate,
-    the record of which rows were dropped or tied on the way, the value of a
-    cell at other locations, and whether a block-kriging estimate would have
-    beaten the plain cell mean.
+    Put each observation in a cell, reduce to one row per cell with a count,
+    a standard error and a pooled value, and read cell values at other
+    locations. `kriging_adequacy()` checks the cell mean against block
+    kriging.
   contents:
   - assign_features_to_polygons
   - summarize_by_cell
   - cell_values_at
   - kriging_adequacy
-  - "[.spatialkit_rows"
 
-- title: Fold
+- title: Make folds
   desc: >
-    Spatial cross-validation folds, how large the blocks should be, and how
-    far the held-out points ended up from the training data.
+    Spatial cross-validation folds, the block size, and how far the held-out
+    points sit from the training data, beside the map's locations when you
+    pass them.
   contents:
   - make_folds
   - plot_folds
   - fold_separation
   - cv_block_size_sweep
-  - plot.block_size_sweep
 
-- title: Fit
+- title: Fit a model
   desc: >
-    Three backends behind one `spatial_fit` class, and the constructor for
-    a backend of your own.
+    Random forest, GWR and Bayesian GP backends behind one `spatial_fit`
+    class, the length-scale bounds the GP uses, and the constructor for a
+    backend of your own.
   contents:
-  - new_spatial_fit
   - fit_rf_model
   - fit_gwr_model
   - fit_bayesian_spatial_model
   - gp_lengthscale_bounds
+  - new_spatial_fit
 
-- title: Choose the predictors
+- title: Use a fitted model
   desc: >
-    Forward selection scored on spatial folds for any backend, and an AICc
-    search over predictor sets for GWR.
-  contents:
-  - select_features_forward
-  - plot.feature_selection
-  - gwr_model_selection
-  - print.gwr_model_selection
-  - plot.gwr_model_selection
-
-- title: Methods on a fit
+    `print()`, `summary()` and `plot()` for any fit; `predict()`, `fitted()`
+    and `residuals()` for each backend; and `coef()` for GWR and the Bayesian
+    GP, since a forest has no coefficients. A forest's fitted values and
+    residuals are out-of-bag.
   contents:
   - print.spatial_fit
   - summary.spatial_fit
   - plot.spatial_fit
-  - predict.rf_fit
-  - predict.gwr_fit
-  - predict.bayesian_fit
-  - fitted.rf_fit
-  - fitted.gwr_fit
-  - fitted.bayesian_fit
-  - residuals.rf_fit
-  - residuals.gwr_fit
-  - residuals.bayesian_fit
-  - coef.rf_fit
-  - coef.gwr_fit
-  - coef.bayesian_fit
-  - print.rf_fit
+  - spatial_fit-predict
+  - spatial_fit-fitted
+  - spatial_fit-residuals
+  - spatial_fit-coef
 
-- title: Read a fit in sample
+- title: Check a fit in sample
   desc: >
-    Metrics on the training data (out-of-bag for a forest), and the residual
-    checks that say whether structure was left behind. In-sample numbers are
-    not comparable across backends; `compare_models_cv()` is.
+    Metrics on the training data (out-of-bag for a forest), and residual
+    Moran's I, which tests for spatial structure the model left behind.
+    In-sample metrics do not compare across backends; compare backends with
+    `compare_models_cv()`. `model_metrics()`, `evaluate_insample()` and
+    `compare_models()` also score rows you held out, passed as `newdata`.
   contents:
   - model_metrics
   - evaluate_insample
@@ -169,8 +197,10 @@ reference:
   - residual_morans_i
   - print.morans_i
 
-- title: Validate
-  desc: Score on held-out blocks, and compare backends on the same folds.
+- title: Cross-validate and compare
+  desc: >
+    Score a model on held-out blocks, compare backends on the same folds, and
+    plot the per-fold spread and interval calibration.
   contents:
   - cv_spatial
   - cv_rf
@@ -180,18 +210,36 @@ reference:
   - plot_cv_metrics
   - plot_calibration
 
-- title: Predict, and check where the prediction applies
+- title: Choose predictors
+  desc: >
+    Forward selection scored on spatial folds for any backend, and an AICc
+    search over predictor sets for GWR.
+  contents:
+  - select_features_forward
+  - plot.feature_selection
+  - gwr_model_selection
+  - plot.gwr_model_selection
+
+- title: Predict a surface
+  desc: >
+    Predict onto a regular grid, and mark the locations whose predictor
+    values are too unlike the training data for the cross-validated score to
+    hold there.
   contents:
   - predict_surface
   - area_of_applicability
   - print.aoa
   - plot.aoa
 
-- title: Package options and caches
+- title: Set options, catch conditions and clear caches
   desc: >
-    The console log, and the two in-session caches.  Both caches are keyed on
-    the inputs, so they only need clearing when memory is the constraint.
+    The console log, the two work limits, every warning and error class the
+    package raises, and two in-session caches. To free memory, clear the grid
+    cache that `create_grid_polygons_cached()` fills; clear a Bayesian fit's
+    fitted-value cache after editing its `brmsfit` by hand.
   contents:
   - spatialkit_quiet
+  - spatialkit-options
+  - spatialkit-conditions
   - clear_grid_cache
   - clear_fitted_cache
