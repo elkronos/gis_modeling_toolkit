@@ -44,8 +44,7 @@ articles:
   - models
   - reporting
 - title: Worked example
-  navbar: Worked example
-  desc: The pipeline on one layer, start to finish.
+  navbar: Example
   contents:
   - spatialkit_nc_demo
 - title: Help

@@ -132,8 +132,8 @@ Where a fold's fit took the response about a centre (a response at a
 large offset; see \code{\link[=fit_gwr_model]{fit_gwr_model()}}), \code{predictions} also carries
 \code{y_centre} (that centre, 0 in the rows of a fold fitted on the raw
 response), \code{yhat_centred} and \code{y_train_mean_centred} (\code{yhat} and
-\code{y_train_mean} less the centre, to the spread a double rounds away at the
-response's size), and the metrics are those of the centred values, as
+\code{y_train_mean} less the centre, which keep digits that rounding at the
+response's size would lose), and the metrics are those of the centred values, as
 \code{\link[=model_metrics]{model_metrics()}} computes them.
 }
 \description{

@@ -1274,13 +1274,12 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' Places `k` seed points at k-means cluster centres of the observed
 #' coordinates, so seeds (and the Voronoi cells built from them) follow the
 #' sampling density: clusters of observations attract seeds, empty ground gets
-#' none. Reach for this when you want cells that follow the data, so that
-#' counts per cell vary far less than on a fixed grid over clustered points
-#' (the density kind, the default, evens them out once there are more cells
-#' than clusters of points; plain k-means, `partition = "kmeans"`, minimises
-#' the spread of points around each centre and does not equalise them),
-#' which is what keeps per-cell aggregates in
-#' [summarize_by_cell()] from resting on one or two observations. Use
+#' none. Use it when the cells should follow the data. With the default
+#' density kind the cells hold similar numbers of observations once there
+#' are more cells than clusters of points, which keeps per-cell aggregates in
+#' [summarize_by_cell()] from resting on one or two observations. Plain
+#' k-means (`partition = "kmeans"`) minimises the spread of points around
+#' each centre and does not even out the counts. Use
 #' [voronoi_seeds_random()] instead when you want coverage of the study area
 #' rather than of the data, and [get_voronoi_seeds()] to pick between them by
 #' name.

@@ -19,12 +19,11 @@ A \code{ggplot} object.
 \description{
 \code{\link{cv_bayes}()} scores every fold's posterior predictive intervals
 at each of \code{coverage_levels}: the share of held-out observations the
-interval of that nominal level contained.  One coverage number cannot show
-a pattern; the pairs can.  This draws observed coverage against nominal
-with the diagonal, one point per level for the fold-weighted pooled value
-(from \code{predictive_coverage}) and one faint point per fold, so
-systematic over-confidence (points below the line) or intervals wider than
-they need to be (above it) are read at a glance.  Three levels is a thin
+interval of that nominal level contained.  This draws observed coverage
+against nominal with the diagonal, one point per level for the
+fold-weighted pooled value (from \code{predictive_coverage}) and one faint
+point per fold, so you can see systematic over-confidence (points below
+the line) or intervals wider than they need to be (above it).  Three levels is a thin
 curve; pass \code{coverage_levels = seq(0.1, 0.9, by = 0.1)} to
 \code{cv_bayes()} for a full one.  Each level is drawn at the nominal value
 \code{cv_bayes()} records in \code{coverage_levels}, so whatever was

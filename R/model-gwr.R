@@ -725,7 +725,7 @@
 #' little to rest on, and can be implausibly large.  An exactly singular
 #' window (an indicator that is constant inside it, or fewer observations
 #' than parameters) is of deficient rank: the coefficients it cannot estimate
-#' are `NA` and the fit is returned (see \strong{The local solve}).
+#' are `NA` and the fit is returned (see "The local solve").
 #' A window with only `cn` above 30 raises no warning:
 #' `plot(fit, type = "coefficients", term = "Intercept")` masks it, and slope
 #' maps do not.  Centre such a predictor if you want an interpretable local
@@ -796,7 +796,7 @@
 #'   \code{Local_R2}), \code{GW.diagnostic}, \code{GW.arguments} and
 #'   \code{lm} (the global least-squares fit).  It is a plain list, not a
 #'   \code{gwrm} object.  Where a predictor or the response was taken less
-#'   its centre (see \strong{The local solve}), \code{lm} is solved on the
+#'   its centre (see "The local solve"), \code{lm} is solved on the
 #'   centred columns and returned as the fit at the data's origin: its
 #'   coefficients, fitted values, \code{qr} and \code{effects} are those of
 #'   the raw columns, so \code{summary()}, \code{vcov()}, \code{confint()}

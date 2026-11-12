@@ -792,19 +792,10 @@
 
 #' Build the area to tessellate within, from points or a boundary
 #'
-#' Builds the polygon layer to tessellate within. With a `boundary` it is
-#' that boundary, row for row (optionally buffered by `expand`). Without one
-#' it is the axis-aligned bounding box of `points_sf` in the working CRS,
-#' again optionally buffered. Points that all share one x or one y, or
-#' nearly so (the short side of their bounding box below a millionth of the
-#' long side, or below about 1.5e-154, a length whose square doubles cannot
-#' hold), get a small buffer around them instead. When every point sits at
-#' one location, or the share of their spread the buffer would take (5
-#' percent, or a fractional `expand`) is below that length, the box has no
-#' extent to take a share of, and the target is a disk of radius 1 unit of
-#' the CRS around it (1 m in a metre CRS, 1 km in a kilometre CRS), unless
-#' `expand` is 1 or more, which is then the radius; the message says so.
-#' Pass `boundary` for a target of real size.
+#' Builds the area that the hex and square cells of
+#' [build_tessellation()] are clipped to.  With a `boundary` it is that
+#' boundary, row for row; without one it is the axis-aligned bounding box of
+#' `points_sf` in the working CRS.  Either can be buffered by `expand`.
 #'
 #' Use it to build the `boundary` that `method = "hex"` and `"square"`
 #' require, to check that a study-area polygon contains the observations
@@ -815,9 +806,22 @@
 #' It is not the target [build_tessellation()] derives on its own:
 #' `method = "voronoi"` without a boundary clips to the convex hull of the
 #' points (or of their `cover`, for seeds) buffered by 2 percent of its
-#' diagonal, and there `expand` is always a distance. A bounding box over a non-rectangular point cloud includes
-#' corners with no data, so a hex or square grid laid over it has cells that
-#' hold no points; pass the study-area polygon when there is one.
+#' diagonal, and there `expand` is always a distance.  A bounding box over a
+#' non-rectangular point cloud includes corners with no data, so a hex or
+#' square grid laid over it has cells that hold no points; pass the
+#' study-area polygon when there is one.
+#'
+#' @section Points with no extent:
+#' Points that all share one x or one y, or nearly so (the short side of
+#' their bounding box below a millionth of the long side, or below about
+#' 1.5e-154, a length whose square doubles cannot hold), get a small buffer
+#' around them instead of a box.  When every point sits at one location, or
+#' the share of their spread the buffer would take (5 percent, or a
+#' fractional `expand`) is below that length, the box has no extent to take
+#' a share of, and the target is a disk of radius 1 unit of the CRS around
+#' it (1 m in a metre CRS, 1 km in a kilometre CRS), unless `expand` is 1 or
+#' more, which is then the radius; the message says so.  Pass `boundary` for
+#' a target of real size.
 #'
 #' @param points_sf An sf object with POINT/MULTIPOINT geometry. Points that
 #'   mix XY and XYZ (or XYM), or that carry M, are read in x and y, since sf
@@ -1469,50 +1473,64 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' does not move an edge. The cells are then the cells each row was scored
 #' in, and [assign_features_to_polygons()] gives a point on an edge between
 #' two of them the cell the profile scored it in.
-#' @return A list with \code{cells}, \code{index}, \code{boundary},
-#'   \code{method} and \code{params}.  \code{index} holds one \code{cell_id}
-#'   per row of \code{points_sf}, and \code{NA} for a point that falls outside
-#'   every cell, which means outside the study area (grown by \code{expand}
-#'   when it is positive), and farther than a thousandth of the median cell
-#'   width from the nearest cell, so a summary built from it counts only the points
-#'   the tessellation actually covers.  Such points are counted in
-#'   \code{params$n_outside}, and a warning of class
-#'   \code{"spatialkit_unassigned"} gives their number.  Points so far from
-#'   the origin of their CRS that doubles there are spaced more than a
-#'   millionth of their extent apart (0.125 at 1e15, beside a layer a few
-#'   kilometres across) have the cells' edges and their own cells read at
-#'   that rounding, so two points that close can fall in one cell; the cells
-#'   are built, and a warning of class \code{"spatialkit_xy_imprecise"}
-#'   gives the spacing and the extent.  For seeds (see
-#'   "Details") \code{index} holds the cell each seed generates, whether the
-#'   seed lies inside the boundary or not, and \code{NA} only for a seed whose
-#'   cell the clip removed whole or without a location (an empty geometry,
-#'   or a coordinate that is not finite or lies beyond 1e150);
-#'   \code{params$n_outside} counts those, the warning names them as seeds,
-#'   and \code{params$snapped} lists only the seeds whose entry is the cell
-#'   they were snapped to.  \code{boundary} is
-#'   the boundary the cells were built in: the one supplied or derived, grown
-#'   by \code{expand}.  \code{params$boundary_source} says where it came
-#'   from: \code{"boundary"} (the argument), \code{"cover"} (the
-#'   \code{cover} argument), \code{"seeds' cover"} (the cover attached to
-#'   \code{points_sf}) or \code{"points"} (the hull of \code{points_sf}
-#'   itself).  \code{params$cover_outside} is the number of \code{cover}
-#'   points outside every cell when a point \code{cover} was given with a
-#'   \code{boundary}, and \code{NULL} otherwise.  \code{params$partition} is
-#'   present when \code{points_sf} is a layer of seeds that records the kind
-#'   of partition that placed it (\code{attr(points_sf, "partition")}, see
-#'   \code{\link{get_voronoi_seeds}()}): the same list, so the cells say what
-#'   built them.  Seeds of plain k-means record nothing, and \code{params}
-#'   then has no such element; neither has it for points that are not seeds.
-#'   \code{params$count_rule} is present when \code{points_sf} carries the
-#'   record of how its count was set (\code{attr(points_sf, "count_rule")}:
-#'   the seeds of a \code{\link{select_resolution}()} result, or seeds a
-#'   seeding function placed from one): the same list, with
-#'   \code{scored_cells = FALSE} when the seeds are fewer or more than its
-#'   count, which the cells carry too as \code{attr(cells, "count_rule")}.
-#'   \code{\link{assign_features_to_polygons}()} copies it to the rows it
-#'   assigns, and \code{\link{summarize_by_cell}()} checks its result
-#'   against it.
+#' @section Points far from the origin of their CRS:
+#' Points so far from the origin of their CRS that doubles there are spaced
+#' more than a millionth of their extent apart (0.125 at 1e15, beside a layer
+#' a few kilometres across) have the cells' edges and their own cells read
+#' at that rounding, so two points that close can fall in one cell.  The
+#' cells are built, and a warning of class \code{"spatialkit_xy_imprecise"}
+#' gives the spacing and the extent.
+#' @return A list with these elements:
+#'   \describe{
+#'     \item{\code{cells}}{The cells, one polygon per unique point, with a
+#'       stable \code{cell_id}.}
+#'     \item{\code{index}}{One \code{cell_id} per row of \code{points_sf}, and
+#'       \code{NA} for a point that falls outside every cell: outside the
+#'       study area (grown by \code{expand} when it is positive), and farther
+#'       than a thousandth of the median cell width from the nearest cell, so
+#'       a summary built from it counts only the points the tessellation
+#'       covers.  Such points are counted in \code{params$n_outside}, and a
+#'       warning of class \code{"spatialkit_unassigned"} gives their number.
+#'       For seeds (see "Details") \code{index} holds the cell each seed
+#'       generates, whether the seed lies inside the boundary or not, and
+#'       \code{NA} only for a seed whose cell the clip removed whole or
+#'       without a location (an empty geometry, or a coordinate that is not
+#'       finite or lies beyond 1e150); \code{params$n_outside} counts those,
+#'       the warning names them as seeds, and \code{params$snapped} lists
+#'       only the seeds whose entry is the cell they were snapped to.}
+#'     \item{\code{boundary}}{The boundary the cells were built in: the one
+#'       supplied or derived, grown by \code{expand}.}
+#'     \item{\code{method}}{\code{"voronoi"}.}
+#'     \item{\code{params}}{The settings and diagnostics of the build,
+#'       among them:
+#'       \itemize{
+#'         \item \code{boundary_source}: where the boundary came from,
+#'           \code{"boundary"} (the argument), \code{"cover"} (the
+#'           \code{cover} argument), \code{"seeds' cover"} (the cover
+#'           attached to \code{points_sf}) or \code{"points"} (the hull of
+#'           \code{points_sf} itself);
+#'         \item \code{cover_outside}: the number of \code{cover} points
+#'           outside every cell when a point \code{cover} was given with a
+#'           \code{boundary}, and \code{NULL} otherwise;
+#'         \item \code{partition}: present when \code{points_sf} is a layer
+#'           of seeds that records the kind of partition that placed it
+#'           (\code{attr(points_sf, "partition")}, see
+#'           \code{\link{get_voronoi_seeds}()}), the same list, so the cells
+#'           say what built them.  Seeds of plain k-means record nothing, and
+#'           \code{params} then has no such element; neither has it for
+#'           points that are not seeds;
+#'         \item \code{count_rule}: present when \code{points_sf} carries the
+#'           record of how its count was set (\code{attr(points_sf,
+#'           "count_rule")}: the seeds of a \code{\link{select_resolution}()}
+#'           result, or seeds a seeding function placed from one), the same
+#'           list, with \code{scored_cells = FALSE} when the seeds are fewer
+#'           or more than its count.  The cells carry it too, as
+#'           \code{attr(cells, "count_rule")};
+#'           \code{\link{assign_features_to_polygons}()} copies it to the
+#'           rows it assigns, and \code{\link{summarize_by_cell}()} checks
+#'           its result against it.
+#'       }}
+#'   }
 #' @family cell building
 #' @examples
 #' library(sf)

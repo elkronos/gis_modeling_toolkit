@@ -33,7 +33,7 @@ A \code{ggplot} object.
 The criteria of a \code{\link{resolution_profile}()} against the number of
 cells, one panel per criterion on a shared x axis, with the level each
 criterion selects marked and the region over which it is within \code{tol}
-of its optimum shaded.  That shaded band is the flat region
+of its optimum shaded.  The shading marks the flat region
 \code{\link{select_resolution}()} reports.  A criterion whose optimum sits
 at an end of the levels it was scored at is captioned with which bound that
 is (the support ceiling, the range floor, the ladder's own end, or the
@@ -60,8 +60,8 @@ D  <- as.matrix(dist(xy))
 xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) \%*\% rnorm(n))
 pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
-plot(prof)                            # one panel per criterion it scored;
-                                      # no elbow on these uniform points
+# Two of the criteria it scored (plot(prof) draws every one, a panel each)
+plot(prof, criteria = c("cp", "reliability"))
 plot(prof, criteria = c("cp", "wss")) # Cp beside the raw WSS curve
 \dontshow{\}) # examplesIf}
 }

@@ -2298,7 +2298,7 @@ assign_features_to_polygons <- function(
 #' Two families of interval columns can be in the frame. Each has its own
 #' argument, and neither changes the other.
 #'
-#' | Family | Columns | Target | Centre | Asked for by |
+#' | **Family** | **Columns** | **Target** | **Centre** | **Asked for by** |
 #' |---|---|---|---|---|
 #' | observation | `..obs_lo_*`, `..obs_hi_*` | one further observation in the cell | pooled value | `obs_level` |
 #' | mean | `..ci_lo_*`, `..ci_hi_*` | a mean, never one observation | plain mean | `conf_level` |
@@ -5220,7 +5220,8 @@ summarize_by_cell <- function(assigned_points_sf,
 print.spatialkit_pooled <- function(x, ...) {
   label  <- function(name) sprintf("  %-12s: ", name)
   indent <- strrep(" ", 16L)
-  sci    <- function(v) sprintf("%.2e", v)
+  # The numbers of one record line in one notation (.one_notation()).
+  sci    <- function(...) .one_notation(c(...))
   pct    <- function(level) paste0(.level_text(level), "%")
   count  <- function(k, what) sprintf("%d %s%s", as.integer(k), what, if (k == 1L) "" else "s")
   # The words beside an interval's columns, read from what the table says the
@@ -5252,9 +5253,10 @@ print.spatialkit_pooled <- function(x, ...) {
         if (r$cells <= 9L) sprintf("all the other cells (%d of them)", r$neighbours)
         else sprintf("the %d nearest cells (centroids of the rows)", r$neighbours),
         "\n", sep = "")
-    cat(label("variances"), "inside cells ", sci(r$sigma2), " (from ",
+    v2 <- sci(r$sigma2, r$tau2)
+    cat(label("variances"), "inside cells ", v2[1L], " (from ",
         count(r$df, "value"), " beyond one per cell);\n", indent,
-        "between a cell and its target ", sci(r$tau2), "\n", sep = "")
+        "between a cell and its target ", v2[2L], "\n", sep = "")
     cat(label("own weight"), sprintf("median %.2f (..pooled_w_%s)\n", r$own_weight, nm),
         sep = "")
     if (no_tau2)
@@ -5266,9 +5268,10 @@ print.spatialkit_pooled <- function(x, ...) {
           "\n", sep = "")
     cat(label("alone"), sprintf("%.1f%% of the rows are the only one in their cell\n",
                                 100 * r$share_alone), sep = "")
-    cat(label("loo"), sci(r$loo),
+    lo <- sci(r$loo, r$loo_one_cell)
+    cat(label("loo"), lo[1L],
         " (leave-one-out mean squared error of the pooled value);\n", indent,
-        "one mean for all rows: ", sci(r$loo_one_cell),
+        "one mean for all rows: ", lo[2L],
         # Which of the rule's two tests failed (.no_structure()).
         if (isFALSE(r$structured)) {
           if (.beats_one_mean(r$loo, r$loo_one_cell))

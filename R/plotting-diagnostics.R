@@ -209,12 +209,12 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
 
 #' Plot the dissimilarity distribution behind an area of applicability
 #'
-#' \code{n_outside} says how many prediction locations fall outside the area
-#' of applicability; it does not say whether the rest sit comfortably inside
-#' or crowd against the threshold, nor how far outside the outsiders are.
-#' This draws the dissimilarity index of the prediction locations against
-#' that of the training data, with the threshold marked, so the prediction
-#' set can be read as mostly inside, marginal or largely outside.  The
+#' Draws the dissimilarity index of the prediction locations against that of
+#' the training data, with the threshold marked, so you can see whether the
+#' prediction set sits well inside, near the threshold or outside.
+#' \code{n_outside} gives only how many prediction locations fall outside
+#' the area of applicability, not how close to the threshold the rest sit or
+#' how far outside the outsiders are.  The
 #' training DI is cross-validated over the \code{folds} passed to
 #' \code{\link{area_of_applicability}()}, or without them is each training
 #' point's distance to its nearest other training point; the legend and the
@@ -447,12 +447,11 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
 #'
 #' \code{\link{cv_bayes}()} scores every fold's posterior predictive intervals
 #' at each of \code{coverage_levels}: the share of held-out observations the
-#' interval of that nominal level contained.  One coverage number cannot show
-#' a pattern; the pairs can.  This draws observed coverage against nominal
-#' with the diagonal, one point per level for the fold-weighted pooled value
-#' (from \code{predictive_coverage}) and one faint point per fold, so
-#' systematic over-confidence (points below the line) or intervals wider than
-#' they need to be (above it) are read at a glance.  Three levels is a thin
+#' interval of that nominal level contained.  This draws observed coverage
+#' against nominal with the diagonal, one point per level for the
+#' fold-weighted pooled value (from \code{predictive_coverage}) and one faint
+#' point per fold, so you can see systematic over-confidence (points below
+#' the line) or intervals wider than they need to be (above it).  Three levels is a thin
 #' curve; pass \code{coverage_levels = seq(0.1, 0.9, by = 0.1)} to
 #' \code{cv_bayes()} for a full one.  Each level is drawn at the nominal value
 #' \code{cv_bayes()} records in \code{coverage_levels}, so whatever was
@@ -677,7 +676,7 @@ plot_calibration <- function(cv, ...) {
 #' The criteria of a \code{\link{resolution_profile}()} against the number of
 #' cells, one panel per criterion on a shared x axis, with the level each
 #' criterion selects marked and the region over which it is within \code{tol}
-#' of its optimum shaded.  That shaded band is the flat region
+#' of its optimum shaded.  The shading marks the flat region
 #' \code{\link{select_resolution}()} reports.  A criterion whose optimum sits
 #' at an end of the levels it was scored at is captioned with which bound that
 #' is (the support ceiling, the range floor, the ladder's own end, or the
@@ -721,8 +720,8 @@ plot_calibration <- function(cv, ...) {
 #' xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
 #' pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 #' prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
-#' plot(prof)                            # one panel per criterion it scored;
-#'                                       # no elbow on these uniform points
+#' # Two of the criteria it scored (plot(prof) draws every one, a panel each)
+#' plot(prof, criteria = c("cp", "reliability"))
 #' plot(prof, criteria = c("cp", "wss")) # Cp beside the raw WSS curve
 #' @export
 plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
@@ -773,7 +772,7 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
               reliability = "Reliability of cell means (higher is better)",
               elbow = "WSS elbow statistic (higher is better)",
               loo = "Leave-one-out error (lower is better)",
-              moran_z = "|Moran's z| of cell means (a diagnostic, not a count rule)",
+              moran_z = "Absolute Moran's z of cell means (a diagnostic, not a count rule)",
               wss = "Within-cluster sum of squares")
   rows <- list(); chosen <- list(); flat <- list(); notes <- character(0)
   skipped <- character(0)

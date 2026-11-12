@@ -340,17 +340,14 @@
   "?compare_models_cv" = paste(
     "When it is NULL, one set of block_kfold folds is built and every model",
     "is scored on it."),
-  "?fit_rf_model" = c(
-    paste("Random folds, and the out-of-bag error, a random hold-out too,",
-          "measure it among the samples: the error of a map over an area the",
-          "samples cover evenly, which reads low for predictions made farther",
-          "from the data."),
+  "?fit_rf_model" =
     paste("so under spatial autocorrelation it is the error of predicting among",
           "the samples, as random k-fold is, and reads low for predictions made",
-          "farther from the data than the samples sit from each other")),
+          "farther from the data than the samples sit from each other"),
   "?print.spatial_fit" = paste(
-    "its out-of-bag error, a random hold-out, is its error among the samples",
-    "and reads low for predictions made farther from the data;"),
+    "Apart from a forest's out-of-bag error and a Bayesian GP's LOOIC, an",
+    "approximate leave-one-out score of single rows, nothing printed here is",
+    "an out-of-sample score, and neither of those is a spatial one."),
   "?estimate_sac_range" = c(
     paste("On fields smoother than exponential that makes the range long, and",
           "blocks sized from it come out larger: they still hold the test points",

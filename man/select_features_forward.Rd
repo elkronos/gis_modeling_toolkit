@@ -120,65 +120,76 @@ training-fold mean is used when that fails. The example builds one.}
 \value{
 A list of class \code{"feature_selection"} (so that
 \code{\link{plot.feature_selection}()} draws the selection path) with
-\code{selected} (the chosen predictors, in the order they were added;
-possibly none), \code{score}, \code{score_holdout}, \code{history},
-\code{params}, \code{split}, \code{baseline} and \code{fold_scores}.
-\code{score} is the winning set's cross-validated \code{metric} at the
-final step: the \strong{selection-internal} optimum, optimistically
+these elements:
+\describe{
+\item{\code{selected}}{The chosen predictors, in the order they were
+added; possibly none.}
+\item{\code{score}}{The winning set's cross-validated \code{metric} at
+the final step: the optimum inside the selection, optimistically
 biased because it was chosen as the best of many (see "Selection
-score"),
-and \code{NA} when nothing was selected.  \code{history} is a data.frame
-with \code{step}, \code{variable}, \code{score}, \code{n_pred},
-\code{gain}, \code{fold_gain} and \code{fold_gain_se},
-holding every candidate evaluated at every step, and a \code{step = 0}
-row named \code{"<none>"} giving the baseline, so the first variable's
-gain can be read off directly.  \code{gain} is the candidate set's
-improvement in the pooled score over the set it was added to (the
-baseline at step 1), \code{fold_gain} the mean of the per-fold
-improvements and \code{fold_gain_se} its standard error: the three
-numbers the rule reads.  \code{fold_scores} is a data.frame with
-\code{step}, \code{variable}, \code{fold} and \code{score}: the metric
-of every set in every fold.  \code{baseline} is a list with
-\code{type} (\code{"null model"}, \code{"null_fn"} or
-\code{"fold mean"}), \code{score}, \code{path} (the set the sweep
-reached), \code{gain}, \code{fold_gain} and \code{fold_gain_se} (that
-set against the baseline), \code{kept} (\code{FALSE} when the path
-did not beat a fold-mean baseline and \code{selected} is empty for that
-reason; \code{NA} when the path is empty) and \code{first}.
-\code{first} is \code{NULL} unless the baseline is the fold mean and a
-path of two or more variables was kept; it is then the test of the
-first variable, a list with \code{variable}; \code{gain},
-\code{fold_gain} and \code{fold_gain_se} (the path against the path
-without that variable); \code{rest}, a list with \code{vars},
-\code{score}, \code{gain}, \code{fold_gain} and \code{fold_gain_se}
-(the path without it, and that set against the baseline);
-\code{dropped} (\code{TRUE} when the variable was taken out:
-\code{selected} is then \code{path[-1]} and \code{score} is
-\code{rest$score}); and \code{note}, the verdict in words.  The set
-scored for that test is not a step of the sweep, so it is not in
-\code{history} or \code{fold_scores}.  Every set is scored on the
-same rows: those the null model's cross-validation predicted or, when
-the baseline is the fold mean, those any step-1 set predicted;
-\code{params$n_scored} counts them (a warning says so when that is
-fewer than all).  \code{n_pred} is how many
-rows the set's cross-validation predicted.  A set that left some of the
-scored rows unpredicted, because a fold failed for it, has \code{score}
-\code{NA}, with a warning naming it: scored on the rows it did predict
-it would be compared on fewer, usually easier, rows than its rivals.  A
-factor with a level found in one spatial block only is the usual case,
-and cannot be selected.
-\code{score_holdout} is \code{NA} unless \code{select_on = "split"}, and
-then the selected set's \code{metric} when fitted on the selection half
-and predicted on the estimation half (\eqn{R^2} against the selection
-half's mean, the out-of-sample convention); \code{NA} when nothing was
-selected or the prediction failed.  \code{split} is \code{NULL} or a
-list with \code{selection} and \code{estimation}, integer row positions
-in \code{train_sf} as passed; rows the completeness filter above dropped
-are in neither.
-\code{params} records \code{metric}, \code{method}, \code{k},
-\code{tol}, \code{seed}, \code{auto_range}, \code{select_on},
-\code{n_candidates}, \code{estimated_fits}, \code{n_scored},
-\code{rule}, \code{se_mult} and \code{baseline} (its type).
+score"), and \code{NA} when nothing was selected.}
+\item{\code{score_holdout}}{\code{NA} unless \code{select_on =
+      "split"}, and then the selected set's \code{metric} when fitted on
+the selection half and predicted on the estimation half (\eqn{R^2}
+against the selection half's mean, the out-of-sample convention);
+\code{NA} when nothing was selected or the prediction failed.}
+\item{\code{history}}{A data.frame with \code{step}, \code{variable},
+\code{score}, \code{n_pred}, \code{gain}, \code{fold_gain} and
+\code{fold_gain_se}, holding every candidate evaluated at every
+step, and a \code{step = 0} row named \code{"<none>"} giving the
+baseline, so the first variable's gain can be read off directly.
+\code{gain} is the candidate set's improvement in the pooled score
+over the set it was added to (the baseline at step 1),
+\code{fold_gain} the mean of the per-fold improvements and
+\code{fold_gain_se} its standard error: the three numbers the rule
+reads.  \code{n_pred} is how many rows the set's cross-validation
+predicted.}
+\item{\code{fold_scores}}{A data.frame with \code{step},
+\code{variable}, \code{fold} and \code{score}: the metric of every
+set in every fold.}
+\item{\code{baseline}}{A list with \code{type} (\code{"null model"},
+\code{"null_fn"} or \code{"fold mean"}), \code{score}, \code{path}
+(the set the sweep reached), \code{gain}, \code{fold_gain} and
+\code{fold_gain_se} (that set against the baseline), \code{kept}
+(\code{FALSE} when the path did not beat a fold-mean baseline and
+\code{selected} is empty for that reason; \code{NA} when the path is
+empty) and \code{first}.  \code{first} is \code{NULL} unless the
+baseline is the fold mean and a path of two or more variables was
+kept.  It is then the test of the first variable, a list with:
+\itemize{
+\item \code{variable};
+\item \code{gain}, \code{fold_gain} and \code{fold_gain_se}: the
+path against the path without that variable;
+\item \code{rest}, a list with \code{vars}, \code{score},
+\code{gain}, \code{fold_gain} and \code{fold_gain_se}: the path
+without it, and that set against the baseline;
+\item \code{dropped}: \code{TRUE} when the variable was taken out
+(\code{selected} is then \code{path[-1]} and \code{score} is
+\code{rest$score});
+\item \code{note}, the verdict in words.
+}
+The set scored for that test is not a step of the sweep, so it is
+not in \code{history} or \code{fold_scores}.}
+\item{\code{split}}{\code{NULL}, or a list with \code{selection} and
+\code{estimation}, integer row positions in \code{train_sf} as
+passed; rows the completeness filter above dropped are in
+neither.}
+\item{\code{params}}{The settings: \code{metric}, \code{method},
+\code{k}, \code{tol}, \code{seed}, \code{auto_range},
+\code{select_on}, \code{n_candidates}, \code{estimated_fits},
+\code{n_scored}, \code{rule}, \code{se_mult} and \code{baseline}
+(its type).}
+}
+
+Every set is scored on the same rows: those the null model's
+cross-validation predicted or, when the baseline is the fold mean,
+those any step-1 set predicted; \code{params$n_scored} counts them (a
+warning says so when that is fewer than all).  A set that left some of
+the scored rows unpredicted, because a fold failed for it, has
+\code{score} \code{NA}, with a warning naming it: scored on the rows it
+did predict it would be compared on fewer, usually easier, rows than its
+rivals.  A factor with a level found in one spatial block only is the
+usual case, and cannot be selected.
 }
 \description{
 Selects predictors by repeatedly adding whichever candidate most improves a

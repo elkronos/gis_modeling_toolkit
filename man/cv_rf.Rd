@@ -96,14 +96,15 @@ responses with zeros" in \code{\link{model_metrics}()}).
 A wrapper over \code{\link{cv_spatial}()} that refits a \pkg{ranger}
 forest on each training fold.  By default it holds out whole spatial
 blocks, so most neighbours of a held-out point are not in the training
-set, where the out-of-bag error holds out single rows; \code{folds} says
-what the score estimates.
+set; the forest's out-of-bag error holds out single rows.  The folds you
+pass decide what the score measures (see "Fold methods" in
+\code{\link{make_folds}()}).
 }
 \section{Comparing the forest with and without coordinates}{
 
 Whether \code{include_coords = TRUE} lowers the error depends on how far
-from the training data the predictions are (see \emph{Coordinates as
-predictors} in \code{\link{fit_rf_model}}), so it is a comparison to make
+from the training data the predictions are (see "Coordinates as
+predictors" in \code{\link{fit_rf_model}}), so it is a comparison to make
 on your own data, at the block size the map will be used at. Score the
 two forests on the same folds: build the folds once with
 \code{\link{make_folds}} and pass the result as \code{folds} to two

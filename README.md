@@ -22,10 +22,10 @@ and marks where a fitted map extrapolates.
 You have observations at points and need values over areas. The usual
 move is to borrow boundaries that already exist: ZIP code areas, census
 tracts, counties, sales territories. They were drawn for mail delivery,
-enumeration or politics, not for the process you are studying, so part
-of any answer aggregated onto them comes from the partition. This is the
-modifiable areal unit problem: the same observations, aggregated under
-different boundaries, can give different conclusions.
+enumeration or politics, so part of any answer aggregated onto them
+comes from the partition. This is the modifiable areal unit problem: the
+same observations, aggregated under different boundaries, can give
+different conclusions.
 
 spatialkit draws the cells from the data, in three steps:
 
@@ -38,7 +38,9 @@ spatialkit draws the cells from the data, in three steps:
     density-weighted k-means, so cells are small where observations are
     dense, and `build_tessellation()` grows Voronoi cells from them (or
     lays hex or square cells, or Delaunay triangles), clipped to your
-    study area. Cell IDs stay the same when the rows are reordered.
+    study area. `build_tessellation()` numbers the cells from their
+    geometry, so the same seeds in a different row order give the same
+    cell IDs.
 3.  Summarise. `summarize_by_cell()` gives each cell a count, a mean
     with its standard error, and a pooled value: the cell’s mean pulled
     toward the mean of the observations in the 8 nearest cells (nearest
@@ -51,14 +53,10 @@ The first figure shows a simulated field on 280 random sites in North
 Carolina, aggregated onto three kinds of cells, about 30 of each:
 Voronoi cells from density-weighted seeds, a hex grid and a square grid.
 
-<figure>
-<img
-src="https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-tessellations.png"
-alt="Four maps of North Carolina: a simulated field at 280 sites, and its cell means on 30 Voronoi cells from density-weighted seeds, on a hex grid and on a square grid" />
-<figcaption aria-hidden="true">Four maps of North Carolina: a simulated
-field at 280 sites, and its cell means on 30 Voronoi cells from
-density-weighted seeds, on a hex grid and on a square grid</figcaption>
-</figure>
+![Four maps of North Carolina: a simulated field at 280 sites, and its
+cell means on 30 Voronoi cells from density-weighted seeds, on a hex
+grid and on a square
+grid](https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-tessellations.png) 
 
 The next figure cuts the same field at three cell counts, each cell
 showing its pooled value. `resolution_profile()` scores each count by
@@ -69,14 +67,10 @@ observations per cell gives) and 0.18 at 140 cells (two per cell). The
 one standard error of the default’s. `vignette("resolution")` covers how
 the count is chosen.
 
-<figure>
-<img
-src="https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-resolution.png"
-alt="Four maps of North Carolina: the simulated field at 280 sites, and its pooled cell values at 12, 62 and 140 Voronoi cells, where 62 is the default count" />
-<figcaption aria-hidden="true">Four maps of North Carolina: the
-simulated field at 280 sites, and its pooled cell values at 12, 62 and
-140 Voronoi cells, where 62 is the default count</figcaption>
-</figure>
+![Four maps of North Carolina: the simulated field at 280 sites, and its
+pooled cell values at 12, 62 and 140 Voronoi cells, where 62 is the
+default
+count](https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-resolution.png) 
 
 The second half of the package tests the result. Three model backends
 (random forest, GWR and a Bayesian GP) sit behind one `spatial_fit`
@@ -85,22 +79,17 @@ out whole blocks, of a grid by default, which can be sized from the
 data’s own autocorrelation range or matched to the locations a map will
 predict at. An area-of-applicability estimate marks where the resulting
 score applies. All of it is built on
-[`sf`](https://r-spatial.github.io/sf/), with CRS handling that will not
-hand metres to a function expecting degrees.
+[`sf`](https://r-spatial.github.io/sf/), and each function that measures
+a distance moves a lon/lat layer into a projected CRS first.
 
 Random folds put a test point’s neighbours in the training set, so a
 model that can memorise location is scored on points it has nearly seen.
 Block folds hold out whole blocks instead; the quick start below shows
 the difference in RMSE.
 
-<figure>
-<img
-src="https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-spatial-cv.png"
-alt="Two maps of North Carolina: 280 sites coloured by fold, mixed at random on the left and grouped into spatial blocks on the right" />
-<figcaption aria-hidden="true">Two maps of North Carolina: 280 sites
-coloured by fold, mixed at random on the left and grouped into spatial
-blocks on the right</figcaption>
-</figure>
+![Two maps of North Carolina: 280 sites coloured by fold, mixed at
+random on the left and grouped into spatial blocks on the
+right](https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-spatial-cv.png) 
 
 ## Scope
 
@@ -228,38 +217,14 @@ c(random = random$overall$RMSE, blocked = blocked$overall$RMSE)
 ```
 
 On the same 400 observations and the same model, random folds give an
-RMSE of 0.98 and the blocks, built 332 m wide, give 1.12. Only the split
-changed: the random figure is the error of predicting among the samples,
-the blocked one the error of predicting into gaps a block wide. A map’s
-error depends on where it predicts, and `fold_separation()` compares the
-folds’ distances from the training data with the map’s. On real data the
-range is estimated, by `estimate_sac_range()` or
-`make_folds(auto_range = TRUE)`; `vignette("spatial-cross-validation")`
-covers that choice.
-
-## Where to go next
-
-The articles, in reading order:
-
-| Article | What it covers | In R |
-|----|----|----|
-| [Get started](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.html) | Take a layer of points to cells with standard errors, a score from spatial cross-validation and a map that marks where its predictions apply. | `vignette("getting-started")` |
-| [Choosing a resolution](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.html) | Decide how many cells the data support, and pass that count to the tessellation. | `vignette("resolution")` |
-| [Building cells and summarising them](https://elkronos.github.io/gis_modeling_toolkit/articles/cells.html) | Draw the cells, put each observation in one, and report each cell’s value with the right standard error. | `vignette("cells")` |
-| [Spatial cross-validation](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.html) | Choose folds whose score matches the map you will make, size the blocks, and read every part of the result. | `vignette("spatial-cross-validation")` |
-| [Fitting and checking models](https://elkronos.github.io/gis_modeling_toolkit/articles/models.html) | Pick a backend or write your own, compare backends on the same folds, check the residuals, and map where the predictions apply. | `vignette("models")` |
-| [Exporting and reporting results](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.html) | Write the cells to a file others can join to, and report the numbers that say how far a cell value or a map can be trusted. | `vignette("reporting")` |
-| [Worked example: North Carolina](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.html) | The whole pipeline on a simulated field over North Carolina, comparing four tessellations, two fold schemes and two backends. | `vignette("spatialkit_nc_demo")` |
-| [Troubleshooting and performance](https://elkronos.github.io/gis_modeling_toolkit/articles/troubleshooting.html) | The errors and warnings you are most likely to meet, what each means, and how to handle large layers, parallel folds, caches and the log. | `vignette("troubleshooting")` |
-| [Terms used on these pages](https://elkronos.github.io/gis_modeling_toolkit/articles/glossary.html) | Short definitions of the terms the articles and help pages use. | `vignette("glossary")` |
-
-The numbered scripts in `system.file("scripts", package = "spatialkit")`
-run each step on a simulated field; Get started lists them. Report a bug
-or ask a question on the [issue
-tracker](https://github.com/elkronos/gis_modeling_toolkit/issues); the
-[contributing
-guide](https://github.com/elkronos/gis_modeling_toolkit/blob/main/.github/CONTRIBUTING.md)
-says what to include.
+RMSE of 0.98 and the blocks, built 332 m wide, give 1.12. The data and
+the model are the same; the random figure is the error of predicting
+among the samples, and the blocked one the error of predicting into gaps
+a block wide. A map’s error depends on where it predicts, and
+`fold_separation()` compares the folds’ distances from the training data
+with the map’s. On real data the range is estimated, by
+`estimate_sac_range()` or `make_folds(auto_range = TRUE)`;
+`vignette("spatial-cross-validation")` covers that choice.
 
 ## The pipeline
 
@@ -281,6 +246,32 @@ same steps inside R.
 | 9\. [Choose predictors](https://elkronos.github.io/gis_modeling_toolkit/reference/index.html#choose-predictors) | `select_features_forward()` | [Fitting and checking models](https://elkronos.github.io/gis_modeling_toolkit/articles/models.html) |
 | 10\. [Predict a surface](https://elkronos.github.io/gis_modeling_toolkit/reference/index.html#predict-a-surface) and check where it applies | `predict_surface()`, `area_of_applicability()` | [Fitting and checking models](https://elkronos.github.io/gis_modeling_toolkit/articles/models.html) |
 | 11\. Report | `ensure_stable_poly_id()`, `sf::st_write()` | [Exporting and reporting results](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.html) |
+
+## Where to go next
+
+The
+[articles](https://elkronos.github.io/gis_modeling_toolkit/articles/index.html),
+in reading order:
+
+| Article | What it covers | In R |
+|----|----|----|
+| [Get started](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.html) | Take a layer of points to cells with standard errors, a score from spatial cross-validation and a map that marks where its predictions apply. | `vignette("getting-started")` |
+| [Choosing a resolution](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.html) | Decide how many cells the data support, and pass that count to the tessellation. | `vignette("resolution")` |
+| [Building cells and summarising them](https://elkronos.github.io/gis_modeling_toolkit/articles/cells.html) | Draw the cells, put each observation in one, and report each cell’s value with the right standard error. | `vignette("cells")` |
+| [Spatial cross-validation](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.html) | Choose folds whose score matches the map you will make, size the blocks, and read every part of the result. | `vignette("spatial-cross-validation")` |
+| [Fitting and checking models](https://elkronos.github.io/gis_modeling_toolkit/articles/models.html) | Pick a backend or write your own, compare backends on the same folds, check the residuals, and map where the predictions apply. | `vignette("models")` |
+| [Exporting and reporting results](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.html) | Write the cells to a file others can join to, and report the numbers that say how far a cell value or a map can be trusted. | `vignette("reporting")` |
+| [Worked example: North Carolina](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.html) | The pipeline on a simulated field over North Carolina, comparing four tessellations, two fold schemes and two backends at cell counts set by hand. | `vignette("spatialkit_nc_demo")` |
+| [Troubleshooting and performance](https://elkronos.github.io/gis_modeling_toolkit/articles/troubleshooting.html) | The errors and warnings you are most likely to meet, what each means, and how to handle large layers, parallel folds, caches and the log. | `vignette("troubleshooting")` |
+| [Terms used on these pages](https://elkronos.github.io/gis_modeling_toolkit/articles/glossary.html) | Short definitions of the terms the articles and help pages use. | `vignette("glossary")` |
+
+The numbered scripts in `system.file("scripts", package = "spatialkit")`
+run each step on a simulated field; Get started lists them. Report a bug
+or ask a question on the [issue
+tracker](https://github.com/elkronos/gis_modeling_toolkit/issues); the
+[contributing
+guide](https://github.com/elkronos/gis_modeling_toolkit/blob/main/.github/CONTRIBUTING.md)
+says what to include.
 
 ## Citation
 

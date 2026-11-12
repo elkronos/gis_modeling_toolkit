@@ -789,9 +789,13 @@ print.spatialkit_count_rule <- function(x, ...) {
   label  <- function(name) sprintf("  %-12s: ", name)
   indent <- strrep(" ", 16L)
   one    <- function(v) length(v) == 1L && !is.na(v)
-  # An error is written as print.spatialkit_pooled() writes it, so the two
-  # records of one summary show one number one way.
-  num    <- function(v) if (is.numeric(v) && one(v)) sprintf("%.2e", v) else "NA"
+  # The errors of a line are written in one notation (.one_notation()), as
+  # print.spatialkit_pooled() writes them, so the two records of one summary
+  # show one number one way: 9.52 as 9.52, and a pair such as 71800000 and
+  # 1.76e+08 both in scientific notation.
+  nums   <- function(...)
+    .one_notation(vapply(list(...), function(v)
+      if (is.numeric(v) && one(v)) as.numeric(v) else NA_real_, numeric(1)))
   count  <- function(k, what)
     sprintf("%s %s%s", format(k), what, if (isTRUE(k == 1L)) "" else "s")
 
@@ -856,10 +860,11 @@ print.spatialkit_count_rule <- function(x, ...) {
     cat(label("scored"), "loo NA: no row of the selection half has a response\n", sep = "")
   else if (is.list(sc))
     cat(label("scored"),
-        sprintf("loo %s on %s in %s (one cell: %s)%s\n", num(sc$loo),
+        sprintf("loo %s on %s in %s (one cell: %s)%s\n",
+                nums(sc$loo, sc$loo_one_cell)[1L],
                 if (half) sprintf("the %s of the selection half", count(sc$n, "row"))
                 else count(sc$n, "row"),
-                count(sc$cells, "cell"), num(sc$loo_one_cell),
+                count(sc$cells, "cell"), nums(sc$loo, sc$loo_one_cell)[2L],
                 if (is.numeric(sc$share_alone) && one(sc$share_alone))
                   sprintf("; %.1f%% of rows alone", 100 * sc$share_alone)
                 else ""),

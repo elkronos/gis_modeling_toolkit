@@ -43,7 +43,7 @@ Two examples below run on a simulated layer: 300 points over a 20 km square
 in UTM zone 32N, whose unit is the metre.
 
 ```{r layer}
-library(sf)
+suppressPackageStartupMessages(library(sf))
 library(spatialkit)
 
 set.seed(1)
@@ -89,7 +89,7 @@ st_crs(pts)$units_gdal
 
 `fit_rf_model(): response '<name>' is not numeric.`
 :   The random forest and GWR backends fit a regression, so they refuse a
-    factor or character response. The GWR message starts
+    logical, factor or character response. The GWR message starts
     `fit_gwr_model(): response '<name>' is not numeric (it is <class>).`
     A number read from a file as text needs `as.numeric()` first; check for
     a thousands separator or an `"NA"` string if that gives `NA`s.
@@ -103,8 +103,8 @@ st_crs(pts)$units_gdal
 ``fit_rf_model(): `num.trees` is already set by this function and cannot be passed through `...` as well``
 :   ranger's own spelling of an argument that `fit_rf_model()` sets would
     reach `ranger::ranger()` twice. Use the wrapper's spelling, which the
-    message names, and it passes the value on: `num_trees`,
-    `min_node_size`, `num_threads` or `sample_fraction`. `cv_rf()` and
+    message names, and it passes the value on, for example `num_trees` for
+    `num.trees` or `sample_fraction` for `sample.fraction`. `cv_rf()` and
     `compare_models_cv(rf_args = )` pass their arguments to
     `fit_rf_model()`, so the same rule applies there.
 
@@ -145,7 +145,8 @@ shows them on a real layer.
     the same way. Here the learner stops on every fold:
 
     ```{r all-failed}
-    cv <- cv_spatial(pts, "z", "w", k = 5,
+    folds <- make_folds(pts, k = 5, method = "block_kfold", seed = 1)
+    cv <- cv_spatial(pts, "z", "w", folds = folds,
                      fit_fn = function(train) stop("the backend is not installed"))
     c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
     cv$overall
@@ -229,8 +230,8 @@ large layer. A limit given as an argument is that argument's default.
 | `create_grid_polygons()`, and `build_tessellation()` for hex and square cells | `max_cells`, 1,000,000 cells, estimated from the bounding box | error | a larger `cellsize`; `create_grid_polygons(max_cells = )` raises the limit, which `build_tessellation()` keeps at its default |
 | `residual_morans_i()` | 5,000 observations without FNN and Matrix; 20,000,000 weights (`k` times the observations) | error | install Matrix; a smaller `k` |
 | `resolution_profile()` | a level with more than 5,000 cells holding a scored row, without FNN and Matrix | `moran_i` and `moran_z` `NA` at that level, with a warning of class `spatialkit_moran_skipped` | install Matrix |
-| `resolution_profile()` on a ladder of sizes, the default | `spatialkit.fit_work_max`, 1e10 point-to-centre comparisons | error of class `spatialkit_work_limit` before any fit | fewer starts, a coarser `obs_per_cell`, random starts of the density kind, or a higher limit |
-| searches made without FNN in `resolution_profile()`, `cell_values_at()`, `summarize_by_cell()` and `select_resolution()` | `spatialkit.exact_pairs_max`, 2e9 pairs | by function: an error, `NA` pooled columns with a warning, or the subsample's centres with a log line | reinstall FNN, or a higher limit |
+| `resolution_profile()` on a ladder of sizes, the default | `spatialkit.fit_work_max`, 1e10 point-to-centre comparisons | error of class `spatialkit_work_limit` before any fit | a smaller `nstart`, a coarser `obs_per_cell`, `init = "random"`, or a higher `spatialkit.fit_work_max` |
+| searches made without FNN in `resolution_profile()`, `cell_values_at()`, `summarize_by_cell()` and `select_resolution()` | `spatialkit.exact_pairs_max`, 2e9 pairs | by function: an error, `NA` pooled columns with a warning, or the subsample's centres with a log line | reinstall FNN, or a higher `spatialkit.exact_pairs_max` |
 | `estimate_sac_range()` | `n_max`, 5,000 rows | a seeded random subsample, counted in the attributes `n_used` and `n_subsampled` | `n_max`, or `Inf` for no limit |
 | `area_of_applicability()` | `normalizer_max_n`, 5,000 training rows | the mean pairwise distance is taken on a subsample | `normalizer_max_n` |
 | `summarize_by_cell(deff = "variogram")` | `deff_max_n`, 500 points in a cell | the cell's correlation matrix is built on a seeded subsample of its points | `deff_max_n` |
@@ -314,11 +315,16 @@ spatialkit_quiet(old)
 
 The file and the console are two `logger` appenders, index 1 and index 2.
 `logger::log_appender()` and `logger::log_threshold()` change index 1, the
-file, unless you name index 2:
+file, unless you name index 2. Each line below is a separate choice:
 
 ```{r appender, eval=FALSE}
+# Write the log file to my_analysis.log (index 1)
 logger::log_appender(logger::appender_file("my_analysis.log"),
+                     namespace = "spatialkit")
+# Send the console lines to a file instead of the console (index 2)
+logger::log_appender(logger::appender_file("my_console.log"),
                      namespace = "spatialkit", index = 2)
+# Or print only FATAL lines on the console (index 2)
 logger::log_threshold(logger::FATAL, namespace = "spatialkit", index = 2)
 ```
 

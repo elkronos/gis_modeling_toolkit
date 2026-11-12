@@ -36,14 +36,15 @@ knitr::opts_chunk$set(
 
 This article takes a layer of observations to cells. It chooses a
 tessellation method, places the seeds of Voronoi cells, puts each observation
-in a cell, and reads what `summarize_by_cell()` returns: the standard error
-that fits the question, a check of the cell mean against block kriging, and
-the warnings about pooled values. `vignette("resolution")` explains how to set
+in a cell, and reads what `summarize_by_cell()` returns (the standard error
+that fits the question, and the warnings about
+[pooled values](glossary.html#pooled-value)). It also checks the cell mean
+against block kriging with `kriging_adequacy()`. `vignette("resolution")` explains how to set
 the number of cells, and `vignette("glossary")` defines the terms used here.
 
 *This article needs two optional packages: `gstat` for the variograms behind
 the design effect and the kriging check, and `ggplot2` for the maps. Where one
-is missing, the chunks that use it are skipped with a note.*
+is missing, the code that needs it is shown but not run.*
 
 ## A simulated layer and its cell count
 
@@ -293,7 +294,8 @@ The columns, in order:
   the standard error of its mean. A cell of one observation has a standard
   error of `NA`.
 - `cell_weight`, the cell's effective sample size: its count of non-missing
-  responses, divided by the design effect when `deff` applies one. Pass it as
+  responses, divided by the [design effect](glossary.html#design-effect) when
+  `deff` applies one. Pass it as
   the weights of a regression on cell values.
 - `..pooled_resp_z`, the pooled value: the cell's mean pulled toward the mean
   of the observations in the 8 nearest cells (nearest by the centroid of their
@@ -302,7 +304,8 @@ The columns, in order:
   value that is the cell's own mean, and it grows with the cell's count.
   `estimate = "mean"` leaves these three columns out.
 
-The plain mean and the pooled value both estimate the cell's true mean: the
+The plain mean and the pooled value both estimate the
+[cell's true mean](glossary.html#cells-true-mean): the
 expected value of one further observation located in the cell the way its
 observations were. Neither is the average of a surface over the cell's area.
 Pooled values are for maps and for predicting observations. For a regression
@@ -327,7 +330,12 @@ share the cell's departure from the population mean, so they carry less
 information than their count.
 
 The design effect is how many times larger a cell mean's variance is than
-\(s^2/n\) says, and \(n/\text{deff}\) is the effective sample size. Leave
+\(s^2/n\) says, and \(n/\text{deff}\) is the effective sample size. A
+design effect estimated from the data (`"kish"` or `"variogram"`) also
+corrects \(s\), which the same correlation biases low, so the standard error
+comes out more than \(\sqrt{\text{deff}}\) times the naive one;
+"Standard errors and design effects" in `?summarize_by_cell` gives the
+formula. Leave
 `deff = 1` when the cell means describe the cells, as on a map or in a
 regression on cell values, and the points are spread through each cell. Set
 `deff` when the cell means feed a claim about the whole population.
@@ -570,8 +578,7 @@ cell's pooled value had a correlation of 0.79 with the mean of the pooled
 values of its 8 nearest cells, where the plain means had one of -0.02
 ([`dev/sim-pooled-values.R`](https://github.com/elkronos/gis_modeling_toolkit/blob/main/dev/sim-pooled-values.R)
 in the package's GitHub repository; `?summarize_by_cell` gives the settings
-under "How this was checked"). The warning means one mean describes this
-column; the smooth map comes from the pooling.
+under "How this was checked").
 
 ### Values with no pooling (`spatialkit_pool_degenerate`)
 

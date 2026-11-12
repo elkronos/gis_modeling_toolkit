@@ -408,11 +408,8 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
 #'     each tree's rows were sampled, the out-of-bag error and the largest
 #'     importances.  A forest fitted without them prints "no spatial
 #'     information used": it sees the covariates alone.  One fitted with
-#'     \code{include_coords = TRUE} fits location closely, so its
-#'     out-of-bag error, a random hold-out, is its error among the samples
-#'     and reads low for predictions made farther from the data; score it on
-#'     folds at the distances the map will be used at (see "Coordinates as
-#'     predictors" in
+#'     \code{include_coords = TRUE} prints a note on how to score it (see
+#'     "Coordinates as predictors" and "Out-of-bag error" in
 #'     \code{\link{fit_rf_model}()}).  When a predictor is an unordered
 #'     factor or a character column, a line says how ranger was told to split
 #'     it;
@@ -919,8 +916,8 @@ print.summary.spatial_fit <- function(x, ...) {
 #' A GWR fit whose response \code{fit_gwr_model()} took about a centre
 #' (\code{fit$engine$centres$response}, a response at a large offset) is
 #' scored on the response and the fitted values or predictions less that
-#' centre, which keep the spread a double rounds away at the response's
-#' size: \code{RMSE}, \code{MAE} and \eqn{R^2} are those of the same values
+#' centre, which keep digits that rounding at the response's size would
+#' lose: \code{RMSE}, \code{MAE} and \eqn{R^2} are those of the same values
 #' at 0, and \code{MAPE} and \code{SMAPE} divide the same errors by the
 #' values in the response's units.  \code{fitted()} and \code{predict()}
 #' still return values in the response's units.
@@ -2396,12 +2393,10 @@ clear_fitted_cache <- function(object) {
 #'     hold-out: use \code{\link{cv_rf}()} on folds at the distances the map
 #'     will be used at for the forest's accuracy;
 #'   \item for a GWR they are in-sample.  Where \code{\link{fit_gwr_model}()}
-#'     took the response about its centre (a response whose centre is more
-#'     than 1000 times its spread, such as 1e8 plus a spread of 1, or whose
-#'     raw values lose their spread, such as 1e15 plus a spread of 1; see
-#'     "The local solve" there), the response and the fitted values are both
-#'     taken about that centre, so the residuals keep the spread a double
-#'     rounds away at that size;
+#'     took the response about its centre (a response at a large offset),
+#'     the response and the fitted values are both taken about that centre,
+#'     so the residuals keep digits that rounding at the response's size
+#'     would lose (see "The local solve" in \code{?fit_gwr_model});
 #'   \item for a Bayesian GP they are in-sample, from the cached posterior
 #'     expectation (\link{spatial_fit-fitted}).
 #' }

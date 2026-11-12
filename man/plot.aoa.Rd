@@ -19,12 +19,12 @@ with the training DI as an outline.}
 A \code{ggplot} object.
 }
 \description{
-\code{n_outside} says how many prediction locations fall outside the area
-of applicability; it does not say whether the rest sit comfortably inside
-or crowd against the threshold, nor how far outside the outsiders are.
-This draws the dissimilarity index of the prediction locations against
-that of the training data, with the threshold marked, so the prediction
-set can be read as mostly inside, marginal or largely outside.  The
+Draws the dissimilarity index of the prediction locations against that of
+the training data, with the threshold marked, so you can see whether the
+prediction set sits well inside, near the threshold or outside.
+\code{n_outside} gives only how many prediction locations fall outside
+the area of applicability, not how close to the threshold the rest sit or
+how far outside the outsiders are.  The
 training DI is cross-validated over the \code{folds} passed to
 \code{\link{area_of_applicability}()}, or without them is each training
 point's distance to its nearest other training point; the legend and the

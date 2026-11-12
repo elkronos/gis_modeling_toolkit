@@ -1192,11 +1192,13 @@ test_that("a record prints the count, the estimate, the cells and what the profi
   sel <- .cr_size()
   rec <- sel$count_rule
   sc <- rec$scored
+  # The errors are written as the record of the pooled columns writes them,
+  # both in one notation.
+  errs <- .one_notation(c(sc$loo, sc$loo_one_cell))
   scored_line <- sprintf(
     "  scored      : loo %s on 600 rows in 133 cells (one cell: %s); %.1f%% of rows alone",
-    sprintf("%.2e", sc$loo), sprintf("%.2e", sc$loo_one_cell), 100 * sc$share_alone)
-  # The errors are written as the record of the pooled columns writes them.
-  expect_match(scored_line, "loo [0-9]\\.[0-9]{2}e[+-][0-9]{2} on 600 rows in 133 cells \\(one cell: [0-9]\\.[0-9]{2}e[+-][0-9]{2}\\)")
+    errs[1L], errs[2L], 100 * sc$share_alone)
+  expect_length(unique(grepl("e", errs, fixed = TRUE)), 1L)
   head <- c(
     "Count: 133 cells, set by size (4.5 rows per cell, the default; 600 rows / 133 cells = 4.51)",
     "  chosen for  : the pooled value",
@@ -1212,7 +1214,7 @@ test_that("a record prints the count, the estimate, the cells and what the profi
   expect_identical(.cr_print(attr(out, "count_rule")), c(
     head, "                these are the cells the profile scored", scored_line,
     "  checked     : the cells and rows summarised are the ones scored"))
-  expect_true(any(grepl(sprintf("loo         : %s ", sprintf("%.2e", sc$loo)),
+  expect_true(any(grepl(sprintf("loo         : %s ", errs[1L]),
                         .cr_print(attr(out, "pooled")), fixed = TRUE)))
   # print() returns its argument, unseen.
   utils::capture.output(back <- withVisible(print(rec)))
@@ -1224,6 +1226,12 @@ test_that("a record prints the count, the estimate, the cells and what the profi
     "                neighbours; seed 100000), fitted to every row;",
     sprintf("  scored      : loo 7.18e+07 on 600 rows in 133 cells (one cell: 1.76e+08); %.1f%% of rows alone",
             100 * sc$share_alone)))
+  # Errors of an ordinary size are written as numbers, not in scientific
+  # notation.
+  small <- rec; small$scored$loo <- 9.5213; small$scored$loo_one_cell <- 42.14
+  expect_identical(.cr_print(small)[6L], sprintf(
+    "  scored      : loo 9.52 on 600 rows in 133 cells (one cell: 42.1); %.1f%% of rows alone",
+    100 * sc$share_alone))
   # One row, one cell.
   single <- rec; single$cells <- 1L; single$n <- 1L; single$scored$n <- 1L
   single$scored$cells <- 1L
@@ -1283,8 +1291,9 @@ test_that("the print names the rule, the kind, the seed and the rows the centres
   expect_identical(out[5L], "                these are the cells the profile scored, on half the rows")
   expect_identical(out[6L], sprintf(
     "  scored      : loo %s on the %d rows of the selection half in %d cells (one cell: %s); %.1f%% of rows alone",
-    sprintf("%.2e", on$scored$loo), on$scored$n, on$scored$cells,
-    sprintf("%.2e", on$scored$loo_one_cell), 100 * on$scored$share_alone))
+    .one_notation(c(on$scored$loo, on$scored$loo_one_cell))[1L], on$scored$n,
+    on$scored$cells, .one_notation(c(on$scored$loo, on$scored$loo_one_cell))[2L],
+    100 * on$scored$share_alone))
   expect_lt(on$scored$n, 600L)
 
   # A count no cell value was scored for.

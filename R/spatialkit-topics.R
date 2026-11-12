@@ -69,7 +69,7 @@
 #' coordinates is not finite or lies beyond 1e150. Such a row takes no part
 #' in the choice of a projection, and its coordinates none in the lon/lat
 #' test. Moved into another CRS, it comes back empty, in its own geometry
-#' type, where [sf::st_transform()] would drop the vertex it cannot move,
+#' type. [sf::st_transform()] alone would drop the vertex it cannot move,
 #' or put a coordinate beyond 1e150 at a finite place, and return the rest
 #' of the feature.
 #'

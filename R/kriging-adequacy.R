@@ -11,12 +11,13 @@
 #' by their spatial correlation with the cell, and would return an estimate
 #' and a variance for every cell, thin or empty.  This function measures what
 #' block kriging would add on a given layer, without changing any cell
-#' value: for every cell it reports
-#' the block-kriging estimate and variance implied by a fitted variogram,
-#' that variance as a share of the variance the cell's mean would have with
-#' no data at all, and, where the cell has points, the error variance of its
-#' plain mean under the same variogram and the share of that variance kriging
-#' removes; and it scores the variogram itself by blocked cross-validation.
+#' value.  For every cell it reports the block-kriging estimate and variance
+#' implied by a fitted variogram (\code{kr_pred}, \code{kr_var}), that
+#' variance as a share of the variance the cell's mean would have with no
+#' data at all (\code{kr_ratio}), and, where the cell has points, the error
+#' variance of its plain mean under the same variogram (\code{plain_var})
+#' and the share of that variance kriging removes (\code{kr_gain}).  It also
+#' scores the variogram itself by blocked cross-validation.
 #'
 #' @section Reading the columns:
 #' \describe{
@@ -319,23 +320,21 @@
 #' Wiley. (Block kriging, chapter 3; cross-validation of the kriging
 #' variance, section 2.6.4.)
 #' @family assign and summarise
-#' @examples
-#' if (requireNamespace("gstat", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   n <- 200
-#'   x <- 5e5 + runif(n, 0, 1000); y <- 5e6 + runif(n, 0, 1000)
-#'   d <- as.matrix(dist(cbind(x, y)))
-#'   z <- as.numeric(t(chol(0.8 * exp(-d / 100) + diag(0.2, n))) %*% rnorm(n))
-#'   pts <- st_as_sf(data.frame(x = x, y = y, z = z), coords = c("x", "y"), crs = 32632)
-#'   bnd <- st_sf(geometry = st_as_sfc(st_bbox(pts)))
-#'   cells <- create_grid_polygons(bnd, target_cells = 16, type = "square")
-#'   asg <- assign_features_to_polygons(pts, cells)
-#'   ka <- kriging_adequacy(asg, "z", cells, k = 4)
-#'   print(ka)                   # the report
-#'   # Variance of the standardised errors: about 1 when the variogram is right
-#'   attr(ka, "cv")$zscore_var
-#' }
+#' @examplesIf requireNamespace("gstat", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' n <- 200
+#' x <- 5e5 + runif(n, 0, 1000); y <- 5e6 + runif(n, 0, 1000)
+#' d <- as.matrix(dist(cbind(x, y)))
+#' z <- as.numeric(t(chol(0.8 * exp(-d / 100) + diag(0.2, n))) %*% rnorm(n))
+#' pts <- st_as_sf(data.frame(x = x, y = y, z = z), coords = c("x", "y"), crs = 32632)
+#' bnd <- st_sf(geometry = st_as_sfc(st_bbox(pts)))
+#' cells <- create_grid_polygons(bnd, target_cells = 16, type = "square")
+#' asg <- assign_features_to_polygons(pts, cells)
+#' ka <- kriging_adequacy(asg, "z", cells, k = 4)
+#' print(ka)                   # the report
+#' # Variance of the standardised errors: about 1 when the variogram is right
+#' attr(ka, "cv")$zscore_var
 #' @export
 kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
                              id_col = "poly_id", sac = NULL, folds = NULL,

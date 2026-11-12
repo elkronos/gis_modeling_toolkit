@@ -1,7 +1,7 @@
 ---
 title: "Worked example: North Carolina"
 description: >
-  The whole pipeline on a simulated field over North Carolina, comparing four tessellations, two fold schemes and two backends.
+  The pipeline on a simulated field over North Carolina, comparing four tessellations, two fold schemes and two backends at cell counts set by hand.
 author: "Justin Chase"
 output:
   rmarkdown::html_vignette:
@@ -49,7 +49,7 @@ if (length(missing))
       ". The code that needs them is shown but not run.*\n", sep = "")
 ```
 
-This article runs the whole pipeline on a simulated field over North
+This article runs the pipeline on a simulated field over North
 Carolina, where the structure the cells and models should find is known, and
 compares four tessellations, two fold schemes and two backends on it.
 `vignette("getting-started")` takes the short path through the same steps.
@@ -59,8 +59,7 @@ article needs no other files.
 *This article needs six optional packages: `ggplot2` for the figures,
 `patchwork` for the stacked panels, `geometry` for the Delaunay triangles,
 `ranger` for the random forest, `sp` for GWR and `gstat` for the variogram.
-When one is missing the code that needs it is shown but not run, and a note
-at the top says so.*
+Where one is missing, the code that needs it is shown but not run.*
 
 ## The state outline, in feet
 
@@ -143,7 +142,10 @@ ggplot() +
 ## Four tessellations
 
 `build_tessellation()` builds four kinds of cell from the same points and
-outline; `vignette("cells")` says which kind suits which purpose.
+outline; `vignette("cells")` says which kind suits which purpose. The counts
+are set by hand, 40 seeds for the Voronoi cells and about 50 cells for each
+grid, so that the methods are compared at similar numbers of cells.
+`vignette("resolution")` shows how to choose the count from the data.
 
 ### Voronoi cells from 40 density-weighted k-means seeds
 
@@ -289,9 +291,9 @@ The Kish standard error is a median
 `r if (has_ggplot) num(stats::median(inflation, na.rm = TRUE), 2) else NA`
 times the default one, more than the
 `r if (has_ggplot) num(sqrt(stats::median(deff$deff, na.rm = TRUE)), 2) else NA`
-that the square root of the median design effect gives. An estimated design
-effect also corrects the within-cell standard deviation, which the same
-correlation biases low; `?summarize_by_cell` gives the formula.
+that the square root of the median design effect gives, because an estimated
+design effect also corrects the within-cell standard deviation
+(`vignette("cells")`, "Standard errors and the design effect").
 
 ### Maps of the cell means
 
@@ -432,6 +434,9 @@ a value at every point. `type = "coefficients"` maps one of them:
 plot(gwr_fit, type = "coefficients", term = "elevation")
 ```
 
+The simulation gives elevation the same effect, 0.01, everywhere, so the
+spread on the map is not variation in the true effect.
+
 In `r if (has_ggplot && has_gwr) sum(gwr_fit$info$local_collinearity$cn > 30, na.rm = TRUE) else NA`
 of the 300 windows the local intercept is poorly determined: the condition
 index that includes the intercept (`cn` in
@@ -461,8 +466,9 @@ the difference on these data.
 ### The autocorrelation range
 
 `estimate_sac_range()` fits a variogram to the residuals of `y` on the
-predictors and returns the autocorrelation range in CRS units, here US survey
-feet: the distance beyond which the residuals stop being correlated. It
+predictors and returns the
+[autocorrelation range](glossary.html#autocorrelation-range) of the residuals
+in CRS units, here US survey feet. It
 returns `NA` when the variogram never levels off within the distances it was
 fitted over, because a range it cannot identify must not size the blocks.
 `?estimate_sac_range` covers the directional fits and anisotropy.
@@ -562,8 +568,8 @@ as the map's locations sit from the data; `"farther"` says they sit farther,
 so that score tends to read high for this map. The reading compares
 nearest-neighbour distances and does not measure a bias. `?fold_separation`
 lists all four readings, and `vignette("spatial-cross-validation")` explains
-them. A map that has to reach far beyond the points, into an area they never
-sampled, would turn the answer round.
+them. For a map of an area the points never sampled, the blocked score would
+be the closer match.
 
 The comparison of backends below and the area of applicability of the surface
 use the random folds, the scheme `fold_separation()` reads as
@@ -613,9 +619,7 @@ ggplot() +
 A fitted model returns a number for any location you hand it, including
 locations whose predictor values look nothing like the training data.
 `area_of_applicability()` marks where the cross-validated score applies. Pass
-it the folds the score came from, here the random ones. For random folds it
-logs a caution that applies when the map is reported with a blocked score;
-this map goes with the random score:
+it the folds the score came from, here the random ones:
 
 ```{r aoa, eval=has_ggplot && has_ranger}
 aoa <- area_of_applicability(surf, model = rf_fit, folds = folds_random)

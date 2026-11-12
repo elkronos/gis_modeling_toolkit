@@ -177,10 +177,10 @@ missing or non-finite values or a bad geometry before any fold was
 fitted.}
 }
 
-Each fold runs in its own worker, so a failure costs that fold only, and
-an error that stops a sequential run (a \code{metrics} or \code{fold_info_fn}
-return value of the wrong shape) stops a parallel one too, naming the
-fold.  When some folds, but not all, end as \code{"error"}, \code{"skipped"} or
+A failure costs that fold only: with \code{parallel = TRUE} each fold runs in
+its own worker, and a sequential run catches the error per fold.  An
+error that stops a sequential run (a \code{metrics} or \code{fold_info_fn} return
+value of the wrong shape) stops a parallel one too, naming the fold.  When some folds, but not all, end as \code{"error"}, \code{"skipped"} or
 \code{"worker_error"}, the function warns, naming them and how many rows
 \code{overall} covers: it is pooled over the folds that produced predictions,
 and the fold that fails is often the hardest to predict, so it may

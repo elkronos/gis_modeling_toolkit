@@ -330,9 +330,10 @@ The WSS curve is read for its shape, so it is fitted to be smooth.  Every
 point on it is a k-means local optimum, and with a few random restarts
 the curve mixes level effects with optimisation noise and can rise from
 one \eqn{k} to the next.  Each \eqn{k} is therefore fitted as the best of
-25 restarts seeded by k-means++ (Arthur and Vassilvitskii 2007), a budget
-chosen where the gain from further restarts levels off (Fränti and
-Sieranoja 2019; Steinley 2003 on why the usual handful is not enough).  A
+25 restarts seeded by k-means++ (Arthur and Vassilvitskii 2007).  A fixed
+budget of restarts follows Fränti and Sieranoja (2019), and Steinley (2003)
+shows why the usual handful is not enough; 25 is the package's choice, not
+a published figure.  A
 curve that still rises somewhere is reported and not refused.  A logged
 warning names the number of rising steps, and the model-aware paths
 return it as \code{wss_bumps} in the \code{"diagnostics"} attribute beside
@@ -425,11 +426,18 @@ pts <- st_as_sf(
 determine_optimal_levels(pts, max_levels = 6)   # 2 1 3: the elbow first
 
 # Points spread evenly have no elbow: NA, with structured = FALSE and a
-# warning of class spatialkit_no_elbow that says why
+# warning of class spatialkit_no_elbow that says why (printed here
+# wrapped, in place of the warning)
 even <- st_as_sf(data.frame(x = 5e5 + runif(200, 0, 100),
                             y = 5e6 + runif(200, 0, 100)),
                  coords = c("x", "y"), crs = 32632)
-determine_optimal_levels(even, max_levels = 6)
+withCallingHandlers(
+  determine_optimal_levels(even, max_levels = 6),
+  spatialkit_no_elbow = function(w) {
+    writeLines(strwrap(conditionMessage(w), 76))
+    invokeRestart("muffleWarning")
+  }
+)
 }
 \references{
 Arthur, D. and Vassilvitskii, S. (2007). k-means++: the advantages of

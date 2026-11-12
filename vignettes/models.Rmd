@@ -56,7 +56,7 @@ choose predictors without letting the choice see the held-out rows.
 
 *This article needs four optional packages: `ranger` for the random forest,
 `sp` for GWR, `gstat` for the autocorrelation ranges and `ggplot2` for the
-figures. Without them the code is shown but not run.*
+figures. Where one is missing, the code that needs it is shown but not run.*
 
 ## Choosing a backend
 
@@ -475,6 +475,15 @@ lack.
 ```{r aoa-mask}
 surface$.pred[!inside] <- NA
 round(100 * mean(!inside), 1)    # percent of locations masked
+```
+
+The map of the surface draws the masked locations grey:
+
+```{r aoa-map, fig.height=4, fig.alt=if (runs) sprintf("The GWR predictions of z at the %d grid locations over the training area, coloured by value, with the %d locations outside the area of applicability or with a missing predictor drawn grey.", nrow(surface), sum(!inside)) else "The GWR predictions on the grid, with the locations outside the area of applicability drawn grey."}
+ggplot2::ggplot(surface) +
+  ggplot2::geom_sf(ggplot2::aes(colour = .pred), size = 2) +
+  ggplot2::scale_colour_viridis_c(name = "predicted z", na.value = "grey75") +
+  ggplot2::theme_void()
 ```
 
 ## Next

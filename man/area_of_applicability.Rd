@@ -447,7 +447,7 @@ empty geometry.
 }
 
 \examples{
-library(sf)
+suppressPackageStartupMessages(library(sf))
 set.seed(1)
 n <- 120
 train <- st_as_sf(

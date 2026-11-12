@@ -23,9 +23,10 @@ Turns the package's console log off (\code{quiet = TRUE}) or back on.  The
 package writes a trace of INFO lines and above to
 \code{file.path(tempdir(), "spatialkit_model_log.log")}, a file that lasts
 as long as the R session, and echoes WARN lines and above to the console;
-this function changes only the console echo.  (\pkg{logger}'s own
-\code{log_threshold()} changes the file by default, \code{index = 1}, so
-it does not do this.)
+this function changes only the console echo.
+\code{logger::log_threshold()} changes the log file's threshold by default
+(\code{index = 1}), not the console echo's, so use this function for the
+echo.
 }
 \details{
 These are log records, not R conditions: \code{suppressWarnings()}

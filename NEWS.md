@@ -1175,8 +1175,8 @@ before upgrading a running analysis.
   articles, and its address now leads to "Fitting and checking models".
 
 * The reference index follows the pipeline, from preparing the data to
-  predicting a surface, and every help page ends with a "See also" that
-  leads somewhere. Three help topics are new:
+  predicting a surface, and the "See also" of every help page lists the
+  other functions in its section of the index. Three help topics are new:
   `?"spatialkit-geometry"` (how input geometry is read),
   `?"spatialkit-conditions"` (every condition class, what it means and what
   to do) and `?"spatialkit-options"` (the two options that bound the
@@ -1214,9 +1214,9 @@ before upgrading a running analysis.
 
 # spatialkit 2.0.0
 
-Published on CRAN on 2026-09-11. Everything below is relative to 1.0.0
-(published on CRAN 2026-08-07). Three exported functions are removed and
-several defaults change results; read Breaking changes before upgrading.
+Everything below is relative to 1.0.0 (published on CRAN 2026-08-07). Three
+exported functions are removed and several defaults change results; read
+Breaking changes before upgrading.
 
 These notes describe what changed for a user of 1.0.0.
 

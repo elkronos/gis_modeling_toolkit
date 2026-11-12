@@ -31,12 +31,10 @@ fitted values are out-of-bag predictions.  Out-of-bag is a random
 hold-out: use \code{\link{cv_rf}()} on folds at the distances the map
 will be used at for the forest's accuracy;
 \item for a GWR they are in-sample.  Where \code{\link{fit_gwr_model}()}
-took the response about its centre (a response whose centre is more
-than 1000 times its spread, such as 1e8 plus a spread of 1, or whose
-raw values lose their spread, such as 1e15 plus a spread of 1; see
-"The local solve" there), the response and the fitted values are both
-taken about that centre, so the residuals keep the spread a double
-rounds away at that size;
+took the response about its centre (a response at a large offset),
+the response and the fitted values are both taken about that centre,
+so the residuals keep digits that rounding at the response's size
+would lose (see "The local solve" in \code{?fit_gwr_model});
 \item for a Bayesian GP they are in-sample, from the cached posterior
 expectation (\link{spatial_fit-fitted}).
 }

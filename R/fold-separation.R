@@ -179,14 +179,14 @@
 #'   coords = c("x", "y"), crs = 32632
 #' )
 #'
-#' # Random folds put a training point close to every held-out one.
+#' # Random folds put a training point close to every held-out one; blocked
+#' # folds hold out whole neighbourhoods, so the distances grow.  The median
+#' # distance from a held-out point to its nearest training point, per fold:
 #' random  <- make_folds(pts, k = 4, method = "random_kfold", seed = 1)
-#' print(fold_separation(random, pts, sac = 200))
-#'
-#' # Blocked folds hold out whole neighbourhoods, so the distances grow.
 #' blocked <- make_folds(pts, k = 4, method = "block_kfold",
 #'                       block_size = 250, seed = 1)
-#' print(fold_separation(blocked, pts, sac = 200))
+#' round(fold_separation(random, pts, sac = 200)$median_dist)
+#' round(fold_separation(blocked, pts, sac = 200)$median_dist)
 #'
 #' # Which of the two suits a map of the sampled square?  Compare each with
 #' # the distances from the cells of that map to the training data.

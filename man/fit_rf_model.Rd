@@ -148,19 +148,11 @@ data never visited, the coordinates can make predictions worse (Meyer et
 al. 2019).  With covariates that carry the spatial structure themselves,
 expect less from the coordinates.
 
-A forest with coordinates fits location closely, so its error grows
-quickly with the distance from the data, and a cross-validated score is
-the error at the distance its folds put between the held-out points and
-their training data.  Random folds, and the out-of-bag error, a random
-hold-out too, measure it among the samples: the error of a map over an
-area the samples cover evenly, which reads low for predictions made
-farther from the data.  Score the forest with \code{\link{cv_rf}()} on
-folds at the distances the map will be used at (folds matched to the
-prediction distance, \code{make_folds(method = "nndm")} or
-\code{"knndm"}, or blocks, \code{method = "block_kfold"}, for predictions
-into unsampled gaps), and compare the forests with and without
-coordinates on the same folds.  Build the folds once and pass them to
-\code{cv_rf()} with and without the coordinates:
+Score the forests with and without coordinates on the same folds, at the
+distances the map will be used at (see "Fold methods" in
+\code{\link{make_folds}()}; "Out-of-bag error" below says why the
+out-of-bag error does not serve).  Build the folds once and pass them to
+\code{\link{cv_rf}()} with and without the coordinates:
 \preformatted{
 folds   <- make_folds(dat, k = 5, method = "block_kfold")
 plain   <- cv_rf(dat, "z", c("a", "b"), folds = folds)

@@ -47,8 +47,14 @@ cat("*`gstat` or `ggplot2` is not installed, so the code below is shown but",
     "and rebuild.*\n")
 ```
 
+This article shows what a cross-validated error measures, how to choose
+[folds](glossary.html#fold) whose score matches the map you will make, how to
+size the [blocks](glossary.html#block), and how to read every part of the
+result.
+
 *This article needs two optional packages: `gstat` for the autocorrelation
-range and `ggplot2` for the figures.*
+range and `ggplot2` for the figures. Where one is missing, the code that
+needs it is shown but not run.*
 
 ## What a cross-validated error measures
 
@@ -109,8 +115,9 @@ knn_fn <- function(train_sf, ...) knn_fit(train_sf, "z", k = 5L)
 that, and `vignette("models")` explains the pattern.
 
 The data are 400 points in a 1,000 m square (EPSG:32632) over a simulated
-exponential field with scale 60 m, whose effective range is three times that,
-180 m. The `sd = 0.3` term adds measurement noise.
+exponential field with range parameter 60 m, so its correlation falls to 5
+percent at about 180 m, three times the range parameter. The `sd = 0.3` term
+adds measurement noise.
 
 ```{r fixture}
 set.seed(7)
@@ -333,8 +340,8 @@ score is the error at that distance.
 
 ### From the autocorrelation range
 
-The autocorrelation range is the distance beyond which an observation says
-little about a location. Using it as the smallest block edge is one way to
+The [autocorrelation range](glossary.html#autocorrelation-range) is the
+distance beyond which two observations are close to uncorrelated. Using it as the smallest block edge is one way to
 choose the separation, and suits a map that has to reach that far from the data
 (Roberts et al. 2017; Valavi et al. 2019).
 
@@ -476,9 +483,9 @@ alt_metrics <- sprintf(paste(
   cv_blocked$overall$RMSE)
 ```
 
-`plot_cv_metrics()` shows the spread across folds. A pooled RMSE built from one
-catastrophic fold and four good ones describes neither; here the five blocked
-folds run from `r if (runs) round(min(fold_rmse), 2) else NA` to
+`plot_cv_metrics()` shows the spread across folds. The pooled RMSE cannot
+tell one bad fold from an even spread of error; here the five blocked folds
+run from `r if (runs) round(min(fold_rmse), 2) else NA` to
 `r if (runs) round(max(fold_rmse), 2) else NA`.
 
 ```{r plot-metrics, fig.height=4, fig.alt=if (runs) alt_metrics else NULL}

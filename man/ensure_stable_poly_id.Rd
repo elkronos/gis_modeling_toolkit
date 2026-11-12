@@ -132,7 +132,7 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
 g <- create_grid_polygons(bnd, target_cells = 9)
-# Reverse the rows and re-derive the IDs: the SAME cell gets the same ID,
+# Reverse the rows and re-derive the IDs: the same cell gets the same ID,
 # which is the property a row-position ID does not have.  The check joins
 # the two layers on geometry, because comparing sorted ID vectors would
 # pass for any two permutations of 1:9.

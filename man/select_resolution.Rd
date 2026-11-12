@@ -211,8 +211,7 @@ and \code{plot()} of a profile read no seeds and refit nothing.
 \description{
 Picks the level a criterion prefers, together with the \emph{flat region}:
 every level whose criterion value is within \code{tol} of the optimum.
-Report the flat region with the count, since every level in it scores
-within \code{tol} of the optimum.
+Report the flat region with the count.
 On the default profile, one size scored for pooled values, the default
 criterion is that size: it returns the count the size gives, with no
 optimum and no flat region (see "A profile built with an estimate"); what

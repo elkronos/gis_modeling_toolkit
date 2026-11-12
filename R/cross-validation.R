@@ -3678,6 +3678,8 @@ sac_nugget <- function(x) {
 #' r                            # the effective range, in metres
 #' attr(r, "directional")       # the four directional ranges
 #' attr(r, "variogram_model")   # the fitted model behind it
+#' attr(r, "nugget_at_bound")   # TRUE: the fit put the nugget at its bound;
+#'                              # ?sac_nugget says how to read that
 #' attr(r, "structure_p")       # the test for spatial structure
 #'
 #' # A field whose range the data cannot pin down: the variogram never
@@ -5198,7 +5200,7 @@ print.sac_range <- function(x, ...) {
 #' from their training data with [fold_separation()].
 #'
 #' @section Fold methods:
-#' | Method | Held out in each fold | Needs | Suits a map that |
+#' | **Method** | **Held out in each fold** | **Needs** | **Suits a map that** |
 #' |---|---|---|---|
 #' | `"random_kfold"` | a random 1/k of the rows | `k` | predicts among the samples, over an area they cover evenly |
 #' | `"block_kfold"` | whole blocks of a grid, or of `blocks` | `k`; `block_size` or `auto_range` to size the grid | predicts into unsampled gaps about as wide as the blocks |
@@ -5284,7 +5286,7 @@ print.sac_range <- function(x, ...) {
 #' built.
 #'
 #' @section NNDM:
-#' `"nndm"` implements the distance-matching principle of Mila et al. (2022):
+#' `"nndm"` implements the distance-matching principle of Milà et al. (2022):
 #' it sizes the exclusion around each held-out point, with no fixed buffer,
 #' so that the distribution of distances from the held-out points to their
 #' training data approaches the distribution of distances from the
@@ -5682,7 +5684,7 @@ print.sac_range <- function(x, ...) {
 #'   folds are built in.  Matching is attempted only while a held-out point's
 #'   nearest-neighbour distance is at most `phi`; the exclusion that takes it
 #'   past `phi` is the last one, so a realised distance can exceed `phi` by
-#'   up to one neighbour step, as in `CAST::nndm()`.  In Mila et al. (2022)
+#'   up to one neighbour step, as in `CAST::nndm()`.  In Milà et al. (2022)
 #'   and in `CAST::nndm()`, \eqn{\phi}{phi} is the autocorrelation range of
 #'   the outcome: beyond it observations are close to independent, so
 #'   matching adds nothing.  [estimate_sac_range()] gives such a value.
@@ -5853,7 +5855,8 @@ print.sac_range <- function(x, ...) {
 #' folds <- make_folds(pts, k = 3, method = "block_kfold", seed = 42)
 #' folds$assignment          # fold and block of each row
 #' lengths(folds$folds[[1]]) # the train and test row IDs of fold 1
-#' folds$params$block_sizes  # points per block; params$fold_blocks packs them
+#' folds$params$block_sizes  # points per block
+#' folds$params$fold_blocks  # the blocks each fold holds
 #'
 #' # Buffered leave-one-out: neighbours within 100 m left out of training.
 #' loo <- make_folds(pts, method = "buffered_loo", buffer = 100)
@@ -8881,8 +8884,8 @@ make_folds <- function(points_sf, k,
 #'   large offset; see [fit_gwr_model()]), `predictions` also carries
 #'   `y_centre` (that centre, 0 in the rows of a fold fitted on the raw
 #'   response), `yhat_centred` and `y_train_mean_centred` (`yhat` and
-#'   `y_train_mean` less the centre, to the spread a double rounds away at the
-#'   response's size), and the metrics are those of the centred values, as
+#'   `y_train_mean` less the centre, which keep digits that rounding at the
+#'   response's size would lose), and the metrics are those of the centred values, as
 #'   [model_metrics()] computes them.
 #' @family cross-validation
 #' @examplesIf requireNamespace("sp", quietly = TRUE)
@@ -9702,10 +9705,10 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'       fitted.}
 #'   }
 #'
-#'   Each fold runs in its own worker, so a failure costs that fold only, and
-#'   an error that stops a sequential run (a `metrics` or `fold_info_fn`
-#'   return value of the wrong shape) stops a parallel one too, naming the
-#'   fold.  When some folds, but not all, end as `"error"`, `"skipped"` or
+#'   A failure costs that fold only: with `parallel = TRUE` each fold runs in
+#'   its own worker, and a sequential run catches the error per fold.  An
+#'   error that stops a sequential run (a `metrics` or `fold_info_fn` return
+#'   value of the wrong shape) stops a parallel one too, naming the fold.  When some folds, but not all, end as `"error"`, `"skipped"` or
 #'   `"worker_error"`, the function warns, naming them and how many rows
 #'   `overall` covers: it is pooled over the folds that produced predictions,
 #'   and the fold that fails is often the hardest to predict, so it may

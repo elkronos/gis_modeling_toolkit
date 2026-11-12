@@ -395,17 +395,16 @@
 #' @param ... Passed to \code{predict()}, e.g. \code{type = "predict"} for a
 #'   \code{bayesian_fit}.  Not \code{draws}, which this function sets itself
 #'   and refuses here.
-#' @return An \code{sf} POINT layer with a \code{.pred} column (and
-#'   \code{.pred_se} when \code{se = TRUE} and available; one a supplied
-#'   \code{grid} already carried, from an earlier surface, is removed
-#'   otherwise).  For an
+#' @return An \code{sf} POINT layer with a \code{.pred} column, and
+#'   \code{.pred_se} when \code{se = TRUE} and the backend gives one.  A
+#'   \code{.pred_se} column that a supplied \code{grid} carries from an
+#'   earlier surface is removed when this call adds none.  For an
 #'   auto-generated grid the resolution is attached as attribute
 #'   \code{"cell_size"}.  For a user-supplied \code{grid} it is only whatever
 #'   \code{"cell_size"} attribute that object already carried.  That is usually
 #'   \code{NULL}, and \code{NULL} for certain if the grid had to be
 #'   re-projected, since \code{st_transform()} does not preserve custom
-#'   attributes.  The resolution of a grid you built is not this function's to
-#'   infer.
+#'   attributes.
 #' @seealso \code{\link{area_of_applicability}()} to mark where the surface
 #'   applies, and \link{spatial_fit-predict} for the predictions of each
 #'   backend.

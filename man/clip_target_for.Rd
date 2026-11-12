@@ -52,19 +52,10 @@ the layer is returned in the automatically selected local projected CRS,
 not the input CRS; a message reports this unless \code{quiet = TRUE}.
 }
 \description{
-Builds the polygon layer to tessellate within. With a \code{boundary} it is
-that boundary, row for row (optionally buffered by \code{expand}). Without one
-it is the axis-aligned bounding box of \code{points_sf} in the working CRS,
-again optionally buffered. Points that all share one x or one y, or
-nearly so (the short side of their bounding box below a millionth of the
-long side, or below about 1.5e-154, a length whose square doubles cannot
-hold), get a small buffer around them instead. When every point sits at
-one location, or the share of their spread the buffer would take (5
-percent, or a fractional \code{expand}) is below that length, the box has no
-extent to take a share of, and the target is a disk of radius 1 unit of
-the CRS around it (1 m in a metre CRS, 1 km in a kilometre CRS), unless
-\code{expand} is 1 or more, which is then the radius; the message says so.
-Pass \code{boundary} for a target of real size.
+Builds the area that the hex and square cells of
+\code{\link[=build_tessellation]{build_tessellation()}} are clipped to.  With a \code{boundary} it is that
+boundary, row for row; without one it is the axis-aligned bounding box of
+\code{points_sf} in the working CRS.  Either can be buffered by \code{expand}.
 }
 \details{
 Use it to build the \code{boundary} that \code{method = "hex"} and \code{"square"}
@@ -76,10 +67,25 @@ tessellations of one dataset cover the same ground.
 It is not the target \code{\link[=build_tessellation]{build_tessellation()}} derives on its own:
 \code{method = "voronoi"} without a boundary clips to the convex hull of the
 points (or of their \code{cover}, for seeds) buffered by 2 percent of its
-diagonal, and there \code{expand} is always a distance. A bounding box over a non-rectangular point cloud includes
-corners with no data, so a hex or square grid laid over it has cells that
-hold no points; pass the study-area polygon when there is one.
+diagonal, and there \code{expand} is always a distance.  A bounding box over a
+non-rectangular point cloud includes corners with no data, so a hex or
+square grid laid over it has cells that hold no points; pass the
+study-area polygon when there is one.
 }
+\section{Points with no extent}{
+
+Points that all share one x or one y, or nearly so (the short side of
+their bounding box below a millionth of the long side, or below about
+1.5e-154, a length whose square doubles cannot hold), get a small buffer
+around them instead of a box.  When every point sits at one location, or
+the share of their spread the buffer would take (5 percent, or a
+fractional \code{expand}) is below that length, the box has no extent to take
+a share of, and the target is a disk of radius 1 unit of the CRS around
+it (1 m in a metre CRS, 1 km in a kilometre CRS), unless \code{expand} is 1 or
+more, which is then the radius; the message says so.  Pass \code{boundary} for
+a target of real size.
+}
+
 \examples{
 library(sf)
 set.seed(1)

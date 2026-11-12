@@ -271,3 +271,25 @@ test_that("the help says what changes for a forest", {
                           "\\code{coords = \"no\"}, it is the object the computation ran on"),
                fixed = TRUE)
 })
+
+test_that("print() gives the location threshold in the unit of the CRS", {
+  set.seed(23)
+  trn <- cf_pts(150, 0, 1000)
+  a <- area_of_applicability(cf_pts(20, 0, 2000),
+                             model = cf_fake_gwr(trn, c("a1", "a2")))
+  expect_identical(a$location$unit, "metres")
+  out <- utils::capture.output(print(a))
+  line <- out[grepl("location    : measured on its own", out, fixed = TRUE)]
+  expect_length(line, 1L)
+  expect_match(line, " metres from the nearest training point)$")
+  expect_false(any(grepl("map units", out, fixed = TRUE)))
+  # A unit the record does not carry is called CRS units.
+  a$location$unit <- NA_character_
+  out <- utils::capture.output(print(a))
+  expect_true(any(grepl(" CRS units from the nearest training point)", out,
+                        fixed = TRUE)))
+  a$location$unit <- NULL
+  out <- utils::capture.output(print(a))
+  expect_true(any(grepl(" CRS units from the nearest training point)", out,
+                        fixed = TRUE)))
+})

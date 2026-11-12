@@ -673,7 +673,7 @@ the boundary.
 \section{Intervals: which one answers which question}{
 Two families of interval columns can be in the frame. Each has its own
 argument, and neither changes the other.\tabular{lllll}{
-   Family \tab Columns \tab Target \tab Centre \tab Asked for by \cr
+   \strong{Family} \tab \strong{Columns} \tab \strong{Target} \tab \strong{Centre} \tab \strong{Asked for by} \cr
    observation \tab \verb{..obs_lo_*}, \verb{..obs_hi_*} \tab one further observation in the cell \tab pooled value \tab \code{obs_level} \cr
    mean \tab \verb{..ci_lo_*}, \verb{..ci_hi_*} \tab a mean, never one observation \tab plain mean \tab \code{conf_level} \cr
 }

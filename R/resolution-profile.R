@@ -3970,7 +3970,8 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
   part <- attr(x, "partition", exact = TRUE)
   # The steps the WSS curve rises at are counted between levels, so on a
   # profile with fewer than two levels that have a WSS (the default ladder of
-  # one size among them) there is no step to count and no clause.  They are
+  # one size among them) there is no step to count and no clause, nor on a
+  # curve that rises at none.  They are
   # counted over the levels printed: a subset of the rows keeps the whole
   # ladder's count in its attributes, and on a whole profile the two agree.
   if ("wss" %in% names(x)) {
@@ -3987,7 +3988,10 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
               if (is.list(part) && !is.null(part$kind)) .partition_label(part, attr(x, "nstart"))
               else sprintf("%d k-means++ restart%s", attr(x, "nstart"),
                            if (identical(as.integer(attr(x, "nstart")), 1L)) "" else "s"),
-              if (n_wss >= 2L) sprintf("; WSS rises at %d step(s)", bumps)
+              # A curve that never rises says nothing here, so the clause
+              # is printed only when it counts a rise.
+              if (n_wss >= 2L && isTRUE(bumps > 0L))
+                sprintf("; WSS rises at %d step(s)", bumps)
               else ""))
   # What one cell for the whole layer scores: the ladder starts at 2, so the
   # level every other has to beat is not a row of the table.
@@ -4119,8 +4123,7 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'
 #' Picks the level a criterion prefers, together with the \emph{flat region}:
 #' every level whose criterion value is within \code{tol} of the optimum.
-#' Report the flat region with the count, since every level in it scores
-#' within \code{tol} of the optimum.
+#' Report the flat region with the count.
 #' On the default profile, one size scored for pooled values, the default
 #' criterion is that size: it returns the count the size gives, with no
 #' optimum and no flat region (see "A profile built with an estimate"); what
@@ -6042,7 +6045,7 @@ print.resolution_summary <- function(x, ...) {
     criterion = x$criterion,
     best = x$best,
     `flat region` = vapply(seq_len(nrow(x)), band_of, character(1)),
-    `levels in band` = x$n_flat,
+    `levels in flat region` = x$n_flat,
     check.names = FALSE, stringsAsFactors = FALSE)
   print(tab, row.names = FALSE)
   # The notes go under the table rather than in a column of it: a listed band

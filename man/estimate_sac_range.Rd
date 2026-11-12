@@ -599,6 +599,8 @@ r <- estimate_sac_range(pts, response_var = "z")
 r                            # the effective range, in metres
 attr(r, "directional")       # the four directional ranges
 attr(r, "variogram_model")   # the fitted model behind it
+attr(r, "nugget_at_bound")   # TRUE: the fit put the nugget at its bound;
+                             # ?sac_nugget says how to read that
 attr(r, "structure_p")       # the test for spatial structure
 
 # A field whose range the data cannot pin down: the variogram never

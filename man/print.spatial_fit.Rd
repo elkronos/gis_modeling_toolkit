@@ -26,11 +26,8 @@ the node size, whether the coordinates were used as predictors, how
 each tree's rows were sampled, the out-of-bag error and the largest
 importances.  A forest fitted without them prints "no spatial
 information used": it sees the covariates alone.  One fitted with
-\code{include_coords = TRUE} fits location closely, so its
-out-of-bag error, a random hold-out, is its error among the samples
-and reads low for predictions made farther from the data; score it on
-folds at the distances the map will be used at (see "Coordinates as
-predictors" in
+\code{include_coords = TRUE} prints a note on how to score it (see
+"Coordinates as predictors" and "Out-of-bag error" in
 \code{\link{fit_rf_model}()}).  When a predictor is an unordered
 factor or a character column, a line says how ranger was told to split
 it;

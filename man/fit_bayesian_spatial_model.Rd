@@ -69,7 +69,7 @@ units, use \code{gp_resolution} and leave this \code{NULL}.}
 
 \item{gp_c}{Positive numeric boundary factor for the approximate GP, or
 NULL (default) to derive it alongside \code{gp_k}.  The boundary must be
-wide enough to contain the longest plausible correlation range; a value
+wide enough to contain the longest plausible effective range; a value
 that is too small truncates the domain and degrades the approximation for
 smooth, long-range surfaces.  When you set \code{gp_c} and leave
 \code{gp_k = NULL}, \code{gp_k} is derived for \emph{your} boundary: a
@@ -462,7 +462,7 @@ on the posterior alone, a line is logged, the reason is in
 \code{$info$gp_adequacy$residual_untested}, and \code{print()} keeps
 its flag on a variogram range that was below the floor.
 
-\if{html}{\out{<div class="sourceCode">}}\preformatted{On a fit with nothing left over the test is conservative, because the
+On a fit with nothing left over the test is conservative, because the
 surface takes up part of the noise and leaves the residuals slightly
 negatively autocorrelated.  It is not sharp just below the floor,
 where the length-scale draws report the structure
@@ -489,8 +489,6 @@ length-scales is wider than its prior; and the share of draws below
 the floor cannot detect an unidentified process, because a posterior
 the data did not move puts 1 percent below the floor, the same as the
 prior.
-}\if{html}{\out{</div>}}
-
 }
 A response whose range is below the floor needs a finer basis and a prior
 that allows the shorter length-scale, both of which \code{gp_resolution}

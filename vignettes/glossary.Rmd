@@ -14,6 +14,16 @@ vignette: >
 
 The articles and help pages use the terms below in these senses.
 
+The terms, A to Z: [area of applicability (AOA)](#area-of-applicability),
+[autocorrelation range](#autocorrelation-range), [backend](#backend),
+[block](#block), [cell](#cell), [cell's true mean](#cells-true-mean), [CRS
+units](#crs-units), [design effect (`deff`)](#design-effect), [dissimilarity
+index (DI)](#dissimilarity-index), [flat region](#flat-region),
+[fold](#fold), [level](#level), [lon/lat](#lon-lat), [nugget, sill,
+range](#nugget-sill-range), [pooled value](#pooled-value), [range
+floor](#range-floor), [row ID](#row-id), [size](#size), [support
+ceiling](#support-ceiling), [variogram](#variogram).
+
 [area of applicability (AOA)]{#area-of-applicability}
 :   The prediction locations where a model's cross-validated score can be
     expected to hold: those whose dissimilarity index is at or below a
@@ -24,8 +34,8 @@ The articles and help pages use the terms below in these senses.
 :   The distance beyond which two observations are close to uncorrelated, in
     the units of the CRS the variogram is fitted in. `estimate_sac_range()`
     returns it as the effective range of an exponential variogram: three
-    times the fitted range parameter, where the semivariance reaches about
-    95 percent of the sill. A block or a buffer has to exceed it to keep
+    times the fitted range parameter, where the semivariance has covered
+    about 95 percent of the rise from the nugget to the sill. A block or a buffer has to exceed it to keep
     held-out rows apart from their training data.
 
 [backend]{#backend}
@@ -100,8 +110,10 @@ The articles and help pages use the terms below in these senses.
 
 [nugget, sill, range]{#nugget-sill-range}
 :   The variogram's value at zero distance (the noise), the value it levels
-    off at (the total variance), and the distance at which it gets there.
-    `sac_nugget()` reads the nugget of an `estimate_sac_range()` result.
+    off at (the total variance), and the range, the distance over which it
+    rises toward the sill. The exponential model `estimate_sac_range()` fits
+    approaches the sill without reaching it; see
+    [autocorrelation range](#autocorrelation-range). `sac_nugget()` reads the nugget of an `estimate_sac_range()` result.
 
 [pooled value]{#pooled-value}
 :   A cell's mean pulled toward the mean of the observations in the 8

@@ -108,7 +108,7 @@
 #'     \code{vignette("reporting")}.
 #' }
 #'
-#' \code{vignette("spatialkit_nc_demo")} runs the whole pipeline on one
+#' \code{vignette("spatialkit_nc_demo")} runs the pipeline on one simulated
 #' layer.
 #'
 #' Two choices are the user's, and each has an argument with a default.
@@ -142,7 +142,7 @@
 #'     \code{fit_bayesian_spatial_model()}: Riutort-Mayol et al. (2023).
 #'   \item The nearest-neighbour distance-matching folds of
 #'     \code{make_folds(method = "nndm")} and their \code{min_train = 0.5}:
-#'     Mila et al. (2022).
+#'     Milà et al. (2022).
 #'   \item The area-of-applicability threshold as the outlier-removed maximum
 #'     of the training dissimilarity, as the paper defines it (the reference
 #'     implementation, CAST, uses the outlier fence itself, which is larger
@@ -161,9 +161,9 @@
 #'     half the maximum separation, in \code{estimate_sac_range()}.
 #'   \item The 25 k-means++ restarts per candidate level in the sweep of
 #'     \code{determine_optimal_levels()}: k-means++ seeding follows Arthur
-#'     and Vassilvitskii (2007) and a fixed budget follows Franti and
-#'     Sieranoja (2019), but 25 is the budget at which the measured WSS curve
-#'     stopped rising between levels, not a published figure.
+#'     and Vassilvitskii (2007) and a fixed budget follows Fränti and
+#'     Sieranoja (2019); 25 is the package's choice, not a published
+#'     figure.
 #'   \item \code{max_levels = 12} and the unit-step ladder of candidate
 #'     levels in \code{determine_optimal_levels()}.
 #'   \item The 3:1 fold-imbalance tolerance (\code{balance_tol = 3}) in

@@ -1418,7 +1418,7 @@
 #'   "Coordinate scaling and anisotropy".
 #' @param gp_c Positive numeric boundary factor for the approximate GP, or
 #'   NULL (default) to derive it alongside \code{gp_k}.  The boundary must be
-#'   wide enough to contain the longest plausible correlation range; a value
+#'   wide enough to contain the longest plausible effective range; a value
 #'   that is too small truncates the domain and degrades the approximation for
 #'   smooth, long-range surfaces.  When you set \code{gp_c} and leave
 #'   \code{gp_k = NULL}, \code{gp_k} is derived for \emph{your} boundary: a
@@ -1665,33 +1665,33 @@
 #'     \code{$info$gp_adequacy$residual_untested}, and \code{print()} keeps
 #'     its flag on a variogram range that was below the floor.
 #'
-#'     On a fit with nothing left over the test is conservative, because the
-#'     surface takes up part of the noise and leaves the residuals slightly
-#'     negatively autocorrelated.  It is not sharp just below the floor,
-#'     where the length-scale draws report the structure
-#'     (\code{"below_resolution"}).  An exponential field has structure at
-#'     every scale and can be reported with a range above the floor.  The 5
-#'     percent level is the usual one and is not tuned; with many rows a small
-#'     leftover autocorrelation is significant, so read the size of I beside
-#'     its p.
+#' On a fit with nothing left over the test is conservative, because the
+#' surface takes up part of the noise and leaves the residuals slightly
+#' negatively autocorrelated.  It is not sharp just below the floor,
+#' where the length-scale draws report the structure
+#' (\code{"below_resolution"}).  An exponential field has structure at
+#' every scale and can be reported with a range above the floor.  The 5
+#' percent level is the usual one and is not tuned; with many rows a small
+#' leftover autocorrelation is significant, so read the size of I beside
+#' its p.
 #'
-#'     "No variance that can be told from zero" is decided on the Gaussian
-#'     process's share of the variance, \code{sdgp^2 / (sdgp^2 + sigma^2)}:
-#'     its 2.5 percent quantile is under 0.01.  It does not mark off a
-#'     response whose structure is all below the floor: such a process can
-#'     still carry a share, and the residual test reports it.  The share
-#'     exists for a gaussian or
-#'     lognormal family.  For any other family the length-scales decide
-#'     instead: the process is not identified when on every axis the
-#'     posterior kept more than three quarters of its prior's variance and
-#'     the largest gap between its distribution function and the prior's is
-#'     under 0.30.  \code{$info$gp_adequacy$identified_by} says which rule
-#'     was used.  The width of the length-scale posterior does not decide by
-#'     itself, because a posterior that moved to longer
-#'     length-scales is wider than its prior; and the share of draws below
-#'     the floor cannot detect an unidentified process, because a posterior
-#'     the data did not move puts 1 percent below the floor, the same as the
-#'     prior.
+#' "No variance that can be told from zero" is decided on the Gaussian
+#' process's share of the variance, \code{sdgp^2 / (sdgp^2 + sigma^2)}:
+#' its 2.5 percent quantile is under 0.01.  It does not mark off a
+#' response whose structure is all below the floor: such a process can
+#' still carry a share, and the residual test reports it.  The share
+#' exists for a gaussian or
+#' lognormal family.  For any other family the length-scales decide
+#' instead: the process is not identified when on every axis the
+#' posterior kept more than three quarters of its prior's variance and
+#' the largest gap between its distribution function and the prior's is
+#' under 0.30.  \code{$info$gp_adequacy$identified_by} says which rule
+#' was used.  The width of the length-scale posterior does not decide by
+#' itself, because a posterior that moved to longer
+#' length-scales is wider than its prior; and the share of draws below
+#' the floor cannot detect an unidentified process, because a posterior
+#' the data did not move puts 1 percent below the floor, the same as the
+#' prior.
 #' }
 #' A response whose range is below the floor needs a finer basis and a prior
 #' that allows the shorter length-scale, both of which \code{gp_resolution}

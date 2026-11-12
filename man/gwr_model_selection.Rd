@@ -93,40 +93,46 @@ long sweep progress.}
 }
 \value{
 An object of class \code{gwr_model_selection}, a list with:
-\code{best} (character vector of the selected predictors, the model with
-the lowest criterion; \code{character(0)} when that is the model without
-predictors);
-\code{table} (ranked data.frame of every model evaluated, with columns
-\code{rank}, \code{n_vars}, \code{variables}, \code{criterion} and
-\code{delta}, the criterion minus the best model's; the model without
-predictors is the row \code{<none>};
-\code{criterion} is \code{NA}, and the model ranked last, where it
-could not be evaluated or where AICc is undefined because the model's
-effective number of parameters \eqn{tr(S)} is not below \eqn{n - 2},
-which raises a warning);
-\code{within_2} (the rows of \code{table} whose \code{delta} is at most
-2) and \code{smallest_within_2} (the predictors of the smallest model
-among them);
-\code{criterion} (\code{"AICc"});
-\code{criterion_by_name}, \code{criterion_column} and
-\code{criterion_verified} (where the criterion was read from the
+\describe{
+\item{\code{best}}{Character vector of the selected predictors, the
+model with the lowest criterion; \code{character(0)} when that is
+the model without predictors.}
+\item{\code{table}}{Ranked data.frame of every model evaluated, with
+columns \code{rank}, \code{n_vars}, \code{variables},
+\code{criterion} and \code{delta}, the criterion minus the best
+model's.  The model without predictors is the row \code{<none>}.
+\code{criterion} is \code{NA}, and the model is ranked last, where it
+could not be evaluated or where AICc is undefined because the
+model's effective number of parameters \eqn{tr(S)} is not below
+\eqn{n - 2} (with a warning).}
+\item{\code{within_2}, \code{smallest_within_2}}{The rows of
+\code{table} whose \code{delta} is at most 2, and the predictors of
+the smallest model among them.}
+\item{\code{criterion}}{\code{"AICc"}.}
+\item{\code{criterion_by_name}, \code{criterion_column},
+\code{criterion_verified}}{Where the criterion was read from the
 diagnostic table: \code{TRUE}, 3 and \code{TRUE} with the built-in
-engine);
-\code{response_var} and \code{candidate_vars} (the response and the full
-candidate set the sweep ran over, both echoed by \code{print()});
-\code{bandwidth}, \code{bandwidth_source}, \code{adaptive} and
-\code{kernel} (the smoothing held fixed across the sweep, and where it
-came from: \code{"supplied"}, or the criterion's name followed by
+engine.}
+\item{\code{response_var}, \code{candidate_vars}}{The response and the
+full candidate set the sweep ran over, both echoed by
+\code{print()}.}
+\item{\code{bandwidth}, \code{bandwidth_source}, \code{adaptive},
+\code{kernel}}{The smoothing held fixed across the sweep, and where
+it came from: \code{"supplied"}, or the criterion's name followed by
 \code{"search on the full model"}, the criterion being
-\code{"leave-one-location-out CV"} when observations share a location);
-\code{bandwidth_search} (what the search scored, as
-\code{\link{fit_gwr_model}} keeps it; \code{NULL} when the bandwidth was
-supplied);
-\code{n_obs}, \code{n_models} (the rows of \code{table}),
-\code{used_dmat} (always \code{FALSE}); and \code{raw}
-(the forward sweep in the layout \code{GWmodel::gwr.model.selection()}
-returns: the two-element list of its model list and its diagnostic
-table, without the model that has no predictors).
+\code{"leave-one-location-out CV"} when observations share a
+location.}
+\item{\code{bandwidth_search}}{What the search scored, as
+\code{\link{fit_gwr_model}} keeps it; \code{NULL} when the bandwidth
+was supplied.}
+\item{\code{n_obs}, \code{n_models}}{The number of observations,
+and the number of rows of \code{table}.}
+\item{\code{used_dmat}}{Always \code{FALSE}.}
+\item{\code{raw}}{The forward sweep in the layout
+\code{GWmodel::gwr.model.selection()} returns: the two-element list
+of its model list and its diagnostic table, without the model that
+has no predictors.}
+}
 }
 \description{
 Grows a GWR model one predictor at a time and scores every intermediate
@@ -134,7 +140,7 @@ model with a corrected Akaike information criterion, the sweep
 \code{GWmodel::gwr.model.selection()} defines, and returns a ranked table
 with each model's distance from the best.  The model without predictors is
 scored too.  Every model is fitted by the package's own local solve (see
-\code{\link{fit_gwr_model}}, \strong{The local solve}), so a candidate
+"The local solve" in \code{\link{fit_gwr_model}}), so a candidate
 that is constant inside some windows, a regional indicator say, is scored
 on what those windows do estimate and neither stops the sweep nor scores
 as rounding error.

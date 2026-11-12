@@ -39,8 +39,8 @@ settled: the cells as a file, the values in them, the model's score with the
 checks that bound it, and what to save to rerun the analysis.
 
 *This article needs two optional packages: `ggplot2` for the map and `gstat`
-for the autocorrelation range. Where one is missing, the chunks that use it
-are skipped with a note.*
+for the autocorrelation range. Where one is missing, the code that needs it
+is shown but not run.*
 
 ## The cells as a file someone else can use
 
@@ -305,16 +305,12 @@ attr(vals, "count_rule")
 A report of cell values reads four things off them.
 
 - Which value it is. `..pooled_resp_yield` is the pooled value and
-  `resp_mean_yield` the plain mean. Both estimate the cell's true mean: the
-  expected value of one further observation located in the cell the way its
-  observations were. Neither is the average of a surface over the cell's
-  area. Give `n` beside either.
+  `resp_mean_yield` the plain mean; `vignette("cells")` says what both
+  estimate. Give `n` beside either.
 - The own weight. `..pooled_w_resp_yield` is the share of the pooled value
-  that is the cell's own mean; the rest is the mean it is pulled toward. A
-  cell of two observations has a smaller weight than a cell of ten, so its
-  value says more about its surroundings and less about itself. The own
-  weight is no regression weight: for a regression on cell values use the
-  plain mean with `cell_weight`.
+  that is the cell's own mean, and it grows with the cell's count. It is no
+  regression weight: for a regression on cell values use the plain mean with
+  `cell_weight` (`vignette("cells")`).
 - What the interval covers. `..obs_lo_*` and `..obs_hi_*` are a range for one
   further observation in the cell, located like the data. The statement holds
   on average over observations and not cell by cell, and the two offsets are
@@ -355,16 +351,12 @@ observation about as well as the cells do or better, or when an F test finds
 the cell means no different from one mean; `?summarize_by_cell` gives the
 thresholds, and `vignette("cells")` shows the warning that comes with it.
 
-`cell_values_at()` gives the value at other locations, with each location's
-distance from the nearest observation. `dist_ratio` is that distance over the
-layer's spacing (the median distance from an observation's location to the
-nearest other), and it is the number to report beside a value read at a place
-that is not an observation. Passing the seeds the cells were built on
-(`seeds$cell_id <- tess$index` gives each seed its cell) extends each Voronoi
-cell past the clipped edge, so a location outside every cell takes the
-cell of its nearest seed. Without `seeds`, such a location comes back with
-`filled = TRUE` and, in `filled_from`, the cell its value was taken from. The
-third location below lies outside the layer:
+`cell_values_at()` gives the value at other locations with its interval.
+Report `dist_ratio` beside a value read at a place that is not an
+observation: the location's distance from the nearest observation over the
+layer's spacing. `vignette("cells")` explains the call, the seeds that extend
+the Voronoi cells past the clipped edge, and `filled`. The third location
+below lies outside the layer:
 
 ```{r value-at}
 seeds$cell_id <- tess$index
@@ -389,7 +381,7 @@ observations, some held out at random and some as a block, the interval at
 and 69.5 percent of those above 8. The script is
 [`dev/sim-pooled-values.R`](https://github.com/elkronos/gis_modeling_toolkit/blob/main/dev/sim-pooled-values.R)
 in the package's GitHub repository, and `?cell_values_at` gives its settings
-and the classes between.
+and the coverage in the `dist_ratio` classes between those two.
 
 ## Reporting a model's score
 
@@ -563,15 +555,11 @@ st_write(aoa$aoa, file.path(dir, "surface.gpkg"), quiet = TRUE)
 |---|---|---|
 | folds | `folds$method`, `folds$k`, `folds$params` | A cross-validated score is the error at the distance the folds put between held-out points and their training data (Milà et al. 2022), so a reader needs the fold geometry to know which map the score describes. |
 | score | `cv$overall`, `cv$fold_metrics` | The pooled score cannot tell a model that fails in one block from one with the same error in every block; the range over folds can. `plot_cv_metrics()` draws it. |
-| coverage | `cv$n_folds_succeeded`, `cv$n_folds_attempted`, `cv$n_dropped`, `cv$orphan_rows`, `cv$n_unknown_ids` | A score computed over 80 percent of the data is not a score over the data. The run warns about it, but the warning ends with the session; these fields carry it into the report. |
+| coverage | `cv$n_folds_succeeded`, `cv$n_folds_attempted`, `cv$n_dropped`, `cv$orphan_rows`, `cv$n_unknown_ids` | A score over the folds that ran describes those rows only. The run warns about it, but the warning ends with the session; these fields carry it into the report. |
 | residuals | `residual_morans_i()` | Checks whether the model captured the spatial structure in the response; a high I means it did not. |
 | applicability | `area_of_applicability()` | A fitted model returns a number everywhere, including ground nothing like its training data, and the cross-validated score does not apply there (Meyer and Pebesma 2021). |
 | range | `estimate_sac_range()`, `folds$params`, `fold_separation()` | Blocks narrower than the range leave held-out points correlated with their training data; `fold_separation()` says what that means for the map. |
-| interval coverage, for a model with intervals; not in this report | `cv_bayes()`, `plot_calibration()` | Good point predictions routinely come with badly calibrated intervals, so RMSE alone can prefer the model whose uncertainty is wrong (Heaton et al. 2019). |
-
-The applicability line bounds the score in space and the coverage line bounds
-it in sample. Without them a reader has a figure and no idea what it was
-computed over.
+| interval coverage, for a model with intervals; not in this report | `cv_bayes()`, `plot_calibration()` | Point predictions can be accurate while their intervals are too narrow or too wide (Heaton et al. 2019 compare both), so RMSE alone can prefer the model whose uncertainty is wrong. |
 
 ## What to save
 
@@ -640,7 +628,7 @@ under the same package version, so save the layer.
 ## Next
 
 The next article in reading order is `vignette("spatialkit_nc_demo")`, the
-whole pipeline on a simulated field over North Carolina. This article relied
+pipeline on a simulated field over North Carolina. This article relied
 on `?assign_features_to_polygons`, `?ensure_stable_poly_id`,
 `?summarize_by_cell`, `?cell_values_at`, `?cv_spatial`,
 `?residual_morans_i`, `?area_of_applicability`, `?estimate_sac_range` and

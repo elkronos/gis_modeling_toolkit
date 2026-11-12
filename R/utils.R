@@ -625,7 +625,7 @@
 #'   regressed its response about (one value, or one per observation for
 #'   pooled folds, each the centre of its own fold's fit). RMSE, MAE and R2
 #'   do not change under a shift, so they read the centred values, which
-#'   keep the spread a double rounds away at the response's size; MAPE and
+#'   keep digits that rounding at the response's size would lose; MAPE and
 #'   SMAPE, which read the size of the values, read the centred error over
 #'   the values with the centre added back. With 0 the arithmetic is that of
 #'   values in the response's units, to the last bit.

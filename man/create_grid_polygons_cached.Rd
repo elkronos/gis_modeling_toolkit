@@ -77,6 +77,8 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
 g <- create_grid_polygons_cached(bnd, target_cells = 16, type = "hex")
+# 27, not 16: clipping keeps every hexagon that overhangs the boundary,
+# which adds more at a small target (see ?create_grid_polygons)
 nrow(g)
 # The IDs come from ensure_stable_poly_id(), so they follow the geometry:
 # the same request with the boundary's vertices in another order gives the

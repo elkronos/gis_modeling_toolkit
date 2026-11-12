@@ -906,9 +906,9 @@ test_that("no signal between cells: every weight is 0 and each value is its targ
     "  own weight  : median 0.00 (..pooled_w_resp_w)",
     "  note        : tau2 is 0: every own weight is 0, and each value is its",
     "                neighbours' mean, with none of the cell's own rows in it"))
-  expect_identical(txt[10L], sprintf(paste0("                one mean for all rows: %.2e: these ",
+  expect_identical(txt[10L], sprintf(paste0("                one mean for all rows: %s: these ",
                                             "cells do no better than one mean"),
-                                     rec$loo_one_cell))
+                                     .one_notation(c(rec$loo, rec$loo_one_cell))[2L]))
   expect_identical(txt[11L],
                    "  interval    : 90% for ONE OBSERVATION (..obs_lo_resp_w, ..obs_hi_resp_w):")
   expect_length(txt, 13L)

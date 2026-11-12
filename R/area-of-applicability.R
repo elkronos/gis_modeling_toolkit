@@ -711,7 +711,9 @@
         abs(m[, 1L]) <= .POOL_XY_MAX & abs(m[, 2L]) <= .POOL_XY_MAX), ] <- NA_real_
     m
   }
-  list(train = xy(train_sf, "`train_sf`"), new = xy(newdata, "`newdata`"))
+  # The unit the distances are in: that of the CRS both layers were read in.
+  list(train = xy(train_sf, "`train_sf`"), new = xy(newdata, "`newdata`"),
+       unit = .crs_unit_label(sf::st_crs(train_sf)))
 }
 
 
@@ -1563,7 +1565,7 @@
 #'   \code{\link{plot.aoa}()} to draw the dissimilarity distribution.
 #' @family prediction
 #' @examples
-#' library(sf)
+#' suppressPackageStartupMessages(library(sf))
 #' set.seed(1)
 #' n <- 120
 #' train <- st_as_sf(
@@ -2062,7 +2064,8 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
       normalizer   = norm_loc$value,
       n_duplicates = if (is.null(loc_groups)) NA_integer_
                      else as.integer(loc_groups$n_dup),
-      n_outside    = sum(!inside_loc, na.rm = TRUE)
+      n_outside    = sum(!inside_loc, na.rm = TRUE),
+      unit         = loc_xy$unit %||% NA_character_
     )
   }
 
@@ -2252,9 +2255,13 @@ print.aoa <- function(x, ...) {
                 n_zero, length(x$train_DI)))
   loc <- x$location
   if (is.list(loc)) {
+    # The real unit when the CRS names one, CRS units otherwise.
+    unit <- loc$unit %||% NA_character_
+    if (length(unit) != 1L || is.na(unit)) unit <- "CRS units"
     cat(sprintf(paste0("  location    : measured on its own; threshold %.4f ",
-                       "(%s map units from the nearest training point)\n"),
-                loc$threshold, format(signif(loc$threshold * loc$normalizer, 4))))
+                       "(%s %s from the nearest training point)\n"),
+                loc$threshold, format(signif(loc$threshold * loc$normalizer, 4)),
+                unit))
     if (isTRUE(loc$threshold == 0))
       cat(sprintf(paste0("                (%d of %d training rows share a ",
                          "location with a row their fold trains on)\n"),

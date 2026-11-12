@@ -125,7 +125,7 @@
 #'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 #' ))), crs = 32632))
 #' g <- create_grid_polygons(bnd, target_cells = 9)
-#' # Reverse the rows and re-derive the IDs: the SAME cell gets the same ID,
+#' # Reverse the rows and re-derive the IDs: the same cell gets the same ID,
 #' # which is the property a row-position ID does not have.  The check joins
 #' # the two layers on geometry, because comparing sorted ID vectors would
 #' # pass for any two permutations of 1:9.
@@ -1274,6 +1274,8 @@ ensure_stable_poly_id <- function(polygons_sf,
 #'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 #' ))), crs = 32632))
 #' g <- create_grid_polygons_cached(bnd, target_cells = 16, type = "hex")
+#' # 27, not 16: clipping keeps every hexagon that overhangs the boundary,
+#' # which adds more at a small target (see ?create_grid_polygons)
 #' nrow(g)
 #' # The IDs come from ensure_stable_poly_id(), so they follow the geometry:
 #' # the same request with the boundary's vertices in another order gives the
@@ -1408,10 +1410,11 @@ create_grid_polygons_cached <- function(boundary,
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 #'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 #' ))), crs = 32632))
+#' invisible(clear_grid_cache())   # start from an empty cache
 #' g1 <- create_grid_polygons_cached(bnd, target_cells = 9)
 #' g2 <- create_grid_polygons_cached(bnd, target_cells = 9)   # cache hit
-#' clear_grid_cache()   # returns the number of entries removed, invisibly
-#' print(clear_grid_cache())                                   # 0: already empty
+#' print(clear_grid_cache())   # 1: the grid cached above
+#' print(clear_grid_cache())   # 0: already empty
 #' @export
 clear_grid_cache <- function(cache_env = .gmt_cache) {
   # Only OUR entries.  rm(ls()) wiped every binding in the environment it was

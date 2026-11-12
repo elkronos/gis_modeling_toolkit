@@ -35,10 +35,7 @@ knitr::opts_chunk$set(
 
 spatialkit draws cells from the distribution of the observations, summarises
 the observations onto them with standard errors, and scores models on folds
-that hold out whole blocks of the map. A random fold on autocorrelated data
-leaves each test point's neighbours in the training set, so its score is the
-error of predicting among the samples; a blocked fold scores predictions into
-gaps a block wide. The [home page](https://elkronos.github.io/gis_modeling_toolkit/)
+that hold out whole [blocks](glossary.html#block) of the map. The [home page](https://elkronos.github.io/gis_modeling_toolkit/)
 says more about why the package exists.
 
 This article is the short path, from installing the package to a map of a
@@ -47,7 +44,8 @@ model's predictions, on the North Carolina counties that ship with `sf`.
 field, and `vignette("glossary")` defines the terms used here.
 
 *This article needs three optional packages: `ggplot2` for the maps, `ranger`
-for the model steps and `gstat` for the block size from the data.*
+for the model steps and `gstat` for the block size from the data. Where one
+is missing, the code that needs it is shown but not run.*
 
 ## Installing
 
@@ -250,25 +248,25 @@ as above, means the choice is made once and you can see it.
 
 ## From points to a map
 
-Seven steps take the points to a scored model and a map of its predictions.
-The first four draw cells and summarise the observations onto them; the last
-three fit a model on the points, score it on folds that hold out whole blocks,
-and mark where its predictions apply.
+The calls below take the points to a scored model and a map of its
+predictions. The first four draw cells and summarise the observations onto
+them; the rest fit a model on the points, score it on folds that hold out
+whole blocks, and mark where its predictions apply.
 
 ### Cells and their values
 
 ```{r pipeline}
-# 1. Choose the number of cells.
+# Choose the number of cells.
 n_cells <- select_resolution(resolution_profile(obs, "rate"))
 
-# 2. Draw hex cells over the state.
+# Draw hex cells over the state.
 tess <- build_tessellation(obs, boundary = boundary, method = "hex",
                            approx_n_cells = n_cells, quiet = TRUE)
 
-# 3. Put each observation in a cell.
+# Put each observation in a cell.
 asg <- assign_features_to_polygons(obs, tess$cells)
 
-# 4. Summarise each cell; cells_sf attaches the geometry so the result maps.
+# Summarise each cell; cells_sf attaches the geometry so the result maps.
 cells <- summarize_by_cell(asg, "rate", cells_sf = tess$cells)
 
 c(asked = n_cells$best, drawn = nrow(tess$cells))
@@ -313,13 +311,12 @@ error of `NA`, and a cell with none has `n = NA`; both rows are kept, so the
 layer has one row per cell. `cell_weight` is the cell's effective sample
 size, which equals `n` here, with no design effect and no missing rates; pass
 it as the weights of a regression on cell values. `..pooled_resp_rate` is the
-pooled value: the
-cell's mean pulled toward the mean of the observations in the 8 nearest cells
+[pooled value](glossary.html#pooled-value): the cell's mean pulled toward the mean of the observations in the 8 nearest cells
 (nearest by the centroid of their observations), by a weight that grows with
 the cell's count. `..pooled_w_resp_rate` holds that weight and
 `..pooled_target_resp_rate` the mean it pulls toward. `vignette("cells")`
-explains every column, when to widen the standard error with a design effect
-(`deff`), and the warnings `summarize_by_cell()` gives about pooled values.
+explains every column, when to widen the standard error with a
+[design effect](glossary.html#design-effect) (`deff`), and the warnings `summarize_by_cell()` gives about pooled values.
 
 ```{r map-alt, include=FALSE}
 mean_range <- range(cells$resp_mean_rate, na.rm = TRUE)
@@ -342,9 +339,9 @@ cat("*(The map needs ggplot2, which is not installed here.)*\n")
 
 ### Cells or points?
 
-Steps 1 to 4 answer *what is the value of each cell*. The model in the next
-steps is fitted on the points, because a hundred counties are a hundred
-observations and `r n_held` cell means are `r n_held`. Fit on cells when the
+The calls so far give the value of each cell. The model in the next calls is
+fitted on the points, which gives it `r nrow(obs)` observations against
+`r n_held` cell means. Fit on cells when the
 cells are the unit you will report or act on, when the point-level data
 cannot leave the building, or when the points are so dense that the cell
 means are what the model should see. Either way the folds come from the
@@ -354,7 +351,7 @@ points' locations, and the cells can serve as the blocks that define them
 ### A model, scored on held-out blocks
 
 ```{r folds}
-# 5. Build random folds and folds that hold out whole blocks.
+# Build random folds and folds that hold out whole blocks.
 random  <- make_folds(obs, k = 4, method = "random_kfold", seed = 1)
 blocked <- make_folds(obs, k = 4, method = "block_kfold", block_size = 100e3,
                       seed = 1)
@@ -392,7 +389,7 @@ cat("*(This step needs gstat, which is not installed here.)*\n")
 ```
 
 ```{r cv, eval=has_ranger}
-# 6. Fit and score a random forest on each set of folds.
+# Fit and score a random forest on each set of folds.
 cv_random  <- cv_rf(obs, "rate", "nw_share", folds = random,
                     num_trees = 300, seed = 1)
 cv_blocked <- cv_rf(obs, "rate", "nw_share", folds = blocked,
@@ -427,10 +424,13 @@ if (ratio > 1.15) {
 cat("R² is", f2(cv_random$overall$R2), "under random folds and",
     f2(cv_blocked$overall$R2), "under blocked ones. Fold by fold it runs from",
     f2(qr[1]), "to", f2(qr[2]), "under random folds and from", f2(qb[1]), "to",
-    paste0(f2(qb[2]),
+    paste0(f2(qb[2]), " under blocked ones",
            if (max(qr[1], qb[1]) <= min(qr[2], qb[2]))
              ", so four folds of a hundred counties do not tell the two schemes apart",
-           ".\n\n"))
+           ". R² here is taken about each fold's training mean (`?cv_spatial`),",
+           " and on blocks that mean can sit far from the held-out values, so a",
+           " blocked R² above 0 does not show that the predictor does better than",
+           " the mean of the nearby counties.\n\n"))
 cat("The gap between the schemes opens when a model can use its neighbours'",
     "values, through the coordinates or a spatially smooth predictor. The",
     "[quick start on the home page](https://elkronos.github.io/gis_modeling_toolkit/#quick-start)",
@@ -438,7 +438,7 @@ cat("The gap between the schemes opens when a model can use its neighbours'",
 ```
 
 ```{r cv-none, echo=FALSE, eval=!has_ranger, results='asis'}
-cat("*(Steps 6 and 7 need ranger, which is not installed here. With only the",
+cat("*(The model steps need ranger, which is not installed here. With only the",
     "hard dependencies, `cv_spatial()` scores a learner you write with",
     "`new_spatial_fit()`; `vignette(\"models\")` shows how.)*\n")
 ```
@@ -450,7 +450,7 @@ backends on the same folds and puts them in one table.
 ### A surface, and where it applies
 
 ```{r surface, eval=has_ranger}
-# 7. Predict on a grid over the state, and mark where the model extrapolates.
+# Predict on a grid over the state, and mark where the model extrapolates.
 fit  <- fit_rf_model(obs, "rate", "nw_share", num_trees = 300, seed = 1)
 surf <- predict_surface(fit, n_cells = 4000, covariates = obs,
                         boundary = boundary)
@@ -469,7 +469,10 @@ if (is.finite(oob) && oob < 0.1)
 ```
 
 `predict_surface()` returns the grid as points, one per grid node, each
-carrying its predictor value from the nearest county. The area of
+carrying its predictor value from the nearest county. `n_cells = 4000` sets
+the grid spacing over the state's bounding box, and `boundary` drops the
+nodes outside the state, which leaves
+`r if (has_ranger) format(nrow(surf), big.mark = ",") else "fewer"`. The area of
 applicability compares each grid point's predictors with the training data.
 With `folds = blocked` it sets its threshold from the same folds as the
 score.

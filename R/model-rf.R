@@ -260,19 +260,11 @@
 #' al. 2019).  With covariates that carry the spatial structure themselves,
 #' expect less from the coordinates.
 #'
-#' A forest with coordinates fits location closely, so its error grows
-#' quickly with the distance from the data, and a cross-validated score is
-#' the error at the distance its folds put between the held-out points and
-#' their training data.  Random folds, and the out-of-bag error, a random
-#' hold-out too, measure it among the samples: the error of a map over an
-#' area the samples cover evenly, which reads low for predictions made
-#' farther from the data.  Score the forest with \code{\link{cv_rf}()} on
-#' folds at the distances the map will be used at (folds matched to the
-#' prediction distance, \code{make_folds(method = "nndm")} or
-#' \code{"knndm"}, or blocks, \code{method = "block_kfold"}, for predictions
-#' into unsampled gaps), and compare the forests with and without
-#' coordinates on the same folds.  Build the folds once and pass them to
-#' \code{cv_rf()} with and without the coordinates:
+#' Score the forests with and without coordinates on the same folds, at the
+#' distances the map will be used at (see "Fold methods" in
+#' \code{\link{make_folds}()}; "Out-of-bag error" below says why the
+#' out-of-bag error does not serve).  Build the folds once and pass them to
+#' \code{\link{cv_rf}()} with and without the coordinates:
 #' \preformatted{
 #' folds   <- make_folds(dat, k = 5, method = "block_kfold")
 #' plain   <- cv_rf(dat, "z", c("a", "b"), folds = folds)
@@ -825,13 +817,14 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #' A wrapper over \code{\link{cv_spatial}()} that refits a \pkg{ranger}
 #' forest on each training fold.  By default it holds out whole spatial
 #' blocks, so most neighbours of a held-out point are not in the training
-#' set, where the out-of-bag error holds out single rows; \code{folds} says
-#' what the score estimates.
+#' set; the forest's out-of-bag error holds out single rows.  The folds you
+#' pass decide what the score measures (see "Fold methods" in
+#' \code{\link{make_folds}()}).
 #'
 #' @section Comparing the forest with and without coordinates:
 #' Whether \code{include_coords = TRUE} lowers the error depends on how far
-#' from the training data the predictions are (see \emph{Coordinates as
-#' predictors} in \code{\link{fit_rf_model}}), so it is a comparison to make
+#' from the training data the predictions are (see "Coordinates as
+#' predictors" in \code{\link{fit_rf_model}}), so it is a comparison to make
 #' on your own data, at the block size the map will be used at. Score the
 #' two forests on the same folds: build the folds once with
 #' \code{\link{make_folds}} and pass the result as \code{folds} to two

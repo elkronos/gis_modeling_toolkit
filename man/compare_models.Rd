@@ -19,46 +19,52 @@ Without \code{newdata} nothing reads them, so any argument here is an
 error, which catches a misspelt \code{newdata}.}
 }
 \value{
-A data.frame comparing all models.  Its \code{metric_basis}
-column says what each row's metrics were computed on (see
-\code{\link{evaluate_insample}}); a table that mixes
+A data.frame with one row per model and these columns:
+\describe{
+\item{\code{model} and the metric columns}{As in
+\code{\link{evaluate_insample}()}.}
+\item{\code{metric_basis}}{What each row's metrics were computed on
+(see \code{\link{evaluate_insample}}).  A table that mixes
 \code{"out-of-bag"} and \code{"in-sample"} rows does not rank the
-models, and says so in the log.  \code{AICc} (GWR) and \code{LOOIC}
-(Bayesian) are sums over the rows a model was fitted to, so each column
-is set to \code{NA}, with a warning, when the fits carrying it were
-fitted to different rows (a predictor with missing values drops rows,
-for example) or to different responses (a transformed response on the
-same rows), and the warning says which.  \code{convergence_ok} is
-\code{TRUE} or \code{FALSE} for a Bayesian fit whose convergence was
-checked (see \code{\link{fit_bayesian_spatial_model}}) and \code{NA}
-otherwise; a fit that did not converge is ranked like the others, so it
-also raises a warning.  \code{gp_adequacy} is what the posterior of a
-Bayesian fit said about its Gaussian-process basis (\code{"ok"},
+models, and says so in the log.}
+\item{\code{AICc} (GWR) and \code{LOOIC} (Bayesian)}{Sums over the
+rows a model was fitted to, so each column is set to \code{NA}, with
+a warning, when the fits carrying it were fitted to different rows
+(a predictor with missing values drops rows, for example) or to
+different responses (a transformed response on the same rows), and
+the warning says which.}
+\item{\code{convergence_ok}}{\code{TRUE} or \code{FALSE} for a
+Bayesian fit whose convergence was checked (see
+\code{\link{fit_bayesian_spatial_model}}) and \code{NA} otherwise.  A
+fit that did not converge is ranked like the others, so it also
+raises a warning.}
+\item{\code{gp_adequacy}}{What the posterior of a Bayesian fit said
+about its Gaussian-process basis (\code{"ok"},
 \code{"below_resolution"}, \code{"unresolved_short_range"},
 \code{"no_signal_above_floor"} or \code{"not_checked"}; see "What the
 basis resolves" in \code{\link{fit_bayesian_spatial_model}}) and
-\code{NA} for the other backends.  A basis found too coarse scores like
-one that was adequate, so read the column beside the metrics.  Alongside
-the metrics it
-carries
-\code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p},
-\code{resid_morans_null} and \code{resid_morans_basis}.
-\code{resid_morans_null} names the null
-\code{\link{residual_morans_i}} scored each model against, since that
-choice is per-fit and governs how much the p-value is worth.
-\code{resid_morans_basis} says which residuals the statistic was
-computed on.  They are always the residuals of the rows the model was
-fitted to, also when \code{newdata} is given, so the column reads
+\code{NA} for the other backends.  A basis found too coarse scores
+like one that was adequate, so read the column beside the metrics.}
+\item{\code{resid_morans_I}, \code{resid_morans_z},
+\code{resid_morans_p}}{Moran's I of the residuals, from
+\code{\link{residual_morans_i}()}.}
+\item{\code{resid_morans_null}}{The null each model was scored
+against, since that choice is per fit and governs how much the
+p-value is worth.}
+\item{\code{resid_morans_basis}}{Which residuals the statistic was
+computed on: always those of the rows the model was fitted to, also
+when \code{newdata} is given, so the column reads
 \code{"in-sample"}, or \code{"out-of-bag"} for a forest, and never
-\code{"newdata"}: beside \code{metric_basis = "newdata"} the Moran
-columns describe the training residuals, not the prediction errors on
-\code{newdata}, and the two can differ in sign.  A
-significant p-value is noted in the log (not raised as an R warning):
+\code{"newdata"}.  Beside \code{metric_basis = "newdata"} the Moran
+columns describe the training residuals, not the prediction errors
+on \code{newdata}, and the two can differ in sign.}
+}
+A significant p-value is noted in the log (not raised as an R warning):
 positive autocorrelation as structure the model may have missed,
 negative (\code{resid_morans_z < 0}) as the alternating residuals of a
 model that tracks its data closely.  Read the caveats in
-\code{\link{residual_morans_i}()} before treating silence as evidence of no
-residual structure.
+\code{\link{residual_morans_i}()} before treating silence as evidence of
+no residual structure.
 }
 \description{
 The table from \code{\link{evaluate_insample}()}, plus AICc (GWR), LOOIC

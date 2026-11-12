@@ -168,7 +168,7 @@ nearest-neighbour distance distributions are matched, in the CRS the
 folds are built in.  Matching is attempted only while a held-out point's
 nearest-neighbour distance is at most \code{phi}; the exclusion that takes it
 past \code{phi} is the last one, so a realised distance can exceed \code{phi} by
-up to one neighbour step, as in \code{CAST::nndm()}.  In Mila et al. (2022)
+up to one neighbour step, as in \code{CAST::nndm()}.  In Milà et al. (2022)
 and in \code{CAST::nndm()}, \eqn{\phi}{phi} is the autocorrelation range of
 the outcome: beyond it observations are close to independent, so
 matching adds nothing.  \code{\link[=estimate_sac_range]{estimate_sac_range()}} gives such a value.
@@ -321,7 +321,7 @@ from their training data with \code{\link[=fold_separation]{fold_separation()}}.
 }
 \section{Fold methods}{
 \tabular{llll}{
-   Method \tab Held out in each fold \tab Needs \tab Suits a map that \cr
+   \strong{Method} \tab \strong{Held out in each fold} \tab \strong{Needs} \tab \strong{Suits a map that} \cr
    \code{"random_kfold"} \tab a random 1/k of the rows \tab \code{k} \tab predicts among the samples, over an area they cover evenly \cr
    \code{"block_kfold"} \tab whole blocks of a grid, or of \code{blocks} \tab \code{k}; \code{block_size} or \code{auto_range} to size the grid \tab predicts into unsampled gaps about as wide as the blocks \cr
    \code{"buffered_loo"} \tab one point, with its neighbours within \code{buffer} left out of training \tab \code{buffer} \tab predicts at a known distance from the data \cr
@@ -412,7 +412,7 @@ built.
 
 \section{NNDM}{
 
-\code{"nndm"} implements the distance-matching principle of Mila et al. (2022):
+\code{"nndm"} implements the distance-matching principle of Milà et al. (2022):
 it sizes the exclusion around each held-out point, with no fixed buffer,
 so that the distribution of distances from the held-out points to their
 training data approaches the distribution of distances from the
@@ -708,7 +708,8 @@ pts <- st_as_sf(
 folds <- make_folds(pts, k = 3, method = "block_kfold", seed = 42)
 folds$assignment          # fold and block of each row
 lengths(folds$folds[[1]]) # the train and test row IDs of fold 1
-folds$params$block_sizes  # points per block; params$fold_blocks packs them
+folds$params$block_sizes  # points per block
+folds$params$fold_blocks  # the blocks each fold holds
 
 # Buffered leave-one-out: neighbours within 100 m left out of training.
 loo <- make_folds(pts, method = "buffered_loo", buffer = 100)

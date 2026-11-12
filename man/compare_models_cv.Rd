@@ -132,39 +132,25 @@ are scored on the same folds and, in \code{overall}, on the same rows
 (see Value), the columns are comparable across rows of \code{overall}.}
 }
 \value{
-A list with overall, by_fold, and per-model cv_results
-(\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
-\code{overall} has one row per model with the pooled metrics,
-\code{n_pred} (the rows they are computed on), the coverage and CRPS
-columns described in "Coverage and CRPS in the overall table" when a
-Bayesian GP ran, and \code{model} as its last column.  \code{MAPE}
-and \code{SMAPE} skip rows whose denominator is zero; \code{n_MAPE} and
+A list with these elements:
+\describe{
+\item{\code{overall}}{One row per model with the pooled metrics,
+\code{n_pred} (the rows they are computed on, see "Rows the overall
+table is computed on"), the coverage and CRPS columns described in
+"Coverage and CRPS in the overall table" when a Bayesian GP ran,
+and \code{model} as its last column.  \code{MAPE} and \code{SMAPE}
+skip rows whose denominator is zero; \code{n_MAPE} and
 \code{n_SMAPE} count the rows they used, and for a count or other
 non-Gaussian response RMSE, MAE and the Bayesian GP's CRPS are the
-numbers to compare (see "Percentage errors on responses with zeros" and
-"Which metrics survive a non-Gaussian response" in
-\code{\link{model_metrics}()}).
-Shared folds do not guarantee shared rows: a model that fails on a fold
-(GWR with a fixed bandwidth across a gap in the data, say) or predicts
-\code{NA} for some rows pools fewer rows, usually without the hardest
-ones.  When the models predicted different rows, the function warns and
-recomputes every model's pooled metrics, your own \code{metrics}
-included, on the rows all of them predicted, so \code{n_pred} is the same
-on every row that has predictions; a model that predicted nothing stays
-an \code{NA} row.  Each model's metrics over all the rows it predicted
-stay in its \code{*_cv} element and in \code{attr(overall, "all_rows")},
-a table of the same shape.  \code{by_fold} and the Bayesian coverage and
-CRPS columns are per fold and are not recomputed.
-Every model is cross-validated on the layer as passed, so the warnings
-\code{\link{prep_model_data}()} raises about that layer (class
-\code{spatialkit_rows_dropped}, counting the incomplete rows dropped,
-and \code{spatialkit_constant_predictor}) are raised once for the
-comparison, not once per model.
-Only the models that actually ran appear, so check which names are
-present; there is not always one entry per requested model, because a
-backend whose package is missing is dropped with a message.  When no
-requested backend is available the function stops with
-\code{"no viable models."} rather than returning an empty comparison.
+numbers to compare (see "Percentage errors on responses with zeros"
+and "Which metrics survive a non-Gaussian response" in
+\code{\link{model_metrics}()}).}
+\item{\code{by_fold}}{The \code{fold_metrics} of every model that
+ran, stacked, with a \code{model} column.}
+\item{\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv}}{The full
+\code{\link{cv_gwr}()}, \code{\link{cv_bayes}()} and
+\code{\link{cv_rf}()} result of each model that ran.}
+}
 }
 \description{
 Cross-validates one or more backends on one set of folds and returns a
@@ -189,6 +175,32 @@ level: 0.95 at \code{coverage_95} is calibrated, well below it is
 overconfident, well above it is wider than it needs to be.
 }
 
+\section{Rows the overall table is computed on}{
+
+Shared folds do not guarantee shared rows: a model that fails on a fold
+(GWR with a fixed bandwidth across a gap in the data, say) or predicts
+\code{NA} for some rows pools fewer rows, usually without the hardest
+ones.  When the models predicted different rows, the function warns and
+recomputes every model's pooled metrics, your own \code{metrics}
+included, on the rows all of them predicted, so \code{n_pred} is the same
+on every row that has predictions; a model that predicted nothing stays
+an \code{NA} row.  Each model's metrics over all the rows it predicted
+stay in its \code{*_cv} element and in \code{attr(overall, "all_rows")},
+a table of the same shape.  \code{by_fold} and the Bayesian coverage and
+CRPS columns are per fold and are not recomputed.
+
+Every model is cross-validated on the layer as passed, so the warnings
+\code{\link{prep_model_data}()} raises about that layer (class
+\code{spatialkit_rows_dropped}, counting the incomplete rows dropped,
+and \code{spatialkit_constant_predictor}) are raised once for the
+comparison, not once per model.
+
+Only the models that ran appear, so check which names are present: a
+backend whose package is missing is dropped with a message.  When no
+requested backend is available the function stops with
+\code{"no viable models."} rather than returning an empty comparison.
+}
+
 \examples{
 \dontshow{if (requireNamespace("ranger", quietly = TRUE)) withAutoprint(\{ # examplesIf}
 library(sf)
@@ -208,7 +220,7 @@ models <- c("RF", if (requireNamespace("sp", quietly = TRUE)) "GWR")
 cmp <- compare_models_cv(dat, "price", "elev", models = models, k = 3,
                          rf_args = list(num_trees = 100),
                          gwr_args = list(bandwidth = 30))
-cmp$overall
+cmp$overall[, c("model", "RMSE", "R2", "n_pred")]
 \dontshow{\}) # examplesIf}
 }
 \references{

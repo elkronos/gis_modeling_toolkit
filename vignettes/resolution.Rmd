@@ -50,8 +50,14 @@ is a single observation. The count also sets the variance of the cell means,
 the design effect, and the size of the blocks a spatial cross-validation
 holds out when it uses the cells as blocks. `resolution_profile()` scores
 candidate counts and `select_resolution()` reads one off the profile. Given
-the response and nothing else, they choose the count for the pooled value
-that `summarize_by_cell()` reports by default:
+the response and nothing else, they choose the count for the
+[pooled value](glossary.html#pooled-value) that `summarize_by_cell()` reports by default.
+
+*This article needs two optional packages: `gstat` for the variogram and
+`ggplot2` for the figure. Where one is missing, the code that needs it is
+shown but not run.*
+
+The two calls with their defaults:
 
 ```{r default-call, eval=FALSE}
 prof <- resolution_profile(pts, response_var = "z")
@@ -61,15 +67,13 @@ sel  <- select_resolution(prof)
 `determine_optimal_levels()` reads a count off the coordinates alone, and
 finds one only when the points cluster.
 
-*This article needs two optional packages: `gstat` for the variogram and
-`ggplot2` for the figure.*
-
 ## A field with known structure
 
 The examples use a simulated field, so its structure is known before anything
 is fitted. The 500 points are spread uniformly over a 1,000 m square. The
-field has the exponential covariance `exp(-d / 100)`, whose effective range is
-300 m, and `rnorm(n, sd = 1)` adds a nugget: measurement noise that does not
+field has an exponential covariance with range parameter 100 m
+(`exp(-d / 100)`), so its correlation falls to 5 percent at about 300 m, three
+times the range parameter, and `rnorm(n, sd = 1)` adds a nugget: measurement noise that does not
 depend on distance, here of variance 1.
 
 ```{r fixture}
@@ -92,7 +96,8 @@ value: the cell's mean pulled toward the mean of the observations in the 8
 nearest cells (nearest by the centroid of their observations), by a weight
 that grows with the number of observations the cell holds.
 `estimate = "pooled"` selects it, and `vignette("cells")` shows how to read
-one. The count for pooled values comes from a size, `obs_per_cell`: the
+one. The count for pooled values comes from a [size](glossary.html#size),
+`obs_per_cell`: the
 number of observations a cell is to hold on average. A size `s` on `n` observations
 gives `max(2, round(n / s))` cells. The printed output counts observations as
 rows.
@@ -106,14 +111,15 @@ select_resolution(prof_default)
 ```
 
 The cells are density-weighted k-means cells: each point is weighted by its
-local density, so the cells hold about the same number of points each once
-there are more cells than clusters of points. At the default size there are
-more cells than clusters on a layer whose clusters hold more than a few
-observations each, so the default size and the default partition go
-together (`?resolution_profile`, section "The partition").
+local density. Density weighting gives cells of about equal counts once there
+are more cells than clusters of points. At the default size that holds on
+any layer whose clusters hold more than a few observations, which is why the
+default size uses the density-weighted partition
+(`?resolution_profile`, section "The partition").
 `partition = "kmeans"` gives plain k-means cells instead.
 
-`obs_per_cell` also takes several sizes, one level each, with the centres
+`obs_per_cell` also takes several sizes, one [level](glossary.html#level)
+each, with the centres
 fitted to every row. `estimate` names the cell value the profile scores, the
 pooled value unless it says otherwise:
 
@@ -144,7 +150,8 @@ gets the same centres on any ladder that holds it and is fitted to the same
 rows.
 
 `select_resolution(criterion = "size")` returns the level of a size. It
-searches for no optimum, so the result has no flat region and sits on no
+searches for no optimum, so the result has no
+[flat region](glossary.html#flat-region) and sits on no
 bound. Here it returns the default call's count:
 
 ```{r size-select}
@@ -153,26 +160,25 @@ sel_size <- select_resolution(prof_size, criterion = "size",
 sel_size$best
 ```
 
-Use `loo` to compare sizes, and do not choose the size by its minimum. For
-pooled values it tends to keep falling as the cells shrink, so its minimum
+```{r size-text, include=FALSE}
+lowest <- prof_size$levels[which.min(prof_size$loo)]
+lowest_txt <- sprintf("%d cells, %s", lowest,
+                      if (lowest == max(prof_size$levels)) "the finest size offered"
+                      else "which is not the finest size offered")
+```
+
+`loo` shows what each size costs, but its minimum does not pick a size. For
+pooled values `loo` tends to keep falling as the cells shrink, so its minimum
 tends to be the finest size offered, and the last level of the ladder would
 then set the count. On 200 simulated layers of 1,500 clustered observations of
 a field plus noise, profiled at seven sizes from 18 to 2, the lowest `loo` of
-the pooled value was at the size 2 on 176
+the pooled value was at the size 2 on 176 of the 200 layers
 ([`dev/sim-pooled-values.R`](https://github.com/elkronos/gis_modeling_toolkit/blob/main/dev/sim-pooled-values.R)
 in the package's GitHub repository; `?resolution_profile` gives the settings).
-
-```{r size-text, echo=FALSE, results='asis'}
-lowest <- prof_size$levels[which.min(prof_size$loo)]
-cat(sprintf("In the table above the lowest `loo` is at %d cells, %s.\n",
-            lowest,
-            if (lowest == max(prof_size$levels)) "the finest size offered"
-            else "which is not the finest size offered"))
-```
-
-The size is therefore the caller's choice, made on other grounds: how many
-observations a cell value should stand on, which `share_alone` and
-`own_weight` describe.
+In the table above the lowest `loo` is at
+`r if (runs) lowest_txt else "a level not computed here"`. The size is
+therefore the caller's choice, made on other grounds: how many observations a
+cell value should stand on, which `share_alone` and `own_weight` describe.
 
 ```{r size-trade, echo=FALSE, results='asis'}
 at <- function(s) {
@@ -299,8 +305,10 @@ bounds and the variogram.
 
 ### What the ladder can support
 
-The ladder runs from 2 cells to a ceiling the data impose. The profile records
-that ceiling and, beside it, a floor from the autocorrelation range:
+The ladder runs from 2 cells to a
+[support ceiling](glossary.html#support-ceiling) the data impose. The profile
+records that ceiling and, beside it, a [range floor](glossary.html#range-floor)
+from the autocorrelation range:
 
 ```{r bounds}
 str(attr(prof, "bounds")[c("floor", "ceiling", "ceiling_from", "supported",
@@ -403,8 +411,10 @@ cat(sprintf("This fixture has a fitted nugget of %s against a partial sill of %s
 ```
 
 `reliability` is highest at a coarse count, because bigger cells hold more
-points and average away more noise. Its maximum usually lies below the range
-floor, where cells are wider than the range. `select_resolution()` therefore
+points and average away more noise. Here its maximum is at
+`r if (runs) prof$levels[which.max(prof$reliability)] else NA` cells, below the
+range floor of `r if (runs) attr(prof, "bounds")$floor else NA`, where cells
+are wider than the range. `select_resolution()` therefore
 reads it from the floor up, and then returns the floor, a bound on the
 analysis that the range sets.
 
@@ -457,9 +467,9 @@ on_bound <- if (is.null(edge) || is.na(edge)) " (this one does not)" else
 if (isTRUE(sel$at_floor)) {
   cat("`at_floor` is `TRUE` here. The reliability curve keeps rising toward",
       "coarser counts, and the floor from the autocorrelation range stops it",
-      "there, so read the answer",
-      "as at most this fine, and take the number as a bound on the analysis.",
-      "Changing `tol` will not move it.\n")
+      "there, so", sel$best, "is the coarsest count the range allows, set by",
+      "the floor and not by the criterion; quote it as a bound, not as the",
+      "criterion's choice. Changing `tol` will not move it.\n")
 } else if (isTRUE(sel$at_ceiling)) {
   cat("`at_ceiling` is `TRUE` here: the support ceiling stopped the criterion,",
       "so take the number as a bound on the analysis.\n")

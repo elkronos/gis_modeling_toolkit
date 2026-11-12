@@ -23,10 +23,11 @@ library(sf)
 bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
+invisible(clear_grid_cache())   # start from an empty cache
 g1 <- create_grid_polygons_cached(bnd, target_cells = 9)
 g2 <- create_grid_polygons_cached(bnd, target_cells = 9)   # cache hit
-clear_grid_cache()   # returns the number of entries removed, invisibly
-print(clear_grid_cache())                                   # 0: already empty
+print(clear_grid_cache())   # 1: the grid cached above
+print(clear_grid_cache())   # 0: already empty
 }
 \seealso{
 \code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}}, which fills the cache.

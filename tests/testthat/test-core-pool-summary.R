@@ -1262,7 +1262,7 @@ test_that("the record prints what was fitted, and each interval under its own wo
   block <- c(
     "Cell values: income, 900 rows in 100 cells",
     "  value       : ..pooled_resp_income, pooled toward the 8 nearest cells (centroids of the rows)",
-    "  variances   : inside cells 3.80e+07 (from 800 values beyond one per cell);",
+    "  variances   : inside cells 3.8e+07 (from 800 values beyond one per cell);",
     "                between a cell and its target 3.84e+06",
     "  own weight  : median 0.48 (..pooled_w_resp_income)",
     "  alone       : 0.0% of the rows are the only one in their cell",
@@ -1358,9 +1358,10 @@ test_that("the print says when cells do no better, when all the others are the t
   txt <- utils::capture.output(print(attr(r$value, "pooled")))
   expect_identical(
     txt[8L],
-    sprintf(paste0("                one mean for all rows: %.2e: the F test does not tell these ",
+    sprintf(paste0("                one mean for all rows: %s: the F test does not tell these ",
                    "cells from one mean (p = %s)"),
-            rec$loo_one_cell, format(signif(rec$structure_p, 2))))
+            .one_notation(c(rec$loo, rec$loo_one_cell))[2L],
+            format(signif(rec$structure_p, 2))))
   expect_identical(txt[6L], "  alone       : 95.1% of the rows are the only one in their cell")
   expect_match(conditionMessage(r$warnings[[2L]]),
                "predict a left-out observation better than one mean for all rows, but the F test",
@@ -1413,15 +1414,17 @@ test_that("with tau2 = 0 on a structured response the print shows the fit and sa
   expect_identical(txt, c(
     "Cell values: z, 900 rows in 100 cells",
     "  value       : ..pooled_resp_z, pooled toward the 8 nearest cells (centroids of the rows)",
-    sprintf("  variances   : inside cells %.2e (from 800 values beyond one per cell);", rec$sigma2),
-    "                between a cell and its target 0.00e+00",
+    sprintf("  variances   : inside cells %s (from 800 values beyond one per cell);",
+            format(signif(rec$sigma2, 3))),
+    "                between a cell and its target 0",
     "  own weight  : median 0.00 (..pooled_w_resp_z)",
     "  note        : tau2 is 0: every own weight is 0, and each value is its",
     "                neighbours' mean, with none of the cell's own rows in it",
     sprintf("  alone       : %.1f%% of the rows are the only one in their cell",
             100 * rec$share_alone),
-    sprintf("  loo         : %.2e (leave-one-out mean squared error of the pooled value);", rec$loo),
-    sprintf("                one mean for all rows: %.2e", rec$loo_one_cell),
+    sprintf("  loo         : %s (leave-one-out mean squared error of the pooled value);",
+            format(signif(rec$loo, 3))),
+    sprintf("                one mean for all rows: %s", format(signif(rec$loo_one_cell, 3))),
     "  interval    : 90% for ONE OBSERVATION (..obs_lo_resp_z, ..obs_hi_resp_z):",
     sprintf("                value - %s to value + %s, quantiles of 900 leave-one-out residuals",
             format(signif(-rec$offsets[1L], 3)), format(signif(rec$offsets[2L], 3))),

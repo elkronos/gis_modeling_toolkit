@@ -101,50 +101,57 @@ cover with a coordinate that is not finite or lies beyond 1e150, read
 as given before any move, is read as an empty row.}
 }
 \value{
-A list with \code{cells}, \code{index}, \code{boundary},
-\code{method} and \code{params}.  \code{index} holds one \code{cell_id}
-per row of \code{points_sf}, and \code{NA} for a point that falls outside
-every cell, which means outside the study area (grown by \code{expand}
-when it is positive), and farther than a thousandth of the median cell
-width from the nearest cell, so a summary built from it counts only the points
-the tessellation actually covers.  Such points are counted in
-\code{params$n_outside}, and a warning of class
-\code{"spatialkit_unassigned"} gives their number.  Points so far from
-the origin of their CRS that doubles there are spaced more than a
-millionth of their extent apart (0.125 at 1e15, beside a layer a few
-kilometres across) have the cells' edges and their own cells read at
-that rounding, so two points that close can fall in one cell; the cells
-are built, and a warning of class \code{"spatialkit_xy_imprecise"}
-gives the spacing and the extent.  For seeds (see
-"Details") \code{index} holds the cell each seed generates, whether the
-seed lies inside the boundary or not, and \code{NA} only for a seed whose
-cell the clip removed whole or without a location (an empty geometry,
-or a coordinate that is not finite or lies beyond 1e150);
-\code{params$n_outside} counts those, the warning names them as seeds,
-and \code{params$snapped} lists only the seeds whose entry is the cell
-they were snapped to.  \code{boundary} is
-the boundary the cells were built in: the one supplied or derived, grown
-by \code{expand}.  \code{params$boundary_source} says where it came
-from: \code{"boundary"} (the argument), \code{"cover"} (the
-\code{cover} argument), \code{"seeds' cover"} (the cover attached to
-\code{points_sf}) or \code{"points"} (the hull of \code{points_sf}
-itself).  \code{params$cover_outside} is the number of \code{cover}
-points outside every cell when a point \code{cover} was given with a
-\code{boundary}, and \code{NULL} otherwise.  \code{params$partition} is
-present when \code{points_sf} is a layer of seeds that records the kind
-of partition that placed it (\code{attr(points_sf, "partition")}, see
-\code{\link{get_voronoi_seeds}()}): the same list, so the cells say what
-built them.  Seeds of plain k-means record nothing, and \code{params}
-then has no such element; neither has it for points that are not seeds.
-\code{params$count_rule} is present when \code{points_sf} carries the
-record of how its count was set (\code{attr(points_sf, "count_rule")}:
-the seeds of a \code{\link{select_resolution}()} result, or seeds a
-seeding function placed from one): the same list, with
-\code{scored_cells = FALSE} when the seeds are fewer or more than its
-count, which the cells carry too as \code{attr(cells, "count_rule")}.
-\code{\link{assign_features_to_polygons}()} copies it to the rows it
-assigns, and \code{\link{summarize_by_cell}()} checks its result
-against it.
+A list with these elements:
+\describe{
+\item{\code{cells}}{The cells, one polygon per unique point, with a
+stable \code{cell_id}.}
+\item{\code{index}}{One \code{cell_id} per row of \code{points_sf}, and
+\code{NA} for a point that falls outside every cell: outside the
+study area (grown by \code{expand} when it is positive), and farther
+than a thousandth of the median cell width from the nearest cell, so
+a summary built from it counts only the points the tessellation
+covers.  Such points are counted in \code{params$n_outside}, and a
+warning of class \code{"spatialkit_unassigned"} gives their number.
+For seeds (see "Details") \code{index} holds the cell each seed
+generates, whether the seed lies inside the boundary or not, and
+\code{NA} only for a seed whose cell the clip removed whole or
+without a location (an empty geometry, or a coordinate that is not
+finite or lies beyond 1e150); \code{params$n_outside} counts those,
+the warning names them as seeds, and \code{params$snapped} lists
+only the seeds whose entry is the cell they were snapped to.}
+\item{\code{boundary}}{The boundary the cells were built in: the one
+supplied or derived, grown by \code{expand}.}
+\item{\code{method}}{\code{"voronoi"}.}
+\item{\code{params}}{The settings and diagnostics of the build,
+among them:
+\itemize{
+\item \code{boundary_source}: where the boundary came from,
+\code{"boundary"} (the argument), \code{"cover"} (the
+\code{cover} argument), \code{"seeds' cover"} (the cover
+attached to \code{points_sf}) or \code{"points"} (the hull of
+\code{points_sf} itself);
+\item \code{cover_outside}: the number of \code{cover} points
+outside every cell when a point \code{cover} was given with a
+\code{boundary}, and \code{NULL} otherwise;
+\item \code{partition}: present when \code{points_sf} is a layer
+of seeds that records the kind of partition that placed it
+(\code{attr(points_sf, "partition")}, see
+\code{\link{get_voronoi_seeds}()}), the same list, so the cells
+say what built them.  Seeds of plain k-means record nothing, and
+\code{params} then has no such element; neither has it for
+points that are not seeds;
+\item \code{count_rule}: present when \code{points_sf} carries the
+record of how its count was set (\code{attr(points_sf,
+          "count_rule")}: the seeds of a \code{\link{select_resolution}()}
+result, or seeds a seeding function placed from one), the same
+list, with \code{scored_cells = FALSE} when the seeds are fewer
+or more than its count.  The cells carry it too, as
+\code{attr(cells, "count_rule")};
+\code{\link{assign_features_to_polygons}()} copies it to the
+rows it assigns, and \code{\link{summarize_by_cell}()} checks
+its result against it.
+}}
+}
 }
 \description{
 Gives every location in the study area to its nearest input point, so
@@ -230,6 +237,16 @@ as the record holds it, so rounding the seeds took on in another CRS
 does not move an edge. The cells are then the cells each row was scored
 in, and \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} gives a point on an edge between
 two of them the cell the profile scored it in.
+}
+
+\section{Points far from the origin of their CRS}{
+
+Points so far from the origin of their CRS that doubles there are spaced
+more than a millionth of their extent apart (0.125 at 1e15, beside a layer
+a few kilometres across) have the cells' edges and their own cells read
+at that rounding, so two points that close can fall in one cell.  The
+cells are built, and a warning of class \code{"spatialkit_xy_imprecise"}
+gives the spacing and the extent.
 }
 
 \examples{
