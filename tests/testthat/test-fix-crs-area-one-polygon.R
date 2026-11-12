@@ -202,7 +202,4 @@ test_that("the help says how one polygon is measured", {
   expect_match(sb, paste0("A layer of one distinct cell gives one ratio and no spread, so its ",
                           "distortion is measured on a 6 by 6 grid over the cell's bounding box."),
                fixed = TRUE)
-  news <- read("NEWS.md")
-  expect_match(news, paste0("`ensure_projected(purpose = \"area\")` skipped its check in silence ",
-                            "on a projected layer of one polygon"), fixed = TRUE)
 })

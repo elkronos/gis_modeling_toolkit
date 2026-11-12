@@ -142,10 +142,10 @@ test_that("the help states how far the kind \"kmeans\" is the same in another un
   }
   rp <- txt("resolution_profile.Rd")
   expect_match(rp, "rounded to 2^{-30} of it", fixed = TRUE)
-  expect_match(rp, "the cells were the same in all 2,040 partitions of the 34 lattices that span a kilometre or more",
+  expect_match(rp, paste0("The cells are then the same in another unit or with another origin ",
+                          "unless the change moves a coordinate across the middle of a rounding step"),
                fixed = TRUE)
-  expect_match(rp, "205 of the 1,560 partitions of the 26 lattices that span less", fixed = TRUE)
-  expect_match(rp, "as earlier versions built them, but for the rounding", fixed = TRUE)
+  expect_match(rp, "does more often the smaller the extent", fixed = TRUE)
   for (f in c("get_voronoi_seeds.Rd", "voronoi_seeds_kmeans.Rd")) {
     s <- txt(f)
     expect_match(s, "rounded to 2^-30 of it, so that the seeds do not move with the unit or the origin",

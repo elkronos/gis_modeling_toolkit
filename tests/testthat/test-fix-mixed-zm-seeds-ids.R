@@ -290,12 +290,17 @@ test_that("the help says the seeders, the IDs and the cached grid read mixed lay
                            "M before it is projected or clustered"), fixed = TRUE)
   expect_match(txt, paste0("seeds that mix XY and XYZ (or XYM) points are then returned in XY, ",
                            "with a warning of class \"spatialkit_zm_dropped\""), fixed = TRUE)
-  expect_match(txt, "defining the sampling area. One that mixes XY and XYZ (or XYM) geometries is read without Z and M",
+  # A boundary's mixed dimensions are handled as ?spatialkit-geometry says.
+  expect_match(txt, paste0("defining the sampling area. Rows without a location, rows the repair ",
+                           "leaves without a polygon, vertices at a latitude beyond 90 and mixed ",
+                           "dimensions are handled as \"Boundaries\" in spatialkit-geometry says"),
                fixed = TRUE)
   expect_match(page("voronoi_seeds_kmeans.Rd"),
                "Points that mix XY and XYZ (or XYM) are read without Z and M", fixed = TRUE)
   expect_match(page("voronoi_seeds_random.Rd"),
-               "One that mixes XY and XYZ (or XYM) geometries is read without Z and M", fixed = TRUE)
+               "mixed dimensions are handled as \"Boundaries\" in spatialkit-geometry says", fixed = TRUE)
+  expect_match(page("spatialkit-geometry.Rd"),
+               "A boundary that mixes dimensions or carries M is read in x and y.", fixed = TRUE)
   txt <- page("ensure_stable_poly_id.Rd")
   expect_match(txt, "are keyed without Z and M", fixed = TRUE)
   expect_match(txt, paste0("are repaired in XY and returned in XY, with a warning of class ",

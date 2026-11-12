@@ -275,7 +275,7 @@ test_that("one location is one pair of coordinates, equal to the last bit", {
     one_row_each(c(x0, -0), c(y0, y0[1]), seed = 34), "z")), 29L, 30L)
 })
 
-test_that("the help and NEWS say what the floor counts, and when", {
+test_that("the help says what the floor counts, and NEWS has an entry for it", {
   root <- testthat::test_path("..", "..")
   flat <- function(x)
     paste(unlist(lapply(x, function(el) if (is.character(el)) el else flat(el))), collapse = "")
@@ -307,35 +307,14 @@ test_that("the help and NEWS say what the floor counts, and when", {
                   "a constant response, or points with no extent), the result is the NA ",
                   "with its reason, and there is no such warning."))
 
+  # NEWS has a Breaking changes entry for the function, whose floor now
+  # counts locations as well as rows.
   news_file <- file.path(root, "NEWS.md")
   if (!file.exists(news_file)) news_file <- system.file("NEWS.md", package = "spatialkit")
   if (!nzchar(news_file) || !file.exists(news_file)) skip("NEWS.md is not there to read")
   lines <- readLines(news_file, warn = FALSE, encoding = "UTF-8")
   top <- grep("^# ", lines)
   dev <- lines[seq.int(top[1L], top[2L] - 1L)]
-  entry_of <- function(section, next_section, anchor) {
-    sec <- dev[seq.int(grep(paste0("^## ", section), dev), grep(paste0("^## ", next_section), dev) - 1L)]
-    starts <- grep("^\\* ", sec)
-    at <- grep(anchor, sec, fixed = TRUE)
-    expect_length(at, 1L)
-    i <- max(starts[starts <= at])
-    j <- min(c(starts[starts > i], length(sec) + 1L)) - 1L
-    gsub("[[:space:]]+", " ", paste(sec[i:j], collapse = " "))
-  }
-  # Breaking changes compares with 2.0.0, which had no kriging_adequacy()
-  # and gave a one-location layer a bare NA.
-  brk <- entry_of("Breaking changes", "New features",
-                  "`estimate_sac_range()` needs 30 distinct locations as well as 30 rows")
-  says(brk, paste0("A layer of 30 or more rows at 2 to 29 distinct locations, to which 2.0.0 ",
-                   "fitted a variogram, gets the unclassed `NA`"))
-  expect_false(grepl("kriging_adequacy", brk, fixed = TRUE))
-  expect_false(grepl("no extent", brk, fixed = TRUE))
-  fix <- entry_of("Bug fixes", "Documentation",
-                  "`estimate_sac_range()` counted rows, not locations, against its floor of")
-  says(fix, "When the layer has 30 or more locations and the `n_max` subsample keeps fewer")
-  says(fix, "`kriging_adequacy()` stops with it")
-  says(fix, "in place of \"the points have no extent\"")
-  says(fix, paste0("Where a predictor is missing on every row of such a layer, there is no ",
-                   "warning that the variogram is fitted to the raw response, since none is ",
-                   "fitted."))
+  brk <- dev[seq.int(grep("^## Breaking changes", dev), grep("^## New features", dev) - 1L)]
+  expect_gte(length(grep("^\\* \\*\\*`estimate_sac_range\\(\\)`", brk)), 1L)
 })

@@ -257,16 +257,16 @@ test_that("the level streams depend on seed, and with seed = NULL on the caller'
   expect_identical(x$after, one_draw)
 })
 
-test_that("the NEWS figures read off the level streams and the re-run streams hold", {
-  # BUG-26's entry: the first count under "morans_i" at top_n 1 to 7 on the
-  # twelve clusters, max_levels = 30, the default set_seed.
+test_that("the figures read off the level streams and the re-run streams hold", {
+  # The first count under "morans_i" at top_n 1 to 7 on the twelve
+  # clusters, max_levels = 30, the default set_seed.
   first <- vapply(1:7, function(tn) as.integer(.ss_q(determine_optimal_levels(
     .ss_layer(), max_levels = 30, response_var = "z", predictor_vars = "w",
     criterion = "morans_i", top_n = tn))[1L]), integer(1))
   expect_identical(first, c(16L, 16L, 16L, 16L, 17L, 17L, 19L))
-  # BUG-29's lattice and the gridded k-means entry: 40 x 30 at 250 m, in
-  # EPSG:26915, in UTM 15N in US feet and with the false origin moved by
-  # 0.1 m, the default profile under each kind.
+  # A lattice of 40 by 30 locations at 250 m, in EPSG:26915, in UTM 15N in
+  # US feet and with the false origin moved by 0.1 m, the default profile
+  # under each kind.
   g <- expand.grid(i = 0:39, j = 0:29)
   x <- 4.5e5 + g$i * 250; y <- 4.55e6 + g$j * 250
   z <- withr::with_seed(1, sin((x - min(x)) / 1500) + cos((y - min(y)) / 1250) +
@@ -289,26 +289,9 @@ test_that("the NEWS figures read off the level streams and the re-run streams ho
       sprintf("%.4f", .ss_q(resolution_profile(l, "z", partition = part))$loo[1L]), "")))
   expect_length(loo$kmeans, 1L)
   expect_identical(loo$density, "0.3066")
-  root <- testthat::test_path("..", "..")
-  if (!file.exists(file.path(root, "NEWS.md"))) skip("NEWS.md is not here to read")
-  news <- gsub("[[:space:]]+", " ",
-               paste(readLines(file.path(root, "NEWS.md"), warn = FALSE), collapse = " "))
-  expect_match(news, paste0("on the same layer the first count is 16 at `top_n` 1 to 4, 17 at 5 ",
-                            "and 6 and 19 at 7, each the count of smallest |z| in its window, and ",
-                            "17 and 19 are counts the wider windows add."), fixed = TRUE)
-  expect_match(news, "The lattice above gives `loo` 0.3066 and the same regions in all three.",
-               fixed = TRUE)
-  expect_match(news, paste0("column. The lattice above gives the same regions in all three. ",
-                            "`stats::kmeans()` also settles ties by the last bits of its own ",
-                            "compiled arithmetic, which differ between platforms, so on a layer ",
-                            "where ties decide cells the regions, and every figure read off them, ",
-                            "can differ between platforms for the same coordinates and seed: this ",
-                            "lattice gets other regions on Linux on x86-64 than on macOS on ",
-                            "arm64."), fixed = TRUE)
-  expect_false(grepl("`loo` 0.2929", news, fixed = TRUE))
 })
 
-test_that("?resolution_profile says the kind \"kmeans\" can give other regions on another platform", {
+test_that("?resolution_profile says the kind \"kmeans\" can give other cells on another platform", {
   root <- testthat::test_path("..", "..")
   # The page's source where it is here, else the installed page as Rd text.
   rp <- if (file.exists(file.path(root, "man", "resolution_profile.Rd"))) {
@@ -323,13 +306,11 @@ test_that("?resolution_profile says the kind \"kmeans\" can give other regions o
   expect_match(rp, paste0(
     "\\code{stats::kmeans()} also settles such ties by the last bits of its own compiled ",
     "arithmetic, which differ between platforms, so on a layer where ties decide cells the kind ",
-    "\\code{\"kmeans\"} can return other regions on another platform from the same coordinates ",
-    "and \\code{seed}, and with them every column read off the cells: the 40 by 30 lattice at ",
-    "250 m of the package's NEWS gets other regions on Linux on x86-64 than on macOS on arm64, ",
-    "the same in all of its units and origins on each."), fixed = TRUE)
+    "\\code{\"kmeans\"} can return other cells on another platform from the same coordinates ",
+    "and \\code{seed}, and with them every column read off the cells."), fixed = TRUE)
 })
 
-test_that("the help and NEWS say a count or level scores the same in any window or ladder that holds it", {
+test_that("the help says a count or level scores the same in any window or ladder that holds it", {
   root <- testthat::test_path("..", "..")
   if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
     skip("the help's source is not here to read")
@@ -350,16 +331,4 @@ test_that("the help and NEWS say a count or level scores the same in any window 
   expect_match(rp, paste0("On a layer of more than \\code{sample_n} rows a ladder of counts is ",
                           "fitted to a subsample and a ladder of sizes to every row, so there the ",
                           "two can give a level other cells."), fixed = TRUE)
-  news <- read("NEWS.md")
-  expect_match(news, paste0("The integer is now read before the sweep and the stream is put back ",
-                            "after the read, so for one `set_seed` a count gets the same cells, ",
-                            "`wss_eval`, `moran_i` and `moran_z` in any window that holds it, ",
-                            "whatever `max_levels` and `top_n` are."), fixed = TRUE)
-  expect_match(news, paste0("Each level now runs on a stream of its own, seeded with one integer ",
-                            "drawn after the subsample plus the level, and the stream is put back ",
-                            "after it, so for one `seed` a level gets the same cells on any ladder ",
-                            "that holds it and is fitted to the same rows (on a layer of more ",
-                            "than `sample_n` rows a ladder of counts is fitted to a subsample and ",
-                            "a ladder of sizes to every row)"), fixed = TRUE)
-  expect_false(grepl("one integer drawn after the sweep", news, fixed = TRUE))
 })

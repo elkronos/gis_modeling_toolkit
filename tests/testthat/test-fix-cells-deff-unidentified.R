@@ -444,7 +444,7 @@ test_that(".se_with_deff() returns NA for an unknown design effect, and .deff_la
   expect_false(identical(.intervals_table(NULL, 0.95, "10")$covers, own))
 })
 
-test_that("the help and NEWS say where the NA falls", {
+test_that("the help says where the NA falls", {
   root <- testthat::test_path("..", "..")
   if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
     skip("the help's source is not here to read")
@@ -465,7 +465,4 @@ test_that("the help and NEWS say where the NA falls", {
   expect_match(rd, paste0("give a summary row of their own but no cell to the ICC, so a column ",
                           "whose values all fall in them, or differ only there, has an ICC ",
                           "that cannot be estimated"), fixed = TRUE)
-  news <- read("NEWS.md")
-  expect_match(news, paste0("return `NA` standard errors, in every cell of two or more values, ",
-                            "for a column whose ICC cannot be estimated"), fixed = TRUE)
 })

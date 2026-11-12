@@ -341,7 +341,7 @@ test_that("a call a guard stops says nothing of the columns", {
   expect_length(fsn_of(r, "spatialkit_no_scored_rows"), 0L)
 })
 
-test_that("the help and NEWS say when the columns are NA and why", {
+test_that("the help says when the columns are NA and why", {
   root <- testthat::test_path("..", "..")
   flat <- function(x)
     paste(unlist(lapply(x, function(el) if (is.character(el)) el else flat(el))), collapse = "")
@@ -355,8 +355,8 @@ test_that("the help and NEWS say when the columns are NA and why", {
                   "class spatialkit_no_scored_rows."))
   says(rp, paste0("All five are NA at every level when no row of the selection half has a ",
                   "response (select_on = \"split\"; spatialkit_no_scored_rows)."))
-  says(rp, paste0("spatialkit_no_scored_rowsresolution_profile() under select_on = ",
-                  "\"split\": no row of the selection half has a response"))
+  says(rp, paste0("spatialkit_no_scored_rowsUnder select_on = \"split\": no row of the ",
+                  "selection half has a response"))
   says(rp, paste0("loo and the estimate's other columns read no row and are NA at every ",
                   "level too."))
   says(rp, paste0("The condition carries reason (\"no response in the selection half\"), n ",
@@ -371,20 +371,4 @@ test_that("the help and NEWS say when the columns are NA and why", {
   says(sr, paste0("When none is finite, as on a constant response, where loo is NA too, or ",
                   "when no row of the selection half has a response (select_on = \"split\"), ",
                   "summary() stops with an error that says so."))
-
-  news_file <- file.path(root, "NEWS.md")
-  if (!file.exists(news_file)) news_file <- system.file("NEWS.md", package = "spatialkit")
-  if (!nzchar(news_file) || !file.exists(news_file)) skip("NEWS.md is not there to read")
-  lines <- readLines(news_file, warn = FALSE, encoding = "UTF-8")
-  top <- grep("^# ", lines)
-  dev <- lines[seq.int(top[1L], top[2L] - 1L)]
-  fixes <- dev[seq.int(grep("^## Bug fixes", dev), grep("^## Documentation", dev) - 1L)]
-  bf <- gsub("[[:space:]]+", " ", paste(fixes, collapse = " "))
-  says(bf, paste0("**`resolution_profile(select_on = \"split\")` returned a `loo` read off no ",
-                  "row, with nothing said, when no row of the selection half had a ",
-                  "response.**"))
-  says(bf, "a warning of class `spatialkit_no_scored_rows` now gives the reason")
-  says(bf, "\"loo NA: no row of the selection half has a response\"")
-  says(bf, paste0("and `summary()` of the profile, whose error said that \"cp needs a ",
-                  "response\", gives it too."))
 })

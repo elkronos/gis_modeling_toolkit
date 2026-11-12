@@ -151,7 +151,8 @@ test_that("a replicate variance above the nugget is used as the measurement erro
   expect_identical(rp$nugget, 0)
   expect_equal(rp$nugget_used, sw2, tolerance = 1e-10)
   expect_true(rp$above_nugget)
-  expect_output(print(res$value),
+  # The report wraps at the console width; print it wide so the line stays whole.
+  expect_output(withr::with_options(list(width = 10000), print(res$value)),
                 "replicates: pooled within-location variance .* is above the nugget 0 and is used")
 
   # It is used, not only reported: kriging the 200 means with error variance
@@ -404,7 +405,8 @@ test_that("print() reports the gain, the shift on the model's scale and the naiv
   s <- .fg_setup()
   ka <- suppressWarnings(kriging_adequacy(s$asg, "lat", s$cells, sac = .fg_sac(), k = 4))
   df <- sf::st_drop_geometry(ka)
-  out <- utils::capture.output(print(ka))
+  # The report wraps at the console width; print it wide so each line stays whole.
+  out <- withr::with_options(list(width = 10000), utils::capture.output(print(ka)))
   # The line that read as a count of cells where kriging does not pay is gone.
   expect_false(any(grepl("kriging variance above s^2/n", out, fixed = TRUE)))
   gain <- out[grepl("kr_gain", out, fixed = TRUE)]
