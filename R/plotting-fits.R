@@ -9,6 +9,21 @@
 }
 
 
+# The linear unit of a CRS as a plot label writes it: "m" for "metre",
+# "ft" for "foot", "US ft" for "US survey foot", "km" for "kilometre", and
+# the name sf::st_crs()$units_gdal gives for any other.  NA when the CRS is
+# missing or names no unit.  GDAL's singular names read wrongly after a
+# number ("Effective range = 463.9 metre").
+.crs_unit_short <- function(crs) {
+  u <- tryCatch(suppressWarnings(sf::st_crs(crs)$units_gdal),
+                error = function(e) NULL)
+  if (!(is.character(u) && length(u) == 1L && !is.na(u) && nzchar(u)))
+    return(NA_character_)
+  switch(u, metre = "m", kilometre = "km", foot = "ft",
+         "US survey foot" = "US ft", degree = "degrees", u)
+}
+
+
 # ggplot2 clips a title, subtitle or caption that is wider than the figure
 # instead of wrapping it, and the loss is silent: on a help page a sentence
 # ending "exceeds the largest lag fitted (682)" was drawn as "exceeds the
@@ -35,10 +50,11 @@
 
 #' Plot a fitted spatial model
 #'
-#' Diagnostic plots for a \code{spatial_fit}.  The package previously shipped
-#' \code{print()} and \code{summary()} methods but no \code{plot()}, so the
-#' checks most likely to reveal a problem (is there structure left in the
-#' residuals, and where is it) had to be written by hand each time.
+#' Draws one of four diagnostic plots of a `spatial_fit`, as a \pkg{ggplot2}
+#' object: the residuals mapped at the training locations, observed against
+#' fitted values, the residual variogram beside the response's, or, for a
+#' GWR, the map of one local coefficient.  Use it to see whether spatial
+#' structure is left in the residuals, and where.
 #'
 #' @param x A \code{spatial_fit}.  The residuals drawn are
 #'   \code{residuals(x)}; for a custom subclass with no \code{residuals()}
@@ -72,12 +88,12 @@
 #'       \code{\link{estimate_sac_range}()}, "Detrending and the
 #'       residual-variogram bias").
 #'       The distance axis is labelled in the units of the CRS the variogram
-#'       was actually fitted in, which is not necessarily the fit's own CRS
-#'       (lon/lat data are projected first). Each curve is the variogram
+#'       was fitted in, which is not always the fit's own CRS (lon/lat data
+#'       are projected first).  Each curve is the variogram
 #'       \code{estimate_sac_range()} returns for its variable, which is over
-#'       all point pairs. A fit that identified no range says why in
-#'       the subtitle, since the overlaid model line is then not a fit to believe.
-#'       Requires 'gstat'.}
+#'       all point pairs.  A fit that identified no range says why in the
+#'       subtitle, since the overlaid model line is then not a fit to believe.
+#'       Requires \pkg{gstat}.}
 #'     \item{\code{"coefficients"}}{For a GWR fit only: the local coefficient
 #'       of one \code{term} mapped at the training locations, which is the
 #'       reason to fit GWR at all.  Locations where the local design is
@@ -112,31 +128,27 @@
 #'   are masked either way.
 #' @param ... Ignored.
 #' @return A \code{ggplot} object.
-#' @family plotting
-#' @examples
+#' @family fit methods
+#' @examplesIf requireNamespace("ranger", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)
 #' # Works on any spatial_fit; a forest keeps the example free of the optional
-#' # GWR/Stan backends.
-#' if (requireNamespace("ranger", quietly = TRUE) &&
-#'     requireNamespace("ggplot2", quietly = TRUE)) {
-#'   library(sf)
-#'   # price depends on elevation, which the forest sees, and on a spatially
-#'   # correlated field it does not: that field is what the residual plots
-#'   # are there to find.
-#'   set.seed(2)
-#'   n <- 120
-#'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-#'                    elev = rnorm(n))
-#'   D  <- as.matrix(dist(xy[, c("x", "y")]))
-#'   xy$price <- 10 + 2 * xy$elev +
-#'     as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) %*% rnorm(n))
-#'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-#'   fit <- fit_rf_model(pts, "price", "elev", num_trees = 100, seed = 1)
-#'   # print() each one: inside a braced block only the last value is drawn.
-#'   print(plot(fit, type = "residuals"))          # structure left in the residuals
-#'   print(plot(fit, type = "observed_predicted"))
-#'   if (requireNamespace("gstat", quietly = TRUE))
-#'     plot(fit, type = "variogram")   # residual and response variograms compared
-#' }
+#' # GWR and Stan backends.
+#' library(sf)
+#' # price depends on elevation, which the forest sees, and on a spatially
+#' # correlated field it does not: that field is what the residual plots are
+#' # there to find.
+#' set.seed(2)
+#' n <- 120
+#' xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'                  elev = rnorm(n))
+#' D  <- as.matrix(dist(xy[, c("x", "y")]))
+#' xy$price <- 10 + 2 * xy$elev +
+#'   as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) %*% rnorm(n))
+#' pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+#' fit <- fit_rf_model(pts, "price", "elev", num_trees = 100, seed = 1)
+#' plot(fit, type = "residuals")            # structure left in the residuals
+#' plot(fit, type = "observed_predicted")
+#' if (requireNamespace("gstat", quietly = TRUE))
+#'   plot(fit, type = "variogram")          # residual and response variograms
 #' @seealso \code{\link{coef.gwr_fit}()} for the coefficients themselves.
 #' @export
 plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
@@ -369,54 +381,46 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
 
 #' Plot an estimated spatial autocorrelation range
 #'
-#' Draws the empirical variogram that \code{\link{estimate_sac_range}()}
-#' attaches to its result, with the fitted model and the effective range
-#' overlaid where a range was identified, and a subtitle saying why not where
-#' it was not.  A variogram that never reaches a sill, or that has no spatial
-#' structure at the lags resolved, is the single most useful thing to
-#' \emph{see} when a range comes back \code{NA}, so those cases are drawn
-#' rather than refused.
+#' Draws the empirical variogram that [estimate_sac_range()] attaches to its
+#' result, as a \pkg{ggplot2} object, with the fitted model and the effective
+#' range overlaid where a range was identified, and a subtitle that gives the
+#' reason where it was not.  A variogram that never reaches a sill, or that
+#' has no spatial structure at the lags resolved, is drawn as well, since the
+#' curve shows why the range came back `NA`.
 #'
-#' Nothing is recomputed: the plot reads the \code{variogram},
-#' \code{variogram_model}, \code{crs} and \code{rejected_reason}
-#' attributes the estimate already carries.  The variogram is the one over
-#' all point pairs; a result stored by an earlier version, whose range could
-#' be that of the widest of four directions (\code{anisotropy_used}
-#' \code{TRUE}), is titled with its azimuth.  The
-#' distance axis is in the units of the CRS the variogram was actually fitted
-#' in, which \code{estimate_sac_range()} may have chosen itself for lon/lat
-#' input.
+#' Nothing is recomputed: the plot reads the `variogram`, `variogram_model`,
+#' `crs` and `rejected_reason` attributes the estimate carries.  The
+#' variogram is the one over all point pairs.  The distance axis is in the
+#' units of the CRS the variogram was fitted in, which
+#' [estimate_sac_range()] chooses itself for lon/lat input.
 #'
-#' @param x An object of class \code{sac_range}, as returned by
-#'   \code{\link{estimate_sac_range}()}.
+#' @param x A `sac_range` object, as returned by [estimate_sac_range()].
 #' @param ... Ignored.
-#' @return A \code{ggplot} object.
-#' @seealso \code{\link{plot.spatial_fit}(type = "variogram")}, which draws
-#'   the same picture for a fitted model's residuals.
-#' @family plotting
-#' @examples
-#' if (requireNamespace("gstat", quietly = TRUE) &&
-#'     requireNamespace("ggplot2", quietly = TRUE)) {
-#'   library(sf)
-#'   # An exponential field with range parameter 150 (effective range about
-#'   # 450 m) and a nugget of half the sill, so the fitted model, the nugget
-#'   # and the range line all have something to show.
-#'   set.seed(3)
-#'   n <- 250
-#'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-#'   D  <- as.matrix(dist(xy))
-#'   xy$z <- as.numeric(t(chol(exp(-D / 150) + diag(0.5, n))) %*% rnorm(n))
-#'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-#'   r <- estimate_sac_range(pts, response_var = "z")
-#'   plot(r)
+#' @return A `ggplot` object.
+#' @seealso [estimate_sac_range()], which makes the object, and
+#'   [plot.spatial_fit()] with `type = "variogram"`, which draws the same
+#'   picture for a fitted model's residuals.
+#' @family spatial autocorrelation
+#' @examplesIf requireNamespace("gstat", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)
+#' library(sf)
+#' # An exponential field with range parameter 150 (effective range about
+#' # 450 m) and a nugget of half the sill, so the fitted model, the nugget and
+#' # the range line all have something to show.
+#' set.seed(3)
+#' n <- 250
+#' xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+#' D  <- as.matrix(dist(xy))
+#' xy$z <- as.numeric(t(chol(exp(-D / 150) + diag(0.5, n))) %*% rnorm(n))
+#' pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+#' r <- estimate_sac_range(pts, response_var = "z")
+#' plot(r)
 #'
-#'   # A field whose variogram never reaches a sill: the plot still draws it,
-#'   # and the subtitle says why no range is marked.
-#'   xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
-#'   r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
-#'                            response_var = "trend")
-#'   plot(r2)
-#' }
+#' # A field whose variogram never reaches a sill: the plot still draws it,
+#' # and the subtitle says why no range is marked.
+#' xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
+#' r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
+#'                          response_var = "trend")
+#' plot(r2)
 #' @export
 plot.sac_range <- function(x, ...) {
   .need_ggplot("plot.sac_range()")
@@ -467,10 +471,8 @@ plot.sac_range <- function(x, ...) {
   # degrees while the numbers were metres of an auto-chosen UTM zone that
   # appeared nowhere on the plot.  estimate_sac_range() returns the CRS for
   # exactly this.
-  vg_units <- tryCatch({
-    u <- sf::st_crs(attr(sac, "crs"))$units_gdal
-    if (is.null(u) || is.na(u) || !nzchar(u)) "CRS units" else u
-  }, error = function(e) "CRS units")
+  vg_units <- .crs_unit_short(attr(sac, "crs"))
+  if (is.na(vg_units)) vg_units <- "CRS units"
 
   # Which variogram is this?  estimate_sac_range() returns the all-pairs
   # variogram and sets anisotropy_used to FALSE.  An object stored by an
@@ -558,8 +560,9 @@ plot.sac_range <- function(x, ...) {
       sprintf("Hollow points, dashed line: %s. Filled points, solid line: %s.",
               overlay_label, tolower(what)),
       if (both_ok)
-        sprintf("Residual sill is %.0f%% of the response sill; effective ranges %s (residuals) and %s (response).",
-                100 * s_res / s_resp, .fmt_len(sac), .fmt_len(overlay))
+        sprintf("Residual sill is %.0f%% of the response sill; effective ranges %s %s (residuals) and %s %s (response).",
+                100 * s_res / s_resp, .fmt_len(sac), vg_units, .fmt_len(overlay),
+                vg_units)
       else sprintf("Sills not compared: %s.",
                    if (!same_pairs)
                      sprintf(paste0("the two variograms are not over the same ",
@@ -666,46 +669,46 @@ plot.sac_range <- function(x, ...) {
 
 #' Map a cross-validation fold scheme
 #'
-#' Shows which fold each observation belongs to.  This is the fastest way to
-#' see whether spatial blocks are actually separating the data, and how wide
-#' they are beside the autocorrelation range.
-#' For \code{"block_kfold"} folds the block outlines are drawn too, from
-#' \code{folds$params$blocks}, so a fold can be seen to be one region or
-#' several and an empty block can be seen to be empty.  The subtitle states
-#' the parameter that sets how far the held-out points sit from their
-#' training data, read from
-#' \code{folds$params}: the block size (and the estimated range when
-#' \code{auto_range} found one), the buffer, the number of location groups,
-#' the median NNDM exclusion, or, for kNNDM folds, that they are matched to
-#' the prediction distances.
+#' Maps the fold each observation belongs to, as a \pkg{ggplot2} object.  Use
+#' it to check that the blocks separate the data, and how wide they are beside
+#' the autocorrelation range when `make_folds(auto_range = TRUE)` estimated
+#' one.  For `"block_kfold"` folds the block outlines are drawn too, from
+#' `folds$params$blocks`, so a fold can be seen to be one area or several and
+#' an empty block can be seen to be empty.
 #'
-#' @param folds A list returned by \code{make_folds()}.
-#' @param points_sf The \code{sf} layer the folds were built from.  Drawn in
-#'   x and y: a layer whose geometries mix XY with XYZ or XYM (as
-#'   \code{rbind()} of an XY and an XYZ layer gives) is drawn without its Z
-#'   and M, and so are \code{boundary} and the blocks.  A row without a
-#'   location (a coordinate that is not finite or lies beyond 1e150, or a
-#'   point that \code{make_folds()} left out of every fold because it is
-#'   empty or the CRS the folds were built in cannot place it) is not
-#'   drawn, and neither is a row of \code{boundary} with such a coordinate;
-#'   one warning says how many.
-#' @param boundary Optional polygonal \code{sf}/\code{sfc} to draw underneath.
-#' @param blocks Logical; draw the block polygons when \code{folds} carries
-#'   them.  Default \code{TRUE}.
-#' @return A \code{ggplot} object.
-#' @family plotting
-#' @examples
-#' if (requireNamespace("ggplot2", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   n <- 80
-#'   pts <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   f <- make_folds(pts, k = 5, method = "block_kfold", block_size = 300)
-#'   plot_folds(f, pts)
-#' }
+#' The subtitle states the setting that decides how far the held-out points
+#' sit from their training data, read from `folds$params`: the size of the
+#' blocks built and the `block_size` asked for (with the estimated range
+#' when there is one), the buffer, the number of location groups, the median
+#' NNDM exclusion, or, for kNNDM folds, that they are matched to the
+#' prediction distances.  Lengths are in the units of the CRS the folds were
+#' built in.
+#'
+#' @param folds A list returned by [make_folds()].
+#' @param points_sf The sf layer the folds were built from.  It is drawn in x
+#'   and y ([spatialkit-geometry]), and so are `boundary` and the blocks.  A
+#'   row without a location (a coordinate that is not finite or lies beyond
+#'   1e150, or a point that [make_folds()] left out of every fold because it
+#'   is empty or the CRS the folds were built in cannot place it) is not
+#'   drawn, and neither is a row of `boundary` with such a coordinate; one
+#'   warning says how many.
+#' @param boundary Optional polygon layer (sf or sfc) to draw underneath.
+#' @param blocks Logical; draw the block polygons when `folds` carries them.
+#'   Default `TRUE`.
+#' @return A `ggplot` object.
+#' @seealso [make_folds()], which builds the folds, and [fold_separation()]
+#'   to measure how far the held-out points sit from their training data.
+#' @family folds
+#' @examplesIf requireNamespace("ggplot2", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' n <- 80
+#' pts <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' f <- make_folds(pts, k = 5, method = "block_kfold", block_size = 300)
+#' plot_folds(f, pts)
 #' @export
 plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
   .need_ggplot("plot_folds()")
@@ -823,7 +826,7 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
   if (!is.null(blk))
     p <- p + ggplot2::geom_sf(data = sf::st_geometry(blk),
                               fill = NA, colour = "grey45", linewidth = 0.25)
-  p +
+  p <- p +
     ggplot2::geom_sf(data = dat, ggplot2::aes(colour = .data$.fold)) +
     ggplot2::scale_colour_viridis_d(name = "Fold", na.value = "grey80") +
     ggplot2::labs(
@@ -831,15 +834,28 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
       subtitle = .fold_subtitle(folds)
     ) +
     ggplot2::theme_minimal()
+  # Axes in the coordinates of the CRS the map is drawn in (that of the first
+  # layer drawn) when it is projected, so they read in the unit the subtitle
+  # and block_size use.  coord_sf()'s default graticule is lon/lat, whose
+  # labels on a map 1 km wide are degrees to the third decimal.
+  first <- if (!is.null(boundary)) boundary else if (!is.null(blk)) blk else dat
+  map_crs <- tryCatch(sf::st_crs(first), error = function(e) sf::NA_crs_)
+  if (!is.na(map_crs) && isFALSE(sf::st_is_longlat(map_crs)))
+    p <- p + ggplot2::coord_sf(datum = map_crs)
+  p
 }
 
-# The subtitle states the one parameter that decides whether the scheme
-# leaks, read from what make_folds() recorded.  It used to be a fixed line
-# about block size, which was wrong for every method that has no blocks.
+# The subtitle states the one parameter that decides how far the held-out
+# points sit from their training data, read from what make_folds() recorded.
+# It used to be a fixed line about block size, which was wrong for every
+# method that has no blocks.
 .fold_subtitle <- function(folds) {
   prm <- folds$params
   fin <- function(v) length(v) == 1L && is.finite(suppressWarnings(as.numeric(v)))
-  num <- function(v) format(signif(as.numeric(v), 3), big.mark = ",")
+  # Never in scientific notation: a block size of 400,000 US survey feet read
+  # "4e+05".
+  num <- function(v) format(signif(as.numeric(v), 3), big.mark = ",",
+                            scientific = FALSE)
   # make_folds() records NA_character_ for points without a CRS, and
   # nzchar(NA) is TRUE: the subtitle read "Block size 300 (NA units)".
   # prm$crs identifies the CRS (an EPSG code, else the proj string or the
@@ -848,19 +864,27 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
   # WKT into the subtitle.
   u <- if (is.character(prm$crs) && length(prm$crs) == 1L &&
            !is.na(prm$crs) && nzchar(prm$crs))
-    tryCatch(sf::st_crs(prm$crs)$units_gdal, error = function(e) NULL)
-  units <- if (is.character(u) && length(u) == 1L && !is.na(u) && nzchar(u))
-    sprintf(" (%s)", u) else ""
+    .crs_unit_short(prm$crs) else NA_character_
+  units <- if (!is.na(u)) paste0(" ", u) else ""
   switch(as.character(folds$method),
     random_kfold =
       "Random folds: a held-out point's neighbours stay in the training set",
     block_kfold = {
+      # The blocks drawn are the ones built, which are at least block_size on
+      # an axis that holds it and up to twice as long; the subtitle gave the
+      # size asked for as if it were the size drawn.
+      built <- fin(prm$block_width) && fin(prm$block_height)
       size <- if (isTRUE(prm$blocks_supplied))
         sprintf("%s supplied blocks", format(prm$n_blocks %||% nrow(prm$blocks)))
+      else if (fin(prm$block_size) && built)
+        sprintf("Blocks %s x %s%s, block_size %s", num(prm$block_width),
+                num(prm$block_height), units, num(prm$block_size))
       else if (fin(prm$block_size))
-        sprintf("Block size %s%s", num(prm$block_size), units)
+        sprintf("block_size %s%s", num(prm$block_size), units)
       else if (fin(prm$grid_nx) && fin(prm$grid_ny))
-        sprintf("%s x %s block grid", format(prm$grid_nx), format(prm$grid_ny))
+        paste0(sprintf("%s x %s block grid", format(prm$grid_nx), format(prm$grid_ny)),
+               if (built) sprintf(" of %s x %s%s blocks", num(prm$block_width),
+                                  num(prm$block_height), units) else "")
       else "Blocked folds"
       # Two lines: one long one is clipped at the width a help page or a
       # vignette draws these at.
@@ -875,7 +899,7 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
       paste(size, range, sep = "\n")
     },
     buffered_loo = if (fin(prm$buffer))
-      sprintf("Leave-one-out with a %s buffer%s", num(prm$buffer), units)
+      sprintf("Leave-one-out with a %s%s buffer", num(prm$buffer), units)
     else "Leave-one-out with an exclusion buffer",
     leave_location_out = if (fin(prm$n_groups) && is.character(prm$group_var))
       sprintf("%s groups of `%s` across the folds", format(prm$n_groups),

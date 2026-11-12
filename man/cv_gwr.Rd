@@ -2,7 +2,7 @@
 % Please edit documentation in R/cross-validation.R
 \name{cv_gwr}
 \alias{cv_gwr}
-\title{K-fold cross-validation for GWR}
+\title{Cross-validate a GWR with spatial folds}
 \usage{
 cv_gwr(
   data_sf,
@@ -23,134 +23,137 @@ cv_gwr(
 )
 }
 \arguments{
-\item{data_sf}{An sf object.}
+\item{data_sf}{An sf layer with the response and the predictors.}
 
-\item{response_var}{Response column name.}
+\item{response_var}{Name of the response column.}
 
-\item{predictor_vars}{Predictor column names.}
+\item{predictor_vars}{Character vector of predictor column names.}
 
-\item{folds}{Optional fold definitions, in any of three shapes: a
-\code{\link{make_folds}()} return value; a bare list of
-\code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
-of fold labels, one per row, which becomes leave-that-label-out splits.
-The label vector is how folds built by another package are used here
-(\code{blockCV::cv_spatial()} returns one as \code{$folds_ids}), since its
-\code{$folds_list} holds two \emph{unnamed} vectors per fold and is
-refused by name.  Train and test must be disjoint: a fold that trains on
-its own test rows is not a cross-validation split and is refused with an
-error.  IDs naming no row in the prepared data are dropped with
-a logged count (expected when rows were removed for missing values; a sign
-the folds came from other data when they were not).
+\item{folds}{Optional fold definitions, in one of three shapes: a
+\code{\link[=make_folds]{make_folds()}} result; a bare list of \code{list(train =, test =)} pairs of
+\code{..row_id} values; or a vector of fold labels, one per row, which becomes
+leave-that-label-out splits.  The label vector is how folds built by
+another package are used here: \code{blockCV::cv_spatial()} returns one as
+\verb{$folds_ids}, while its \verb{$folds_list} holds two unnamed vectors per fold
+and is refused by name.  Train and test must be disjoint; a fold that
+trains on its own test rows is not a cross-validation split and is
+refused with an error.  IDs naming no row of the prepared data are
+dropped with a logged count (expected when rows were removed for missing
+values; a sign the folds came from other data when they were not).  When
+\code{NULL}, the folds are \code{make_folds(method = "block_kfold")}, built with
+\code{k}, \code{seed}, \code{boundary}, \code{block_size} and \code{auto_range}.
 With \code{folds = NULL} the score estimates the error at the distance
 the block grid built here puts between the held-out points and their
 training data, which overstates the error of a map where the samples
 cover the area it predicts over.  The excess is how much the model's
 error grows from the map's distances to the data to the block grid's,
 and is small for a model whose error changes little with the distance
-from the data.  \code{\link{fold_separation}()}
-with \code{prediction_points} compares the held-out distances with those
-of the locations the model will predict at, and
-\code{make_folds(method = "knndm", prediction_points = )} builds folds
-matched to them.}
+from the data.  \code{\link[=fold_separation]{fold_separation()}} with \code{prediction_points} compares
+the held-out distances with those of the locations the model will
+predict at, and \code{make_folds(method = "knndm", prediction_points = )}
+builds folds matched to them.}
 
-\item{k}{Number of folds to build when \code{folds} is \code{NULL}; not
-read when \code{folds} is supplied.  Default 5.}
+\item{k}{Number of folds to build when \code{folds} is \code{NULL}; not read when
+\code{folds} is supplied.  Default 5.}
 
-\item{seed}{RNG seed. Default 123.}
+\item{seed}{Seed for building the folds when \code{folds} is \code{NULL}, and for
+the one seed drawn per fold before it is fitted.  With a seed, the
+caller's random stream is restored afterwards.  Default 123.}
 
-\item{adaptive}{Logical; use adaptive bandwidth. Default TRUE.}
+\item{adaptive}{Logical; use an adaptive bandwidth, a number of
+neighbours, rather than a fixed distance.  Default \code{TRUE}.}
 
-\item{bandwidth}{Optional bandwidth, applied to every fold. For
-\code{adaptive = TRUE} an integer number of neighbours; for
-\code{adaptive = FALSE} a distance in the units of the \strong{projected}
-CRS the folds are fitted in (geographic input is projected first, so a
-value in degrees is read as metres). \code{NULL} (default) selects a
-bandwidth per fold from that fold's training rows, by the search
-\code{\link{fit_gwr_model}()} runs (its section Bandwidth selection:
-AICc, or the leave-one-location-out sum of squares when observations
-share a location), and reports it in \code{fold_metrics$bandwidth}.}
+\item{bandwidth}{Optional bandwidth, applied to every fold.  For
+\code{adaptive = TRUE} a whole number of neighbours; for \code{adaptive = FALSE} a
+distance in the units of the projected CRS the folds are fitted in
+(lon/lat input is projected first, so a value in degrees is read as
+metres).  \code{NULL} (default) selects a bandwidth in each fold from that
+fold's training rows, by the search \code{\link[=fit_gwr_model]{fit_gwr_model()}} runs (its section
+"Bandwidth selection": AICc, or the leave-one-location-out sum of squares
+when observations share a location), and reports it in
+\code{fold_metrics$bandwidth}.}
 
-\item{kernel}{Kernel function type.}
+\item{kernel}{The kernel that weights each location's neighbours:
+\code{"bisquare"} (default), \code{"gaussian"}, \code{"tricube"}, \code{"boxcar"} or
+\code{"exponential"}, as in \code{\link[=fit_gwr_model]{fit_gwr_model()}}.}
 
-\item{boundary}{Optional polygonal sf/sfc for CRS alignment.}
+\item{boundary}{Optional polygon layer (sf or sfc).  Data without a CRS are
+aligned to it, and the blocks built when \code{folds} is \code{NULL} are clipped to
+it (see \code{\link[=make_folds]{make_folds()}} and \link{spatialkit-geometry}).}
 
-\item{pointize}{Geometry coercion strategy.}
+\item{pointize}{How a feature that is not a point is reduced to one before
+fitting: a mode of \code{\link[=coerce_to_points]{coerce_to_points()}}.  Default \code{"auto"}.}
 
-\item{block_size}{Optional minimum block edge length (projected CRS
-units) for the blocks built when \code{folds} is \code{NULL}; see
-\code{\link{make_folds}()}.  It is a size you choose and is not
-compared with the autocorrelation range unless one can be estimated, in
-which case a smaller size is warned about.  Beside supplied
-\code{folds} it has nothing to size and raises a warning (class
-\code{spatialkit_fold_args_ignored}).}
+\item{block_size}{Optional minimum block edge length, in the units of the
+CRS the folds are built in, for the blocks built when \code{folds} is \code{NULL};
+see \code{\link[=make_folds]{make_folds()}}.  It is a size you choose and is compared with the
+autocorrelation range only when one can be estimated, in which case a
+smaller size is warned about.  Beside supplied \code{folds} it has nothing to
+size and raises a warning of class \code{spatialkit_fold_args_ignored}.}
 
-\item{auto_range}{Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
-estimate the autocorrelation range and use it as the minimum block size.
-Default \code{FALSE}.  \code{TRUE} beside supplied \code{folds} raises
-the same warning as \code{block_size}.}
+\item{auto_range}{Logical, default \code{FALSE}.  \code{TRUE} with \code{folds = NULL}
+estimates the autocorrelation range and uses it as the minimum block
+size.  \code{TRUE} beside supplied \code{folds} raises the same warning as
+\code{block_size}.}
 
-\item{parallel}{Accepted so that every \code{cv_*()} function takes the
-same arguments, but the GWR folds always run one after another in this
-R process, where the warnings \code{predict()} raises for each fold are
-collected into one.  A value asking for more than one core
-raises a warning saying so.  Default \code{FALSE}.}
+\item{parallel}{Accepted so that every \verb{cv_*()} function takes the same
+arguments, but the GWR folds always run one after another in this R
+process, where the warnings \code{predict()} raises for each fold are
+collected into one.  A value asking for more than one core raises a
+warning saying so.  Default \code{FALSE}.}
 
 \item{metrics}{Optional scoring function of your own, a
-\code{function(y, yhat)} returning a named numeric vector; its names
-become columns of \code{fold_metrics} (per fold) and \code{overall}
-(pooled) beside the built-in ones.  See \strong{Your own metrics} on
-\code{\link{cv_spatial}()} for the contract.}
+\verb{function(y, yhat)} returning a named numeric vector; its names become
+columns of \code{fold_metrics} (per fold) and \code{overall} (pooled) beside the
+built-in ones.  See the section "Your own metrics" in \code{\link[=cv_spatial]{cv_spatial()}} for
+the contract.}
 }
 \value{
-A list with \code{overall}, \code{fold_metrics},
-\code{predictions}, \code{folds}, \code{n_folds_attempted},
-\code{n_folds_succeeded}, \code{fold_status}, \code{orphan_rows},
-\code{n_unknown_ids}, \code{n_dropped}, \code{formula} and
-\code{adaptive}.  The two
-fold counts make a run where every fold failed visible in the return
-value itself, beyond the warning, since \code{overall} is a
-well-formed all-\code{NA} row either way, and \code{fold_status} (one
-row per fold: \code{fold}, \code{status}, \code{message}) says why each
-missing fold is missing.  See \code{\link{cv_spatial}} for the five
-statuses and for \code{orphan_rows}.  \code{Adj_R2} is \code{NA}
-in both \code{overall} and \code{fold_metrics}: the pooled predictions
-have no single parameter count, and a GWR's effective parameter count is
-not its predictor count (see \code{\link{cv_spatial}}).  A held-out
-location whose local regression cannot be estimated has \code{yhat}
-\code{NA}, and one beyond the reach of its fold's fit is predicted and
+A list with the elements \code{\link[=cv_spatial]{cv_spatial()}} returns (\code{overall},
+\code{fold_metrics}, \code{predictions}, \code{folds}, \code{n_folds_attempted},
+\code{n_folds_succeeded}, \code{fold_status}, \code{orphan_rows}, \code{n_unknown_ids} and
+\code{n_dropped}; see its Value for each, and for the five fold statuses),
+plus:
+\describe{
+\item{\code{formula}}{The model formula, as text.}
+\item{\code{adaptive}}{Whether the bandwidth was adaptive.}
+}
+\code{fold_metrics} also carries each fold's \code{bandwidth}.  \code{Adj_R2} is \code{NA} in
+both \code{overall} and \code{fold_metrics}: the pooled predictions have no single
+parameter count, and a GWR's effective parameter count is not its
+predictor count.
+
+A held-out location whose local regression cannot be estimated has
+\code{yhat} \code{NA}, and one beyond the reach of its fold's fit is predicted and
 scored; each case raises one warning for the whole run (classes
-\code{"spatialkit_gwr_not_estimable"} and
-\code{"spatialkit_gwr_extrapolation"}), with the totals over the folds
-that had any.  See \code{\link{predict.gwr_fit}}.  Where a fold's
-fit took the response about a centre (a response at a large offset;
-see \code{\link{fit_gwr_model}}), \code{predictions} also carries
+\code{"spatialkit_gwr_not_estimable"} and \code{"spatialkit_gwr_extrapolation"}),
+with the totals over the folds that had any.  See \code{\link[=predict.gwr_fit]{predict.gwr_fit()}}.
+Where a fold's fit took the response about a centre (a response at a
+large offset; see \code{\link[=fit_gwr_model]{fit_gwr_model()}}), \code{predictions} also carries
 \code{y_centre} (that centre, 0 in the rows of a fold fitted on the raw
-response), \code{yhat_centred} and \code{y_train_mean_centred}
-(\code{yhat} and \code{y_train_mean} less the centre, to the spread a
-double rounds away at the response's size), and the metrics are those
-of the centred values, as \code{\link{model_metrics}()} computes them.
+response), \code{yhat_centred} and \code{y_train_mean_centred} (\code{yhat} and
+\code{y_train_mean} less the centre, which keep digits that rounding at the
+response's size would lose), and the metrics are those of the centred values, as
+\code{\link[=model_metrics]{model_metrics()}} computes them.
 }
 \description{
 Refits a geographically weighted regression from scratch on each training
-fold and scores it on the held-out fold, so the reported error is what the
-model achieves at locations it did not see.  Reach for it whenever you need
-a defensible accuracy figure for a GWR: the in-sample \eqn{R^2} that
-\code{\link{model_metrics}()} reports on a \code{gwr_fit} is close to
-meaningless, because a local regression with a small bandwidth can track the
-training points almost exactly.  Bandwidth is re-selected per fold unless you
-fix it with \code{bandwidth}, which keeps the selection itself inside the
-cross-validation, with no tuning on the full data first.
+fold and scores it on the held-out fold, so the reported error is the
+model's at locations it did not see.  Use it for an accuracy figure for a
+GWR: the in-sample \eqn{R^2}{R^2} that \code{\link[=model_metrics]{model_metrics()}} reports on a
+\code{gwr_fit} says little, because a local regression with a small bandwidth
+can track the training points almost exactly.  The bandwidth is selected
+again in each fold unless \code{bandwidth} fixes it, so the selection itself is
+inside the cross-validation, with no tuning on the full data first.
 }
 \details{
-Folds default to spatial blocks (\code{\link{make_folds}(method =
-"block_kfold")}), not random ones.  A random split leaves a held-out
-point's neighbours in the training set, so its score is the error of
-predicting among the samples; blocks hold out whole areas, and
-\code{folds} says what their score estimates.  Use
-\code{\link{cv_bayes}()} for the same treatment
-of a Bayesian GP model, \code{\link{cv_rf}()} for a forest, and
-\code{\link{compare_models_cv}()} to score several backends on one set of
-folds.
+Folds default to spatial blocks (\code{make_folds(method = "block_kfold")}),
+not random ones.  A random split leaves a held-out point's neighbours in
+the training set, so its score is the error of predicting among the
+samples; blocks hold out whole areas, and \code{folds} says what their score
+estimates.  Use \code{\link[=cv_bayes]{cv_bayes()}} for the same treatment of a Bayesian GP,
+\code{\link[=cv_rf]{cv_rf()}} for a random forest, and \code{\link[=compare_models_cv]{compare_models_cv()}} to score several
+backends on one set of folds.
 }
 \section{Percentage errors on responses with zeros}{
 
@@ -162,55 +165,50 @@ Non-zero is judged at the scale of the data: a denominator no larger
 than 100 machine epsilons times the largest one counts as zero, so the
 rule does not depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
-the \code{n} column counts finite observation/prediction pairs.  Read a
-percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
-an average over a subset of the data, whatever its value.
+the \code{n} column (\code{n_pred} in a cross-validation result) counts
+finite observation/prediction pairs.  Read a percentage error next to that
+count: when \code{n_MAPE} is smaller, \code{MAPE} is an average over a
+subset of the data, whatever its value.
 
-This bites on any response taking exact zeros: counts, rainfall,
-abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
-120, \code{MAPE} is an average over the 58 non-zero rows, which
-\code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
-subtly: it drops the rows where observation and prediction are both near
-zero (which on a well-fitted zero-inflated model are the rows it got
-\emph{right}), so it averages the harder rows only and reads worse than
-the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
-count is only a label, not a repair.
+Any response taking exact zeros is affected: counts, rainfall, abundance,
+claim amounts.  On a zero-inflated response with 62 zeros out of 120,
+\code{MAPE} averages the 58 non-zero rows and \code{n_MAPE} is 58.
+\code{SMAPE} drops the rows where observation and prediction are both
+near zero, which on a well-fitted zero-inflated model are the rows it got
+right, so it averages the harder rows only and reads worse than the fit
+deserves.  \code{n_SMAPE} shows how many rows it kept; it does not correct
+the average.
 
-\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row and are
-unaffected; prefer them whenever the response can be zero.  For a Bayesian
-fit, \code{\link{cv_bayes}()} additionally reports CRPS and interval
-coverage, which are proper scoring rules and have no such failure mode.
+\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row; prefer them
+whenever the response can be zero.  For a Bayesian GP fit,
+\code{\link{cv_bayes}()} also reports CRPS and interval coverage, which
+are proper scoring rules and are defined at zero.
 }
 
 \examples{
-if (requireNamespace("sp", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  n <- 60
-  dat <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               elev = rnorm(n)),
-    coords = c("x", "y"), crs = 32632
-  )
-  dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
-    2 * dat$elev + rnorm(n)
-  cv <- cv_gwr(dat, "price", "elev", k = 3, bandwidth = 30)
-  print(cv$overall)       # pooled over the held-out rows of every fold
-  cv$fold_metrics         # and fold by fold
-}
+\dontshow{if (requireNamespace("sp", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+set.seed(1)
+n <- 60
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             elev = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
+  2 * dat$elev + rnorm(n)
+cv <- cv_gwr(dat, "price", "elev", k = 3, bandwidth = 30)
+cv$overall          # pooled over the held-out rows of every fold
+cv$fold_metrics     # and fold by fold
+\dontshow{\}) # examplesIf}
 }
 \seealso{
 Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=compare_models_cv]{compare_models_cv()}},
 \code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
 \code{\link[=cv_rf]{cv_rf()}},
 \code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=fold_separation]{fold_separation()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=sac_nugget]{sac_nugget()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+\code{\link[=plot_calibration]{plot_calibration()}},
+\code{\link[=plot_cv_metrics]{plot_cv_metrics()}}
 }
 \concept{cross-validation}

@@ -1,7 +1,8 @@
 #' Plot a tessellation map with optional boundary, seeds, and features
 #'
-#' Builds a layered ggplot2 map of polygon tessellations and optional
-#' overlays for a study boundary, seed points, and additional features.
+#' Builds a layered ggplot2 map of the cells, with optional overlays of a
+#' study boundary, seed points and other features. Requires the \pkg{ggplot2}
+#' package.
 #'
 #' Every layer is drawn in x and y: a layer whose geometries mix XY with XYZ
 #' or XYM (as \code{rbind()} of an XY and an XYZ layer gives) is drawn
@@ -27,33 +28,36 @@
 #'   \code{fill_col} and \code{label_col} name
 #'   columns, while \code{outline_col}, \code{features_col},
 #'   \code{seeds_col} and \code{boundary_col} are colours.
-#' @param palette Viridis palette name. Default "viridis".
+#' @param palette Viridis palette, passed as `option` to
+#'   `ggplot2::scale_fill_viridis_c()` or `ggplot2::scale_fill_viridis_d()`:
+#'   `"viridis"` (default), `"magma"`, `"inferno"`, `"plasma"`, `"cividis"`,
+#'   `"rocket"`, `"mako"` or `"turbo"`.
 #' @param na_fill Fill for NA values. Default "grey90".
 #' @param tile_alpha Alpha for filled polygons. Default 0.9.
-#' @param outline_col,outline_size Colour and line width of the tessellation
-#'   outline.
+#' @param outline_col,outline_size Colour and line width of the cell
+#'   outlines. Defaults `"white"` and 0.2.
 #' @param features_col,features_size Colour and point size of the feature
-#'   overlay.
+#'   overlay. Defaults `"#333333"` and 0.5.
 #' @param seeds_col,seeds_size Colour and point size of the seed overlay.
+#'   Defaults `"#1f77b4"` and 1.5.
 #' @param boundary_col,boundary_size Colour and line width of the boundary
-#'   outline.
+#'   outline. Defaults `"#111111"` and 0.6.
 #' @param labels Logical; draw per-cell labels. Default FALSE.  A cell is
 #'   labelled when its label is not NA and it has a location; when no cell
 #'   has both, the labels are skipped with a log line.
 #' @param label_col Name of the COLUMN holding the label text.  Default
-#'   \code{NULL}: the first of \code{"grid_id"}, \code{"cell_id"},
-#'   \code{"poly_id"}, \code{"polygon_id"} and \code{"id"} the layer has, so
-#'   the cells of \code{\link{build_tessellation}()} (\code{cell_id}) and the
-#'   output of \code{\link{summarize_by_cell}()} (\code{poly_id}) are
-#'   labelled without naming one.  A \code{units} or \code{difftime} column
+#'   \code{NULL}: the first of \code{"poly_id"}, \code{"polygon_id"},
+#'   \code{"id"}, \code{"cell_id"} and \code{"grid_id"} the layer has, the
+#'   order in which \code{\link{assign_features_to_polygons}()} reads a
+#'   polygon layer's IDs, so the cells of \code{\link{build_tessellation}()}
+#'   and the output of \code{\link{summarize_by_cell}()} are labelled
+#'   without naming one, by the ID the summary is keyed on.  A \code{units} or \code{difftime} column
 #'   is drawn formatted, with its unit.
 #' @param label_size Label text size. Default 2.7.
 #' @param legend Logical; show fill legend. Default TRUE.
 #' @param legend_title Optional legend title.
-#' @param theme A ggplot2 theme, or NULL (the default) to use
-#'   \code{ggplot2::theme_void()}.  The default is resolved inside the function
-#'   rather than in the formals, so that a Suggests package is never evaluated
-#'   before the \code{requireNamespace()} check has run.
+#' @param theme A ggplot2 theme. Default \code{NULL}, which uses
+#'   \code{ggplot2::theme_void()}.
 #' @param target_crs Optional CRS for plotting. When `NULL` (the default) the
 #'   tessellation's own CRS is used, or (if the tessellation has none) a
 #'   CRS borrowed from the first overlay that carries one, so a CRS-less grid
@@ -71,7 +75,7 @@
 #' @param expand Logical; expand plot area slightly beyond data limits.
 #'   Default TRUE.
 #' @return A ggplot2 object.
-#' @family tessellation
+#' @family cell building
 #' @examples
 #' if (requireNamespace("ggplot2", quietly = TRUE)) {
 #'   library(sf)
@@ -86,9 +90,10 @@
 #'   # shaded by the cell mean rather than by an arbitrary ID.  Each cell
 #'   # holds one point, so there is nothing to pool: estimate = "mean".
 #'   tess  <- build_tessellation(pts, method = "voronoi", quiet = TRUE)
-#'   cells <- summarize_by_cell(assign_features_to_polygons(pts, tess$cells),
-#'                              response_var = "z", cells_sf = tess$cells,
-#'                              estimate = "mean")
+#'   asg   <- assign_features_to_polygons(pts, tess$cells,
+#'                                        polygon_id_col = "cell_id")
+#'   cells <- summarize_by_cell(asg, response_var = "z", id_col = "cell_id",
+#'                              cells_sf = tess$cells, estimate = "mean")
 #'   plot_tessellation_map(cells, features_sf = pts, fill_col = "resp_mean_z",
 #'                         legend_title = "mean z")
 #' }
@@ -289,12 +294,12 @@ plot_tessellation_map <- function(tessellation_sf,
 
   # Labels
   if (isTRUE(labels)) {
-    # The default used to be "grid_id", a column nothing in the package
-    # produces: Voronoi and triangle cells carry cell_id, grids poly_id and
-    # cell_id, and summarize_by_cell() output poly_id, so labels = TRUE drew
-    # no labels on any of them.  "grid_id" stays first so a layer that has
-    # one is labelled as before.
-    id_candidates <- c("grid_id", "cell_id", "poly_id", "polygon_id", "id")
+    # The ID columns in the order assign_features_to_polygons() reads a
+    # polygon layer's IDs, so a layer that carries two of them is labelled
+    # by the one its summary was keyed on: Voronoi and triangle cells carry
+    # cell_id, grids poly_id and cell_id, and summarize_by_cell() output
+    # poly_id (or the `id_col` it was given).
+    id_candidates <- c("poly_id", "polygon_id", "id", "cell_id", "grid_id")
     if (is.null(label_col))
       label_col <- id_candidates[id_candidates %in% names(tess)][1L]
     if (is.na(label_col)) {

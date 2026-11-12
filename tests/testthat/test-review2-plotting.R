@@ -38,10 +38,18 @@ test_that("labels = TRUE labels the package's own cells without naming a column"
   txt2 <- ggplot2::layer_data(p2, which(layer_geoms_r2(p2) == "GeomText"))
   expect_equal(sort(as.numeric(txt2$label)), sort(cells$poly_id))
 
-  # A grid_id column still wins, and an explicit label_col is honoured.
+  # The label column is the first of the ID columns that
+  # assign_features_to_polygons() reads, in its order: poly_id comes before
+  # grid_id, and a layer whose only ID column is grid_id is labelled by it.
+  # An explicit label_col is honoured.
   cells$grid_id <- paste0("g", cells$poly_id)
   p3 <- plot_tessellation_map(cells, labels = TRUE)
-  expect_true(all(grepl("^g", ggplot2::layer_data(p3, 2L)$label)))
+  expect_equal(sort(as.numeric(ggplot2::layer_data(p3, 2L)$label)), sort(cells$poly_id))
+  grid_only <- cells[, setdiff(names(cells), c("poly_id", "polygon_id", "id", "cell_id"))]
+  expect_true("grid_id" %in% names(grid_only))
+  p3g <- plot_tessellation_map(grid_only, labels = TRUE)
+  expect_true(all(grepl("^g", ggplot2::layer_data(p3g, 2L)$label)))
+  expect_setequal(ggplot2::layer_data(p3g, 2L)$label, cells$grid_id)
   p4 <- plot_tessellation_map(cells, labels = TRUE, label_col = "n")
   expect_equal(sort(ggplot2::layer_data(p4, 2L)$label), sort(cells$n))
 })
@@ -149,7 +157,7 @@ test_that("plot_folds' subtitle gives no unit for folds built without a CRS", {
                                     block_size = 300, seed = 1))
   expect_true(is.na(fb$params$crs))
   sub_b <- plot_folds(fb, pts_na)$labels$subtitle
-  expect_match(sub_b, "Block size 300\n")
+  expect_match(sub_b, "^Blocks [0-9.,]+ x [0-9.,]+, block_size 300\n")
   expect_false(grepl("NA units", sub_b))
   fl <- suppressWarnings(make_folds(pts_na, k = 80, method = "buffered_loo", buffer = 150))
   sub_l <- plot_folds(fl, pts_na)$labels$subtitle
@@ -206,7 +214,7 @@ test_that("plot_cv_metrics draws no pooled line for a model without per-fold val
   b <- ggplot2::ggplot_build(p)
   hl <- b$data[[which(layer_geoms_r2(p) == "GeomHline")]]
   expect_equal(hl$yintercept, 3.66)
-  expect_match(p$labels$caption, "Not drawn: GWR \\(no finite per-fold `RMSE`\\)")
+  expect_match(p$labels$caption, "Not drawn: GWR (no finite per-fold RMSE)", fixed = TRUE)
 
   # A pooled row for a model absent from the per-fold table: no NA panel.
   cmp$by_fold$RMSE[1:4] <- c(1.5, 2, 1.9, 2.1)

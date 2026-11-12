@@ -2,7 +2,7 @@
 % Please edit documentation in R/level-selection.R
 \name{determine_optimal_levels}
 \alias{determine_optimal_levels}
-\title{Determine an optimal number of spatial levels via an elbow heuristic}
+\title{Choose a cell count from the elbow of the k-means WSS curve}
 \usage{
 determine_optimal_levels(
   data_sf,
@@ -18,15 +18,10 @@ determine_optimal_levels(
 )
 }
 \arguments{
-\item{data_sf}{An sf object.  Features without a location (an empty
-point, or a coordinate that is not finite or lies beyond 1e150, as given
-or once projected) are dropped with a warning.  A layer that mixes XY and XYZ
-(or XYM) geometries is read in x and y, before and after it is reduced
-to points, since sf reads a layer in the dimension of its first geometry.
-So is a layer whose geometries carry M (XYM or XYZM), which GEOS
-refuses.  The points a layer is reduced to are read in x and y when they
-mix dimensions, as those of a layer XYZ throughout that holds points and
-polygons do.}
+\item{data_sf}{An sf object.  Non-point geometries are reduced to points
+with \code{\link{coerce_to_points}()}.  Features without a location are
+dropped with a warning, and a layer that mixes XY and XYZ geometries or
+carries M is read in x and y (see \link{spatialkit-geometry}).}
 
 \item{max_levels}{Integer upper bound on levels. Default 12.  The sweep
 also stops at the number of distinct locations (k-means cannot place
@@ -34,9 +29,9 @@ more centres) and one short of the number of points.}
 
 \item{top_n}{Integer; how many candidates to return. Default 3. Under
 \code{criterion = "geometric"} the candidate set is the elbow and its two
-immediate neighbours, so at most 3 values are ever returned no matter how
-large \code{top_n} is; only the model-aware criteria can return more.
-Under those it also sets the counts scored, the elbow plus or minus
+immediate neighbours, so at most 3 values are returned however large
+\code{top_n} is; only the model-aware criteria can return more.  Under
+those it also sets the counts scored, the elbow plus or minus
 \code{max(4, top_n)}: a \code{top_n} above 4 scores more counts, and
 under \code{"morans_i"} one of them can rank first.  A count scores the
 same whichever \code{top_n} puts it in the window.}
@@ -48,17 +43,17 @@ restarts; restored afterwards. Default 123.  The rows are put in
 coordinate order before either, so the answer does not depend on the
 order they come in.}
 
-\item{response_var}{Optional response column name.  Read under
-\code{criterion = "morans_i"}, which ranks the counts around the elbow
-by Moran's I of the cell means, and \code{"combined"}, which reports
-that statistic beside the elbow's ranking; under \code{"geometric"},
-the default, it is not read.  Where it is read it must be numeric or
-logical (logicals are read as 0/1);
-a factor or character response raises an error and is never coerced,
-because the residuals of an OLS fit to arbitrary level codes carry no
-meaning to test for autocorrelation.  Rows where it, or a predictor, is
-missing or non-finite stay in the WSS sweep and the cells and are left
-out of Moran's I; a logged warning gives their number.}
+\item{response_var}{Name of the response column (numeric or logical), or
+\code{NULL}.  Read under \code{criterion = "morans_i"}, which ranks the
+counts around the elbow by Moran's I of the cell means, and
+\code{"combined"}, which reports that statistic beside the elbow's
+ranking; under \code{"geometric"}, the default, it is not read.
+Logicals are read as 0/1; a factor or character response raises an
+error and is never coerced, because the residuals of an OLS fit to
+arbitrary level codes carry no meaning to test for autocorrelation.
+Rows where it, or a predictor, is missing or non-finite stay in the WSS
+sweep and the cells and are left out of Moran's I; a logged warning
+gives their number.}
 
 \item{predictor_vars}{Optional predictor column names, read where
 \code{response_var} is. Must be numeric or
@@ -67,30 +62,30 @@ error.  Without them the model-aware criteria regress the cell means on
 an intercept alone, as \code{\link{resolution_profile}()} does.}
 
 \item{criterion}{One of \code{"geometric"} (default: the elbow and its
-two neighbours, read off the coordinates alone),
-\code{"morans_i"} (among the candidates around the elbow, the k at which
-Moran's I of the cell means, or of their regression residuals, is least
-\emph{significant}: the count at which neighbouring cells stop
-resembling each other, not the count that represents the response
-best), or \code{"combined"} (the candidates around the elbow in the
-order of the WSS curve's log-log sag, the quantity the elbow is read
-from, with Moran's I of the cell means and its z in the diagnostics;
-the statistic does not take part in the ranking).  Under
+two neighbours, read off the coordinates alone), \code{"morans_i"}
+(among the candidates around the elbow, the \eqn{k} at which Moran's I
+of the cell means, or of their regression residuals, is least
+significant: the count at which neighbouring cells stop resembling each
+other, which need not be the count that represents the response best),
+or \code{"combined"} (the candidates around the elbow in the order of
+the WSS curve's log-log sag, the quantity the elbow is read from, with
+Moran's I of the cell means and its \eqn{z} in the diagnostics; the
+statistic does not take part in the ranking).  Under
 \code{"morans_i"} a warning of class
 \code{spatialkit_diagnostic_ranking} says that the ranking is by a
 diagnostic of the cell means; its condition carries \code{k} (the
 count ranked first), \code{criterion}, \code{first_computable} (the
 first count at which the statistic is finite) and \code{window}
 (the first and last count tried).  \code{"morans_i"} and
-\code{"combined"} fall back to \code{"geometric"},
-with a warning, when \code{response_var} is not
-given, and with a logged warning when no candidate clears the
-nine-cell resolution floor described in \strong{Details}.  A
-\code{response_var} or \code{predictor_vars} naming a column that is not
-in \code{data_sf} is an error under every criterion.  Supplying
-both \code{response_var} and \code{predictor_vars} does not change the
-criterion: under \code{"geometric"} neither is read, and a line logged
-at the INFO level says that \code{"combined"} reports Moran's I.}
+\code{"combined"} fall back to \code{"geometric"}, with a warning, when
+\code{response_var} is not given, and with a logged warning when no
+candidate clears the nine-cell floor described under "Model-aware
+criteria".  A \code{response_var} or \code{predictor_vars} naming a
+column that is not in \code{data_sf} is an error under every criterion.
+Supplying both \code{response_var} and \code{predictor_vars} does not
+change the criterion: under \code{"geometric"} neither is read, and a
+line logged at the INFO level says that \code{"combined"} reports
+Moran's I.}
 
 \item{select_on}{\code{"all"} (default) selects on every point;
 \code{"split"} reads the response on one spatially blocked half of the
@@ -120,271 +115,251 @@ candidates are scored around the elbow: with no elbow, \code{"na"} and
 that window.}
 }
 \value{
-An integer vector of candidate level counts, \strong{best first}:
-under the geometric criterion the elbow, then its lower and upper
-neighbours; under \code{"morans_i"} the candidates in the order of
-\eqn{|z|}, with a warning of class
-\code{spatialkit_diagnostic_ranking}; under \code{"combined"} the
-candidates around the elbow in the order of the sag.  When the WSS
-curve has no elbow it is \code{NA_integer_}, with a warning of class
-\code{spatialkit_no_elbow} (under
-\code{on_no_elbow = "warn"} the ladder's choice and its neighbours, with
-the same warning; see Details), and so it is when the ladder is too
-short to show an elbow (\code{max_levels} of 1 or 2).  At the default
-\code{on_no_elbow = "na"} every result carries the attributes
-\code{structured} (\code{TRUE} when the WSS curve has an elbow,
-\code{FALSE} with the \code{NA}) and \code{sag}.  A layer with no
-points is an error, and one with fewer than three points, or with every
-point on one location, has no ladder: it returns \code{NA} under the
-same rule, and 1 under \code{"warn"}.
-\code{k[1]} is therefore the top-ranked count, or \code{NA}, on every
-path, and \code{top_n = 1} returns it alone. When
-\code{criterion != "geometric"}, an attribute \code{"diagnostics"} is
-attached with per-k Moran's I values (\code{moran_i}) and their
-standardised deviates (\code{moran_z}), the WSS curve (\code{wss}) with
-the relative between-restart spread at each \code{k} (\code{wss_spread}),
-the number of rising steps on it (\code{wss_bumps}), the restart
-budget (\code{nstart}), the geometric elbow the evaluated
-neighbourhood was drawn around (\code{knee_k}), whether the WSS curve
-has an elbow (\code{structured}) and its largest log-log sag
-(\code{sag}), the \code{k} at which
-k-means failed (\code{failed_k}; their \code{wss} entries are
-interpolated from the neighbours, not measured) and the \code{k} the
-model-aware pass actually scored (\code{eval_ks}, the elbow's
-neighbourhood).  Under \code{"combined"} it also carries the WSS of the
-re-run clustering at those \code{k} (\code{wss_eval}, the clustering
-Moran's I is computed on; reported, not ranked on), the rank of the
-sag of \code{wss} that ordered them (\code{combined_rank}, named by
-\code{k}; with no elbow every candidate ties and the order is by
-distance from \code{knee_k}) and
-\code{criterion = "combined"}; when \code{"combined"} returned the
-geometric ranking because the elbow is below ten cells, it carries
-\code{criterion = "geometric"} and \code{fallback} (the reason) in
-place of \code{combined_rank}.  The \code{NA} the default returns on
-a model-aware call whose WSS curve has no elbow (or a ladder too short
-to show one) carries the attribute too, with what the sweep measured:
-\code{moran_i} and \code{moran_z} all \code{NA} and \code{eval_ks}
-empty, since no count was scored, \code{knee_k} the count the chord
-rule lands on, and \code{structured = FALSE}.  When the model-aware
-path itself falls back to the geometric result (no viable k in the elbow
-neighbourhood, a neighbourhood that ends at nine cells or fewer, or,
-under \code{"morans_i"}, Moran's I computable at no candidate), no
-diagnostics are available and the attribute is absent; these fallbacks
-are logged as warnings.  Under \code{"combined"} a Moran's I computable
-at no candidate of a neighbourhood that reaches ten cells is not a
-fallback: the attribute is there, with \code{moran_i} and
-\code{moran_z} all \code{NA}, and a logged warning says so.  The
-attribute is absent on the \code{NA} of a layer with
-no ladder (fewer than three points, one location, or k-means failing at
-every \code{k} from 2).  The geometric
-path returns an integer vector with
-no attribute but \code{structured} and \code{sag} (none under
-\code{"warn"} or \code{"error"}); a rising WSS curve is still logged
-there.  With
-\code{select_on = "split"} every path adds a \code{"split"} attribute:
-a list with \code{selection} and \code{estimation} (integer row
-positions in \code{data_sf}), \code{method} and \code{seed}.  For a full
-per-level table of criteria, cell support, restart spread and the flat
-region, see \code{\link{resolution_profile}()}.
+An integer vector of candidate counts, best first:
+\describe{
+\item{\code{"geometric"}}{The elbow, then its lower and upper
+neighbours.}
+\item{\code{"morans_i"}}{The candidates in the order of \eqn{|z|},
+with a warning of class \code{spatialkit_diagnostic_ranking}.}
+\item{\code{"combined"}}{The candidates around the elbow in the order
+of the sag.}
+\item{No elbow}{\code{NA_integer_}, with a warning of class
+\code{spatialkit_no_elbow}; under \code{on_no_elbow = "warn"}, the
+ladder's choice and its neighbours, with the same warning.  So it
+is when the ladder is too short to show an elbow (\code{max_levels}
+of 1 or 2), and for a layer with fewer than three points or every
+point on one location, which has no ladder (1 under
+\code{"warn"}).  A layer with no points is an error.}
+}
+\code{k[1]} is the top-ranked count, or \code{NA}, on every path, and
+\code{top_n = 1} returns it alone.  The vector can carry these
+attributes:
+\describe{
+\item{\code{structured}, \code{sag}}{Under the default
+\code{on_no_elbow = "na"}, on every result: \code{structured} is
+\code{TRUE} when the WSS curve has an elbow and \code{FALSE} with the
+\code{NA}, and \code{sag} is the curve's largest log-log sag.  None
+under \code{"warn"} or \code{"error"}.  The geometric path carries no
+other attribute.}
+\item{\code{diagnostics}}{Under \code{"morans_i"} and
+\code{"combined"}: a list with per-\eqn{k} Moran's I
+(\code{moran_i}) and standardised deviates (\code{moran_z}), the WSS
+curve (\code{wss}) with the relative between-restart spread at each
+\eqn{k} (\code{wss_spread}), the number of rising steps on it
+(\code{wss_bumps}), the restart budget (\code{nstart}), the elbow
+the scored neighbourhood was drawn around (\code{knee_k}), whether
+the WSS curve has an elbow (\code{structured}) and its largest
+log-log sag (\code{sag}), the \eqn{k} at which k-means failed
+(\code{failed_k}; their \code{wss} entries are interpolated from the
+neighbours, not measured) and the \eqn{k} the model-aware pass
+scored (\code{eval_ks}, the elbow's neighbourhood).  Under
+\code{"combined"} it also carries the WSS of the re-run clustering at
+those \eqn{k} (\code{wss_eval}, the clustering Moran's I is computed
+on; reported, not ranked on), the rank of the sag of \code{wss}
+that ordered them (\code{combined_rank}, named by \eqn{k}; with no
+elbow every candidate ties and the order is by distance from
+\code{knee_k}) and \code{criterion = "combined"}.  When
+\code{"combined"} returned the geometric ranking because the elbow is
+below ten cells, it carries \code{criterion = "geometric"} and
+\code{fallback} (the reason) in place of \code{combined_rank}.
+The \code{NA} the default returns on a model-aware call whose WSS
+curve has no elbow (or a ladder too short to show one) carries the
+attribute too, with what the sweep measured: \code{moran_i} and
+\code{moran_z} all \code{NA} and \code{eval_ks} empty, since no
+count was scored, \code{knee_k} the count the chord rule lands on,
+and \code{structured = FALSE}.  Under \code{"combined"}, Moran's I
+computable at no candidate of a neighbourhood that reaches ten cells
+leaves the attribute in place, with \code{moran_i} and
+\code{moran_z} all \code{NA}, and a logged warning says so.
+The attribute is absent when the model-aware path falls back to the
+geometric result (no viable \eqn{k} in the elbow's neighbourhood, a
+neighbourhood that ends at nine cells or fewer, or, under
+\code{"morans_i"}, Moran's I computable at no candidate); these
+fallbacks are logged as warnings.  It is absent too on the \code{NA}
+of a layer with no ladder (fewer than three points, one location, or
+k-means failing at every \eqn{k} from 2).}
+\item{\code{split}}{With \code{select_on = "split"}, on every path: a
+list with \code{selection} and \code{estimation} (integer row
+positions in \code{data_sf}), \code{method} and \code{seed}.}
+}
+A rising WSS curve is logged on every path.  For a per-level table of
+criteria, cell support, restart spread and the flat region, see
+\code{\link{resolution_profile}()}.
 }
 \description{
-Computes a WSS curve over k=1..K_max using k-means on projected feature
-coordinates and selects candidate k values around the elbow.
+Fits k-means to the coordinates at \eqn{k = 1} to \code{max_levels} cells
+and returns the count at the elbow of the within-cluster sum of squares
+(WSS), read on log-log axes, with its two neighbours.  Points with no
+cluster structure have no elbow, and the result is then \code{NA} with a
+warning.  For a count chosen from the response, use
+\code{\link{resolution_profile}()}.
 }
-\details{
-\strong{The elbow is read on log-log axes, and there may be none.}  Points
-with no cluster structure have a WSS curve close to \eqn{c/k}, and the
+\section{How the elbow is read}{
+
+Points with no cluster structure have a WSS curve close to \eqn{c/k}.  The
 classical rule, the point furthest below the chord from the first to the
-last k, still finds a "knee" on it on linear axes, at about
+last \eqn{k}, still finds a "knee" on such a curve on linear axes, at about
 \eqn{\sqrt{K_{max}}}: 4 at the default \code{max_levels = 12} and 13 at
 160, whatever the data.  On \eqn{\log k} against \eqn{\log} WSS that curve
 is a straight line, while separated clusters fall faster than it until
 there is one cell per cluster and like it after, a bend at the cluster
-count.  The elbow is therefore the k whose \eqn{\log} WSS sags furthest
-below the straight line joining k = 1 and \eqn{K_{max}} on those axes, and
-it counts as one only when the sag is at least \eqn{\log 1.25} (the WSS a
-fifth below the power law through the ends).  Measured on 60 to 1500
-points with ladders to 3--40, uniform layouts over squares, discs,
-triangles, an L-shape, density gradients and jittered lattices sagged at
-most 0.16, and two to ten separated clusters at least 0.6 once
-\code{max_levels} passed the cluster count.  With no elbow the function
-returns \code{NA}, so that a count which is not a finding is not passed on
-as one: the result carries \code{structured = FALSE} and the largest sag
-as \code{sag}, and a warning of class \code{spatialkit_no_elbow} says
-why.  The linear-axis answer there is the ladder's, not the data's: about
+count.  The elbow is therefore the \eqn{k} whose \eqn{\log} WSS sags
+furthest below the straight line joining \eqn{k = 1} and \eqn{K_{max}} on
+those axes, and it counts as one only when the sag is at least
+\eqn{\log 1.25} (the WSS a fifth below the power law through the ends).
+
+An elongated extent also bends, at about its aspect ratio, because the
+first cuts go across its long axis; past the threshold that bend is
+reported as an elbow, and it describes the shape of the extent rather
+than clusters in it.  When locations repeat (stations visited many
+times), the sweep can reach one cell per distinct location, where the WSS
+is zero (to within \eqn{10^{-12}} of the total).  That \eqn{k} has no
+place on log axes and is left out of the line, but the fall to zero is
+the sharpest bend there is: when the rest of the curve has no elbow, the
+number of distinct locations is the elbow.
+}
+
+\section{When there is no elbow}{
+
+With no elbow the function returns \code{NA}, so that a count which is
+not a finding is not passed on as one.  The result carries
+\code{structured = FALSE} and the largest sag as \code{sag}, and a
+warning of class \code{spatialkit_no_elbow} says why.  The count the
+linear-axis rule gives there is the ladder's and not the data's: about
 \eqn{\sqrt{K_{max}}}, 3 or 4 cells at the default, close to one mean for
-the whole layer, and the warning carries it as \code{k} and the largest
-sag as \code{sag}.  \code{on_no_elbow = "warn"} returns that count all
-the same, with the same warning, and \code{"error"} stops.  An elongated
-extent also bends, at about its aspect ratio, because
-the first cuts go across its long axis (0.2--0.45 for a 4:1 rectangle);
-past the threshold that bend is reported as an elbow, and it describes
-the extent's shape rather than clusters in it.  When locations repeat
-(stations visited many times), the sweep can reach one cell per distinct
-location, where the WSS is zero (to within \eqn{10^{-12}} of the total).
-That \code{k} has no place on log axes and is left out of the line, but
-the fall to zero is the sharpest bend there is: when the rest of the
-curve has no elbow, the number of distinct locations is the elbow.
+the whole layer.  The warning carries it as \code{k} and the largest sag
+as \code{sag}.  \code{on_no_elbow = "warn"} returns that count all the
+same, with the same warning, and \code{"error"} stops.
+}
+
+\section{Model-aware criteria}{
 
 Under \code{criterion = "morans_i"} or \code{"combined"}, with a
-\code{response_var}, the geometric WSS elbow is supplemented with Moran's
-I of the cell means at each candidate k: the cell means are regressed on
-the cell-mean predictors (on an intercept alone when no
+\code{response_var}, the elbow is supplemented with Moran's I of the cell
+means at each candidate \eqn{k}: the cell means are regressed on the
+cell-mean predictors (on an intercept alone when no
 \code{predictor_vars} are given) and Moran's I is computed on the
-residuals over each cell's 8 nearest cells.
-That statistic tests whether \emph{neighbouring cells} are independent.
-It does not measure the autocorrelation the cells leave unexplained in
-the response, and it does not say how well they represent it: on an
-autocorrelated response it grows as the cells get finer than the range,
-because neighbouring cells then resemble each other, and it is close to 0
-at about 10 to 20 cells whatever the data, where the neighbour graph is
-nearly complete.  \code{"morans_i"} prefers the candidate with the
-smallest \eqn{|z|}, which is the count at which neighbouring cell means
-stop resembling each other, cells about as wide as the range.  Only the
-elbow's neighbourhood is scored, so the response moves the answer by at
-most a few cells either side of the geometric elbow.  \strong{A ranking
-by Moran's z is a ranking by a diagnostic, not by a count rule}, and it
-is returned with a warning of class
+residuals over each cell's 8 nearest cells.  Under \code{"geometric"},
+the default, \code{response_var} and \code{predictor_vars} are not read,
+whether one or both are given.
+
+Moran's I of the cell means tests whether neighbouring cells are
+independent.  It does not measure the autocorrelation the cells leave
+unexplained in the response, and it does not say how well they represent
+it: on an autocorrelated response it grows as the cells get finer than
+the range, because neighbouring cells then resemble each other, and it is
+close to 0 at about 10 to 20 cells whatever the data, where the neighbour
+graph is nearly complete.
+
+\code{"morans_i"} prefers the candidate with the smallest \eqn{|z|}: the
+count at which neighbouring cell means stop resembling each other, cells
+about as wide as the range.  Only the elbow's neighbourhood is scored, so
+the response moves the answer by at most a few cells either side of the
+elbow.  That ranking is by a diagnostic of the cell means and not by a
+count rule, and it is returned with a warning of class
 \code{spatialkit_diagnostic_ranking} that says so and gives the count
 ranked first, the first count the statistic could be computed at and the
-counts scored.  Measured on 500 points with a response alone and
-\code{criterion = "morans_i"}: the first-ranked count was 10 to 13 on 16
-of 16 white-noise layers and on 16 of 16 exponential fields
-(\code{max_levels} 40 and 80), and 10 was the first count the statistic
-could be computed at on all 32.  Those layers have no elbow, so their
-counts are ranked under \code{on_no_elbow = "warn"} only; at the default
-they return \code{NA}.  \code{\link{select_resolution}()}
-refuses the same statistic unless asked with \code{diagnostic = TRUE};
-here the criterion is asked for by name, so the count is returned and the
-warning carries the caveat.  \code{"combined"} does not rank by the
-statistic: it orders the same counts by the WSS curve's sag and reports
-Moran's I and its z beside them in the \code{"diagnostics"} attribute,
-with no such warning.  Under \code{"geometric"}, the default,
-\code{response_var} and \code{predictor_vars} are not read, whether one
-or both are given.
+counts scored.  \code{\link{select_resolution}()} refuses the same
+statistic unless asked with \code{diagnostic = TRUE}; here the criterion
+is asked for by name, so the count is returned and the warning carries
+the caveat.
 
-To keep memory use and runtime bounded for large \code{max_levels}, the
-initial k-means sweep records only within-cluster sum-of-squares (WSS)
-without retaining cluster assignments.  Moran's I is then evaluated
-lazily: k-means is re-run only for a focused neighbourhood around the
-elbow (±4 by default, or ±\code{top_n} if larger), so that only the most
-promising candidate k values incur the cost of the full Moran's I
-computation.  The re-run at each count draws its starts from a stream of
-its own, seeded before the sweep, so for one \code{set_seed} a count gets
-the same cells, \code{wss_eval} and Moran's I in any neighbourhood that
-holds it, whichever \code{top_n} and \code{max_levels} set the
-neighbourhood: a larger \code{top_n} adds counts to the neighbourhood and
-leaves the scores of the others as they were.
-
-\strong{The WSS curve is read for its shape, so it is fitted to be
-smooth.}  Every point on it is a k-means local optimum, and with a few
-random restarts the curve mixes level effects with optimisation noise:
-measured on clustered layouts, a sweep over \code{k = 1..30} at
-\code{stats::kmeans(nstart = 5)} \emph{rose} at one or two steps in three
-of five draws, and an earlier form of the elbow rule once selected such a
-bump.  Each \code{k} is therefore fitted as the best of 25 restarts seeded
-by k-means++ (Arthur and Vassilvitskii 2007), the budget at which the gain
-from further restarts saturates (Fränti and Sieranoja 2019; Steinley 2003
-on why the usual handful is not enough).  The same sweeps then had no
-increase at all.  A curve that still rises somewhere is reported but not
-refused: a bumpy curve is uncertain, not unidentified.  A logged warning
-names the number of rising steps, and the model-aware paths return it as
-\code{wss_bumps} in the \code{"diagnostics"} attribute beside
-\code{wss_spread}, the relative spread of WSS across the restarts at each
-\code{k}.  Because the optimiser changed, a selection made by an earlier
-version on a curve that had such a bump can differ from the one made now;
-where the earlier curve was clean, the selection is the same.
-
-\strong{The sweep is plain k-means, whatever the regions are built with
-afterwards.}  This function has no \code{partition} argument: the elbow is
-a reading of the sum of squares that plain k-means minimises, and the
-cells behind Moran's z are that partition's.  A count returned here says
-nothing about density-weighted regions;
-\code{\link{resolution_profile}()}, whose regions are of that kind by
-default, scores counts of those.
-
-\strong{\code{"morans_i"} ranks on the standardised deviate, not on
-|Moran's I|.}  Both \eqn{E[I]} and \eqn{Var[I]} depend on the number of
-cells, so \eqn{|I|} falls as \code{k} grows whether or not the finer
-tessellation is capturing anything.  Measured over 300 replicates of a
-response with \emph{no} spatial structure, mean \eqn{|I|} fell monotonically
-from 0.114 at \code{k = 10} to 0.050 at \code{k = 60} (\eqn{-56\%}), which
-made an \eqn{|I|} ranking prefer the largest candidate for arithmetic
-reasons alone.  Candidates are therefore ordered by
-\eqn{|z| = |I - E[I]| / \mathrm{sd}(I)} using the Cliff & Ord regression
-residual moments.  The cell-level residuals are OLS residuals by
+\code{"morans_i"} ranks on the standardised deviate
+\eqn{|z| = |I - E[I]| / \mathrm{sd}(I)}, using the Cliff and Ord
+regression residual moments, and not on \eqn{|I|}: both \eqn{E[I]} and
+\eqn{Var[I]} depend on the number of cells, so \eqn{|I|} falls as
+\eqn{k} grows whether or not the finer cells capture anything, and a
+ranking by \eqn{|I|} would prefer the largest candidate for arithmetic
+reasons alone.  The cell-level residuals are OLS residuals by
 construction, which is the case those moments are derived for, but the
 derivation also assumes errors of equal variance, and a cell mean over
-\eqn{n_j} points has a variance proportional to \eqn{1/n_j}.  Over the
-same runs \eqn{z} had mean \eqn{\approx 0}, \eqn{\mathrm{sd} \approx 1}
-and a two-sided 5\% rejection rate of 0.040--0.057 at every \code{k}, and
-it stayed calibrated on gradient and moderately clustered layouts; with
-single-point cells next to cells of 70 or more points its mean rose to
-0.2--0.34 and its rejection rate to 7--8\% at 20 cells.  Where structure
-remains, \eqn{|z|} mixes its size with the number of cells it is measured
-on, since \eqn{\mathrm{sd}(I)} shrinks as cells are added.  Both
-quantities are reported in the \code{"diagnostics"} attribute, as
-\code{moran_i} and \code{moran_z}.
+\eqn{n_j} points has a variance proportional to \eqn{1/n_j}, so
+\eqn{z} is less reliable where single-point cells sit next to cells of
+many points.  Where structure remains, \eqn{|z|} mixes its size with the
+number of cells it is measured on, since \eqn{\mathrm{sd}(I)} shrinks as
+cells are added.  Both quantities are reported in the
+\code{"diagnostics"} attribute, as \code{moran_i} and \code{moran_z}.
 
-\strong{Resolution floor on the model-aware criteria.}  Moran's I is
-computed on cell-level residuals with an 8-nearest-neighbour weight matrix,
-so it only carries information once there are more than nine cells.  At nine
-or fewer, every cell is a neighbour of every other, the row-standardised
-weight matrix is complete, and Moran's I collapses to exactly
-\eqn{-1/(k - 1)} for \emph{any} residual vector (a function of \code{k}
-alone).  \code{"morans_i"} ranks on \eqn{|z|}, not on \eqn{|I|}, and at
-the floor the residual moments give \eqn{E[I] = I} and \eqn{\mathrm{Var}[I] =
-0} identically (the algebra holds to \eqn{10^{-16}}), so the standardised
-deviate is \eqn{0/0}: it carries no information about the tessellation, and
-whichever way rounding noise resolves it those candidates would rank first
-or last on nothing.  They therefore return \code{NA} and are excluded from
-the ranking of \code{"morans_i"}.  When no candidate in the elbow
-neighbourhood clears the floor, the whole call falls back to the
-geometric ranking and logs a warning that says so.  That is the usual
-outcome well past
-\code{max_levels = 10}: the neighbourhood is the elbow plus or minus
-\code{max(4, top_n)}, and on points with no cluster structure the elbow
-sits near \eqn{\sqrt{K_{max}}}, so the neighbourhood reaches ten cells only
-from about \code{max_levels = 40}.  Measured on 1000 uniform points
-under \code{on_no_elbow = "warn"} (at the default they return \code{NA}
-before any window is placed), \code{max_levels} of 12, 20 and 30 all fell
-back, and 40 scored \code{k} = 10 and 11 alone.  On such a layer
-\code{\link{resolution_profile}()}, which scores Moran's z at every level of
-its ladder, is the model-aware view.  Under \code{criterion = "combined"},
-an elbow below ten cells is a count Moran's I cannot score: the geometric
+Moran's I is computed with an 8-nearest-neighbour weight matrix, so it
+carries information only once there are more than nine cells.  At nine or
+fewer, every cell is a neighbour of every other, the row-standardised
+weight matrix is complete, and Moran's I is exactly \eqn{-1/(k - 1)} for
+any residual vector.  The residual moments then give \eqn{E[I] = I} and
+\eqn{\mathrm{Var}[I] = 0}, so the standardised deviate is \eqn{0/0}: those
+candidates return \code{NA} and are left out of the ranking of
+\code{"morans_i"}.  When no candidate in the elbow's neighbourhood clears
+the floor, the call falls back to the geometric ranking and logs a
+warning that says so.  On points with no cluster structure the elbow
+sits near \eqn{\sqrt{K_{max}}} and the neighbourhood is the elbow plus or
+minus \code{max(4, top_n)}, so the neighbourhood reaches ten cells only
+from about \code{max_levels = 40}.  On such a layer
+\code{\link{resolution_profile}()}, which scores Moran's z at every level
+of its ladder, is the model-aware view.
+
+\code{"combined"} is the elbow's ranking of the counts around it, best
+sag first, with Moran's I of the cell means and its \eqn{z} beside it in
+the diagnostics; Moran's I does not take part in the ranking, and the
+result is not an estimate of the number of clusters.  The sag is read off
+the sweep's WSS curve, the one the elbow is read from, so with an elbow
+the first count is the elbow and the counts after it come in order of
+sag; they can differ from the two neighbours \code{"geometric"} returns.
+An elbow below ten cells is a count Moran's I cannot score: the geometric
 ranking is returned, the elbow and its two neighbours, with a logged
-warning, and the diagnostics record it (see Value).  Otherwise
-\code{"combined"} orders the window by the elbow's own log-log sag at each
-candidate, the candidates below the floor among them.  When the WSS curve
+warning, and the diagnostics record it (see Value).  When the WSS curve
 has no elbow (under \code{on_no_elbow = "warn"}) the sag is flat, every
 candidate tied, and the window comes out in order of distance from the
-count the chord rule lands on, which is the geometric order.
-
-\code{"combined"} is the elbow's ranking of the counts around it, best sag
-first, with Moran's I of the cell means beside it in the diagnostics.  It
-is not an estimate of the number of clusters, and Moran's I does not take
-part in the ranking.  Averaged with the sag, as it was, it put first ten,
-the lowest count it scores, or the count after it: on a curve with no
-elbow the sag is flat and the counts below the floor took the last place
-on its axis, and with an elbow its \eqn{|z|} is near 0 at the coarsest
-counts it scores whatever the response.  The sag is read off the sweep's
-WSS curve, the one the elbow is read from, so with an elbow the first
-count is the elbow and the counts after it come in order of sag; they can
-differ from the two neighbours \code{"geometric"} returns.  The k-means
+count the chord rule lands on, which is the geometric order.  The k-means
 re-run at each candidate, whose cells Moran's I is computed on, can land
-in a different optimum than the sweep; its WSS is reported as
-\code{wss_eval} and does not rank.  The response reaches the diagnostics
-alone: where Moran's I can be computed at no candidate of a window that
-reaches ten cells (a constant response, too few cells holding a row with
-one, or too few in the half that \code{select_on = "split"} reads),
-\code{moran_i} and \code{moran_z} are \code{NA}, the log gives the
-reason at the WARN level, and the counts are ranked as they would be
-otherwise.  Use
-\code{"geometric"} when the cell count should follow the clustering of the
-points, \code{"morans_i"} for a ranking by the diagnostic, and
+in another optimum than the sweep; its WSS is reported as
+\code{wss_eval} and does not rank.  Where Moran's I can be computed at no
+candidate of a window that reaches ten cells (a constant response, too
+few cells holding a row with one, or too few in the half that
+\code{select_on = "split"} reads), \code{moran_i} and \code{moran_z} are
+\code{NA}, the log gives the reason at the WARN level, and the counts are
+ranked as they would be otherwise.
+
+Use \code{"geometric"} when the cell count should follow the clustering
+of the points, \code{"morans_i"} for a ranking by the diagnostic, and
 \code{\link{resolution_profile}()} when the response should drive the
 count.
 }
+
+\section{The k-means sweep}{
+
+The WSS curve is read for its shape, so it is fitted to be smooth.  Every
+point on it is a k-means local optimum, and with a few random restarts
+the curve mixes level effects with optimisation noise and can rise from
+one \eqn{k} to the next.  Each \eqn{k} is therefore fitted as the best of
+25 restarts seeded by k-means++ (Arthur and Vassilvitskii 2007).  A fixed
+budget of restarts follows Fränti and Sieranoja (2019), and Steinley (2003)
+shows why the usual handful is not enough; 25 is the package's choice, not
+a published figure.  A
+curve that still rises somewhere is reported and not refused.  A logged
+warning names the number of rising steps, and the model-aware paths
+return it as \code{wss_bumps} in the \code{"diagnostics"} attribute beside
+\code{wss_spread}, the relative spread of WSS across the restarts at each
+\eqn{k}.
+
+The sweep is plain k-means, whatever the cells are built with
+afterwards.  This function has no \code{partition} argument: the elbow is
+a reading of the sum of squares that plain k-means minimises, and the
+cells behind Moran's z are that partition's.  A count returned here says
+nothing about density-weighted cells; \code{\link{resolution_profile}()},
+whose cells are of that kind by default, scores counts of those.
+
+To keep memory use and run time bounded for large \code{max_levels}, the
+sweep records only the WSS at each \eqn{k}, without the cluster
+assignments.  Moran's I is then evaluated on demand: k-means is re-run
+only for a neighbourhood around the elbow (plus or minus 4 by default, or
+plus or minus \code{top_n} if larger).  The re-run at each count draws
+its starts from a stream of its own, seeded before the sweep, so for one
+\code{set_seed} a count gets the same cells, \code{wss_eval} and Moran's
+I in any neighbourhood that holds it, whichever \code{top_n} and
+\code{max_levels} set the neighbourhood: a larger \code{top_n} adds
+counts to the neighbourhood and leaves the scores of the others as they
+were.
+}
+
 \section{Post-selection inference}{
 
 When the selection reads the response (here, under
@@ -395,11 +370,11 @@ descriptive, not at nominal coverage (Gao, Bien and Witten 2022; Chen and
 Witten 2023 give the exact selective test for two k-means clusters, the
 first link of this chain).  The exposure is narrower than "the partition
 was chosen on the response": every partition here is k-means on the
-coordinates alone, and the response only decides which \emph{count} is
-ranked first.  It is not zero, because the count determines every cell the
-downstream standard errors are computed over.  Under \code{"combined"} the
-response reaches the diagnostics and not the ranking, which is the same
-whether or not Moran's I can be computed.
+coordinates alone, and the response only decides which count is ranked
+first.  It is not zero, because the count determines every cell the
+downstream standard errors are computed over.  Under \code{"combined"}
+the response reaches the diagnostics and not the ranking, which is the
+same whether or not Moran's I can be computed.
 
 \code{select_on = "split"} is sample splitting: the layer is cut into two
 spatially blocked halves (\code{\link{make_folds}(k = 2, method =
@@ -409,36 +384,34 @@ halves come back in the \code{"split"} attribute (\code{selection} and
 \code{estimation}).  The WSS curve and the k-means cells still use every
 point: they read coordinates alone, and the count is for a tessellation
 of every point, so it is chosen on that layer's extent and clusters
-rather than on half of them.  Build the tessellation on
-every point (cells are geometry), but aggregate and fit on
+rather than on half of them.  Build the tessellation on every point
+(cells are geometry), but aggregate and fit on
 \code{data_sf[attr(x, "split")$estimation, ]}, whose response the
 selection never saw.  That keeps the selection's use of the response out
 of the estimates, but only as far as the two halves are independent: the
 split has no buffer, so points near the border between them are
 correlated with the selection half over the autocorrelation range, and
 coverage is nominal only when that range is short against the blocks.
-The price is
-precision: half the points estimate, and García Rasines and Young (2023)
-show a \emph{contiguous} spatial half is less efficient than the
+The price is precision: half the points estimate, and García Rasines and
+Young (2023) show a contiguous spatial half is less efficient than the
 exchangeable split the i.i.d. theory assumes, because the two halves are
 not interchangeable.  Two alternatives keep the whole sample: data
 thinning for count responses (Neufeld et al. 2024) and data fission for
 Gaussian-like ones (Leiner et al. 2023).  Neither is implemented here;
-the split needs no distributional assumption, which is why it comes first.
-Under \code{"combined"} the split changes only the rows the diagnostics
-read.  Selection on coordinates alone (\code{"geometric"}, whatever
-variables are given) is not exposed in this way, and \code{"split"} then
-changes nothing but the attribute.
+the split needs no distributional assumption.  Under \code{"combined"}
+the split changes only the rows the diagnostics read.  Selection on
+coordinates alone (\code{"geometric"}, whatever variables are given) is
+not exposed in this way, and \code{"split"} then changes nothing but the
+attribute.
 
 The estimation rows cover only the estimation half's blocks, while the
 cells cover the whole layer, so the estimation rows do not fill every
 cell.  A cell inside the selection half gets none and comes back
 \code{NA}; a cell across the border between the halves is estimated from
 its estimation-half points alone, and its standard error describes that
-part, not the cell (on 400 simulated fields a nominal 95\% interval covered
-0.97 in cells inside the estimation half and 0.88 in cells across the
-border).  Count, per cell, how many of its points are estimation rows,
-and read inferential results only off cells whose points all are.
+part, not the cell.  Count, per cell, how many of its points are
+estimation rows, and read inferential results only off cells whose
+points all are.
 }
 
 \examples{
@@ -453,11 +426,18 @@ pts <- st_as_sf(
 determine_optimal_levels(pts, max_levels = 6)   # 2 1 3: the elbow first
 
 # Points spread evenly have no elbow: NA, with structured = FALSE and a
-# warning of class spatialkit_no_elbow that says why
+# warning of class spatialkit_no_elbow that says why (printed here
+# wrapped, in place of the warning)
 even <- st_as_sf(data.frame(x = 5e5 + runif(200, 0, 100),
                             y = 5e6 + runif(200, 0, 100)),
                  coords = c("x", "y"), crs = 32632)
-determine_optimal_levels(even, max_levels = 6)
+withCallingHandlers(
+  determine_optimal_levels(even, max_levels = 6),
+  spatialkit_no_elbow = function(w) {
+    writeLines(strwrap(conditionMessage(w), 76))
+    invokeRestart("muffleWarning")
+  }
+)
 }
 \references{
 Arthur, D. and Vassilvitskii, S. (2007). k-means++: the advantages of
@@ -500,13 +480,10 @@ candidate is used, and the output records that it came from here; an
 \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} and \code{\link[=summarize_by_cell]{summarize_by_cell()}} for the steps
 that follow.
 
-Other aggregation:
-\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
-\code{\link[=cell_values_at]{cell_values_at()}},
-\code{\link[=kriging_adequacy]{kriging_adequacy()}},
+Other resolution:
+\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
 \code{\link[=resolution_profile]{resolution_profile()}},
 \code{\link[=select_resolution]{select_resolution()}},
-\code{\link[=summarize_by_cell]{summarize_by_cell()}},
 \code{\link[=summary.resolution_profile]{summary.resolution_profile()}}
 }
-\concept{aggregation}
+\concept{resolution}

@@ -155,18 +155,21 @@
 }
 
 
-#' Quieten (or restore) spatialkit's console log
+#' Turn the console log off or on
 #'
-#' The package writes an INFO+ trace to a session temp file (logger appender
-#' index 1) and echoes WARN+ to the console (index 2).  Both
-#' \code{logger::log_appender()} and \code{logger::log_threshold()} default to
-#' \code{index = 1}, so the obvious two-line recipe silences the file and
-#' leaves the console untouched, which is the opposite of what anyone wants.
-#' This helper names the right index.
+#' Turns the package's console log off (\code{quiet = TRUE}) or back on.  The
+#' package writes a trace of INFO lines and above to
+#' \code{file.path(tempdir(), "spatialkit_model_log.log")}, a file that lasts
+#' as long as the R session, and echoes WARN lines and above to the console;
+#' this function changes only the console echo.
+#' \code{logger::log_threshold()} changes the log file's threshold by default
+#' (\code{index = 1}), not the console echo's, so use this function for the
+#' echo.
 #'
 #' These are log records, not R conditions: \code{suppressWarnings()}
 #' and \code{tryCatch(warning = )} do not see them.  Conditions the package
-#' raises as real R warnings are unaffected by this function.
+#' raises as R warnings are unaffected by this function (see "Warnings and
+#' log lines" in \link{spatialkit-conditions}).
 #'
 #' While a document is being knitted (R Markdown, Quarto, a \pkg{pkgdown}
 #' article) the console echo is also sent as an R message, because
@@ -185,7 +188,7 @@
 #'   spatialkit_quiet(old)}.
 #' @return Invisibly, the threshold that was in force before the change, a
 #'   \pkg{logger} level that can be passed back as \code{quiet}.
-#' @family package options and caches
+#' @family options and caches
 #' @examples
 #' old <- spatialkit_quiet()      # console echo off
 #' spatialkit_quiet(old)          # back to whatever it was

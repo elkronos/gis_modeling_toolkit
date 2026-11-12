@@ -504,7 +504,7 @@
 }
 
 
-#' Cell values at other locations
+#' Read cell values at new locations
 #'
 #' Gives each location of `newdata` the value of the cell it lies in, read
 #' from a [summarize_by_cell()] result: the pooled value when the summary
@@ -580,7 +580,8 @@
 #'    read them for the rows of `points`: the locations are handed to it in
 #'    the CRS of `points`, whatever CRS `newdata` arrived in. Where that
 #'    join runs on the sphere and s2 refuses a polygon of `values` (see
-#'    Details in [assign_features_to_polygons()]), the call stops with an
+#'    "Joins in longitude and latitude" in [assign_features_to_polygons()]),
+#'    the call stops with an
 #'    error of class `"spatialkit_cells_degenerate"` that gives the rows of
 #'    `values` s2 refuses (`rows` on the condition), names the cause and
 #'    says to transform `values` to a projected CRS.
@@ -656,7 +657,7 @@
 #' CRS, so on gridded locations the same layer in another projected CRS can
 #' put a location on a boundary in the other cell; another unit or origin of
 #' the same CRS moves only the last bits of the distances and settles the ties
-#' the same way, but for one case. The margin grows with the largest
+#' the same way, with one exception. The margin grows with the largest
 #' coordinate (about 0.46 mm at a UTM northing near 4,550 km, about half a
 #' micrometre once the origin lies next to data 5 km across), so a location
 #' whose distances to two of them differ by less than the margin with one
@@ -674,21 +675,8 @@
 #' flagged or left out. [area_of_applicability()] and [fold_separation()]
 #' are the tools for deciding where a prediction applies.
 #'
-#' A simulation shows how the interval's coverage falls with `dist_ratio`
-#' (`dev/sim-pooled-values.R` in the package's repository; "Pooled values" in
-#' [summarize_by_cell()] describes it). Each of 200 layers has 1,500
-#' clustered observations in 333 cells, 300 further observations held out
-#' at random among them and 300 held out as a block, which leaves a gap in
-#' the layer. Over the held-out observations of all layers, the interval at
-#' `obs_level = 0.90` held 91.5 percent of those with a `dist_ratio` below
-#' 1, 89.2 percent from 1 to 2, 83.9 percent from 2 to 4, 77.9 percent from
-#' 4 to 8 and 69.5 percent above 8. It held 89.6 percent of the observations
-#' held out at random and 75.1 percent of those in the block. A second
-#' simulation, on fields whose level jumps at boundaries, gave this
-#' function's interval to held-out observations; "Intervals: which one
-#' answers which question" in [summarize_by_cell()] gives its coverage, which
-#' in cells of one training observation fell short of `obs_level` on one kind
-#' of field.
+#' The interval's coverage falls as `dist_ratio` grows; "How this was
+#' checked" gives the figures.
 #'
 #' @section Without the FNN package:
 #' The function makes three nearest-neighbour searches: each location's
@@ -704,6 +692,19 @@
 #' above about 44,700 distinct scored locations the call stops without
 #' \pkg{FNN} however few they are. The result is the same with and without
 #' the package.
+#'
+#' @section How this was checked:
+#' A simulation shows how the interval's coverage falls with `dist_ratio`
+#' ([`dev/sim-pooled-values.R`](https://github.com/elkronos/gis_modeling_toolkit/blob/main/dev/sim-pooled-values.R)
+#' in the package's GitHub repository; "How this was checked" in
+#' [summarize_by_cell()] describes it). Each of 200 layers has 1,500
+#' clustered observations in 333 cells, 300 further observations held out
+#' at random among them and 300 held out as a block, which leaves a gap in
+#' the layer. Over the held-out observations of all layers, the interval at
+#' `obs_level = 0.90` held 91.5 percent of those with a `dist_ratio` below
+#' 1, 89.2 percent from 1 to 2, 83.9 percent from 2 to 4, 77.9 percent from
+#' 4 to 8 and 69.5 percent above 8. It held 89.6 percent of the observations
+#' held out at random and 75.1 percent of those in the block.
 #'
 #' @param newdata The locations: an sf layer. A feature that is not a point
 #'   is reduced to one with [`coerce_to_points(, "auto")`][coerce_to_points];
@@ -801,10 +802,9 @@
 #'   The function raises no classed warning of its own; the warning that
 #'   says how `seeds` without a CRS were read (step 1) and the one that
 #'   counts the seeds outside the polygons of `values` left without a cell
-#'   (step 3) are plain ones. It
-#'   passes on what [coerce_to_points()], a CRS transformation and
-#'   [assign_features_to_polygons()] raise, but for one error and one
-#'   warning. The error of class `spatialkit_features_degenerate` with which
+#'   (step 3) are plain ones. It passes on the conditions that
+#'   [coerce_to_points()], a CRS transformation and
+#'   [assign_features_to_polygons()] raise, with two exceptions. The error of class `spatialkit_features_degenerate` with which
 #'   [coerce_to_points()] refuses a polygon s2 cannot take a centroid of, or
 #'   a centroid GEOS puts outside its feature, is raised in this function's
 #'   name, with the same class and fields, naming `newdata` or `points` and
@@ -832,7 +832,7 @@
 #' prof  <- resolution_profile(pts, "income")
 #' sel   <- select_resolution(prof)
 #' seeds <- get_voronoi_seeds(method = "kmeans", n = sel, sample_points = pts)
-#' tess  <- build_tessellation(seeds, method = "voronoi")
+#' tess  <- build_tessellation(seeds, method = "voronoi", quiet = TRUE)
 #' asg   <- assign_features_to_polygons(pts, tess$cells, polygon_id_col = "cell_id")
 #' out   <- summarize_by_cell(asg, "income", id_col = "cell_id",
 #'                            cells_sf = tess$cells, obs_level = 0.90)
@@ -851,7 +851,7 @@
 #' beyond <- st_sf(geometry = st_sfc(st_point(c(5e5 + 2e4, 5e6 + 5e3)), crs = 32632))
 #' cell_values_at(rbind(st_sf(geometry = st_geometry(newpts[1:2, ])), beyond),
 #'                out, asg, "income", id_col = "cell_id")
-#' @family aggregation
+#' @family assign and summarise
 #' @seealso [summarize_by_cell()], which computes `values`;
 #'   [build_tessellation()], whose `index` gives each seed's cell;
 #'   [area_of_applicability()] and [fold_separation()] for where a

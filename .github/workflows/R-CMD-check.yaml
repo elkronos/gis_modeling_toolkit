@@ -13,6 +13,7 @@ jobs:
   R-CMD-check:
     runs-on: ${{ matrix.config.os }}
     name: ${{ matrix.config.os }} (${{ matrix.config.r }})
+    timeout-minutes: 120
 
     strategy:
       fail-fast: false
@@ -38,38 +39,44 @@ jobs:
       - uses: r-lib/actions/setup-pandoc@v2
 
       - uses: r-lib/actions/setup-r@v2
+        timeout-minutes: 15
         with:
           r-version: ${{ matrix.config.r }}
           http-user-agent: ${{ matrix.config.http-user-agent }}
           use-public-rspm: true
 
       # Hard dependencies and a short list of Suggests.  Installing all of
-      # Suggests here pulled the entire Stan toolchain into every matrix job --
-      # slow everywhere, and fatal on r-devel, where nothing arrives as a
-      # binary.  There CRAN's rstan 2.32.7 was compiled against StanHeaders
-      # 2.39.0.9000 from the stan-dev universe and died with "'ecuyer1988' is
-      # not a member of 'boost'": Stan dropped that typedef after 2.32.  The
-      # optional backends are the job of the `backends` job below and of
-      # check-brms.yaml.
+      # Suggests here pulled the entire Stan toolchain into every matrix job,
+      # which was slow everywhere and fatal on r-devel, where nothing arrives
+      # as a binary.  There CRAN's rstan 2.32.7 was compiled against
+      # StanHeaders 2.39.0.9000 from the stan-dev universe and died with
+      # "'ecuyer1988' is not a member of 'boost'": Stan dropped that typedef
+      # after 2.32.  The optional backends are the job of the `backends` job
+      # below and of check-brms.yaml.
       #
       # Three Suggests are not optional in practice.  knitr and rmarkdown build
       # the vignettes during R CMD build, and tests/testthat.R opens with
       # library(testthat), so without it the test stage errors rather than
-      # skipping.  _R_CHECK_FORCE_SUGGESTS_ = false does not cover this -- it
-      # only downgrades the complaint about absent Suggests, it does not stop
-      # check from running the test file.
+      # skipping.  _R_CHECK_FORCE_SUGGESTS_ = false does not cover this: it
+      # only downgrades the complaint about absent Suggests, and check still
+      # runs the test file.
       #
-      # ggplot2 and gstat are installed by choice rather than necessity.  Every
-      # vignette gates its chunks on requireNamespace() in its setup chunk, so
-      # R CMD build succeeds without them -- but then the North Carolina demo
-      # (gated on ggplot2) and the resolution, diagnostics and spatial
-      # cross-validation vignettes (gated on gstat and ggplot2) render as code
-      # with no output, and the tests behind skip_if_not_installed("gstat")
-      # skip.  Without these two, that code would run only on ubuntu, in the
-      # `backends` job below.  gstat brings sp, FNN, zoo, xts, intervals,
-      # spacetime, sftime and stars with it; none declares a system
+      # ggplot2 and gstat are installed by choice rather than necessity.  Each
+      # vignette that uses a Suggests package gates its chunks on
+      # requireNamespace(), so R CMD build succeeds without them, but a gated
+      # chunk then renders as code with no output, and the tests behind
+      # skip_if_not_installed("gstat") skip.  With these two, the resolution,
+      # cells, spatial cross-validation and reporting vignettes run in full
+      # here.  The models vignette is gated as a whole on ranger, sp, gstat
+      # and ggplot2, so it runs only in the `backends` job below.  So do the
+      # ranger parts of Get started and the ranger and geometry parts of the
+      # North Carolina example.  That example's two patchwork figures run
+      # only in the site build (pkgdown.yaml).  The troubleshooting and
+      # glossary vignettes need no Suggests.  gstat brings sp, FNN, zoo, xts,
+      # intervals, spacetime, sftime and stars with it; none declares a system
       # requirement, but on r-devel they build from source, which is slower.
       - uses: r-lib/actions/setup-r-dependencies@v2
+        timeout-minutes: 40
         with:
           dependencies: '"hard"'
           extra-packages: |
@@ -95,6 +102,7 @@ jobs:
   backends:
     runs-on: ubuntu-latest
     name: ubuntu-latest (release, with optional backends)
+    timeout-minutes: 150
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
@@ -110,19 +118,20 @@ jobs:
       - uses: r-lib/actions/setup-pandoc@v2
 
       - uses: r-lib/actions/setup-r@v2
+        timeout-minutes: 15
         with:
           r-version: 'release'
           use-public-rspm: true
 
       # Hard dependencies plus exactly the optional backends this job exists
-      # to exercise.  Suggests are deliberately NOT installed wholesale: that
-      # dragged in brms and the Stan toolchain, which the comment above says
-      # belongs in the nightly workflow instead.
+      # to exercise.  Suggests are not installed wholesale: that dragged in
+      # brms and the Stan toolchain, which the comment above says belongs in
+      # the nightly workflow instead.
       #
-      # ranger is here because without it the entire random-forest backend --
-      # fit_rf_model(), cv_rf(), predict/fitted/residuals/coef/print.rf_fit,
+      # ranger is here because without it the random-forest backend
+      # (fit_rf_model(), cv_rf(), predict/fitted/residuals/coef/print.rf_fit,
       # summary.spatial_fit()'s out-of-bag branch and the AOA coordinate-space
-      # branch -- never ran in CI at all.  It is a small binary with no system
+      # branch) never ran in CI at all.  It is a small binary with no system
       # dependencies.  tibble is here because .safe_tibble()'s tibble branch is
       # otherwise dead code in every job, so the tibble-vs-data.frame drop
       # semantics that folds$assignment and cv$predictions inherit went
@@ -130,6 +139,7 @@ jobs:
       # compare the regression-residual moments against; without it that
       # comparison skips.
       - uses: r-lib/actions/setup-r-dependencies@v2
+        timeout-minutes: 40
         with:
           dependencies: '"hard"'
           extra-packages: |

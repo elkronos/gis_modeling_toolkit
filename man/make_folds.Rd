@@ -31,765 +31,671 @@ make_folds(
 )
 }
 \arguments{
-\item{points_sf}{An sf object.  Any Z or M dimension is dropped before
-folding: \code{sf::st_distance()} uses every coordinate dimension, so an
-XYZ layer would otherwise have elevation folded into every buffer, block
-and neighbour distance.  CRS-less points are aligned to a \code{boundary}
-or \code{prediction_points} that carries a CRS.  They are reprojected when
-the coordinates look like lon/lat and otherwise stamped without
-reprojection, with a warning either way.  A CRS in longitude and
-latitude is not stamped on coordinates outside longitude -180 to 360
-and latitude -90 to 90: that is refused.}
+\item{points_sf}{An sf layer of the observations.  Z and M are dropped
+before folding, since distances are measured in x and y.  A layer
+without a CRS is aligned to a \code{boundary}, \code{blocks} or
+\code{prediction_points} that has one, by the rule in \link{spatialkit-geometry}.
+Rows without a location are dropped (see Value).}
 
-\item{k}{Integer; number of folds.  Must be a single whole number >= 1,
-and is required except for the two leave-one-out methods.
-A fraction, \code{NA} or a vector is an error, because a non-integer used
-to truncate silently and leave the last rows in no test set at all.
-Not every method honours it.  \code{"buffered_loo"} and \code{"nndm"} are
-leave-one-out schemes and always return one fold per held-out point
-(\code{k = n}, or \code{max_test} when that is given) regardless of what
-was asked for; \code{"block_kfold"} lowers it when the grid yields fewer
-than \code{k} non-empty blocks, and \code{"leave_location_out"} lowers it
-when there are fewer than \code{k} distinct groups.  \code{"random_kfold"}
-and \code{"knndm"} lower it only when the layer has fewer than \code{k}
-rows.  \code{k = 1} is
-raised to 2 by \code{"random_kfold"}, \code{"block_kfold"},
-\code{"leave_location_out"} and \code{"knndm"}, since one fold has no
-training set.  Read
-the \code{k} element of the returned list, and do not assume the
-requested value; \code{params$k_requested} keeps the value asked for.
-Returning fewer folds than asked raises a warning of class
-\code{"spatialkit_k_reduced"}, whose message gives both counts, the
-reason and, where there is one, a setting that works; the condition
-carries them as \code{k_requested} and \code{k}, so
-\code{tryCatch(spatialkit_k_reduced = )} or
-\code{withCallingHandlers()} can act on it without reading the text.
-(Before this version a reduction was a log line only.)}
+\item{k}{The number of folds, a single whole number of at least 1; required
+except for \code{"buffered_loo"} and \code{"nndm"}, which build one fold per
+held-out point (\code{k = n}, or \code{max_test} of them when it is given)
+whatever \code{k} is.  A fraction, \code{NA} or a vector is an error.
+\code{"block_kfold"} lowers \code{k} when fewer than \code{k} blocks hold points,
+\code{"leave_location_out"} when there are fewer than \code{k} groups, and
+\code{"random_kfold"} and \code{"knndm"} when the layer has fewer than \code{k} rows;
+those four raise \code{k = 1} to 2, since one fold has no training set.  Read
+the \code{k} element of the result rather than assume the value asked for,
+which \code{params$k_requested} keeps.  Fewer folds than asked raise a
+warning of class \code{"spatialkit_k_reduced"}, whose message gives both
+counts, the reason and, where there is one, a setting that works; the
+condition carries them as \code{k_requested} and \code{k}, so
+\code{tryCatch(spatialkit_k_reduced = )} or \code{withCallingHandlers()} can act
+on it without reading the text.}
 
-\item{method}{One of \code{"random_kfold"}, \code{"block_kfold"},
-\code{"buffered_loo"}, \code{"leave_location_out"}, \code{"nndm"} or
-\code{"knndm"}.  See \strong{Details} for what each one does and when it
-is appropriate.}
+\item{method}{One of the six methods in the section "Fold methods":
+\code{"random_kfold"} (default), \code{"block_kfold"}, \code{"buffered_loo"},
+\code{"leave_location_out"}, \code{"nndm"} or \code{"knndm"}.}
 
-\item{seed}{Optional integer RNG seed.  \code{"nndm"} is deterministic and
-reads it only to draw the \code{max_test} subset; \code{"buffered_loo"}
-likewise.  \code{"knndm"} uses it for the random partition among its
-candidates, for ties in the packing, and above 4,000 points for the
-k-means starts, so its folds are reproducible only with a seed.}
+\item{seed}{Optional integer RNG seed; \code{NULL} (default) leaves the draws
+to the session's RNG state.  It draws the partition of \code{"random_kfold"},
+the assignment of groups to folds of \code{"leave_location_out"}, the packing
+ties of \code{"block_kfold"} and \code{"knndm"}, the random candidate of
+\code{"knndm"} and, above 4,000 points, its k-means starts, and the
+\code{max_test} subset of \code{"buffered_loo"} and \code{"nndm"}, which are otherwise
+deterministic.  With \code{auto_range = TRUE} it is also the seed of
+\code{\link[=estimate_sac_range]{estimate_sac_range()}}, which keeps its own default of 123 when \code{seed}
+is \code{NULL}.}
 
-\item{block_nx, block_ny}{Optional grid dimensions for block_kfold, each a
-single whole number >= 1.  Give both, or give one and the other is
-derived from the extent's aspect ratio so that the blocks are roughly
-square.  Ignored when \code{block_size} or \code{auto_range} override
-them.}
+\item{block_nx, block_ny}{Optional grid dimensions for \code{"block_kfold"},
+each a single whole number of at least 1.  Give both, or give one and the
+other is derived from the extent's aspect ratio so that the blocks are
+about square.  Ignored when \code{block_size} or \code{auto_range} set the grid.}
 
-\item{block_multiplier}{A single positive number, default 3.  When
-neither \code{block_size} nor \code{block_nx}/\code{block_ny} is given,
-the automatic grid aims for
-\code{block_multiplier * k} blocks over the extent (aspect-preserving),
-so each fold holds out about \code{block_multiplier} blocks.  An extent
-more than about \code{block_multiplier * k} times as wide as it is tall
-(or as tall as it is wide) gets a single row (or column) of that many
-blocks.  With 1,
-every fold is one contiguous region and the score depends heavily on
-which region each fold happened to get; with many, the blocks shrink
-towards single points and the scheme drifts back towards random k-fold.
-3 is a compromise between those two, not a published constant.  The
-size of the blocks sets how far the held-out points sit from their
-training data; \code{block_size} and \code{auto_range} set it from a
-distance, where this sets it from a count.}
+\item{block_multiplier}{A single positive number, default 3.  When neither
+\code{block_size} nor \code{block_nx}/\code{block_ny} is given, the grid aims for
+\code{block_multiplier * k} blocks over the extent, keeping its aspect, so
+each fold holds out about \code{block_multiplier} blocks; an extent more than
+about \code{block_multiplier * k} times as wide as it is tall (or as tall as
+it is wide) gets a single row (or column) of that many blocks.  With 1,
+every fold is one contiguous area and the score depends on which area
+each fold gets; with many, the blocks shrink towards single points and
+the folds approach random k-fold.  3 is a compromise between the two, not
+a published constant.}
 
-\item{block_size}{Optional positive numeric minimum block edge length,
-\strong{in the units of the CRS the folds are built in}.  Takes
-precedence over \code{block_nx}/\code{block_ny} and
-\code{block_multiplier}.  When supplied, a whole number of blocks is
-fitted across each axis of the extent: as many as leave every block at
-least this long on that axis, a block shorter by no more than one part
-in ten million counting as this long, so that a size of exactly the
-axis over a whole number gives that number of blocks in any unit.  On
-an axis at least as long as
-\code{block_size} the blocks built are therefore from one to just under
-two times this size.  An axis shorter than \code{block_size} cannot
-hold a block that long: a single row or column spans it, and its blocks
-are as long as the extent on that axis, which is less than the size
-asked (a 39.8 km by 5 km extent with \code{block_size = 10000} gets
-three blocks 13.3 km wide and 5 km tall).  \code{params$block_width} and
-\code{params$block_height} record what was built.  A size that leaves
-fewer than \code{k} blocks holding points returns that many folds,
-with a warning (see \code{k}); one that leaves a single block is an
-error.  Both name the largest size that still gives \code{k} folds.
+\item{block_size}{Optional positive number, the minimum block edge length,
+in the units of the CRS the folds are built in (\code{params$crs}): your own
+CRS's units for projected input, and for lon/lat input those of the
+metre CRS \code{\link[=ensure_projected]{ensure_projected()}} chooses, which varies with the data
+(project the data yourself to fix the units in advance).  It takes
+precedence over \code{block_nx}/\code{block_ny} and \code{block_multiplier}.  The
+blocks built are at least this long on an axis that can hold one, and up
+to just under twice as long; \code{params$block_width} and
+\code{params$block_height} record them.  See the section "Block size and the
+autocorrelation range" for how the grid is laid and for a size that
+leaves too few blocks.}
 
-Which CRS that is depends on the input.  Projected input is used as it
-stands, so \code{block_size} is in your own CRS's units.  Geographic
-(lon/lat) input is projected first by \code{\link{ensure_projected}()},
-which picks a local UTM zone or, at wide extents, an equal-area
-projection.  That is a CRS you did not choose, whose units are metres but
-whose identity varies with the data.  \code{block_size} is then
-interpreted in \emph{that} CRS.  The CRS actually used is recorded in
-\code{params$crs} of the returned list; project the data yourself before
-calling if you want to fix the units in advance.
+\item{auto_range}{Logical, default \code{FALSE}.  \code{TRUE} estimates the
+autocorrelation range with \code{\link[=estimate_sac_range]{estimate_sac_range()}} and uses it as the
+minimum \code{block_size}; it needs \code{response_var}, and an explicit
+\code{block_size} takes precedence.  With supplied \code{blocks} the range is only
+compared with them.  See the section "Block size and the autocorrelation
+range".}
 
-A \code{block_size} in the wrong unit asks for an enormous grid, so a
-request above 1,000,000 blocks is refused with an error naming the grid
-dimensions, the extent and the CRS's units.}
+\item{range_frac}{Passed to \code{\link[=estimate_sac_range]{estimate_sac_range()}} when
+\code{auto_range = TRUE}: a fitted range beyond the longest lag the empirical
+variogram was fitted over is refused as unidentified, and the grid falls
+back to geometry, with a warning.  A range within that bound can still be
+too wide for two blocks.  Default 1.}
 
-\item{auto_range}{Logical.  If \code{TRUE}, the spatial autocorrelation
-range is estimated via \code{estimate_sac_range()} (the omnidirectional,
-all-pairs range; the directional ranges it also fits are a diagnostic
-only, so on a field known to be anisotropic pass
-\code{block_size = max(attr(r, "directional_fitted"), na.rm = TRUE)}
-yourself after checking \code{attr(r, "directional_status")}, see
-\code{\link{estimate_sac_range}}) and used as the
-minimum \code{block_size}.  Requires \code{response_var}.  An explicit
-\code{block_size} takes precedence.  Default \code{FALSE}.  Sizing
-blocks from the autocorrelation range is the recommendation of Roberts
-et al. (2017) and what \pkg{blockCV} (Valavi et al. 2019) automates.
-\pkg{blockCV} takes the fitted variogram's range
-\emph{parameter} as the block size, whereas this uses the
-\emph{effective} range \code{estimate_sac_range()} returns (three
-times that parameter for an exponential fit), so its blocks are larger
-than \pkg{blockCV}'s from the same variogram.  When no range is
-identified, the geometric grid is used instead, with a warning that
-gives the reason.  Range-sized blocks do not fit every layout.  On a
-square extent at \code{k = 5} a range up to a third of the side gives
-five folds; up to half, a 2 x 2 grid and four folds, returned with the
-\code{"spatialkit_k_reduced"} warning; and above half the extent in
-both directions there is room for a single block, and
-\code{make_folds()} stops with an error naming the size, rather than
-return one fold with an empty training set.  The warning and the error
-name the largest block size that still gives \code{k} folds on this
-layout and how far below the range it is; \code{method = "nndm"} is the
-design that does not depend on a block size.  The message printed when
-the range is used states the grid and the block size built.}
+\item{response_var}{Name of the response column.  Required when
+\code{auto_range = TRUE}.  For \code{"block_kfold"} a name that is not a column of
+\code{points_sf} is an error whether or not \code{auto_range} is set, since the
+response also feeds the warning on blocks smaller than the range, which a
+misspelt name would switch off.}
 
-\item{range_frac}{Passed through to \code{estimate_sac_range()} when
-\code{auto_range = TRUE}.  A fitted range beyond the longest lag the
-empirical variogram was fitted over is rejected as unidentified, and block
-sizing falls back to geometry (with a warning).  A range within that
-bound can still be too wide for two blocks; see \code{auto_range}.
-Default 1.0.}
-
-\item{response_var}{Character(1) response column name.  Required when
-\code{auto_range = TRUE}.  For \code{"block_kfold"} a name that is not a
-column of \code{points_sf} is an error, whether or not
-\code{auto_range} is set: with it off the response still feeds the
-warning on blocks smaller than the range, which a misspelt name would
-silently disable.}
-
-\item{group_var}{Character(1) naming a column of \code{points_sf} that
-identifies the location each observation belongs to.  Required for
+\item{group_var}{Name of a column of \code{points_sf} that identifies the
+location each observation belongs to.  Required for
 \code{method = "leave_location_out"}, which keeps every observation from a
-location together in the same fold.  Repeated measurements at the same
-site otherwise get split across folds, and the model is scored partly on
-sites it has already seen, which random k-fold reports as excellent
-performance.}
+location in one fold.  Repeated measurements at a site split across
+folds score the model partly on sites it has already seen.}
 
-\item{prediction_points}{Optional \code{sf} layer of the locations you
-actually intend to predict onto.  Required for \code{method = "nndm"} and
-\code{method = "knndm"}.
-The grid from \code{\link{predict_surface}()} is the natural choice; a
-non-POINT layer (grid cells, polygons) is reduced to representative points
-first, so the target distances are point-to-point.  A point-to-polygon
-distance is zero for every cell that contains a training point, which
-pulls the target distribution towards zero and degenerates the CV towards
-plain leave-one-out.  A layer that mixes XY and XYZ (or XYM) geometries
-is read in x and y, before and after it is reduced to points,
-since sf reads a layer in the dimension of its first geometry.  So is a
-layer whose geometries carry M (XYM or XYZM), which GEOS refuses.  The
-points a layer is reduced to are read in x and y when they mix
-dimensions, as those of a layer XYZ throughout that holds points and
-polygons do.  A prediction point without a location (an empty point, or
-a coordinate that is not finite or lies beyond 1e150), as given or once
-brought into the CRS of the folds, takes no part in the target and is
-not counted in \code{params$n_prediction_points}.}
+\item{prediction_points}{Optional sf layer of the locations the model will
+predict at, such as the grid from \code{\link[=predict_surface]{predict_surface()}}; required for
+\code{"nndm"} and \code{"knndm"}.  A layer of cells or polygons is reduced to
+representative points first, so the target distances are point to
+point: a point-to-polygon distance is zero for every cell that holds a
+training point, which would pull the target towards zero and the folds
+towards plain leave-one-out.  A layer that mixes dimensions or carries M
+is read in x and y, before and after it is reduced to points
+(\link{spatialkit-geometry}).  A prediction point without a location, as
+given or once brought into the CRS of the folds, takes no part in the
+target and is not counted in \code{params$n_prediction_points}.}
 
-\item{predictor_vars}{Optional character vector of predictor column names.
-Passed to \code{estimate_sac_range()} for residual variogram estimation.}
+\item{predictor_vars}{Optional character vector of predictor column names,
+passed to \code{\link[=estimate_sac_range]{estimate_sac_range()}} so that the range is that of the
+residuals on them.}
 
-\item{boundary}{Optional polygonal sf/sfc for block_kfold.  The grid is
-clipped to it; a cell that the boundary only touches at a corner or
-along an edge is not a block.  A point on the boundary, to the margin of
-the edge rule in Details, is inside it.  A boundary without a CRS is brought into
-the points' CRS: reprojected from EPSG:4326 when its coordinates look
-like lon/lat, otherwise stamped, with a warning either way; a CRS in
-longitude and latitude is not stamped on coordinates outside longitude
--180 to 360 and latitude -90 to 90, which is refused.  The same
-goes for \code{prediction_points} and \code{blocks}.  A boundary that
-mixes XY and XYZ (or XYM) geometries is read in x and y, since sf reads
-a layer in the dimension of its first geometry, and so is one whose
-polygons carry M (XYM or XYZM), which GEOS refuses.
-A row that is empty, or has a coordinate that is not finite or lies
-beyond 1e150 (read as given, and again after any move into another
-CRS), covers no ground and is left out; a boundary with no such row
-left is refused with an error that says so. A boundary in a geographic
-CRS with a vertex at a latitude beyond 90 degrees, which is no place on
-the Earth, is refused with an error of class
-\code{"spatialkit_cells_degenerate"} that names its rows and says to check
-its CRS.
-A row the repair of \code{boundary} leaves without a polygon (a ring with no
-height: every vertex on one line, or in degrees on one parallel) is
-left out as well, and a boundary with no polygon left is refused.}
+\item{boundary}{Optional polygon layer (sf or sfc) that the block grid of
+\code{"block_kfold"} is clipped to.  A cell the boundary only touches at a
+corner or along an edge is not a block, and a point on the boundary, to
+the margin in the section "Numerical tolerances", is inside it.  See
+\link{spatialkit-geometry} for how a boundary without a CRS is read, and for
+the rows of a boundary that are left out or refused.}
 
-\item{buffer}{For \code{"buffered_loo"}: a single positive number, the
-distance within which the held-out point's neighbours are excluded from
-its training set.  Like \code{block_size} it is in the units of the CRS
-the folds are built in (\code{params$crs}), which for geographic
-(lon/lat) input is the metre CRS \code{\link{ensure_projected}()}
-chooses: 0.1 means 0.1 m, not 0.1 degrees.  A neighbour at the buffer
-distance is excluded, and so is one over it by rounding: a squared
-distance within one part in ten million of the buffer's square (a
-distance about one part in twenty million over the buffer) counts as at
-it, so a lattice whose spacing divides the buffer gives the same folds in
-any unit or origin.  A buffer that excludes no
-neighbour from any fold makes the scheme plain leave-one-out, and is
-warned about.}
+\item{buffer}{For \code{"buffered_loo"}: a single positive number, the distance
+within which the held-out point's neighbours are excluded from its
+training set.  Like \code{block_size} it is in the units of the CRS the folds
+are built in (\code{params$crs}), which for lon/lat input is the metre CRS
+\code{\link[=ensure_projected]{ensure_projected()}} chooses: 0.1 means 0.1 m, not 0.1 degrees.  A
+neighbour at the buffer distance is excluded.  A buffer that excludes no
+neighbour from any fold makes the scheme plain leave-one-out, with a
+warning.}
 
-\item{min_train}{For \code{method = "nndm"}: the smallest fraction of the
-data any fold's training set may be reduced to by neighbour exclusion.
-Default \code{0.5}, as in \code{CAST::nndm()}.  Where it binds, the
-distance matching stops short: the held-out points stay closer to their
-training data than the prediction points are, and the error reads low
-for them; see \strong{Details}.  For \code{method = "knndm"}: the
-smallest fraction
-of the data a fold may leave for training, so a candidate whose largest
-fold holds more than \code{1 - min_train} of the rows is set aside (the
-\code{maxp = 0.5} of \code{CAST::knndm()} is \code{min_train = 0.5}).
-Equal folds leave \code{1 - 1/k} of the data, so a value above that is
-an error.}
+\item{min_train}{For \code{"nndm"}: the smallest fraction of the data any
+fold's training set may be reduced to by neighbour exclusion; default
+0.5, as in \code{CAST::nndm()}.  Where it binds, the distance matching stops
+short and the held-out points stay closer to their training data than
+the prediction points are (see the section "NNDM").  For \code{"knndm"}: the
+smallest fraction of the data a fold may leave for training, so a
+candidate whose largest fold holds more than \code{1 - min_train} of the rows
+is set aside (the \code{maxp = 0.5} of \code{CAST::knndm()} is \code{min_train = 0.5}).
+Equal folds leave \code{1 - 1/k} of the data, so a value above that is an
+error.}
 
-\item{phi}{For \code{method = "nndm"}: the distance up to which the two
+\item{phi}{For \code{"nndm"}: the distance up to which the two
 nearest-neighbour distance distributions are matched, in the CRS the
-folds are built in.  Matching is attempted only while a held-out
-point's nearest-neighbour distance is at most \code{phi}; the exclusion
-that takes it past \code{phi} is the last one, so a realised distance
-can exceed \code{phi} by up to one neighbour step, as in
-\code{CAST::nndm()}.  In Mila et al. (2022), and in
-\code{CAST::nndm()}, \eqn{\phi} is the autocorrelation range of the
-outcome: beyond it observations are effectively independent, so
-matching is unnecessary.  \code{\link{estimate_sac_range}()} gives such
-a value.  Default \code{NULL} = the largest prediction-to-training
-distance, which matches everywhere (\code{CAST}'s \code{phi = "max"}).}
+folds are built in.  Matching is attempted only while a held-out point's
+nearest-neighbour distance is at most \code{phi}; the exclusion that takes it
+past \code{phi} is the last one, so a realised distance can exceed \code{phi} by
+up to one neighbour step, as in \code{CAST::nndm()}.  In Milà et al. (2022)
+and in \code{CAST::nndm()}, \eqn{\phi}{phi} is the autocorrelation range of
+the outcome: beyond it observations are close to independent, so
+matching adds nothing.  \code{\link[=estimate_sac_range]{estimate_sac_range()}} gives such a value.
+Default \code{NULL}: the largest prediction-to-training distance, which
+matches everywhere (\code{phi = "max"} in \pkg{CAST}).}
 
-\item{drop_empty_blocks}{Logical. Default TRUE.  With \code{FALSE} the
-blocks that hold no point are kept and packed into folds too, but
-\code{k} is still lowered to the number of blocks that hold points, so
-no fold is left without test points.}
+\item{drop_empty_blocks}{Logical, default \code{TRUE}.  With \code{FALSE} the blocks
+that hold no point are kept and packed into folds too, but \code{k} is still
+lowered to the number of blocks that hold points, so no fold is left
+without test points.}
 
-\item{blocks}{Optional polygon layer (\code{sf} or \code{sfc}, POLYGON or
-MULTIPOLYGON, at least two features) to use as the blocks of
-\code{"block_kfold"} in place of the grid this function would otherwise
-build: the \code{$cells} of a \code{\link{build_tessellation}()} result,
-hexagons, watersheds, administrative units, the \code{$blocks} of
-\code{blockCV::cv_spatial()}.  Each point takes the block that contains
-it, and the blocks are then assigned to folds exactly as grid cells are.
-\code{block_size}, \code{block_nx}/\code{block_ny},
-\code{block_multiplier} and \code{boundary} have nothing to act on and
-are ignored (logged); \code{auto_range} only compares the estimated range
-against the blocks.  See \strong{Supplied blocks} below for the CRS,
-overlap and coverage rules.  Blocks that mix XY and XYZ (or XYM)
-polygons are read in x and y, since sf reads a layer in the dimension
-of its first geometry, and \code{params$blocks} holds them in XY.  So
-are blocks whose polygons carry M (XYM or XYZM), which GEOS refuses.  An
-error for any other \code{method}.}
+\item{blocks}{Optional polygon layer (sf or sfc, POLYGON or MULTIPOLYGON,
+at least two features) to use as the blocks of \code{"block_kfold"} in place
+of the grid: the \verb{$cells} of a \code{\link[=build_tessellation]{build_tessellation()}} result, hexagons,
+watersheds, administrative units, or the \verb{$blocks} of
+\code{blockCV::cv_spatial()}.  Each point takes the block that contains it,
+and the blocks are then assigned to folds as grid cells are.
+\code{block_size}, \code{block_nx}/\code{block_ny}, \code{block_multiplier} and \code{boundary}
+have nothing to act on and are ignored (logged); \code{auto_range} only
+compares the estimated range with the blocks.  See the section
+"Supplied blocks".  Blocks that mix dimensions or carry M are read in x
+and y, and \code{params$blocks} holds them in XY.  An error for any other
+\code{method}.}
 
-\item{balance_tol}{A number of at least 1, default 3.  For \code{"block_kfold"}:
-the ratio of the largest fold's point count to the smallest's above
-which the folds are reported as imbalanced, with a warning (an R
-condition, also logged) that names both counts.  \code{Inf} disables the
-check.  The value is the tolerance of a check, not a target the packing
-aims for: see \strong{Fold balance} below for what the packing can and
-cannot do.  \code{params$balance_ratio} carries the ratio achieved.
-For \code{"knndm"} it is a limit and not a check: a candidate whose
-largest fold holds more than \code{balance_tol} times the points of its
-smallest is set aside, so the folds returned are always within it.}
+\item{balance_tol}{A number of at least 1, default 3.  For
+\code{"block_kfold"}: the ratio of the largest fold's point count to the
+smallest's above which the folds are reported as imbalanced, with a
+warning (an R condition, also logged) that names both counts; \code{Inf}
+turns the check off.  It is the tolerance of a check, not a target the
+packing aims for (see the section "Fold balance"), and
+\code{params$balance_ratio} carries the ratio achieved.  For \code{"knndm"} it is
+a limit: a candidate whose largest fold holds more than \code{balance_tol}
+times the points of its smallest is set aside, so the folds returned are
+within it.}
 
-\item{max_test}{For \code{"buffered_loo"} and \code{"nndm"}: optional
-whole number of at least 2.  Folds are built for a random subset of that
-many held-out points (drawn under \code{seed}), and every row stays
-available for training, so each fold returned is the fold the full
-design has for that point.  The model is then refitted \code{max_test}
-times and not \code{n} times, and the folds hold
-\code{4 * n * max_test} bytes of row indices in place of
-\code{4 * n^2}, which lets \code{"buffered_loo"} run on layers its
-storage limit otherwise refuses.  It does not lift the 5,000-row limit of
-\code{"nndm"}, whose cost is the matching itself; for that there is
-\code{"knndm"}.  Rows that are not held out have \code{NA} in
-\code{assignment$fold}.  For \code{"nndm"} the matching still runs over
-all \code{n} points and \code{params} describes all of them.
-\code{\link{area_of_applicability}()} needs every training row in a
-test fold and refuses a subset.  Default
-\code{NULL}: every point is held out once.  An error for the k-fold
-methods, whose number of folds is \code{k}.}
+\item{max_test}{For \code{"buffered_loo"} and \code{"nndm"}: optional whole number of
+at least 2.  Folds are built for a random subset of that many held-out
+points (drawn under \code{seed}), and every row stays available for training,
+so each fold returned is the fold the full design has for that point.
+The model is then refitted \code{max_test} times and not \code{n} times, and the
+folds hold \code{4 * n * max_test} bytes of row indices in place of
+\code{4 * n^2}, which lets \code{"buffered_loo"} run on layers its storage limit
+otherwise refuses.  It does not lift the 5,000-row limit of \code{"nndm"},
+whose cost is the matching itself; for that there is \code{"knndm"}.  For
+\code{"nndm"} the matching still runs over all \code{n} points and \code{params}
+describes all of them.  \code{\link[=area_of_applicability]{area_of_applicability()}} needs every training
+row in a test fold and refuses a subset.  Default \code{NULL}: every point is
+held out once.  An error for the k-fold methods, whose number of folds
+is \code{k}.}
 }
 \value{
-A list with method, k, folds, assignment, params.  The
-\code{train}/\code{test} elements of each fold contain \code{..row_id}
-values (equal to row positions when the input has no pre-existing
-\code{..row_id} column), consistent with the \code{assignment} tibble.
-The returned \code{k} is the number of folds actually built, which is not
-always the \code{k} that was requested (see the \code{k} argument above),
-and \code{length(folds)} always matches it.
+A list with:
+\describe{
+\item{\code{method}}{The method used.}
+\item{\code{k}}{The number of folds built, which can differ from the \code{k}
+asked for (see \code{k}); \code{length(folds)} always equals it.}
+\item{\code{folds}}{A list with one element per fold, each a list of
+\code{train} and \code{test} row IDs: the values of the \code{..row_id} column when
+the input has one, otherwise row positions.}
+\item{\code{assignment}}{A tibble with one row per observation kept:
+\code{row_id} (the same IDs) and \code{fold}, and for \code{"block_kfold"} a third
+column, \code{block_id}, the row of \code{params$blocks} the point fell in.
+With \code{max_test}, \code{fold} is \code{NA} for the rows not held out.}
+\item{\code{params}}{The settings and diagnostics of the build, below.}
+}
 
-For \code{"block_kfold"} the block design is returned with the folds.
-\code{assignment} has a third column, \code{block_id}: the block each
-point fell in, numbered as the rows of \code{params$blocks}, an
-\code{sf} layer of the block polygons in the CRS the folds were built
-in.  Those rows are \strong{not} the rows of the layer the blocks came
-from: \code{drop_empty_blocks = TRUE} (the default) removes the blocks
-that hold no point and renumbers the rest, so with supplied
-\code{blocks} a nine-polygon layer of which three are empty comes back
-as six rows numbered 1 to 6.  \code{params$blocks$source_row} is the
-row each one came from in that original layer (a grid cell's index in
-the full \code{grid_nx} by \code{grid_ny} grid, or the row of the
-\code{blocks} argument), so
+Every method's \code{params} carries \code{seed}, \code{k_requested} (the \code{k} asked
+for, \code{NA} when none was given) and \code{row_probe}, a small sample of row
+IDs and coordinates that every \verb{cv_*()} function compares with the data
+it is handed, so folds built from a different layer of the same size are
+refused rather than applied.  The methods that work in projected space
+add \code{crs}, the CRS the folds were built in (an \code{"EPSG:code"} string
+where there is one, otherwise the CRS's input definition).  Every length
+in \code{params} (\code{block_size}, \code{sac_range}, \code{buffer}, \code{median_buffer}) is in
+that CRS's units, which for lon/lat input is a CRS
+\code{\link[=ensure_projected]{ensure_projected()}} chose, not one you passed.
+
+For \code{"block_kfold"} the block design comes with the folds:
+\itemize{
+\item \code{blocks}: an sf layer of the block polygons in the CRS the folds
+were built in.  Its rows are not the rows of the layer the blocks
+came from: \code{drop_empty_blocks = TRUE} (the default) removes the
+blocks that hold no point and renumbers the rest, so with supplied
+\code{blocks} a nine-polygon layer of which three are empty comes back as
+six rows numbered 1 to 6.  \code{blocks$source_row} is the row each one
+came from (a grid cell's index in the full \code{grid_nx} by \code{grid_ny}
+grid, or the row of the \code{blocks} argument), so
 \code{blocks[params$blocks$source_row, ]} recovers them with their own
-columns and in their own order.  It runs from 1 to
-\code{params$n_blocks} and is the identity when nothing was dropped.
-For a grid \code{params$n_blocks} is \code{grid_nx * grid_ny}, the
-cells a \code{boundary} clips away included, and
-\code{params$blocks_used} is the number of blocks returned.
-\code{params$block_sizes} is the number of points in each block, indexed
-by \code{block_id} (zeros are empty blocks that
-\code{drop_empty_blocks = FALSE} kept), and \code{params$fold_blocks}
-is a list with one integer vector per fold naming the blocks packed into
-it.  Between them the folds account for every block exactly once,
-empty ones included, so a fold's territory on the map is all of its
-blocks and not merely the ones that happen to hold points.  So
-\code{table(assignment$fold)} can be traced back to the blocks
-it is made of, a fold can be seen to be one contiguous region or
-several, and the blocks can be drawn over the data
-(\code{\link{plot_folds}()} does so).
+columns and in their own order.  It runs from 1 to \code{n_blocks} and is
+the identity when nothing was dropped.
+\item \code{n_blocks} and \code{blocks_used}: for a grid, \code{n_blocks} is
+\code{grid_nx * grid_ny}, the cells a \code{boundary} clips away included, and
+\code{blocks_used} the number of blocks returned.
+\item \code{block_sizes}: the number of points in each block, indexed by
+\code{block_id} (zeros are empty blocks that \code{drop_empty_blocks = FALSE}
+kept); \code{fold_blocks}: a list with one integer vector per fold naming
+the blocks packed into it.  Between them the folds account for every
+block once, empty ones included, so a fold's territory on the map is
+all of its blocks, and \code{table(assignment$fold)} can be traced back to
+the blocks it is made of.  \code{\link[=plot_folds]{plot_folds()}} draws the blocks over the
+data.
+\item \code{block_width} and \code{block_height}: the width and height of the
+grid cells built, before any clipping to a \code{boundary} (\code{NA} for
+supplied \code{blocks}).  They are what \code{block_size} turned into: at least
+that size on an axis long enough to hold it, and the whole extent on
+an axis that is not.
+\item \code{blocks_supplied} and \code{boundary_supplied}: whether the blocks
+came from \code{blocks}, and whether a \code{boundary} was given.
+\item \code{block_scale}, \code{balance_ratio}, \code{balance_tol}, \code{block_size},
+\code{block_multiplier}, \code{sac_range} and \code{auto_range}: the length compared
+with the range (see the section "Supplied blocks"), the balance
+achieved and allowed, and the sizing settings.
+}
 
-For \code{"block_kfold"}, \code{params} carries a
-\code{params$blocks_supplied} that says whether the blocks came from
-\code{blocks} or from a grid built here, and
-\code{params$boundary_supplied} whether a \code{boundary} was given.
-\code{params$block_width} and \code{params$block_height} are the width
-and height of the grid cells built, before any clipping to a
-\code{boundary} (\code{NA} for supplied \code{blocks}); they are what
-\code{block_size} turned into: at least that size on an axis long
-enough to hold it, and the whole extent on an axis that is not (see
-\code{block_size}).
-Every method's \code{params} carries \code{params$k_requested}, the
-\code{k} that was asked for (\code{NA} when none was given), beside
-the \code{k} returned, and
-\code{params$row_probe}, a small sample of row IDs and coordinates
-that every \code{cv_*()} compares against the data it is handed, so
-folds built from a different layer of the same size are refused, never
-applied silently.
-
-For \code{"knndm"}, \code{params} carries \code{chosen}
-(\code{"random"} or \code{"clusters"}), \code{n_clusters} (the number of
-clusters packed into the folds; \code{NA} for the random partition),
-\code{clustering} (\code{"ward"} or \code{"kmeans+ward"}; \code{NA} when
-no cluster count was tried), \code{candidates} (a data frame with one row
-per candidate, the random partition first: \code{candidate},
-\code{n_clusters}, \code{largest_fold}, \code{balance_ratio},
-\code{admissible} and \code{W}, which is \code{NA} for a candidate set
-aside), \code{wasserstein}, \code{wasserstein_random} and
-\code{wasserstein_loo} (the Wasserstein distance to the target of the
-folds returned, of the random partition among the candidates and of
-plain leave-one-out, in distance units), \code{fold_sizes},
-\code{balance_ratio}, \code{target_distances} and
-\code{realised_distances} (one per prediction point, and one per row:
-its distance to the nearest point of another fold) with their medians
-and means, and the diagnostics \code{"nndm"} reports under the same
-names: \code{max_ecdf_excess}, \code{max_ecdf_deficit},
-\code{loo_ecdf_deficit}, \code{ecdf_deficit_tol},
-\code{target_separated} and \code{target_out_of_reach}, with
-\code{short_of_target} for the opposite case (see \strong{Details}).
-
-With \code{max_test}, \code{"buffered_loo"} and \code{"nndm"} return
-that many folds, \code{assignment$fold} is \code{NA} for the rows not
-held out, and \code{params$max_test} records the value.
-
-For the methods that work in projected space, \code{params} also carries a
-\code{crs} element naming the CRS the folds were built in (an
-\code{"EPSG:code"} string where there is one, otherwise the CRS's input
-definition).  Every length in \code{params} (\code{block_size},
-\code{sac_range}, \code{buffer}, \code{median_buffer}) is in that CRS's
-units, which for geographic input is a CRS
-\code{\link{ensure_projected}()} chose for you, and not one you passed.
+For \code{"nndm"}, \code{params} carries the diagnostics named in the section
+"NNDM".  For \code{"knndm"} it carries \code{chosen} (\code{"random"} or \code{"clusters"}),
+\code{n_clusters} (the number of clusters packed into the folds; \code{NA} for the
+random partition), \code{clustering} (\code{"ward"} or \code{"kmeans+ward"}; \code{NA} when
+no cluster count was tried), \code{candidates} (a data frame with one row per
+candidate, the random partition first: \code{candidate}, \code{n_clusters},
+\code{largest_fold}, \code{balance_ratio}, \code{admissible} and \code{W}, which is \code{NA} for
+a candidate set aside), \code{wasserstein}, \code{wasserstein_random} and
+\code{wasserstein_loo} (the Wasserstein distance to the target of the folds
+returned, of the random partition among the candidates and of plain
+leave-one-out, in distance units), \code{fold_sizes}, \code{balance_ratio},
+\code{target_distances} and \code{realised_distances} (one per prediction point,
+and one per row: its distance to the nearest point of another fold) with
+their medians and means, and the diagnostics \code{"nndm"} reports under the
+same names: \code{max_ecdf_excess}, \code{max_ecdf_deficit}, \code{loo_ecdf_deficit},
+\code{ecdf_deficit_tol}, \code{target_separated} and \code{target_out_of_reach}, with
+\code{short_of_target} for the opposite case (see the section "kNNDM").  With
+\code{max_test}, \code{params$max_test} records the value.
 
 Rows without a location (an empty point, or a coordinate that is not
 finite or lies beyond 1e150) are dropped before folding, with a logged
-warning naming the count; they appear in no fold and in no
-\code{assignment} row.  The bound is read on the coordinates as given,
-and again after the projection for the methods that measure distance.
+warning naming the count; they appear in no fold and in no \code{assignment}
+row.  The bound is read on the coordinates as given, and again after the
+projection for the methods that measure distance.
 }
 \description{
-Builds train/test splits by random k-fold, spatial block k-fold,
-leave-location-out, buffered leave-one-out, nearest-neighbour distance
-matching (NNDM) leave-one-out or its k-fold version (kNNDM).
+Builds train and test splits of a layer for cross-validation, by one of six
+methods: random k-fold, spatial block k-fold, buffered leave-one-out,
+leave-location-out, nearest-neighbour distance matching (NNDM)
+leave-one-out, or its k-fold version (kNNDM).  It returns the splits
+(\code{folds}), one row per observation naming the fold that holds it out
+(\code{assignment}), and the settings and diagnostics of the build (\code{params}).
+Pass the result as \code{folds} to \code{\link[=cv_spatial]{cv_spatial()}} or another \verb{cv_*()} function,
+map it with \code{\link[=plot_folds]{plot_folds()}}, and measure how far the held-out points sit
+from their training data with \code{\link[=fold_separation]{fold_separation()}}.
 }
-\details{
+\section{Fold methods}{
+\tabular{llll}{
+   \strong{Method} \tab \strong{Held out in each fold} \tab \strong{Needs} \tab \strong{Suits a map that} \cr
+   \code{"random_kfold"} \tab a random 1/k of the rows \tab \code{k} \tab predicts among the samples, over an area they cover evenly \cr
+   \code{"block_kfold"} \tab whole blocks of a grid, or of \code{blocks} \tab \code{k}; \code{block_size} or \code{auto_range} to size the grid \tab predicts into unsampled gaps about as wide as the blocks \cr
+   \code{"buffered_loo"} \tab one point, with its neighbours within \code{buffer} left out of training \tab \code{buffer} \tab predicts at a known distance from the data \cr
+   \code{"leave_location_out"} \tab every row of one or more locations \tab \code{group_var} \tab predicts at sites with no measurements, from repeated measurements at others \cr
+   \code{"nndm"} \tab one point, with neighbours left out to match the prediction distances \tab \code{prediction_points}; at most 5,000 rows \tab predicts at known locations, with a model cheap enough to refit once per point \cr
+   \code{"knndm"} \tab \code{k} folds matched to the prediction distances \tab \code{prediction_points} \tab predicts at known locations, from a large layer or with a costly model \cr
+}
+
+
 A cross-validated error is the error at the distances the folds put
 between the held-out points and their training data.  It reads low for
 predictions made farther from the data than the held-out points sit, and
 high for predictions made closer, so which folds to use depends on where
-the model will predict.  \code{\link{fold_separation}()} with
-\code{prediction_points} compares the two distances, and
-\code{method = "nndm"} and \code{"knndm"} build folds matched to them.
+the model will predict.  \code{\link[=fold_separation]{fold_separation()}} with \code{prediction_points}
+compares the two distances, and \code{method = "nndm"} and \code{"knndm"} build
+folds matched to them.
 
-For \code{block_kfold}, the default grid sizing is purely geometric and
-unrelated to the autocorrelation range of the data.  The wider the blocks,
-the farther the held-out points sit from their training data.  When blocks
-are smaller than the autocorrelation range, held-out points have training
-data within the range, and the score is the error of predicting that close
-to the data: it reads low for predictions made farther from the data, and
-is the error of a map whose locations sit as close.  Use
-\code{block_size} to set a minimum
-block edge length (in CRS units), or set \code{auto_range = TRUE} to
-estimate the range from an empirical variogram and use it as that minimum.
-When a response is given and the blocks come out smaller than the
-estimated range, the warning says so and what range-sized blocks would
-yield on this layout:
-the setting and the grid it builds when that gives \code{k} folds, and
-otherwise how many folds it gives (or that it leaves a single block), the
-largest block size that still gives \code{k} folds, and
-\code{method = "nndm"} as the design that needs no block size.
+\code{"random_kfold"} ignores geography: a held-out point keeps most of its
+neighbours in the training data, so the score is the error of predicting
+among the samples.  That is the error of a map over an area the samples
+cover evenly, and it reads low for predictions made farther from the data,
+such as a map of a whole region from clustered samples.  \code{"block_kfold"}
+holds out whole blocks, so the held-out points sit farther from their
+training data the wider the blocks are, and the score is the error of
+predicting into unsampled gaps of that size; for a map of an area the
+samples cover, it reads high.  \code{"buffered_loo"} holds out one point at a
+time and excludes everything within a fixed \code{buffer} from its training
+set.  \code{"leave_location_out"} groups by \code{group_var}, so all observations
+from a location share a fold.
+}
 
-A point on the edge two grid cells share goes to the lower one, the cell
-with the lower index in the full grid (\code{params$blocks$source_row};
-the grid is numbered along each row from the bottom left, so the cell to
-the left or below).  A point is on an edge
-while it lies within one part in 1e10 of the largest coordinate of the
-points and the blocks from it (0.44 mm at a UTM northing of 4,400 km), at
-most a millionth of the diagonal of their bounding box and at least
-four times the spacing of doubles at that coordinate, so points on the
-grid lines of a lattice are blocked alike in any unit or origin.  A point
-in no cell of a clipped grid goes to the cell with the nearest centroid,
-and to the lower of two whose centroids are as near to one part in ten
-million or that margin.
+\section{Block size and the autocorrelation range}{
 
-Points so far from the origin of their coordinates that doubles there are
-spaced more than a millionth of the points' extent apart (0.125 at 1e15,
-beside a layer a few kilometres across) are held to that spacing, and so
-are the edges of the blocks laid over them, so a point that lies within
-it of an edge near the origin can fall in the next block.  With
-\code{method = "block_kfold"} or \code{"buffered_loo"} the folds are
-made, and a warning of class \code{"spatialkit_xy_imprecise"} gives the
-spacing and the extent.
+With \code{block_size}, each axis of the extent gets as many blocks as leave
+every block at least that long, so on an axis at least as long as
+\code{block_size} the blocks are from one to just under two times this size.
+An axis shorter than \code{block_size} is spanned by one row or column of blocks
+as long as the extent there: a 39.8 km by 5 km extent with
+\code{block_size = 10000} gets three blocks 13.3 km wide and 5 km tall.  A size
+that leaves fewer than \code{k} blocks holding points returns that many folds,
+with a warning (see \code{k}); one that leaves a single block is an error.  Both
+name the largest size that still gives \code{k} folds.  A size in the wrong unit
+asks for an enormous grid, so a request above 1,000,000 blocks is refused
+with an error naming the grid dimensions, the extent and the CRS's units.
 
-\strong{Fold methods.}
-\code{"random_kfold"} ignores geography: a held-out point keeps most of
-its neighbours in the training data, so the score is the error of
-predicting among the samples.  That is the error of a map over an area the
-samples cover evenly, and it reads low for predictions made farther from
-the data, such as a map of a whole region from clustered samples.
-\code{"block_kfold"} holds out whole blocks, so the held-out points sit
-farther from their training data the wider the blocks are, and the score
-is the error of predicting into unsampled gaps of that size; for a map of
-an area the samples cover, it reads high.  \code{"buffered_loo"} holds out
-one point at a time and excludes everything within a fixed \code{buffer}.
+Without \code{block_size} or \code{auto_range}, the grid is sized from the extent
+and \code{block_multiplier} (or \code{block_nx} and \code{block_ny}) alone, with no
+regard to the autocorrelation range of the data.  The wider the blocks, the
+farther the held-out points sit from their training data.  When blocks are
+smaller than the autocorrelation range, each held-out point still has
+training data within the range.  The score is then the error of predicting
+that close to the data.  It reads low for a map whose locations lie farther
+from the samples, and is the error of a map whose locations lie as close.
 
-\code{"leave_location_out"} groups by \code{group_var}, so all
-observations from a location share a fold.
+\code{block_size} sets a minimum block edge length in CRS units, and
+\code{auto_range = TRUE} estimates the range with \code{\link[=estimate_sac_range]{estimate_sac_range()}} and
+uses it as that minimum.  When a response is given and the blocks are
+smaller than the estimated range, \code{make_folds()} warns and gives the block
+size of the range.  When blocks of that size leave fewer than \code{k} folds on
+this layout, the warning also names the largest size that still gives \code{k}
+folds and a method that needs no block size (\code{"nndm"}, or \code{"knndm"} above
+5,000 rows).
 
-\code{"nndm"} implements the distance-matching principle of Milà et al.
-(2022): it sizes the exclusion around each held-out point, with no arbitrary
-buffer, so that the resulting training-to-test distance distribution
-approaches the distribution of distances from your actual prediction
-locations to the training data.
+Sizing blocks from the autocorrelation range is the recommendation of
+Roberts et al. (2017) and what \pkg{blockCV} (Valavi et al. 2019)
+automates.  \pkg{blockCV} takes the fitted variogram's range parameter as
+the block size; \code{auto_range} takes the effective range that
+\code{\link[=estimate_sac_range]{estimate_sac_range()}} returns, three times that parameter for an
+exponential fit, so its blocks are larger than \pkg{blockCV}'s from the
+same variogram.  The estimate is the omnidirectional range.  On a field
+known to be anisotropic, pass
+\code{block_size = max(attr(r, "directional_fitted"), na.rm = TRUE)} yourself
+after checking \code{attr(r, "directional_status")} (see the section
+"Directional ranges and anisotropy" in \code{\link[=estimate_sac_range]{estimate_sac_range()}}).
 
-The procedure is the paper's, and it is deterministic.  Let \eqn{G_{ij}}
-be the empirical distribution of
-prediction-to-nearest-training distances and \eqn{G_j^*} the distribution
-of each held-out point's nearest remaining training point.  Starting from
-plain leave-one-out, the point with the smallest \eqn{G_j^*} at which the
-realised distribution exceeds the target (\eqn{G_j^*(r) > G_{ij}(r)}) has
-its nearest training neighbour removed, and this repeats until no such
-point remains, subject to two limits: a point is matched only while its
-nearest-neighbour distance is at most \code{phi} (default: the largest
-prediction distance, since a training point already further than every
-prediction distance has nothing to match), so the exclusion that takes it
-past \code{phi} is its last and a realised distance can exceed \code{phi}
-by up to one neighbour step; and no fold's training set is stripped below
-\code{min_train} of the data.
+Range-sized blocks do not fit every layout.  On a square extent at
+\code{k = 5}, a range up to a third of the side gives five folds; up to half, a
+2 by 2 grid and four folds, returned with the \code{"spatialkit_k_reduced"}
+warning.  Above half the extent in both directions there is room for a
+single block, and \code{make_folds()} stops with an error naming the size
+rather than return one fold with an empty training set.  The warning and
+the error name the largest block size that still gives \code{k} folds on this
+layout and how far below the range it is.  When no range is identified,
+the geometric grid is used instead, with a warning that gives the reason.
+When the range is used, a message states the grid and the block size
+built.
+}
 
-It differs from \code{CAST::nndm()} in two details, so the folds agree
-closely with CAST's but not exactly.  The removal rule is strict: a
-neighbour is removed whenever the realised distribution exceeds the target,
-whereas CAST removes one only while the realised distribution, less the
-point about to move, is still at or above the target.  The rule here
-therefore removes up to one point more per distance value (a few percent
-more removals in all on clustered layouts), erring towards held-out
-distances longer than the target.
-And ties in \eqn{G_j^*} are broken by the points' coordinates, not by
-their row index as in CAST, so the folds do not depend on the order of the
-rows.  On gridded samples many distances tie, and the last bits of the
-coordinates, which move with the unit and the origin, would settle those
-ties.  So distances within one part in ten million of each other count as
-equal, when the held-out distances are counted, compared with the target
-and \code{phi}, and put in order; equal ones are taken by the column of
-the point (first coordinates within that part of the extent of the points
-count as one), then its second coordinate, counted the same way, then its
-row.  Each point's neighbours are put in order by the same rule, the
-package's tie rule, so of neighbours that are equally far away the same
-one is excluded first.  The folds are then the same in another unit or
-with another origin as long as no coordinate moves by more than about a
-two-hundred-millionth of the distance between neighbouring locations.
+\section{NNDM}{
 
-Where neither limit binds, the realised distribution of
-\emph{nearest-neighbour distances} is then never shorter than the target:
-\eqn{G_j^*(r) \le G_{ij}(r)} up to the granularity of the neighbour
-distances, which is the property the method exists to deliver.  It is a
-statement about the distance to the one nearest training point.  A learner
-that draws on several neighbours (a forest, a k-nearest-neighbour mean, a
-kriging neighbourhood) also depends on how far the second and later
-neighbours are, which NNDM does not match, so on clustered samples its
-cross-validated error can still read low for the prediction points with
-the nearest-neighbour distances matched exactly.  Beyond \code{phi} no
-matching is attempted, by design.  \code{min_train} is different: when the
-prediction locations lie
-further from the samples than a fold can be made to hold out (clustered
-samples and a prediction domain well beyond them, the layout NNDM is meant
-for), it stops the matching early and the realised distances stay
-too short.  \code{params$n_at_min_train} counts the folds that were held
-at the floor while still closer than the target allows, and
+\code{"nndm"} implements the distance-matching principle of Milà et al. (2022):
+it sizes the exclusion around each held-out point, with no fixed buffer,
+so that the distribution of distances from the held-out points to their
+training data approaches the distribution of distances from the
+prediction locations to the training data.
+
+The procedure is the paper's, and it is deterministic.  Let
+\eqn{G_{ij}}{G_ij} be the empirical distribution of
+prediction-to-nearest-training distances and \eqn{G_j^*}{G_j*} the
+distribution of each held-out point's distance to its nearest remaining
+training point.  Starting from plain leave-one-out, the point with the
+smallest \eqn{G_j^*}{G_j*} at which the realised distribution exceeds the
+target (\eqn{G_j^*(r) > G_{ij}(r)}{G_j*(r) > G_ij(r)}) has its nearest
+training neighbour removed, and this repeats until no such point remains,
+within two limits.  A point is matched only while its nearest-neighbour
+distance is at most \code{phi} (default: the largest prediction distance,
+since a training point already farther than every prediction distance has
+nothing to match), so the exclusion that takes it past \code{phi} is its last
+and a realised distance can exceed \code{phi} by up to one neighbour step.  And
+no fold's training set is stripped below \code{min_train} of the data.
+
+It differs from \code{CAST::nndm()} in two details, so the folds agree closely
+with CAST's but not exactly.  The removal rule is strict: a neighbour is
+removed whenever the realised distribution exceeds the target, where CAST
+removes one only while the realised distribution, less the point about to
+move, is still at or above the target.  The rule here therefore removes
+up to one point more per distance value, erring towards held-out distances
+longer than the target.  And ties in \eqn{G_j^*}{G_j*} are broken by the
+points' coordinates, not by their row index as in CAST, so the folds do
+not depend on the order of the rows (see the section "Numerical
+tolerances").
+
+Where neither limit binds, the realised distribution of nearest-neighbour
+distances is never shorter than the target:
+\eqn{G_j^*(r) \le G_{ij}(r)}{G_j*(r) <= G_ij(r)} up to the granularity of
+the neighbour distances, which is the property the method exists to
+deliver.  It is a statement about the distance to the one nearest
+training point.  A learner that draws on several neighbours (a forest, a
+k-nearest-neighbour mean, a kriging neighbourhood) also depends on how far
+the second and later neighbours are, which NNDM does not match, so on
+clustered samples its cross-validated error can still read low for the
+prediction points with the nearest-neighbour distances matched exactly.
+Beyond \code{phi} no matching is attempted.  \code{min_train} is different: when the
+prediction locations lie farther from the samples than a fold can be made
+to hold out (clustered samples and a prediction domain well beyond them,
+the layout NNDM is meant for), it stops the matching early and the
+realised distances stay too short.  \code{params$n_at_min_train} counts the
+folds held at the floor while still closer than the target allows, and
 \code{make_folds()} warns when that leaves more than one point's worth of
-excess at or below \code{phi}.  Lower \code{min_train} to match further, or
-read the cross-validated score as an upper bound on performance at the
-prediction locations.
+excess at or below \code{phi}.  Lower \code{min_train} to match further, or read the
+cross-validated score as an upper bound on performance at the prediction
+locations.  \code{params$max_ecdf_excess} reports the largest remaining excess;
+compare \code{params$target_median} with \code{params$realised_median} as well.
 
-The match has a second side.  \code{params$max_ecdf_deficit} is the
-largest amount by which the target distribution runs above the realised
-one, the mirror of \code{params$max_ecdf_excess}: the share of prediction
-points within some distance of the data that the folds do not reproduce.
-Part of it is the granularity of the matching.  Excluding a neighbour
-moves a held-out point out to its next remaining neighbour, and on
-clustered samples that can be the next cluster, well past the prediction
-distances.
+The match has a second side.  \code{params$max_ecdf_deficit} is the largest
+amount by which the target distribution runs above the realised one, the
+mirror of \code{params$max_ecdf_excess}: the share of prediction points within
+some distance of the data that the folds do not reproduce.  Part of it is
+the granularity of the matching.  Excluding a neighbour moves a held-out
+point out to its next remaining neighbour, and on clustered samples that
+can be the next cluster, well past the prediction distances.
 
 The other part no setting reaches.  Excluding neighbours can only lengthen
-a held-out distance, so when the prediction points sit \emph{nearer} to
-the data than the samples sit to each other (prediction points among the
-samples, or a regular sample predicted between its nodes) the folds
-returned are plain leave-one-out and are still farther from their
-training data than the prediction points are.  The cross-validated error
-is then pessimistic for those locations: an upper bound on the error
-there.  \code{params$loo_ecdf_deficit} is the largest amount by which
-the target distribution runs above that of plain leave-one-out.  When it
-exceeds \code{params$ecdf_deficit_tol}, three times
-\eqn{\sqrt{1/n + 1/m}} for \eqn{n} folds and \eqn{m} prediction points
-(about three times the chance difference between two samples of one
-distribution), \code{make_folds()} raises a warning of class
-\code{"spatialkit_nndm_out_of_reach"} and sets
-\code{params$target_out_of_reach} to \code{TRUE}.
+a held-out distance, so when the prediction points sit nearer to the data
+than the samples sit to each other (prediction points among the samples,
+or a regular sample predicted between its nodes) the folds returned are
+plain leave-one-out and are still farther from their training data than
+the prediction points are.  The cross-validated error is then pessimistic
+for those prediction points: an upper bound on the error there.
+\code{params$loo_ecdf_deficit} is the largest amount by which the target
+distribution runs above that of plain leave-one-out.  When it exceeds
+\code{params$ecdf_deficit_tol}, three times \eqn{\sqrt{1/n + 1/m}}{sqrt(1/n +
+1/m)} for \eqn{n} folds and \eqn{m} prediction points (about three times
+the chance difference between two samples of one distribution),
+\code{make_folds()} raises a warning of class \code{"spatialkit_nndm_out_of_reach"}
+and sets \code{params$target_out_of_reach} to \code{TRUE}.
 
 On small samples no deficit can exceed that tolerance.  A deficit is a
 difference of two shares, so it is at most 1, and the tolerance is 1 or
-more whenever \eqn{nm/(n+m) \le 9}: for nine folds or fewer whatever the
-number of prediction points, and for up to eighteen folds with as many
-prediction points.  There the same warning is raised in one case only,
-complete separation: every prediction point nearer to the data than any
-sample is to its nearest other sample, by more than one part in ten
-million (a deficit of exactly 1), provided
-the two sets are large enough for that ordering to mean something, which
-is taken as \code{choose(n + m, n) >= 1000} ways of interleaving them (17
-prediction points for 3 folds, 7 for 6 folds, 4 for 12 folds).
-\code{params$target_separated} records the ordering whether or not it
-was enough to warn, and the warning's condition carries it as
+more whenever \eqn{nm/(n+m) \le 9}{nm/(n+m) <= 9}: for nine folds or fewer
+whatever the number of prediction points, and for up to eighteen folds with
+as many prediction points.  There the same warning is raised in one case
+only, complete separation: every prediction point nearer to the data than
+any sample is to its nearest other sample, by more than one part in ten
+million (a deficit of 1), provided the two sets are large enough for that
+ordering to mean something, taken as \code{choose(n + m, n) >= 1000} ways of
+interleaving them (17 prediction points for 3 folds, 7 for 6 folds, 4 for
+12 folds).  \code{params$target_separated} records the ordering whether or not
+it was enough to warn, and the warning's condition carries it as
 \code{separated}.  With very few samples it can hold for a grid over the
-samples' own extent, because a few points hug the box they span; the
-folds are then farther than the grid all the same.  A partial shortfall
-on such a sample (most prediction points nearer than leave-one-out
-reaches, not all) is not warned about: the tolerance is 1 or more at
-these sizes, which no difference of shares exceeds, so only complete
-separation can be reported.  Compare
-\code{params$target_median} with \code{params$realised_median}.
+samples' own extent, because a few points hug the box they span; the folds
+are then farther than the grid all the same.  A partial shortfall on such a
+sample (most prediction points nearer than leave-one-out reaches, not all)
+is not warned about, since no difference of shares exceeds a tolerance of 1
+or more.  Compare \code{params$target_median} with \code{params$realised_median}.
 
-\code{params$wasserstein} is the Wasserstein distance between the target
-and realised distributions, in distance units, and
-\code{params$wasserstein_loo} the same for plain leave-one-out: equal
-when nothing was excluded, smaller when the matching helped.
+\code{params$wasserstein} is the Wasserstein distance between the target and
+realised distributions, in distance units, and \code{params$wasserstein_loo}
+the same for plain leave-one-out: equal when nothing was excluded, smaller
+when the matching helped.
+}
 
-\strong{kNNDM.}  \code{"knndm"} is the k-fold version of that idea
-(Linnenbrink et al. 2024): \code{k} folds, and so \code{k} model fits,
-whose held-out distances are as close to the same target as a set of
-candidates allows.  It has no row limit, and is the method to use above
-the 5,000 rows \code{"nndm"} takes or when a model is too costly to refit
-once per point.  It is not an equal of NNDM below that: a fold design has
-far fewer degrees of freedom than one exclusion set per point, so the
-match is coarser.
+\section{kNNDM}{
 
-The candidates are a random k-fold partition (the one
-\code{"random_kfold"} builds with the same \code{seed}) and, for each of
-up to 50 cluster counts spaced evenly on the log scale from \code{k} to
-one fewer than the number of distinct locations, the samples clustered on
-their coordinates and the clusters merged into \code{k} folds.  Few large
-clusters give folds that are whole regions, far from their training data;
-many small ones approach the random partition.  Up to 4,000 points the
-clustering is Ward's (\code{stats::hclust(method = "ward.D2")}), cut at
-each count.  Above that, where the n by n distance matrix it needs is no
-longer affordable, k-means first reduces the samples to 4,000 groups
-(Lloyd's algorithm from random sample locations, at most ten passes) and
-Ward's method is continued from those groups; a count above 4,000 is a
-k-means run of its own.  \code{params$clustering} says which
-(\code{"ward"} or \code{"kmeans+ward"}).  Both read the coordinates
-centred on the middle of their bounding box, divided by its diagonal and
-rounded to \eqn{2^{-30}} of it (about a billionth), as the
-\code{"kmeans"} partition hands them to \code{stats::kmeans()}: on a
-lattice many merges and many assignments tie exactly, and the last bits of
-the coordinates, which move with the unit and the origin, would settle
-them.  A point as near two k-means centres to one part in ten million
-goes to the lower-numbered one: a squared distance ties with the least
-when it is no more than the square of the least distance lengthened by a
-margin, plus one part in ten million of the least squared distance, the
-margin one part in 1e10 of the largest coordinate of the centres in that
-frame, at most a millionth of the diagonal of their bounding box and at
-least four times the spacing of doubles at that coordinate.  The clusters are then the same in another
-unit or with another origin, but for a location within its own rounding
-noise of the middle of a step.  Clusters are merged by the packing
-\code{"block_kfold"} uses for its blocks, largest first and each to the
-fold with the fewest points so far (see \strong{Fold balance}).
-\code{CAST::knndm()} merges clusters by a rule of its own, which this was
-\emph{not} checked against, so the folds are not expected to equal CAST's.
+\code{"knndm"} is the k-fold version of NNDM (Linnenbrink et al. 2024): \code{k}
+folds, and so \code{k} model fits, whose held-out distances are as close to the
+same target as a set of candidates allows.  It has no row limit, and is
+the method to use above the 5,000 rows \code{"nndm"} takes or when a model is
+too costly to refit once per point.  Below that it matches less closely
+than NNDM, since a fold design has far fewer degrees of freedom than one
+exclusion set per point.
+
+The candidates are a random k-fold partition (the one \code{"random_kfold"}
+builds with the same \code{seed}) and, for each of up to 50 cluster counts
+spaced evenly on the log scale from \code{k} to one fewer than the number of
+distinct locations, the samples clustered on their coordinates and the
+clusters merged into \code{k} folds.  Few large clusters give folds that are
+whole areas, far from their training data; many small ones approach the
+random partition.  Up to 4,000 points the clustering is Ward's
+(\code{stats::hclust(method = "ward.D2")}), cut at each count.  Above that,
+where the n by n distance matrix it needs is too large, k-means first
+reduces the samples to 4,000 groups (Lloyd's algorithm from random sample
+locations, at most ten passes) and Ward's method is continued from those
+groups; a count above 4,000 is a k-means run of its own.
+\code{params$clustering} says which (\code{"ward"} or \code{"kmeans+ward"}).  Clusters are
+merged by the packing \code{"block_kfold"} uses for its blocks, largest first
+and each to the fold with the fewest points so far (see the section "Fold
+balance").  \code{CAST::knndm()} merges clusters by a rule of its own, which
+this was not checked against, so the folds are not expected to equal
+CAST's.
 
 Each candidate is scored by the Wasserstein distance \eqn{W} between its
 held-out distances (each point's distance to the nearest point of another
-fold) and the target distances, in the unit of the layer, and the
-smallest \eqn{W} is returned; of the candidates within one part in ten
-million of the smallest, the earliest in \code{params$candidates}.  A
-candidate is set aside without being scored when its largest fold leaves
-less than \code{min_train} of the rows for training or holds more than
-\code{balance_tol} times the points of its smallest; the random partition
-is always kept.  So \code{params$wasserstein} is never above
-\code{params$wasserstein_random}, the \eqn{W} of that random partition,
-and \code{params$candidates} lists every candidate with its cluster count,
-fold sizes and \eqn{W}.  \code{params$chosen} is \code{"random"} when no
-clustering came closer, which is the right answer for samples spread
-evenly over the prediction area.
-
-Read \eqn{W} against the mean target distance.  On 400 points in 12
-clusters predicted onto a grid over their extent (12 draws, 5 and 10
-folds) the folds returned had \eqn{W} at 0.32 of the mean target distance,
-against 0.70 to 0.72 for a random partition and 0.01 for \code{"nndm"}.
-A 5-nearest-neighbour learner scored 9 to 11 percent high on them, where
-random folds scored 23 to 25 percent low and \code{"nndm"} 6 percent low.
-On 2,000 points in 40 clusters of unequal size the ratio was 0.07 to
-0.10, against 0.56 to 0.59 for a random partition and 0.003 to 0.006 for
-\code{"nndm"}; on 30,000 points of that layout it was 0.11 to 0.15, and
-on 100,000 points 0.27.  So the method removes most of the mismatch of a
-random partition and leaves more of it than NNDM does, in either
-direction: \eqn{W} has no sign.  On 400 evenly spread points the random
-partition or one close to it came back and the two scored alike (3.3 and
-3.5 percent high).  With few folds a random partition is itself farther
-than the target, since each fold trains on \code{1 - 1/k} of the points:
-at \code{k = 2} on evenly spread points the mean held-out distance was 9
-to 53 percent above the target mean (60 draws of 100 to 1,000 points),
-and no candidate is nearer.
-
-Construction took 2 s at 8,000 points and 10 s at 30,000 with ten folds
-(37 s at 100,000) with \pkg{FNN} installed, and three to four times that
-without it; it grows with the number of folds.
+fold) and the target distances, in the unit of the layer, and the smallest
+\eqn{W} is returned; of the candidates within one part in ten million of
+the smallest, the earliest in \code{params$candidates}.  A candidate is set
+aside without being scored when its largest fold leaves less than
+\code{min_train} of the rows for training or holds more than \code{balance_tol}
+times the points of its smallest; the random partition is always kept.  So
+\code{params$wasserstein} is never above \code{params$wasserstein_random}, the
+\eqn{W} of that random partition, and \code{params$candidates} lists every
+candidate with its cluster count, fold sizes and \eqn{W}.
+\code{params$chosen} is \code{"random"} when no clustering came closer, as for
+samples spread evenly over the prediction area.  Read \eqn{W} against the
+mean target distance; it has no sign, so it measures the mismatch in either
+direction.  With few folds a random partition can itself be farther than
+the target, since each fold trains on \code{1 - 1/k} of the points.
+Construction time grows with the number of points and of folds.
 
 Two cases are warned about, each with a condition class.  When the
 prediction points sit nearer to the data than a sample is to its nearest
 other sample, no fold design reaches them, since a held-out point is never
-nearer to its training data than that; the test is the one
-\code{"nndm"} applies, the warning has the same class,
-\code{"spatialkit_nndm_out_of_reach"}, and what comes back is the random
-partition or a candidate as fine as one.  In the other direction, the
-closest candidate can still be
-short of the target: prediction points well beyond the samples lie farther
-from the data than \code{k} folds of those samples can be held apart.
-When the mean held-out distance of the folds returned is below the mean
-target distance by more than a quarter of it and by at least half of
-\eqn{W} (the test \code{\link{fold_separation}()} words as
-\code{"closer"}), \code{make_folds()} raises a warning of class
-\code{"spatialkit_knndm_short_of_target"} and sets
-\code{params$short_of_target}: the cross-validated error then tends to
-read low for the prediction points.  Fewer folds hold out larger regions.
-Short of either warning the folds can still differ from the target at
-some distances; \code{params$max_ecdf_excess} and
-\code{params$max_ecdf_deficit} give the largest difference each way, and
-\code{\link{fold_separation}()} reads the folds against the same
-prediction points fold by fold.
-
-An earlier version of this package drew one random radius per point from
-\eqn{G_{ij}} and excluded up to the order statistic \emph{closest} to it,
-which rounds down half the time: on a two-cluster layout the realised
-distribution exceeded the target by up to 0.17 (13\% of folds had a
-nearest training point within 50 m against a target of 9\%), an
-\emph{optimistic} cross-validation.  \code{params$max_ecdf_excess} reports
-the largest remaining excess; compare \code{params$target_median} with
-\code{params$realised_median} as well.
+nearer to its training data than that; the test is the one \code{"nndm"}
+applies, the warning has the same class, \code{"spatialkit_nndm_out_of_reach"},
+and what comes back is the random partition or a candidate as fine as one.
+In the other direction, the closest candidate can still be short of the
+target: prediction points well beyond the samples lie farther from the
+data than \code{k} folds of those samples can be held apart.  When the mean
+held-out distance of the folds returned is below the mean target distance
+by more than a quarter of it and by at least half of \eqn{W} (the test
+\code{\link[=fold_separation]{fold_separation()}} words as \code{"closer"}), \code{make_folds()} raises a warning
+of class \code{"spatialkit_knndm_short_of_target"} and sets
+\code{params$short_of_target}: the cross-validated error then tends to read low
+for the prediction points.  Fewer folds hold out larger areas.  Short of
+either warning the folds can still differ from the target at some
+distances; \code{params$max_ecdf_excess} and \code{params$max_ecdf_deficit} give the
+largest difference each way, and \code{\link[=fold_separation]{fold_separation()}} reads the folds
+against the same prediction points fold by fold.
 }
+
 \section{Supplied blocks}{
 
 A polygon layer passed as \code{blocks} is aligned to the points the way
-\code{boundary} is: CRS-less points are aligned to blocks that carry a CRS
-(reprojected if they look like lon/lat, otherwise stamped, warning either
-way, and refused when the blocks are in longitude and latitude and the
-points lie outside longitude -180 to 360 and latitude -90 to 90), and the
-blocks are then brought into the CRS the folds are built in.
-A point inside more than one block is given the first (lowest row) that
-contains it, as for a point on the shared edge of two grid cells, and a
-point within the same margin of a block's edge (one part in 1e10 of the
-largest coordinate of the points and the blocks, within the bounds
-above) counts as inside it.  When the
-blocks that caught such a point share area instead of an edge, the layer
-overlaps and is not a partition, and this is warned about.  A point
-inside no block is assigned to the nearest one, by distance to the polygon
-itself; a point the same distance from two blocks, to one part in ten
-million or that margin, goes to the lower row.  The count of such points is warned
-about, unless they sit
-within a millionth of the extent of a block, which is an edge that
+\code{boundary} is, and then brought into the CRS the folds are built in (see
+\link{spatialkit-geometry}).  A point inside more than one block is given the
+first (lowest row) that contains it, as for a point on the shared edge of
+two grid cells, and a point within the margin of a block's edge (see the
+section "Numerical tolerances") counts as inside it.  When the blocks that
+caught such a point share area instead of an edge, the layer overlaps and
+is not a partition, and \code{make_folds()} warns.  A point inside no block is
+assigned to the nearest one, by distance to the polygon itself; a point the
+same distance from two blocks, to one part in ten million or that margin,
+goes to the lower row.  The count of such points is warned about, unless
+they sit within a millionth of the extent of a block, an edge that
 reprojection or clipping moved by a rounding error.  Blocks that hold no
-point are dropped when \code{drop_empty_blocks = TRUE}, and \code{k} is
-lowered to the number of blocks that hold points when that is smaller.
-\code{params$n_blocks} is the number of blocks before empties were dropped,
-\code{params$blocks_used} the number after (so with
-\code{drop_empty_blocks = FALSE} the two are equal, and
-\code{sum(params$block_sizes > 0)} is how many of them hold points),
-\code{params$grid_nx} and
-\code{params$grid_ny} are \code{NA}, and \code{params$block_scale} is the
-median over blocks that hold points of the side of the square with the
-block's area.  That is the length compared against the autocorrelation range
-for the warning on blocks smaller than the range, since a polygon has no
-single edge length.
+point are dropped when \code{drop_empty_blocks = TRUE}, and \code{k} is lowered to
+the number of blocks that hold points when that is smaller.
 
-The connection to the rest of the package is
-\code{\link{build_tessellation}()}: every shape it builds can be a block
-design here, including Voronoi cells around
-\code{\link{get_voronoi_seeds}(method = "kmeans")} seeds, which adapt to the
-density of the points.
+\code{params$n_blocks} is the number of blocks before empties were dropped and
+\code{params$blocks_used} the number after (so with \code{drop_empty_blocks = FALSE}
+the two are equal, and \code{sum(params$block_sizes > 0)} is how many hold
+points); \code{params$grid_nx} and \code{params$grid_ny} are \code{NA}.
+\code{params$block_scale} is the median, over the blocks that hold points, of
+the side of the square with the block's area.  A polygon has no single
+edge length, so that is the length compared with the autocorrelation range
+for the warning on blocks smaller than the range.
+
+Every set of cells \code{\link[=build_tessellation]{build_tessellation()}} builds can be a block design
+here, including Voronoi cells around \code{get_voronoi_seeds(method = "kmeans")}
+seeds, which adapt to the density of the points.
 }
 
 \section{Fold balance}{
 
-\code{"block_kfold"} and \code{"knndm"} balance the number of points per
-fold, and they do so by packing: blocks (for \code{"knndm"}, clusters of
-the samples) are taken largest first and each goes to the
-fold with the fewest points so far, ties broken at random.  This is the
-longest-processing-time rule for multiway partitioning.  Measured against
-the optimum by enumeration (two folds, up to ten blocks, heavy-tailed block
-sizes) it is optimal in 72 percent of cases and within two points of
-optimal on average; a local search with 30 random restarts moved the
-largest-to-smallest ratio by 0.004 on average and never brought a packing
-above the 3:1 tolerance below it.  An imbalance past the tolerance is
-therefore in the points per block, which no assignment of blocks to folds
-can even out, and this function offers no search over packings.  The
-remedy is the block design: smaller blocks, or blocks that adapt to the
-density of the points passed through \code{blocks}.  On clustered layouts
-where the geometric grid exceeded 3:1 in 22 percent of cases (median ratio
-1.8, worst 6.3), Voronoi cells around 15 k-means seeds never exceeded 1.3
-(median 1.09).  Density-adaptive blocks are smaller where points are
-dense, so check \code{params$block_scale} against the autocorrelation
-range as you would a grid.
+\code{"block_kfold"} and \code{"knndm"} balance the number of points per fold by
+packing: blocks (for \code{"knndm"}, clusters of the samples) are taken largest
+first and each goes to the fold with the fewest points so far, ties broken
+at random.  This is the longest-processing-time rule for multiway
+partitioning, and \code{make_folds()} offers no search over other packings.
+The remedy for an imbalance past \code{balance_tol} is the block design:
+smaller blocks, or blocks that adapt to the density of the points, passed
+through \code{blocks}.  Density-adaptive blocks are smaller where points are
+dense, so check \code{params$block_scale} against the autocorrelation range as
+you would a grid.
 
-\code{"knndm"} chooses its clusters, so for it \code{balance_tol} is a
-limit: a clustering whose packing exceeds it is not a candidate, and the
-folds returned are within it (\code{params$fold_sizes},
-\code{params$balance_ratio}).
+\code{"knndm"} chooses its clusters, so for it \code{balance_tol} is a limit: a
+clustering whose packing exceeds it is not a candidate, and the folds
+returned are within it (\code{params$fold_sizes}, \code{params$balance_ratio}).
 
 The other methods do not balance point counts.  \code{"random_kfold"} is
 balanced by construction (fold sizes differ by at most one);
 \code{"buffered_loo"} and \code{"nndm"} hold out one point per fold;
-\code{"leave_location_out"} gives each fold the same number of
-\emph{locations} (to within one), so folds differ by as much as the
-locations' sizes do.
+\code{"leave_location_out"} gives each fold the same number of locations (to
+within one), so folds differ by as much as the locations' sizes do.
+}
+
+\section{Numerical tolerances}{
+
+A point on the edge two grid cells share goes to the lower one, the cell
+with the lower index in the full grid (\code{params$blocks$source_row}; the grid
+is numbered along each row from the bottom left, so the cell to the left or
+below).  A point is on an edge while it lies within one part in 1e10 of the
+largest coordinate of the points and the blocks from it (0.44 mm at a UTM
+northing of 4,400 km), at most a millionth of the diagonal of their
+bounding box and at least four times the spacing of doubles at that
+coordinate, so points on the grid lines of a lattice are blocked alike in
+any unit or origin.  A point in no cell of a clipped grid goes to the cell
+with the nearest centroid, and to the lower of two whose centroids are as
+near to one part in ten million or that margin.  The same margin decides
+whether a point lies on a \code{boundary} or inside a supplied block.
+
+A block shorter than \code{block_size} by no more than one part in ten million
+counts as that long, so a size of exactly the axis over a whole number
+gives that number of blocks in any unit.  A neighbour of a
+\code{"buffered_loo"} point at the buffer distance is excluded, and so is one
+over it by rounding: a squared distance within one part in ten million of
+the buffer's square (a distance about one part in twenty million over the
+buffer) counts as at it, so a lattice whose spacing divides the buffer
+gives the same folds in any unit or origin.
+
+NNDM counts distances within one part in ten million of each other as
+equal, when the held-out distances are counted, compared with the target
+and \code{phi}, and put in order.  Equal ones are taken by the column of the
+point (first coordinates within that part of the extent of the points count
+as one), then its second coordinate, counted the same way, then its row.
+Each point's neighbours are put in order by the same rule, so of
+neighbours that are equally far away the same one is excluded first.  The
+folds are then the same in another unit or with another origin as long as
+no coordinate moves by more than about a two-hundred-millionth of the
+distance between neighbouring locations.
+
+The clusterings of kNNDM read the coordinates centred on the middle of
+their bounding box, divided by its diagonal and rounded to
+2^-30 of it (about a billionth), as the \code{"kmeans"} partition
+hands them to \code{stats::kmeans()}; on a lattice many merges and many
+assignments tie exactly, and the last bits of the coordinates, which move
+with the unit and the origin, would settle them.  A point as near two
+k-means centres to one part in ten million goes to the lower-numbered one:
+a squared distance ties with the least when it is no more than the square
+of the least distance lengthened by a margin, plus one part in ten million
+of the least squared distance, the margin one part in 1e10 of the largest
+coordinate of the centres in that frame, at most a millionth of the
+diagonal of their bounding box and at least four times the spacing of
+doubles at that coordinate.  The clusters are then the same in another unit
+or with another origin, but for a location within its own rounding noise of
+the middle of a step.
+
+Points so far from the origin of their coordinates that doubles there are
+spaced more than a millionth of the points' extent apart are held to that
+spacing, and so are the edges of the blocks laid over them (see the
+section "Coordinates far from the origin" in \link{spatialkit-geometry}).  With
+\code{method = "block_kfold"} or \code{"buffered_loo"} the folds are made, and a
+warning of class \code{"spatialkit_xy_imprecise"} gives the spacing and the
+extent.
 }
 
 \examples{
@@ -800,16 +706,25 @@ pts <- st_as_sf(
   coords = c("x", "y"), crs = 32632
 )
 folds <- make_folds(pts, k = 3, method = "block_kfold", seed = 42)
-folds$assignment          # fold and block membership per row
-lengths(folds$folds[[1]]) # train/test row-ID splits
-folds$params$block_sizes  # points per block; params$fold_blocks packs them
+folds$assignment          # fold and block of each row
+lengths(folds$folds[[1]]) # the train and test row IDs of fold 1
+folds$params$block_sizes  # points per block
+folds$params$fold_blocks  # the blocks each fold holds
 
-# Buffered leave-one-out: neighbours within 100 units excluded from training
-loo <- make_folds(pts, k = 1, method = "buffered_loo", buffer = 100)
+# Buffered leave-one-out: neighbours within 100 m left out of training.
+loo <- make_folds(pts, method = "buffered_loo", buffer = 100)
+loo$k                     # one fold per point
 
-# Three folds matched to the distances from a prediction grid to the data
-grid <- st_make_grid(pts, n = c(10, 10), what = "centers")
-km <- make_folds(pts, k = 3, method = "knndm", prediction_points = grid,
+# Three folds matched to the distances from a prediction grid to
+# clustered samples.
+set.seed(2)
+cx <- runif(6, 0, 1e4); cy <- runif(6, 0, 1e4)
+xy <- do.call(rbind, lapply(1:6, function(i)
+  cbind(cx[i] + rnorm(15, 0, 200), cy[i] + rnorm(15, 0, 200))))
+cl <- st_as_sf(data.frame(x = 5e5 + xy[, 1], y = 5e6 + xy[, 2]),
+               coords = c("x", "y"), crs = 32632)
+grid <- st_make_grid(cl, n = c(20, 20), what = "centers")
+km <- make_folds(cl, k = 3, method = "knndm", prediction_points = grid,
                  seed = 42)
 km$params[c("chosen", "n_clusters", "wasserstein", "wasserstein_random")]
 }
@@ -838,17 +753,14 @@ folds for k-fold cross-validation of species distribution models.
 \doi{10.1111/2041-210X.13107}
 }
 \seealso{
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=plot_folds]{plot_folds()}} to map the folds, \code{\link[=fold_separation]{fold_separation()}} to measure
+how far the held-out points sit from their training data,
+\code{\link[=cv_spatial]{cv_spatial()}} to score a model on them, and \code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}} to
+cross-validate at a ladder of block sizes.
+
+Other folds:
 \code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
 \code{\link[=fold_separation]{fold_separation()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=sac_nugget]{sac_nugget()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+\code{\link[=plot_folds]{plot_folds()}}
 }
-\concept{cross-validation}
+\concept{folds}

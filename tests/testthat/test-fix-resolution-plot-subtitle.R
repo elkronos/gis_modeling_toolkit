@@ -41,6 +41,6 @@ test_that("the Moran panel is labelled as a diagnostic", {
   p <- suppressWarnings(resolution_profile(pts, "z", sac = 300, n_levels = 6, nstart = 2))
   g <- plot(p, criteria = c("cp", "moran_z"))
   panels <- as.character(ggplot2::ggplot_build(g)$layout$layout$panel)
-  expect_true("|Moran's z| of cell means (a diagnostic, not a count rule)" %in% panels)
+  expect_true("Absolute Moran's z of cell means (a diagnostic, not a count rule)" %in% panels)
   expect_false(any(grepl("Moran.*lower is better", panels)))
 })

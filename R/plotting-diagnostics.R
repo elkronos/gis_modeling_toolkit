@@ -10,9 +10,10 @@
 
 #' Plot one cross-validation metric fold by fold
 #'
-#' A pooled RMSE of 3.2 can come from 3.2 in every fold or from 1.1 in eight
-#' folds and 14 in one (a model that works, and a model that fails in one
-#' region), and the pooled number cannot tell the two apart.  This draws the
+#' One pooled RMSE can come from the same error in every fold or from small
+#' errors in most folds and a large one in a single fold (a model that
+#' works, and a model that fails in one block), and the pooled number cannot
+#' tell the two apart.  This draws the
 #' metric of each fold as a point, sized by the number of held-out
 #' predictions the fold contributed, with the pooled value from
 #' \code{overall} as a horizontal line, so the spread behind the number is
@@ -40,25 +41,24 @@
 #'   or \code{\link{compare_models_cv}()}.
 #' @param metric Character(1) naming a column of \code{fold_metrics} (or of
 #'   \code{by_fold}).  Default \code{"RMSE"}.
-#' @param ... Ignored.
+#' @param ... Not used.
 #' @return A \code{ggplot} object.
-#' @family plotting
-#' @examples
-#' if (requireNamespace("ranger", quietly = TRUE) &&
-#'     requireNamespace("ggplot2", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   n <- 150
-#'   dat <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-#'                a = rnorm(n)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   dat$z <- 2 * dat$a + 0.003 * (st_coordinates(dat)[, 1] - 5e5) +
-#'     rnorm(n, 0, 0.5)
-#'   cv <- cv_rf(dat, "z", "a", k = 5, num_trees = 100)
-#'   plot_cv_metrics(cv, "RMSE")
-#' }
+#' @seealso \code{\link{cv_spatial}()} and \code{\link{compare_models_cv}()},
+#'   which make the results.
+#' @family cross-validation
+#' @examplesIf requireNamespace("ranger", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' n <- 150
+#' dat <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              a = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' dat$z <- 2 * dat$a + 0.003 * (st_coordinates(dat)[, 1] - 5e5) +
+#'   rnorm(n, 0, 0.5)
+#' cv <- cv_rf(dat, "z", "a", k = 5, num_trees = 100)
+#' plot_cv_metrics(cv, "RMSE")
 #' @export
 plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
   .need_ggplot("plot_cv_metrics()")
@@ -126,13 +126,14 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
   n_models <- nlevels(df$model)
   title <- sprintf("%s by fold", metric)
   caption <- if (nrow(pooled))
-    "Dashed line: the pooled value from `overall`"
+    "Dashed line: the pooled value (overall)"
   else if (metric %in% .cv_count_metrics)
-    sprintf("No pooled value: `%s` is a count per fold; `overall` holds the total", metric)
+    sprintf("No pooled value: %s is a count per fold; overall holds the total", metric)
   else
-    sprintf("No pooled value: `%s` is a per-fold quantity with no counterpart in `overall`", metric)
+    sprintf("No pooled value: %s is a per-fold quantity with no counterpart in overall", metric)
+  # ggplot2 draws a caption as plain text, so no Markdown backticks here.
   if (length(no_folds))
-    caption <- paste0(caption, sprintf("\nNot drawn: %s (no finite per-fold `%s`)",
+    caption <- paste0(caption, sprintf("\nNot drawn: %s (no finite per-fold %s)",
                                        paste(no_folds, collapse = ", "), metric))
 
   size_aes <- if (any(is.finite(df$n_pred))) ggplot2::aes(size = .data$n_pred) else NULL
@@ -208,12 +209,12 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
 
 #' Plot the dissimilarity distribution behind an area of applicability
 #'
-#' \code{n_outside} says how many prediction locations fall outside the area
-#' of applicability; it does not say whether the rest sit comfortably inside
-#' or crowd against the threshold, nor how far outside the outsiders are.
-#' This draws the dissimilarity index of the prediction locations against
-#' that of the training data, with the threshold marked, so the prediction
-#' set can be read as mostly inside, marginal or largely outside.  The
+#' Draws the dissimilarity index of the prediction locations against that of
+#' the training data, with the threshold marked, so you can see whether the
+#' prediction set sits well inside, near the threshold or outside.
+#' \code{n_outside} gives only how many prediction locations fall outside
+#' the area of applicability, not how close to the threshold the rest sit or
+#' how far outside the outsiders are.  The
 #' training DI is cross-validated over the \code{folds} passed to
 #' \code{\link{area_of_applicability}()}, or without them is each training
 #' point's distance to its nearest other training point; the legend and the
@@ -241,29 +242,28 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
 #' @param type \code{"ecdf"} (default), the two empirical distribution
 #'   functions on one axis, or \code{"histogram"}, the prediction DI as bars
 #'   with the training DI as an outline.
-#' @param ... Ignored.
+#' @param ... Not used.
 #' @return A \code{ggplot} object.
-#' @family plotting
-#' @examples
-#' if (requireNamespace("ggplot2", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(2)
-#'   n <- 200
-#'   train <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-#'                a = rnorm(n), b = rnorm(n)),
-#'     coords = c("x", "y"), crs = 32632)
-#'   train$z <- train$a - train$b + rnorm(n, 0, 0.3)
-#'   # Prediction locations whose predictor `a` drifts beyond the training range.
-#'   new <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(100, 0, 1000), y = 5e6 + runif(100, 0, 1000),
-#'                a = rnorm(100, mean = 2), b = rnorm(100)),
-#'     coords = c("x", "y"), crs = 32632)
-#'   aoa <- area_of_applicability(new, train_sf = train, predictor_vars = c("a", "b"))
-#'   print(plot(aoa))              # the two ECDFs; print() because only a
-#'                                 # block's last value is drawn on its own
-#'   plot(aoa, type = "histogram")
-#' }
+#' @seealso \code{\link{area_of_applicability}()}, which makes the object, and
+#'   \code{\link{print.aoa}()}.
+#' @family prediction
+#' @examplesIf requireNamespace("ggplot2", quietly = TRUE)
+#' library(sf)
+#' set.seed(2)
+#' n <- 200
+#' train <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              a = rnorm(n), b = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632)
+#' train$z <- train$a - train$b + rnorm(n, 0, 0.3)
+#' # Prediction locations whose predictor `a` drifts beyond the training range.
+#' new <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(100, 0, 1000), y = 5e6 + runif(100, 0, 1000),
+#'              a = rnorm(100, mean = 2), b = rnorm(100)),
+#'   coords = c("x", "y"), crs = 32632)
+#' aoa <- area_of_applicability(new, train_sf = train, predictor_vars = c("a", "b"))
+#' plot(aoa)                     # the two ECDFs
+#' plot(aoa, type = "histogram")
 #' @export
 plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
   .need_ggplot("plot.aoa()")
@@ -447,12 +447,11 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
 #'
 #' \code{\link{cv_bayes}()} scores every fold's posterior predictive intervals
 #' at each of \code{coverage_levels}: the share of held-out observations the
-#' interval of that nominal level contained.  One coverage number cannot show
-#' a pattern; the pairs can.  This draws observed coverage against nominal
-#' with the diagonal, one point per level for the fold-weighted pooled value
-#' (from \code{predictive_coverage}) and one faint point per fold, so
-#' systematic over-confidence (points below the line) or intervals wider than
-#' they need to be (above it) are read at a glance.  Three levels is a thin
+#' interval of that nominal level contained.  This draws observed coverage
+#' against nominal with the diagonal, one point per level for the
+#' fold-weighted pooled value (from \code{predictive_coverage}) and one faint
+#' point per fold, so you can see systematic over-confidence (points below
+#' the line) or intervals wider than they need to be (above it).  Three levels is a thin
 #' curve; pass \code{coverage_levels = seq(0.1, 0.9, by = 0.1)} to
 #' \code{cv_bayes()} for a full one.  Each level is drawn at the nominal value
 #' \code{cv_bayes()} records in \code{coverage_levels}, so whatever was
@@ -461,9 +460,10 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
 #' @param cv The list returned by \code{\link{cv_bayes}()}, or a
 #'   \code{\link{compare_models_cv}()} result that ran the Bayesian backend
 #'   (its \code{$bayes_cv} is used).
-#' @param ... Ignored.
+#' @param ... Not used.
 #' @return A \code{ggplot} object.
-#' @family plotting
+#' @seealso \code{\link{cv_bayes}()}, which makes the result.
+#' @family cross-validation
 #' @examples
 #' \dontrun{
 #' # Needs brms and a Stan toolchain, and takes minutes: run it, do not check it.
@@ -676,7 +676,7 @@ plot_calibration <- function(cv, ...) {
 #' The criteria of a \code{\link{resolution_profile}()} against the number of
 #' cells, one panel per criterion on a shared x axis, with the level each
 #' criterion selects marked and the region over which it is within \code{tol}
-#' of its optimum shaded.  That shaded band is the flat region
+#' of its optimum shaded.  The shading marks the flat region
 #' \code{\link{select_resolution}()} reports.  A criterion whose optimum sits
 #' at an end of the levels it was scored at is captioned with which bound that
 #' is (the support ceiling, the range floor, the ladder's own end, or the
@@ -704,26 +704,25 @@ plot_calibration <- function(cv, ...) {
 #'   \code{\link{select_resolution}()}), and \code{"wss"} is the raw curve
 #'   behind \code{"elbow"}: both are drawn as curves with no selected point.
 #' @param tol Passed to \code{\link{select_resolution}()} for the flat region.
-#' @param ... Ignored.
+#' @param ... Not used.
 #' @return A \code{ggplot} object.
-#' @family plotting
-#' @examples
-#' if (requireNamespace("gstat", quietly = TRUE) &&
-#'     requireNamespace("ggplot2", quietly = TRUE)) {
-#'   library(sf)
-#'   # The same field as ?resolution_profile: an exponential covariance with
-#'   # range parameter 200 and a nugget of 0.6 on a unit sill.
-#'   set.seed(4)
-#'   n <- 400
-#'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-#'   D  <- as.matrix(dist(xy))
-#'   xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
-#'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-#'   prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
-#'   print(plot(prof))                     # one panel per criterion it scored: no
-#'                                         # elbow on these uniform points
-#'   plot(prof, criteria = c("cp", "wss")) # Cp beside the raw WSS curve
-#' }
+#' @seealso \code{\link{resolution_profile}()}, which makes the object, and
+#'   \code{\link{select_resolution}()}.
+#' @family resolution
+#' @examplesIf requireNamespace("gstat", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)
+#' library(sf)
+#' # The same field as ?resolution_profile: an exponential covariance with
+#' # range parameter 200 and a nugget of 0.6 on a unit sill.
+#' set.seed(4)
+#' n <- 400
+#' xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+#' D  <- as.matrix(dist(xy))
+#' xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
+#' pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+#' prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
+#' # Two of the criteria it scored (plot(prof) draws every one, a panel each)
+#' plot(prof, criteria = c("cp", "reliability"))
+#' plot(prof, criteria = c("cp", "wss")) # Cp beside the raw WSS curve
 #' @export
 plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
   .need_ggplot("plot.resolution_profile()")
@@ -773,7 +772,7 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
               reliability = "Reliability of cell means (higher is better)",
               elbow = "WSS elbow statistic (higher is better)",
               loo = "Leave-one-out error (lower is better)",
-              moran_z = "|Moran's z| of cell means (a diagnostic, not a count rule)",
+              moran_z = "Absolute Moran's z of cell means (a diagnostic, not a count rule)",
               wss = "Within-cluster sum of squares")
   rows <- list(); chosen <- list(); flat <- list(); notes <- character(0)
   skipped <- character(0)
@@ -843,10 +842,51 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
   # One point has no line through it: ggplot2 draws nothing for one and says
   # so, once a panel, each time the plot is printed.  Every other profile, a
   # one-level profile on another ladder included, keeps its line layer.
-  .plot_sweep(df, chosen = do.call(rbind, chosen), flat = do.call(rbind, flat),
-              title = "Resolution profile", subtitle = subtitle, caption = caption,
-              x_lab = "Number of cells", y_lab = NULL, log_x = log_x,
-              connect = !one_size)
+  p <- .plot_sweep(df, chosen = do.call(rbind, chosen), flat = do.call(rbind, flat),
+                   title = "Resolution profile", subtitle = subtitle, caption = caption,
+                   x_lab = "Number of cells", y_lab = NULL, log_x = log_x,
+                   connect = !one_size)
+  # Several panels share the figure's height, so each gets few y breaks, and
+  # large values (the WSS curve) get short labels rather than "4e+07".
+  p + ggplot2::scale_y_continuous(breaks = .few_breaks, labels = .short_number)
+}
+
+
+#' At most three axis breaks inside a panel's limits
+#'
+#' @param lims The panel's y limits.
+#' @return Numeric breaks.
+#' @keywords internal
+#' @noRd
+.few_breaks <- function(lims) {
+  b <- pretty(lims, n = 2L)
+  b[b >= min(lims) & b <= max(lims)]
+}
+
+
+#' Short axis labels for large numbers
+#'
+#' The breaks of one axis are formatted together, so they share one unit
+#' and one number of decimals ("1.0" beside "1.2").
+#'
+#' @param x Numeric axis breaks.
+#' @return Character labels: when the largest break is 10,000 or more, all
+#'   in thousands (k), millions (M) or billions (B) to three significant
+#'   digits, with a zero as "0"; otherwise to four significant digits.
+#' @keywords internal
+#' @noRd
+.short_number <- function(x) {
+  out <- rep(NA_character_, length(x))
+  ok <- is.finite(x)
+  if (!any(ok)) return(out)
+  a <- max(abs(x[ok]))
+  unit <- if (a >= 1e9) c(1e9, "B") else if (a >= 1e6) c(1e6, "M")
+          else if (a >= 1e4) c(1e3, "k") else c(1, "")
+  v <- signif(x[ok] / as.numeric(unit[1]), if (unit[2] == "") 4L else 3L)
+  lab <- format(v, trim = TRUE, scientific = FALSE, drop0trailing = FALSE)
+  if (unit[2] != "") lab <- ifelse(v == 0, "0", paste0(lab, unit[2]))
+  out[ok] <- lab
+  out
 }
 
 
@@ -856,14 +896,15 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
 #' step and keeps the best; its \code{history} holds all of them.  This draws
 #' the accepted variable's score at each step as the path, every other
 #' candidate's score at that step as a faint point, and the step at which the
-#' selection stopped in red.  When it stopped because no candidate cleared
-#' \code{tol}, the path runs one step further to the best of the rejected
-#' candidates, drawn hollow and labelled "not added", so the stop reads as a
-#' flattening rather than a cut.  The picture then says whether the last variable
-#' was a clear gain or the first that happened to clear \code{tol}, and
-#' whether the runner-up would have done as well.  The scores are the
-#' selection's own cross-validated criterion, optimistically biased by the
-#' selection (see the help page's section on that); when a hold-out score
+#' selection stopped in red.  When it stopped because no candidate passed
+#' the acceptance rule (\code{rule} in \code{\link{select_features_forward}()}),
+#' the path runs one step further to the best of the rejected candidates,
+#' drawn hollow and labelled "not added", so the stop reads as a flattening
+#' rather than a cut.  The picture then shows whether the last variable was a
+#' clear gain or a marginal one, and whether the runner-up would have done as
+#' well.  The scores are the selection's own cross-validated criterion,
+#' optimistically biased by the selection (see "Selection score" in
+#' \code{\link{select_features_forward}()}); when a hold-out score
 #' was computed (\code{select_on = "split"}) it is drawn as a separate mark
 #' at the final step and named in the caption.
 #'
@@ -874,26 +915,24 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
 #' the red mark is the selected set, scored without it.
 #'
 #' @param x The list returned by \code{\link{select_features_forward}()}.
-#' @param ... Ignored.
+#' @param ... Not used.
 #' @return A \code{ggplot} object.
-#' @family plotting
-#' @examples
-#' if (requireNamespace("ranger", quietly = TRUE) &&
-#'     requireNamespace("ggplot2", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(4)
-#'   n <- 150
-#'   dat <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-#'                a = rnorm(n), b = rnorm(n), c = rnorm(n)),
-#'     coords = c("x", "y"), crs = 32632)
-#'   dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
-#'   fit_fn <- function(train_sf, vars)
-#'     fit_rf_model(train_sf, "z", vars, num_trees = 80, seed = 1)
-#'   sel <- select_features_forward(dat, "z", c("a", "b", "c"), fit_fn = fit_fn,
-#'                                  k = 3, quiet = TRUE)
-#'   plot(sel)
-#' }
+#' @seealso \code{\link{select_features_forward}()}, which makes the object.
+#' @family predictor selection
+#' @examplesIf requireNamespace("ranger", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)
+#' library(sf)
+#' set.seed(4)
+#' n <- 150
+#' dat <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              a = rnorm(n), b = rnorm(n), c = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632)
+#' dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
+#' fit_fn <- function(train_sf, vars)
+#'   fit_rf_model(train_sf, "z", vars, num_trees = 80, seed = 1)
+#' sel <- select_features_forward(dat, "z", c("a", "b", "c"), fit_fn = fit_fn,
+#'                                k = 3, quiet = TRUE)
+#' plot(sel)
 #' @export
 plot.feature_selection <- function(x, ...) {
   .need_ggplot("plot.feature_selection()")
@@ -919,11 +958,11 @@ plot.feature_selection <- function(x, ...) {
   n_walk <- length(walked)
 
   # The accepted variable at step s is walked[s]; the path runs through
-  # its score.  Steps past n_sel were scored and rejected (nothing cleared
-  # tol), and their best candidate is drawn as part of the path too, so the
-  # stop is visible as a flattening rather than as a cut -- but hollow and
-  # labelled "not added": drawn and named like the others, a candidate that
-  # improved the score by less than tol read as a variable in the model.
+  # its score.  Steps past n_sel were scored and rejected (no candidate
+  # passed the acceptance rule), and their best candidate is drawn as part
+  # of the path too, so the stop is visible as a flattening rather than as a
+  # cut, but hollow and labelled "not added": drawn and named like the
+  # others, a rejected candidate would read as a variable in the model.
   h$role  <- "candidate"
   h$label <- ""
   path_rows <- integer(0)
@@ -977,7 +1016,10 @@ plot.feature_selection <- function(x, ...) {
                                       format(x$params$k %||% "k")),
                    caption = caption, x_lab = "Step (variables in the model)",
                    y_lab = metric) +
-    ggplot2::scale_x_continuous(breaks = sort(unique(df$x)))
+    # Room on the right for the label of the last step, which sits on the
+    # panel's edge.
+    ggplot2::scale_x_continuous(breaks = sort(unique(df$x)),
+                                expand = ggplot2::expansion(add = c(0.3, 0.8)))
   if (is.finite(holdout) && n_sel > 0L)
     p <- p + ggplot2::geom_point(data = data.frame(x = n_sel, y = holdout),
                                  ggplot2::aes(x = .data$x, y = .data$y),
@@ -991,32 +1033,29 @@ plot.feature_selection <- function(x, ...) {
 #' \code{\link{gwr_model_selection}()} ranks every model it evaluated on
 #' AICc.  This draws each model's criterion against its number of
 #' predictors, the winner in red, so the gap between the best model and the
-#' runners-up (which the ranked table shows only as numbers) is read
-#' as a shape: a winner well below the rest was chosen by the data, a
-#' winner a fraction of an AICc unit ahead of three others was chosen by the
-#' tie-break.  The criterion is in-sample and the caption carries the label
-#' \code{gwr_model_selection()} attached to it, including any note saying it
-#' was read positionally.
+#' runners-up (which the ranked table shows only as numbers) is read as a
+#' shape.  A winner well below the rest is preferred; one within 2
+#' AICc units of others is not separated from them (see "Printing" in
+#' \code{\link{gwr_model_selection}()}).  The criterion is in-sample, and the
+#' caption says so.
 #'
 #' @param x A \code{gwr_model_selection} object.
-#' @param ... Ignored.
+#' @param ... Not used.
 #' @return A \code{ggplot} object.
-#' @family plotting
-#' @examples
-#' if (requireNamespace("sp", quietly = TRUE) &&
-#'     requireNamespace("ggplot2", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   n <- 80
-#'   dat <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-#'                a = rnorm(n), b = rnorm(n), noise = rnorm(n)),
-#'     coords = c("x", "y"), crs = 32632)
-#'   dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
-#'   sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 30)
-#'   # Every model tried, AICc against its size; the winner (a and b) marked.
-#'   plot(sel)
-#' }
+#' @seealso \code{\link{gwr_model_selection}()}, which makes the object.
+#' @family predictor selection
+#' @examplesIf requireNamespace("sp", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' n <- 80
+#' dat <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              a = rnorm(n), b = rnorm(n), noise = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632)
+#' dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
+#' sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 30)
+#' # Every model tried, AICc against its size; the winner (a and b) marked.
+#' plot(sel)
 #' @export
 plot.gwr_model_selection <- function(x, ...) {
   .need_ggplot("plot.gwr_model_selection()")
@@ -1050,10 +1089,14 @@ plot.gwr_model_selection <- function(x, ...) {
   gap <- if (n_finite >= 2L) sort(v[ok])[2L] - min(v[ok]) else NA_real_
   .plot_sweep(df, chosen = chosen,
               title = "GWR model selection",
+              # Two lines, so the gap the subtitle exists to show is not
+              # cut off at the figure's edge.
               subtitle = sprintf("%d models evaluated at bandwidth %s (%s)%s",
                                  nrow(tab), format(signif(x$bandwidth, 4)),
                                  if (isTRUE(x$adaptive)) "adaptive" else "fixed",
-                                 if (is.finite(gap)) sprintf("; the winner leads the runner-up by %.2f", gap) else ""),
+                                 if (is.finite(gap))
+                                   sprintf("\nThe winner leads the runner-up by %.2f", gap)
+                                 else ""),
               caption = paste0("Criterion: ", crit_label, " (in-sample; lower is better). ",
                                "Line: the best model of each size."),
               x_lab = "Number of predictors", y_lab = crit_label) +

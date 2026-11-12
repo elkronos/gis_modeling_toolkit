@@ -2,14 +2,14 @@
 % Please edit documentation in R/model-classes.R
 \name{summary.spatial_fit}
 \alias{summary.spatial_fit}
-\title{Summarise a fitted spatial model}
+\title{Summarise a fitted model}
 \usage{
 \method{summary}{spatial_fit}(object, ...)
 }
 \arguments{
 \item{object}{A \code{spatial_fit} object.}
 
-\item{...}{Ignored.}
+\item{...}{Not used.}
 }
 \value{
 An object of class \code{summary.spatial_fit}: a list with
@@ -19,79 +19,62 @@ data.frame, out-of-bag for an \code{rf_fit}).
 }
 \description{
 Computes goodness-of-fit metrics from \code{fitted(object)} against the
-observed response.  A non-numeric response is an error: a character or
-factor response cannot be scored, and used to come back as \code{n = 0} with
-every metric \code{NA}; a logical response is treated as 0/1.
+observed response, and prints them with what they are to be read
+against.  A character or factor response is an error; a logical response
+is scored as 0/1.
 }
 \section{What the metrics are computed on}{
 
-For a \code{gwr_fit} or a \code{bayesian_fit} these are \strong{in-sample}
-metrics: \code{fitted()} returns values computed at the training locations
-from the model that saw them.  For an \code{rf_fit} they are
-\strong{out-of-bag}, because \code{fitted.rf_fit()} returns out-of-bag
-predictions in place of in-sample ones (see \code{\link{fit_rf_model}}).
-The two are not comparable, and \code{print()} on the result labels which
-one it is holding, driven by \code{$info$fitted_are_oob}.  Use
-\code{\link{compare_models_cv}} to compare backends.
+For a GWR or a Bayesian GP fit these are in-sample metrics:
+\code{fitted()} returns values computed at the training locations from
+the model that saw them.  For a random forest they are out-of-bag,
+because \code{fitted()} on an \code{rf_fit} returns out-of-bag
+predictions (see \code{\link{fit_rf_model}()}).  The two are not
+comparable, and \code{print()} on the result says which one it holds,
+from \code{$info$fitted_are_oob}.  Use \code{\link{compare_models_cv}()} to
+compare backends.
 
-Adjusted R-squared is suppressed: GWR's effective parameter count far
-exceeds the global predictor count, and a GP model has no simple \code{p}.
+Adjusted \eqn{R^2} is not computed: a GWR's effective number of
+parameters far exceeds the global predictor count, and a GP model has no
+simple \code{p}.
 
-For a \code{gwr_fit}, \code{print()} on the result adds what the
-in-sample metrics are to be read against: the effective number of
-parameters and residual degrees of freedom, the number of local windows
-of deficient rank, the number of locations when observations share one,
-and the AICc and RMSE of one global least-squares
-regression on the same rows beside the fit's own AICc
-(\code{$info$global_ols}; see \code{\link{fit_gwr_model}}).
+For a GWR, \code{print()} on the result adds what the in-sample metrics
+are to be read against: the effective number of parameters and residual
+degrees of freedom, the number of local windows of deficient rank, the
+number of locations when observations share one, and the AICc and RMSE of
+one global least-squares regression on the same rows beside the fit's own
+AICc (\code{$info$global_ols}; see \code{\link{fit_gwr_model}()}).
+
+\code{MAPE} and \code{SMAPE} skip rows whose denominator is zero;
+\code{n_MAPE} and \code{n_SMAPE} count the rows they used (see
+"Percentage errors on responses with zeros" in
+\code{\link{model_metrics}()}).
 }
 
-\section{Percentage errors on responses with zeros}{
-
-\code{MAPE} divides by the observed value and \code{SMAPE} by
-\eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
-Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
-whose denominator is non-zero, and are \code{NA} when no row qualifies.
-Non-zero is judged at the scale of the data: a denominator no larger
-than 100 machine epsilons times the largest one counts as zero, so the
-rule does not depend on the units of the response.
-The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
-the \code{n} column counts finite observation/prediction pairs.  Read a
-percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
-an average over a subset of the data, whatever its value.
-
-This bites on any response taking exact zeros: counts, rainfall,
-abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
-120, \code{MAPE} is an average over the 58 non-zero rows, which
-\code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
-subtly: it drops the rows where observation and prediction are both near
-zero (which on a well-fitted zero-inflated model are the rows it got
-\emph{right}), so it averages the harder rows only and reads worse than
-the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
-count is only a label, not a repair.
-
-\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row and are
-unaffected; prefer them whenever the response can be zero.  For a Bayesian
-fit, \code{\link{cv_bayes}()} additionally reports CRPS and interval
-coverage, which are proper scoring rules and have no such failure mode.
+\examples{
+\dontshow{if (requireNamespace("ranger", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+set.seed(1)
+pts <- st_as_sf(
+  data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+             a = rnorm(60)),
+  coords = c("x", "y"), crs = 32632
+)
+pts$z <- 10 + 2 * pts$a + rnorm(60, 0, 0.3)
+fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
+summary(fit)            # out-of-bag metrics for a forest
+\dontshow{\}) # examplesIf}
 }
-
 \seealso{
-Other methods on a fitted model:
-\code{\link[=coef.bayesian_fit]{coef.bayesian_fit()}},
-\code{\link[=coef.gwr_fit]{coef.gwr_fit()}},
-\code{\link[=coef.rf_fit]{coef.rf_fit()}},
-\code{\link[=fitted.bayesian_fit]{fitted.bayesian_fit()}},
-\code{\link[=fitted.gwr_fit]{fitted.gwr_fit()}},
-\code{\link[=fitted.rf_fit]{fitted.rf_fit()}},
-\code{\link[=model_metrics]{model_metrics()}},
-\code{\link[=predict.bayesian_fit]{predict.bayesian_fit()}},
-\code{\link[=predict.gwr_fit]{predict.gwr_fit()}},
-\code{\link[=predict.rf_fit]{predict.rf_fit()}},
-\code{\link[=print.rf_fit]{print.rf_fit()}},
+\code{\link{model_metrics}()} for the metrics alone, and on new
+data.
+
+Other fit methods:
+\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
 \code{\link[=print.spatial_fit]{print.spatial_fit()}},
-\code{\link[=residuals.bayesian_fit]{residuals.bayesian_fit()}},
-\code{\link[=residuals.gwr_fit]{residuals.gwr_fit()}},
-\code{\link[=residuals.rf_fit]{residuals.rf_fit()}}
+\code{\link{spatial_fit-coef}},
+\code{\link{spatial_fit-fitted}},
+\code{\link{spatial_fit-predict}},
+\code{\link{spatial_fit-residuals}}
 }
-\concept{methods on a fitted model}
+\concept{fit methods}

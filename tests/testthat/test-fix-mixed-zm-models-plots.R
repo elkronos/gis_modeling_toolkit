@@ -733,18 +733,18 @@ test_that("the help says these layers are read in x and y", {
   expect_match(aoa, "When location is measured it is read in x and y, as newdata is.",
                fixed = TRUE)
   ps <- page("predict_surface.Rd")
-  expect_match(ps, "The grid is read in x and y", fixed = TRUE)
+  expect_match(ps, "All three layers are read in x and y", fixed = TRUE)
   expect_match(ps, paste0("A POINT grid whose coordinates are not moved (one in the fit's ",
                           "CRS, or one without a CRS that is stamped with it) is returned ",
                           "with its rows as given, Z and M included"), fixed = TRUE)
   expect_match(page("kriging_adequacy.Rd"),
                paste0("Multipoints whose geometries carry M (XYM or XYZM) are reduced to ",
                       "points in x and y, since GEOS does not read M."), fixed = TRUE)
-  expect_match(ps, paste0("Read in x and y: a boundary whose geometries mix XY with XYZ ",
-                          "or XYM, or carry M, is read without its Z and M."), fixed = TRUE)
-  for (nm in c("predict.rf_fit.Rd", "predict.gwr_fit.Rd", "predict.bayesian_fit.Rd"))
-    expect_match(page(nm), paste0("A layer whose geometries ", mixed, " is read in x and y."),
-                 fixed = TRUE, info = nm)
+  expect_match(ps, paste0("All three layers are read in x and y: one whose geometries mix XY ",
+                          "with XYZ or XYM, or carry M (XYM or XYZM), is read without its Z and ",
+                          "M, with no warning for a boundary or covariates."), fixed = TRUE)
+  expect_match(page("spatial_fit-predict.Rd"),
+               "A layer that mixes XY with XYZ or XYM geometries is read in x and y.", fixed = TRUE)
   expect_match(page("plot_tessellation_map.Rd"),
                paste0("Every layer is drawn in x and y: a layer whose geometries ", mixed,
                       " is drawn without its Z and M. The labels are placed in x and y, ",
@@ -754,12 +754,20 @@ test_that("the help says these layers are read in x and y", {
                "The maps are drawn in x and y: a data_sf whose geometries mix XY with XYZ or XYM",
                fixed = TRUE)
   expect_match(page("residual_morans_i.Rd"),
-               "or carry M (XYM or XYZM), is read in x and y, with no warning.", fixed = TRUE)
+               "or carry M (XYM or XYZM), is read in x and y, with no warning (see spatialkit-geometry).",
+               fixed = TRUE)
   expect_match(page("coerce_to_points.Rd"), "GEOS does not read M coordinates.", fixed = TRUE)
   expect_match(page("compare_models_cv.Rd"),
-               "or carry M (XYM or XYZM), is read in x and y.", fixed = TRUE)
+               paste0("When the folds are built here, a feature that is not a point is reduced to ",
+                      "one, and the layer is read in x and y (see spatialkit-geometry)."),
+               fixed = TRUE)
   expect_match(page("select_features_forward.Rd"),
-               "or carry M (XYM or XYZM), is read in x and y.", fixed = TRUE)
+               paste0("With select_on = \"split\" a feature that is not a point is reduced to one, ",
+                      "and the layer is read in x and y (see spatialkit-geometry)."), fixed = TRUE)
+  # The two pages above link here for the rule on mixed dimensions and M.
+  expect_match(page("spatialkit-geometry.Rd"),
+               paste0("is read in x and y when it mixes dimensions or its geometries carry M ",
+                      "(XYM or XYZM)."), fixed = TRUE)
   expect_match(page("cell_values_at.Rd"),
                "whose geometries carry M (XYM or XYZM), which GEOS does not read.", fixed = TRUE)
   sbc <- page("summarize_by_cell.Rd")

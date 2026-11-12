@@ -187,7 +187,7 @@ test_that("with s2 off and no lwgeom, lon/lat cells are refused as before", {
   expect_false(sf::sf_use_s2())
 })
 
-test_that("the help and NEWS say what lon/lat cells s2 refuses get", {
+test_that("the help says what lon/lat cells s2 refuses get", {
   root <- testthat::test_path("..", "..")
   if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
     skip("the help's source is not here to read")
@@ -199,10 +199,8 @@ test_that("the help and NEWS say what lon/lat cells s2 refuses get", {
   expect_match(rd, paste0("Every cell's area is taken before any summary, and when s2 refuses a ",
                           "cell that is not valid on the sphere"), fixed = TRUE)
   expect_no_match(rd, "distortion check passes by construction; with s2 switched off", fixed = TRUE)
-  cv <- read("man", "create_voronoi_polygons.Rd")
-  expect_match(cv, "with \\code{area = TRUE}, which takes the areas of such cells, stops with the same error before any summary.",
-               fixed = TRUE)
-  news <- read("NEWS.md")
-  expect_match(news, paste0("`summarize_by_cell(area = TRUE)` stopped without the cause on lon/lat ",
-                            "cells that s2 refuses."), fixed = TRUE)
+  # With area = TRUE such cells stop the request before any summary, with the cause.
+  expect_match(rd, paste0("the request stops with an error of class ",
+                          "\\code{\"spatialkit_cells_degenerate\"} that gives the rows of ",
+                          "\\code{cells_sf} s2 refuses"), fixed = TRUE)
 })

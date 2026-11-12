@@ -451,7 +451,7 @@ test_that("the divergence advice prints adapt_delta as set whatever options(digi
                "raise adapt_delta in `control` (now 0.995)", fixed = TRUE)
 })
 
-test_that("the help and NEWS state the default control as it was measured", {
+test_that("the help and NEWS state the default control", {
   root <- testthat::test_path("..", "..")
   flat <- function(x)
     paste(unlist(lapply(x, function(el) if (is.character(el)) el else flat(el))), collapse = "")
@@ -460,20 +460,18 @@ test_that("the help and NEWS state the default control as it was measured", {
         else tools::Rd_db("spatialkit")[["fit_bayesian_spatial_model.Rd"]]
   rd <- gsub("[[:space:]]+", " ", flat(db))
   says <- function(text, x) expect_true(grepl(x, text, fixed = TRUE), info = x)
+  # The help gives the reason for 0.99 and its cost in time.
+  says(rd, paste0("adapt_delta defaults to 0.99, not Stan's 0.8, because one divergent ",
+                  "transition sets convergence_ok to FALSE"))
+  says(rd, paste0("A lower value, such as list(adapt_delta = 0.9), runs faster, since the ",
+                  "smaller step of 0.99 costs sampling time."))
   # At 0.9 three of the seven fits whose divergent draws were located had
   # them in the middle of the GP's standard deviation and length-scales, so
   # the help does not say they sit in the upper tail.
-  says(rd, paste0("at 0.95 and 0.975 some fits still had one or more. The smaller step ",
-                  "costs time: sampling took about twice as long as at 0.9 (1.3 to 2.7 times)."))
   expect_false(grepl("upper tail", rd, fixed = TRUE))
-  says(rd, paste0("Some can remain at 0.99 too, for example on a layer whose spatial field ",
-                  "is weak against the noise; then raise it to 0.995 or 0.999, which took ",
-                  "three to four and a half times the sampling time of 0.9 on the four layers."))
-  # The R-hat figures of check_convergence come from fits at the earlier
-  # settings, and the help says so.
-  says(rd, paste0("four fits at the default four chains of 2,000 iterations, with ",
-                  "adapt_delta at 0.9 or 0.95, had largest values of 1.005, 1.009, 1.009 ",
-                  "and 1.011"))
+  says(rd, paste0("Some divergent transitions can remain at 0.99 too, for example on a layer ",
+                  "whose spatial field is weak against the noise; then raise it to 0.995 or ",
+                  "0.999, which costs more time again."))
 
   news_file <- file.path(root, "NEWS.md")
   if (!file.exists(news_file)) news_file <- system.file("NEWS.md", package = "spatialkit")
@@ -482,15 +480,13 @@ test_that("the help and NEWS state the default control as it was measured", {
   top <- grep("^# ", lines)
   dev <- lines[seq.int(top[1L], top[2L] - 1L)]
   brk <- dev[seq.int(grep("^## Breaking changes", dev), grep("^## New features", dev) - 1L)]
+  # Breaking changes holds one entry for the new default.
   starts <- grep("^\\* ", brk)
-  at <- grep("samples at `adapt_delta = 0.99` by default", brk, fixed = TRUE)
-  expect_length(at, 1L)
-  i <- max(starts[starts <= at])
-  j <- min(c(starts[starts > i], length(brk) + 1L)) - 1L
-  entry <- gsub("[[:space:]]+", " ", paste(brk[i:j], collapse = " "))
-  # Sampling at 0.99 took 1.3 to 2.7 times as long on the four layers the
-  # default was chosen on, and 2.3 to 3.1 times on others.
-  says(entry, "Sampling takes about two to three times as long")
-  expect_false(grepl("about twice", entry, fixed = TRUE))
-  says(entry, "`control = list(adapt_delta = 0.9)` restores the previous setting.")
+  entries <- vapply(seq_along(starts), function(k) {
+    j <- c(starts[-1L] - 1L, length(brk))[k]
+    gsub("[[:space:]]+", " ", paste(brk[starts[k]:j], collapse = " "))
+  }, character(1))
+  hit <- grepl("`fit_bayesian_spatial_model()`", entries, fixed = TRUE) &
+         grepl("`adapt_delta = 0.99`", entries, fixed = TRUE)
+  expect_equal(sum(hit), 1L)
 })

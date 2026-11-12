@@ -2,7 +2,7 @@
 % Please edit documentation in R/stable-ids-cache.R
 \name{ensure_stable_poly_id}
 \alias{ensure_stable_poly_id}
-\title{Create deterministic, stable polygon IDs based on spatial sort keys}
+\title{Give cells IDs that follow their position}
 \usage{
 ensure_stable_poly_id(
   polygons_sf,
@@ -18,9 +18,13 @@ Polygons that mix XY and XYZ (or XYM) geometries are keyed without Z
 and M, since sf reads a layer in the dimension of its first geometry
 (see \code{make_valid} for the rows returned).}
 
-\item{id_col}{Character scalar; name of the identifier column.}
+\item{id_col}{Name of the ID column to write. Default \code{"poly_id"}. An
+existing column of that name is replaced.}
 
-\item{method}{One of "centroid", "surface_point", "bbox_center".}
+\item{method}{The point each polygon is sorted by: \code{"centroid"}
+(default), \code{"surface_point"} (a point inside the polygon,
+\code{\link[sf:st_point_on_surface]{sf::st_point_on_surface()}}) or \code{"bbox_center"} (the centre of its
+bounding box).}
 
 \item{make_valid}{Logical; apply st_make_valid() first. Default TRUE.
 The copy the sort key is measured on is repaired as well, after it has
@@ -61,13 +65,11 @@ as failed in the same way: the whole layer is sorted in its own CRS, and
 the log says so. In a geographic CRS the
 sort key is rounded to 7 decimal degrees (about 1 cm) before ordering, so
 the floating-point noise of a round trip through a different projection
-does not usually reverse two neighbouring cells. It can where two cells'
+does not reverse two neighbouring cells, except where two cells'
 centres lie within about that step of the same longitude, as fine cells
-stacked north-south near a projection's central meridian do: 36 of 2,500
-100 m cells straddling a UTM central meridian changed ID after a
-transform to EPSG:3035. No rounding step removes that, so to match cells
-computed in different projections, join them on geometry rather than on
-the ID. The key is computed on the sphere (s2) whether or not
+stacked north-south near a projection's central meridian do. No
+rounding step removes that, so to match cells computed in different
+projections, join them on geometry rather than on the ID. The key is computed on the sphere (s2) whether or not
 \code{sf::sf_use_s2()} is on, so the session setting does not change the
 IDs. Set to NULL to sort in the input CRS, which gives IDs that are
 reproducible but not comparable across projections.
@@ -83,15 +85,19 @@ units out are then not ordered by the last bits of their centres, which
 doubles do not hold there, and take the order they have at the origin.}
 }
 \value{
-An sf polygon layer re-ordered with sequential IDs in id_col.
-Non-polygonal rows are \strong{dropped} (with a warning), so the result can
+An sf polygon layer re-ordered, with sequential IDs in \code{id_col}.
+Non-polygonal rows are dropped (with a warning), so the result can
 have fewer rows than the input; if no polygonal rows remain, an error is
 raised.
 }
 \description{
-Ensures that a polygon layer has a reproducible, deterministic identifier
-column by sorting features using representative point coordinates (and
-secondary tie-breakers) and then assigning sequential IDs.
+Numbers the polygons of a layer from west to east, and from south to
+north among polygons at the same longitude, by a representative point of
+each (its centroid by default) taken by default in EPSG:4326
+(\code{transform_for_sort}); ties go to the smaller area. The same polygons get
+the same IDs whatever their row order or projection, except as
+\code{transform_for_sort} says, so use it before joining summaries made from
+different runs.
 }
 \details{
 A feature that is valid in its own CRS is not always one s2 can measure.
@@ -99,9 +105,7 @@ Only the vertices are transformed to the sort CRS, and on the sphere they
 are joined by great-circle arcs, so a long edge that is straight in the
 layer's CRS and passes about a metre from another vertex of the same ring
 can end up on the other side of that vertex. The ring then crosses itself,
-and s2 refuses it (1 of 291 Voronoi cells of Texas clipped to the state
-outline in EPSG:5070; "Loop 1 is not valid: Edge 36 crosses edge 52"). The
-repair of the sort copy does not split crossing edges, so a feature s2
+and s2 refuses it. The repair of the sort copy does not split crossing edges, so a feature s2
 still refuses is handled on its own. Its sort copy is repaired a second
 time with the crossing edges split. If s2 refuses that as well, or with
 \code{make_valid = FALSE}, which asks for no repair, the feature's
@@ -111,15 +115,10 @@ and the centroid is transformed to the sort CRS. With the methods
 because those points are not taken with s2.
 
 The function warns once, saying how many features took each route. Their
-keys are close to the spherical ones and not equal to them. The second
-repair moved the Texas cell's area by about 40 square metres in 2,949
-square kilometres. Its centroid taken in the plane lay 20 m from the one
-the second repair gave on the sphere, and the two kinds of centroid lay
-5 m apart at the median and 61 m at most for the other 290 cells. A
-feature measured in the plane can therefore sort on the other side of a
-neighbour whose centre is that close to its own in longitude. Every other
-feature's key is unaffected, and the geometry returned is never the sort
-copy.
+keys are close to the spherical ones and not equal to them, so a feature
+measured in the plane can sort on the other side of a neighbour whose
+centre is nearly at its own longitude. Every other feature's key is
+unaffected, and the geometry returned is never the sort copy.
 
 A polygon of a layer in a geographic CRS with a vertex at a latitude
 beyond 90 degrees is no place on the Earth. It is keyed as an empty
@@ -133,7 +132,7 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
 g <- create_grid_polygons(bnd, target_cells = 9)
-# Reverse the rows and re-derive the IDs: the SAME cell gets the same ID,
+# Reverse the rows and re-derive the IDs: the same cell gets the same ID,
 # which is the property a row-position ID does not have.  The check joins
 # the two layers on geometry, because comparing sorted ID vectors would
 # pass for any two permutations of 1:9.
@@ -143,8 +142,9 @@ same_cell <- match(st_as_text(st_geometry(rev)), st_as_text(st_geometry(fwd)))
 all(rev$poly_id == fwd$poly_id[same_cell])
 }
 \seealso{
-Other tessellation:
+Other cell building:
 \code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=clip_target_for]{clip_target_for()}},
 \code{\link[=create_grid_polygons]{create_grid_polygons()}},
 \code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
 \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
@@ -153,4 +153,4 @@ Other tessellation:
 \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}},
 \code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
 }
-\concept{tessellation}
+\concept{cell building}

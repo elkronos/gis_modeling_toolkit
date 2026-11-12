@@ -312,10 +312,12 @@ test_that("plot_folds' subtitle describes the scheme that was built", {
   expect_match(sub(fr), "Random folds")
   expect_false(grepl("[Bb]lock", sub(fr)))
   fb <- make_folds(pts, k = 4, method = "block_kfold", block_size = 300, seed = 1)
-  expect_match(sub(fb), "Block size 300")
-  # The unit of the CRS the folds were built in, not its identifier
-  # ("EPSG:3857 units", or a whole WKT for a CRS with no EPSG code).
-  expect_match(sub(fb), "Block size 300 (metre)", fixed = TRUE)
+  # The blocks as built, and the block_size asked for, in the unit of the CRS
+  # the folds were built in, not its identifier ("EPSG:3857 units", or a
+  # whole WKT for a CRS with no EPSG code).
+  expect_match(sub(fb), sprintf("^Blocks %s x %s m, block_size 300\n",
+                                format(signif(fb$params$block_width, 3)),
+                                format(signif(fb$params$block_height, 3))))
   expect_false(grepl(as.character(fb$params$crs), sub(fb), fixed = TRUE))
   # Two lines: one long one is clipped at the width these are drawn at, and
   # neither line is long enough to clip on its own.
@@ -327,9 +329,132 @@ test_that("plot_folds' subtitle describes the scheme that was built", {
   expect_match(sub(fg), "3 x 3 block grid")
   fl <- suppressWarnings(make_folds(pts, k = nrow(pts), method = "buffered_loo",
                                     buffer = 150))
-  expect_match(sub(fl), "150 buffer")
+  expect_match(sub(fl), "Leave-one-out with a 150 m buffer", fixed = TRUE)
   pts$g <- rep(c("a", "b", "c"), length.out = nrow(pts))
   fo <- make_folds(pts, k = 3, method = "leave_location_out", group_var = "g",
                    seed = 1)
   expect_match(sub(fo), "3 groups of `g`")
+})
+
+test_that("plot_folds' subtitle gives the blocks built, never in scientific notation", {
+  skip_if_not_installed("ggplot2")
+  # Blocks of 400,000 US survey feet were subtitled "Block size 4e+05 (US
+  # survey foot)": the size asked for, in scientific notation, while the
+  # blocks drawn were larger.
+  set.seed(4)
+  ft <- sf::st_as_sf(data.frame(x = runif(80, 1e6, 3e6), y = runif(80, 5e5, 1e6)),
+                     coords = c("x", "y"), crs = 2264)
+  fb <- suppressWarnings(make_folds(ft, k = 4, method = "block_kfold",
+                                    block_size = 4e5, seed = 1))
+  sub <- strsplit(plot_folds(fb, ft)$labels$subtitle, "\n", fixed = TRUE)[[1]][1L]
+  expect_false(grepl("e+", sub, fixed = TRUE))
+  expect_match(sub, ", block_size 400,000$")
+  expect_match(sub, sprintf("^Blocks %s x %s US ft,",
+                            format(signif(fb$params$block_width, 3), big.mark = ",",
+                                   scientific = FALSE),
+                            format(signif(fb$params$block_height, 3), big.mark = ",",
+                                   scientific = FALSE)))
+  expect_true(fb$params$block_width >= 4e5)
+  # A grid set by its dimensions names the blocks it built as well.
+  pts <- surf_test_points(n = 100)
+  fg <- make_folds(pts, k = 4, method = "block_kfold", block_nx = 3, block_ny = 3,
+                   seed = 1)
+  expect_match(plot_folds(fg, pts)$labels$subtitle,
+               "^3 x 3 block grid of [0-9.]+ x [0-9.]+ m blocks\n")
+})
+
+test_that("the variogram labels give the unit in short form, the caption's ranges too", {
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("gstat")
+  # GDAL's singular name read "Effective range = 463.9 metre" and
+  # "Distance (metre)", and the caption's two ranges had no unit.
+  set.seed(3); n <- 250
+  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+  d <- as.matrix(dist(xy))
+  xy$z <- as.numeric(t(chol(exp(-d / 150) + diag(0.5, n))) %*% rnorm(n))
+  xy$elev <- rnorm(n); xy$price <- 2 * xy$elev + xy$z
+  pts <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  r <- estimate_sac_range(pts, "z")
+  skip_if_not(is.finite(r))
+  p <- plot(r)
+  expect_identical(p$labels$x, "Distance (m)")
+  expect_match(p$labels$subtitle, "^Effective range = [0-9.]+ m$")
+  # A layer with no CRS keeps "CRS units".
+  expect_identical(.crs_unit_short(NA_character_), NA_character_)
+  expect_identical(.crs_unit_short("EPSG:2264"), "US ft")
+  skip_if_not_installed("ranger")
+  fit <- fit_rf_model(pts, "price", "elev", num_trees = 50, seed = 1)
+  cap <- gsub("\n", " ", plot(fit, type = "variogram")$labels$caption)
+  if (grepl("effective ranges", cap, fixed = TRUE))
+    expect_match(cap, "effective ranges [0-9.]+ m \\(residuals\\) and [0-9.]+ m \\(response\\)")
+})
+
+test_that("the sweep's axis names the CRS's unit and its table fits 80 columns", {
+  skip_if_not_installed("ggplot2")
+  # The axis read "Block edge length (EPSG:32632, log scale)", and the printed
+  # table, with a method column and a long header, wrapped fold_max onto a
+  # block of its own.
+  sw <- data.frame(block_size = c(NA, 100, 200), method = c("random_kfold", "block_kfold",
+                                                           "block_kfold"),
+                   blocks_used = c(NA, 16L, 4L), k = 4L, n_folds_succeeded = 4L,
+                   value = c(1.0123, 1.1234, 1.2345), fold_min = c(0.9, 1, 1.1),
+                   fold_max = c(1.1333, 1.2444, 1.3555), fold_sd = 0.1,
+                   block_width = c(NA, 120, 240), block_height = c(NA, 125, 250))
+  class(sw) <- c("block_size_sweep", "data.frame")
+  attr(sw, "metric") <- "RMSE"; attr(sw, "sac_range") <- 150
+  attr(sw, "crs") <- "EPSG:32632"; attr(sw, "k") <- 4L; attr(sw, "n_fits") <- 12L
+  expect_identical(plot(sw)$labels$x, "Smallest block edge asked for (m, log scale)")
+  out <- utils::capture.output(print(sw))
+  expect_true(all(nchar(out) <= 80L))
+  head <- out[grepl("^ *block_size", out)]
+  expect_length(head, 1L)
+  expect_false(grepl("method", head, fixed = TRUE))
+  expect_match(head, "folds_ok", fixed = TRUE)
+  expect_match(head, "fold_max", fixed = TRUE)
+})
+
+
+test_that("print(<sac_range>) wraps the directional ranges within 80 columns", {
+  # On one line, with a refused direction among them, the directional ranges
+  # ran past 100 characters and scrolled sideways on a help page.
+  r <- structure(463.88531, class = "sac_range",
+                 directional = c(`0` = 248.16083, `45` = 413.73181,
+                                 `90` = NA, `135` = 426.58801),
+                 directional_status = c(`0` = "ok", `45` = "ok",
+                                        `90` = "over_cutoff", `135` = "ok"),
+                 directional_fitted = c(`0` = 248.16083, `45` = 413.73181,
+                                        `90` = 2617.96761, `135` = 426.58801),
+                 anisotropy = 1.719, crs = sf::st_crs(32632), detrended = FALSE)
+  out <- utils::capture.output(print(r))
+  expect_true(all(nchar(out) <= 80L))
+  dir <- paste(trimws(out[seq(grep("directional:", out, fixed = TRUE),
+                              grep("^  in ", out) - 1L)]), collapse = " ")
+  expect_identical(dir, paste("directional: 0 deg = 248.1608, 45 deg = 413.7318,",
+                              "90 deg = 2617.968 (past the fitted lags),",
+                              "135 deg = 426.588  (ratio 1.72)"))
+  # No anisotropy attribute: the line still prints, without a ratio.
+  attr(r, "anisotropy") <- NULL
+  expect_false(any(grepl("ratio", utils::capture.output(print(r)), fixed = TRUE)))
+})
+
+test_that("plot_folds draws its axes in the projected CRS of the map", {
+  skip_if_not_installed("ggplot2")
+  # The axes were a lon/lat graticule over UTM data, in degrees to the third
+  # decimal, while the subtitle and block_size are in metres.
+  set.seed(1)
+  pts <- sf::st_as_sf(data.frame(x = 5e5 + runif(80, 0, 1000),
+                                 y = 5e6 + runif(80, 0, 1000)),
+                      coords = c("x", "y"), crs = 32632)
+  f <- make_folds(pts, k = 5, method = "block_kfold", block_size = 300)
+  expect_true(sf::st_crs(plot_folds(f, pts)$coordinates$datum) == sf::st_crs(32632))
+  # Lon/lat points: the blocks, drawn first, are in the UTM CRS the folds
+  # were built in, and so is the graticule.
+  ll <- sf::st_transform(pts, 4326)
+  fl <- make_folds(ll, k = 5, method = "block_kfold", block_size = 300)
+  p <- plot_folds(fl, ll)
+  expect_true(sf::st_crs(p$coordinates$datum) == sf::st_crs(fl$params$blocks))
+  expect_silent(ggplot2::ggplot_build(p))
+  # A map in lon/lat keeps the default lon/lat graticule.
+  fr <- make_folds(ll, k = 5, method = "random_kfold", seed = 1)
+  expect_true(sf::st_is_longlat(plot_folds(fr, ll)$coordinates$datum))
 })

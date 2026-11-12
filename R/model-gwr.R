@@ -227,7 +227,7 @@
 #'
 #' A fit made by \code{fit_gwr_model()} carries its fitted values in
 #' \code{$fitted}, and those are returned.  For any other engine object
-#' (GWmodel's own, or one from an earlier version) four strategies follow, in
+#' (a GWmodel result) four strategies follow, in
 #' order:
 #'   1. Look for a direct prediction/fitted column in the SDF.
 #'   2. Reconstruct from local coefficients × design matrix.
@@ -408,14 +408,19 @@
 # Main GWR fitting function
 # -----------------------------------------------------------------------------
 
-#' Fit a Geographically Weighted Regression (GWR)
+#' Fit a geographically weighted regression (GWR)
 #'
-#' Fits a Gaussian GWR on an sf dataset with an adaptive or a fixed
-#' bandwidth.  The kernels, the bandwidth conventions and the diagnostics are
-#' those of the GWmodel package.  The local regressions are solved by this
-#' package, each as a weighted least squares by pivoted QR, so a window whose
-#' design is rank deficient neither stops the fit nor returns coefficients
-#' made of rounding error.
+#' Fits a Gaussian GWR on an sf layer with an adaptive or a fixed bandwidth.
+#' Each location gets its own regression, weighted towards nearby
+#' observations, so the coefficients can vary across the map.  Use it when
+#' that variation is the question; \code{\link{fit_bayesian_spatial_model}()}
+#' fits one global relationship plus a spatial random field.
+#'
+#' The kernels, the bandwidth conventions and the diagnostics are those of
+#' \pkg{GWmodel}.  This package solves the local regressions itself,
+#' each as a weighted least squares by pivoted QR, so a window whose design
+#' is rank deficient neither stops the fit nor returns coefficients made of
+#' rounding error.
 #'
 #' @param data_sf An sf object with response, predictors, and geometries.
 #' @param response_var Response column name.
@@ -431,7 +436,7 @@
 #'   bandwidth is a fixed distance in CRS units.
 #' @param bandwidth Optional numeric bandwidth value. For adaptive mode this
 #'   is an integer (number of neighbours); for fixed mode a distance in the
-#'   units of the **projected** CRS the fit runs in. \code{prep_model_data()}
+#'   units of the projected CRS the fit runs in.  \code{prep_model_data()}
 #'   projects geographic input before the bandwidth is used, so 0.2 supplied
 #'   for lon/lat data is 0.2 metres, not 0.2 degrees. Read the CRS off
 #'   \code{sf::st_crs(fit$data_sf)}, or pass \code{target_crs} to
@@ -452,25 +457,13 @@
 #'   A count above the number of
 #'   observations is capped at it, with a warning (a distance meant for
 #'   \code{adaptive = FALSE}, most often).
-#' @param kernel Kernel function type. One of "bisquare" (default),
-#'   "gaussian", "tricube", "boxcar", "exponential".  The boxcar gives weight
-#'   1 to every observation within the bandwidth's distance (with an adaptive
-#'   bandwidth, the distance to the \code{bandwidth}-th nearest neighbour)
-#'   and 0 to the others; an observation whose squared distance is within
-#'   one part in ten million of the edge counts as at the edge, and inside,
-#'   so on a regular grid every neighbour tied with the last one is in the
-#'   window in any unit and at any origin where the doubles hold the
-#'   coordinates to better than about one part in 1e8 of the distances
-#'   between neighbours.  Farther from the origin the doubles round the
-#'   coordinates more coarsely, and where a neighbour lies past the edge by
-#'   less than that rounding the call warns, with class
-#'   \code{"spatialkit_xy_imprecise"}; the windows are those the
-#'   coordinates as stored give.
-#' @param .already_prepped Logical (internal). If \code{TRUE}, skip the
-#'   \code{prep_model_data()} call because the caller has already projected,
-#'   coerced, and filtered the data.  Used by the CV internals to avoid a
-#'   redundant second pass on every fold.  End users should leave this at the
-#'   default \code{FALSE}.
+#' @param kernel Weighting kernel: one of \code{"bisquare"} (default),
+#'   \code{"gaussian"}, \code{"tricube"}, \code{"boxcar"} or
+#'   \code{"exponential"}.  The boxcar gives weight 1 within the bandwidth
+#'   (with an adaptive bandwidth, the distance to the \code{bandwidth}-th
+#'   nearest neighbour) and 0 beyond it; see "The local solve" for how a
+#'   neighbour at the edge is counted.
+#' @param .already_prepped Internal; leave at the default.
 #'
 #' @section The local solve:
 #' At every observation the model is a weighted least squares on the
@@ -482,6 +475,18 @@
 #' whole data and centred in the window, so nothing below depends on a
 #' predictor's origin or units: an indicator coded 0/1 and one coded
 #' 288.7/289.3 give the same fit.
+#'
+#' Under the boxcar kernel an observation whose squared distance is within
+#' one part in ten million of the window's edge counts as at the edge, and
+#' inside, so on a regular grid every neighbour tied with the last one is in
+#' the window in any unit and at any origin where the doubles hold the
+#' coordinates to better than about one part in 1e8 of the distances
+#' between neighbours.  Farther from the origin the doubles round the
+#' coordinates more coarsely, and where a neighbour lies past the edge by
+#' less than that rounding the call warns, with class
+#' \code{"spatialkit_xy_imprecise"} (see "Coordinates far from the origin"
+#' in \link{spatialkit-geometry}); the windows are those the coordinates as
+#' stored give.
 #'
 #' A predictor whose centre is more than 1000 times its spread (a timestamp
 #' in seconds, a northing, 1e8 plus a spread of 1) is taken less its centre
@@ -522,7 +527,7 @@
 #'
 #' One tolerance, \code{1e-7}, decides what a window can estimate:
 #' \itemize{
-#'   \item \strong{Rank.}  A predictor is aliased in a window when the part
+#'   \item Rank.  A predictor is aliased in a window when the part
 #'     of it that the terms entered before it do not explain varies there by
 #'     less than \code{1e-7} of its standard deviation over the study area
 #'     (the length of that part over the weighted rows).  A predictor that is
@@ -531,14 +536,14 @@
 #'     than parameters are the cases.  No weight is cut off: under a Gaussian
 #'     or exponential kernel every observation enters, and distant ones stop
 #'     counting only through this rule.
-#'   \item \strong{Coefficients.}  A coefficient is returned when it has one
+#'   \item Coefficients.  A coefficient is returned when it has one
 #'     value over all least-squares solutions of the window, and is \code{NA}
 #'     otherwise.  The slope of an aliased predictor is \code{NA}.  So is the
 #'     intercept when a predictor is constant in the window at a value other
 #'     than 0, because it would absorb that value times the slope; when the
 #'     constant is 0 the intercept is identified and returned.  The slopes of
 #'     the other predictors are returned.
-#'   \item \strong{Fitted values.}  The fitted value at an observation is
+#'   \item Fitted values.  The fitted value at an observation is
 #'     always estimable (its own row is in its window) and is returned, also
 #'     where a coefficient is \code{NA}.
 #' }
@@ -591,14 +596,9 @@
 #' deficient are computed from its centred cross-products, many windows to
 #' one matrix product, and the windows that are not are left to the QR; the
 #' two routes agree to rounding error (\code{1e-9} relative in the package's
-#' tests) and take the same rank decisions.  A default-bandwidth fit with one
-#' of those kernels and two predictors then takes 1.1 to 1.6 times as long
-#' as \code{GWmodel::bw.gwr()} followed by \code{gwr.basic()} (2.0 s
-#' against 1.6 s at 1,000 observations and 7.4 s against 5.7 s at 2,000,
-#' fixed Gaussian, on one machine), and 3 to 5 times as long by the QR
-#' alone.  With several strongly correlated predictors more windows are
-#' left to the QR and the fit is slower than that.  The fit at the selected
-#' bandwidth is always the QR's.
+#' tests) and take the same rank decisions.  With several strongly
+#' correlated predictors more windows are left to the QR and the search is
+#' slower.  The fit at the selected bandwidth is always the QR's.
 #'
 #' Everything scored is kept in \code{info$bandwidth_search}:
 #' \code{approach} (the criterion minimised, \code{"AICc"} or \code{"CV"}),
@@ -631,21 +631,17 @@
 #' samples of one plot, records geocoded to one address) get one kernel
 #' weight at every regression point.  \code{info$n_locations} is the number
 #' of distinct locations, and when it is below \code{n} a warning of class
-#' \code{"spatialkit_gwr_repeated_locations"} gives the counts.  Three things
-#' follow.
+#' \code{"spatialkit_gwr_repeated_locations"} gives the counts.
 #'
-#' \strong{The bandwidth is not selected by AICc.}  AICc counts the rows at
-#' one location as independent observations.  When a location has an effect
-#' of its own, which is the usual case, a window that holds little but the
-#' location reproduces its mean, the residual sum of squares falls to the
-#' spread within locations, and AICc is lowest where the windows
-#' interpolate: on 100 simulated sites with 3 observations each it is 58 at
-#' 5 to 10 neighbours, 90 at 13 and 221 at 58, while the error of prediction
-#' at new sites is 46 at 10 neighbours, 1.35 at 13 and 0.15 at 150.  A floor on
-#' the bandwidth does not repair that, because the criterion keeps falling
-#' towards the floor.  With \code{bandwidth = NULL} the search therefore
-#' minimises the
-#' \strong{leave-one-location-out} sum of squares: each location's
+#' The bandwidth is then not selected by AICc.  AICc counts the rows at one
+#' location as independent observations.  When a location has an effect of
+#' its own, a window that holds little but the location reproduces its
+#' mean, the residual sum of squares falls to the spread within locations,
+#' and AICc is lowest where the windows interpolate, which is where the
+#' error of predicting new sites is largest.  A floor on the bandwidth does
+#' not repair that, because the criterion keeps falling towards the floor.
+#' With \code{bandwidth = NULL} the search therefore minimises the
+#' leave-one-location-out sum of squares: each location's
 #' observations are predicted by the local regression there without any of
 #' them, the kernel keeping its width, and the squared errors are summed.
 #' It is computed from the hat matrix of the fit at each bandwidth, without
@@ -654,12 +650,12 @@
 #' then \code{"CV"} and \code{by_location} is \code{TRUE}.  On a layer
 #' without repeat locations nothing changes: the criterion is AICc.
 #'
-#' \strong{The range of an adaptive search counts locations.}  It starts at
-#' the smallest count that gives every window one location more than the
-#' model has parameters, and for a fixed bandwidth at the distance at which
-#' half the windows hold that many locations.
+#' The range of the search counts locations.  For an adaptive bandwidth it
+#' starts at the smallest count that gives every window one location more
+#' than the model has parameters, and for a fixed bandwidth at the distance
+#' at which half the windows hold that many locations.
 #'
-#' \strong{AICc and the standard errors still assume independence.}
+#' AICc and the standard errors still assume independence.
 #' \code{info$AICc}, the comparison with the global regression in
 #' \code{summary()} and the standard errors of \code{coef(se = TRUE)} and
 #' \code{predict(se.fit = TRUE)} treat every row as an independent
@@ -673,7 +669,7 @@
 #' replicates of one measurement, fit their means, one row per location.
 #'
 #' @section Collinearity diagnostics:
-#' The function computes **scaled condition indices** of the design and
+#' The function computes scaled condition indices of the design and
 #' warns when one exceeds 30, the conventional threshold, which Wheeler &
 #' Tiefelsdorf (2005) carry over to the local designs of GWR.  An index is
 #' the ratio of the largest to the smallest singular value (from an SVD) after
@@ -683,14 +679,14 @@
 #' \code{kappa()} on the raw matrix is not, and a threshold on it is a
 #' threshold on nothing in particular.
 #'
-#' A **global** index is computed on the predictors centred at their means
+#' A global index is computed on the predictors centred at their means
 #' (with the intercept, which centring makes orthogonal to them), and kept as
 #' `info$condition_index`.  It measures how nearly the predictors are
 #' collinear with one another over the whole study area; it is 1 for a single
 #' predictor, and a change of origin (degrees C or kelvin, a year or years
 #' since 2000) does not move it.
 #'
-#' **Local** indices are then computed at **every** location, on the weighted
+#' Local indices are then computed at every location, on the weighted
 #' design of the local regression there: each row weighted by the square root
 #' of its kernel weight at the bandwidth the model is fitted with (supplied or
 #' selected), with rows of negligible weight (below 1e-8) dropped.  A window
@@ -722,14 +718,14 @@
 #' singular to machine precision, where the predictor's spread is lost in the
 #' rounding of its own values.
 #'
-#' A warning is issued whenever **any** location has collinear slopes; the
+#' A warning is issued whenever any location has collinear slopes; the
 #' wording reports a percentage when more than 25% of locations are affected
 #' and a count otherwise.  Both are real R warnings, not log lines.
 #' Coefficients at a near-singular window are least-squares estimates with
-#' little to rest on, and can be implausibly large.  An **exactly** singular
+#' little to rest on, and can be implausibly large.  An exactly singular
 #' window (an indicator that is constant inside it, or fewer observations
 #' than parameters) is of deficient rank: the coefficients it cannot estimate
-#' are `NA` and the fit is returned (see \strong{The local solve}).
+#' are `NA` and the fit is returned (see "The local solve").
 #' A window with only `cn` above 30 raises no warning:
 #' `plot(fit, type = "coefficients", term = "Intercept")` masks it, and slope
 #' maps do not.  Centre such a predictor if you want an interpretable local
@@ -800,7 +796,7 @@
 #'   \code{Local_R2}), \code{GW.diagnostic}, \code{GW.arguments} and
 #'   \code{lm} (the global least-squares fit).  It is a plain list, not a
 #'   \code{gwrm} object.  Where a predictor or the response was taken less
-#'   its centre (see \strong{The local solve}), \code{lm} is solved on the
+#'   its centre (see "The local solve"), \code{lm} is solved on the
 #'   centred columns and returned as the fit at the data's origin: its
 #'   coefficients, fitted values, \code{qr} and \code{effects} are those of
 #'   the raw columns, so \code{summary()}, \code{vcov()}, \code{confint()}
@@ -814,24 +810,31 @@
 #'   of each column of the design (\code{Intercept} first, 0 for a column
 #'   used as it is), \code{NULL} where none was, and \code{response}, 0
 #'   where none was.
+#' @seealso \code{\link{cv_gwr}()} to score the fit on spatial folds;
+#'   \code{predict()} (\link{spatial_fit-predict}) and \code{coef()}
+#'   (\link{spatial_fit-coef}) for predictions and local coefficients;
+#'   \code{\link{gwr_model_selection}()} and
+#'   \code{\link{select_features_forward}()} to choose the predictors;
+#'   \code{\link{plot.spatial_fit}()} to map the coefficients.
 #' @family model fitting
-#' @examples
-#' if (requireNamespace("sp", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   n <- 60
-#'   dat <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-#'                elev = rnorm(n)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
-#'     2 * dat$elev + rnorm(n)
-#'   fit <- fit_gwr_model(dat, "price", "elev", bandwidth = 30)
-#'   print(summary(fit))     # print(): only a block's last value shows on its own
-#'   head(predict(fit, newdata = dat))   # newdata is re-projected if needed
-#'   head(coef(fit, se = TRUE)$se)       # local standard errors
-#' }
+#' @examplesIf requireNamespace("sp", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' n <- 80
+#' dat <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              elev = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' # The slope on elev rises from 1 in the west to 3 in the east.
+#' east <- (st_coordinates(dat)[, 1] - 5e5) / 1000
+#' dat$price <- 10 + (1 + 2 * east) * dat$elev + rnorm(n, 0, 0.3)
+#' fit <- fit_gwr_model(dat, "price", "elev", bandwidth = 30)
+#' summary(fit)
+#' # The local slopes follow the west-east change.
+#' summary(coef(fit)$elev)
+#' head(coef(fit, se = TRUE)$se)          # their standard errors
+#' head(predict(fit, newdata = dat))
 #' @export
 fit_gwr_model <- function(data_sf, response_var, predictor_vars,
                           adaptive = TRUE,
@@ -1474,7 +1477,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     else .gwr_warn("spatialkit_gwr_repeated_locations", "%s", repeat_msg)
   }
 
-  # The benchmark a GWR is read against: one least-squares regression on the
+  # The baseline a GWR is read against: one least-squares regression on the
   # same rows, scored by the same AICc formula (its hat-matrix trace is its
   # rank).  A GWR whose AICc is no lower has not shown that its coefficients
   # vary.
@@ -3705,17 +3708,15 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 #' singular to machine precision counts: the predictor's spread is then lost
 #' in the rounding of its own values.
 #'
-#' A fit whose engine is GWmodel's object (one made by an earlier version)
-#' was solved from the uncentred \eqn{X^\top W X}, whose condition number is
+#' A fit whose engine is GWmodel's object was solved from the uncentred \eqn{X^\top W X}, whose condition number is
 #' about \code{cn^2}: shifting a predictor's origin until \code{cn} reached
 #' 1.6e6 moved its local slopes by 0.4\% of their spread, 1.6e7 by 25\%, and
 #' 1.6e8 made GWmodel stop with "matrix is singular".  For such a fit a
 #' \code{cn} above 1e6 counts as collinear too.  A fit of this package is
 #' told by the \code{rank} column its survey carries.
 #'
-#' A survey without \code{cn_slopes} (a fit made before it existed) falls
-#' back to \code{cn > 30}.  \code{NA} (a survey that did not run) counts as
-#' collinear, as it always has.
+#' A survey without \code{cn_slopes} falls back to \code{cn > 30}.
+#' \code{NA} (a survey that did not run) counts as collinear.
 #'
 #' @param lc A survey, as \code{.gwr_local_collinearity()} returns it.
 #' @param own_solve Whether the fit was solved by this package's local
@@ -3735,8 +3736,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 
 #' Warn about the local collinearity survey's findings
 #'
-#' The two messages the sampled spot-check used to raise, now on the exact
-#' fraction of locations, and about the slopes (\code{.gwr_slopes_collinear()}):
+#' Two messages, on the exact fraction of locations, and about the slopes (\code{.gwr_slopes_collinear()}):
 #' a window whose only problem is an ill-determined intercept (\code{cn}
 #' above 30, slopes fine) is logged, not warned about.
 #' @keywords internal

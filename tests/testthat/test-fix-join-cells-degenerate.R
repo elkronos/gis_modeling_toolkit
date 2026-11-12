@@ -481,7 +481,7 @@ test_that("the cells of centres refitted to every point, returned in lon/lat, st
   expect_false(anyNA(got$cell_id))
 })
 
-test_that("?assign_features_to_polygons, ?create_voronoi_polygons, ?cell_values_at and NEWS name the error", {
+test_that("?assign_features_to_polygons, ?create_voronoi_polygons and ?cell_values_at name the error", {
   root <- testthat::test_path("..", "..")
   if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
     skip("the help's source is not here to read")
@@ -503,7 +503,7 @@ test_that("?assign_features_to_polygons, ?create_voronoi_polygons, ?cell_values_
   expect_no_match(rd, "The largest-overlap join repairs such polygons instead", fixed = TRUE)
   rd <- read("man", "cell_values_at.Rd")
   expect_match(rd, paste0("Where that join runs on the sphere and s2 refuses a polygon of ",
-                          "\\code{values} (see Details in ",
+                          "\\code{values} (see \"Joins in longitude and latitude\" in ",
                           "\\code{\\link[=assign_features_to_polygons]{assign_features_to_polygons()}}), ",
                           "the call stops with an error of class ",
                           "\\code{\"spatialkit_cells_degenerate\"} that gives the rows of ",
@@ -511,18 +511,7 @@ test_that("?assign_features_to_polygons, ?create_voronoi_polygons, ?cell_values_
                           "cause and says to transform \\code{values} to a projected CRS."),
                fixed = TRUE)
   rd <- read("man", "create_voronoi_polygons.Rd")
-  expect_match(rd, paste0("then stops with an error of class \\code{\"spatialkit_cells_degenerate\"} ",
-                          "that names the cells s2 refuses, the cause and that transform; its ",
-                          "largest-overlap join of polygon features repairs such cells instead, ",
-                          "with a warning."), fixed = TRUE)
-  news <- read("NEWS.md")
-  expect_match(news, paste0("The join by `predicate` now stops with an error of class ",
-                            "`spatialkit_cells_degenerate` that gives the number and rows of the ",
-                            "polygons s2 refuses"), fixed = TRUE)
-  expect_match(news, paste0("on a polygon s2 refuses even after the repair (a hole that crosses ",
-                            "its outer ring) it stops with the same error, where it advised ",
-                            "`largest = FALSE`, which meets the same refusal."), fixed = TRUE)
-  expect_match(news, paste0("`cell_values_at()` without `seeds`, which places its locations with ",
-                            "this join, gives the error in its own words: it names `values` and the ",
-                            "rows of `values`."), fixed = TRUE)
+  expect_match(rd, paste0("The package's other joins and measures of it stop with an error of ",
+                          "class \\code{\"spatialkit_cells_degenerate\"} (\"Polygons in degrees\" in ",
+                          "\\link{spatialkit-geometry} gives the exceptions)."), fixed = TRUE)
 })

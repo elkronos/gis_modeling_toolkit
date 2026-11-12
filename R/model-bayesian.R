@@ -1081,8 +1081,7 @@
 #' The remedy differs by check.  More iterations bring R-hat down and the
 #' effective sample size up.  They do not remove divergent transitions, which
 #' need a smaller step size (a higher \code{adapt_delta}), and a low E-BFMI
-#' comes from the shape of the posterior.  A fit whose only failure was two
-#' divergent transitions used to be told to run more iterations.
+#' comes from the shape of the posterior.
 #'
 #' @param failed Character: any of \code{"divergent"}, \code{"rhat"},
 #'   \code{"ess"} and \code{"ebfmi"}.
@@ -1336,51 +1335,46 @@
 }
 
 
-#' Fit a Bayesian spatial regression with a 2D Gaussian Process (via brms)
+#' Fit a Bayesian Gaussian-process regression with brms
 #'
-#' Fits a regression whose residual spatial structure is modelled explicitly, as
-#' a Gaussian process over the coordinates, and so kept out of the errors.  Two
-#' things follow, and they are the reasons to reach for this backend.  First,
-#' every quantity comes with a posterior, so predictions carry intervals
-#' instead of point estimates.  Whether those intervals are calibrated is
-#' something to measure, not assume: score them with
-#' \code{\link{cv_bayes}()}, which reports held-out interval coverage and CRPS.
-#' Second, the spatial term is a smooth regional surface at a stated
-#' resolution.  The Gaussian process is fitted through a reduced-rank basis,
-#' and that basis has a floor: an effective range below which it cannot
-#' represent structure, reported in map units as \code{$info$gp_resolution}
-#' and by \code{print()}.  With the defaults the floor is 14 to 33 percent of
-#' the extent along each axis (about 32 km on a uniform 100 km square, 155 km
-#' east-west and 63 km north-south on the census tracts of North Carolina).
-#' Structure shorter than the floor is counted as noise: the fitted range comes
-#' out too long, the residual standard deviation too large, and the intervals
-#' too narrow where the structure is.  See "What the basis resolves" below.
+#' Fits a regression whose residual spatial structure is modelled as a
+#' Gaussian process over the coordinates, and so kept out of the errors.
+#' Every quantity has a posterior, so predictions come with intervals;
+#' \code{\link{cv_bayes}()} reports their held-out coverage and CRPS.  The
+#' spatial term is a smooth surface at a stated resolution.  The Gaussian
+#' process is fitted through a reduced-rank basis, and that basis has a
+#' floor: an effective range below which it cannot represent structure,
+#' reported in CRS units as \code{$info$gp_resolution} and by \code{print()}.
+#' With the defaults the floor is about 32 km along each axis on points
+#' spread evenly over a 100 km square.  Structure shorter than the floor is
+#' counted as noise: the fitted range comes out too long, the residual
+#' standard deviation too large, and the intervals too narrow where the
+#' structure is.  See "What the basis resolves" below.
 #'
 #' The fitted length-scale is an estimate of how far the spatial dependence
 #' reaches only when its posterior sits clear of both that floor and its
 #' prior.  \code{$info$gp_adequacy} says whether it does, and when it does
 #' \code{$info$gp_adequacy$effective_range} holds the posterior effective range
-#' per axis in map units (the raw \code{lscale} draws are in per-axis
+#' per axis in CRS units (the raw \code{lscale} draws are in per-axis
 #' standardised units and are not a distance).
 #'
 #' Choose it over \code{\link{fit_gwr_model}()} when you want one global
-#' relationship plus an explicit spatial random field, and uncertainty you can
-#' defend; choose GWR instead when the question is how a coefficient
-#' \emph{varies} across the map.  Choose \code{\link{fit_rf_model}()} when
-#' predictive accuracy matters more than an interpretable model and the
-#' response is non-linear in the predictors.  The cost here is time: this is
-#' full MCMC via 'brms' and Stan, so it is minutes rather than seconds, and the
-#' GP is fitted through a reduced-rank basis approximation whose size
-#' (\code{gp_k}) trades fidelity against runtime.
+#' relationship plus a spatial random field, with posterior intervals; choose
+#' GWR when the question is how a coefficient varies across the map.  Choose
+#' \code{\link{fit_rf_model}()} when predictive accuracy matters more than an
+#' interpretable model and the response is non-linear in the predictors.  The
+#' cost is time: this is full MCMC through \pkg{brms} and Stan, so a fit takes
+#' minutes rather than seconds, and the basis size (\code{gp_k}) trades
+#' fidelity against run time.
 #'
 #' @param data_sf An sf object with response, predictors, and geometries.
 #' @param response_var Response column name.
 #' @param predictor_vars Predictor column names.  May be \code{character(0)}
 #'   for an intercept-only model: the response is then explained by the
-#'   intercept and the spatial Gaussian process alone, which is the right
-#'   baseline for asking how much of the surface is spatial structure and how
-#'   much covariate effect (and the natural null model for comparing against a
-#'   covariate model with \code{\link{compare_models}}).
+#'   intercept and the spatial Gaussian process alone, the baseline for
+#'   asking how much of the surface is spatial structure and how much
+#'   covariate effect, and the null model to compare a covariate model with
+#'   in \code{\link{compare_models}()}.
 #' @param family A model family accepted by \code{brms::brm()}: a stats
 #'   family function such as \code{poisson()}, or a brms family object such
 #'   as \code{brms::zero_inflated_poisson()}, \code{brms::negbinomial()},
@@ -1390,24 +1384,25 @@
 #'   unchanged with the spatial GP term still in the formula.  A factor
 #'   response is accepted only under \code{brms::categorical()} or an ordinal
 #'   family, and those fits have no single expected value per row, so several
-#'   methods cannot use them; see the section on non-Gaussian responses for
+#'   methods cannot use them; see "Non-Gaussian responses" for
 #'   what each family supports, and the count example below.
 #' @param gp_k Positive integer giving the number of GP basis functions
 #'   \emph{per dimension}, or NULL (default) to derive it from the
 #'   length-scale/domain ratio.  The fitted model carries
-#'   \code{gp_k^2} basis functions, not \code{gp_k} (see Details).  A value
+#'   \code{gp_k^2} basis functions, not \code{gp_k} (see "GP basis count
+#'   and boundary factor").  A value
 #'   above the derived one makes the basis finer, and the length-scale
 #'   prior's lower tail moves down to the length-scale that basis resolves,
 #'   because a finer basis under the default prior gains almost nothing.  A
 #'   value below the derived one leaves the prior where it was, mostly below
 #'   what the basis resolves; that share is stored as
 #'   \code{$info$gp_adequacy$prior_mass_below}, logged when it passes 10
-#'   percent and flagged by \code{print()}.  To ask for a resolution in map
+#'   percent and flagged by \code{print()}.  To ask for a resolution in CRS
 #'   units, use \code{gp_resolution} and leave this \code{NULL}.
 #' @param gp_resolution The shortest effective range the basis should resolve,
 #'   as a single positive number in the units of the data's CRS (metres for a
-#'   UTM layer), or NULL (default) for the percentile rule described under
-#'   Details.  \code{gp_k} is derived from it, and the length-scale prior's
+#'   UTM layer), or NULL (default) for the rule described under "GP basis
+#'   count and boundary factor".  \code{gp_k} is derived from it, and the length-scale prior's
 #'   lower tail moves with the basis.  It can only refine: a value the default
 #'   basis already resolves leaves the default basis in place.  It is an error
 #'   when the basis it needs exceeds the cap of 50 functions per dimension
@@ -1415,14 +1410,15 @@
 #'   range the cap reaches on this layout.  Cost grows with
 #'   \code{gp_k^2}.  Give \code{gp_resolution} or \code{gp_k}, not both.
 #' @param gp_iso Logical; passed to \code{brms::gp(iso = )}.  \code{FALSE}
-#'   (the default) fits a separate length-scale per coordinate axis, letting the
-#'   model learn any directional structure from the data.  \code{TRUE} fits a
-#'   single shared length-scale, which makes the kernel anisotropic in the
-#'   original CRS by whatever ratio \code{sd(X)/sd(Y)} happens to take, because
-#'   the coordinates are standardised per axis beforehand.  See Details.
+#'   (the default) fits a separate length-scale per coordinate axis, so the
+#'   model learns any directional structure from the data.  \code{TRUE} fits a
+#'   single length-scale shared by both standardised axes, which makes the
+#'   kernel anisotropic in the original CRS by the ratio \code{sd(X)/sd(Y)},
+#'   because the coordinates are standardised per axis beforehand.  See
+#'   "Coordinate scaling and anisotropy".
 #' @param gp_c Positive numeric boundary factor for the approximate GP, or
 #'   NULL (default) to derive it alongside \code{gp_k}.  The boundary must be
-#'   wide enough to contain the longest plausible correlation range; a value
+#'   wide enough to contain the longest plausible effective range; a value
 #'   that is too small truncates the domain and degrades the approximation for
 #'   smooth, long-range surfaces.  When you set \code{gp_c} and leave
 #'   \code{gp_k = NULL}, \code{gp_k} is derived for \emph{your} boundary: a
@@ -1438,138 +1434,115 @@
 #'   \code{normal(0, 5)} under any other link (log, logit and so on), where the
 #'   linear predictor has a scale of its own.  \code{sd()} is taken over the
 #'   training rows.  The result therefore does not depend on the units of the
-#'   response: a fixed \code{normal(0, 5)} under an identity link, which is
-#'   what earlier versions set, left a slope alone when income was in
-#'   thousands of dollars and shrank the same slope to nothing when it was in
-#'   dollars.  The prior brms used is stored as \code{$info$b_prior} and shown
+#'   response.  The prior brms used is stored as \code{$info$b_prior} and shown
 #'   by \code{print()}.  When \code{prior} is given, no slope prior is added.
 #'   A prior given here on a class that lives on the response's scale
 #'   (\code{b}, \code{Intercept}, \code{sigma}, \code{sdgp}, and
 #'   \code{beta} of \code{exgaussian()}) keeps the response as it is; see
 #'   "The response's centre and scale".
-#'   A data-informed GP length-scale prior is always appended
-#'   automatically unless \code{prior} already contains an entry with
-#'   \code{class = "lscale"}.
+#'   A GP length-scale prior set from the data is added unless \code{prior}
+#'   already contains an entry with \code{class = "lscale"}.
 #' @param chains Number of MCMC chains. Default 4.
 #' @param iter Total iterations per chain. Default 2000.
-#' @param warmup Warmup iterations. Default floor(iter/2).
-#' @param cores Number of cores for the sampler, one chain per core. Default
-#'   \code{getOption("mc.cores", 1L)}, the same convention \pkg{brms} uses
+#' @param warmup Warmup iterations. Default \code{floor(iter / 2)}.
+#' @param cores Number of cores for the sampler, one chain per core.  Default
+#'   \code{getOption("mc.cores", 1L)}, the convention \pkg{brms} uses
 #'   itself, so \code{options(mc.cores = 4)} once per session runs the four
-#'   default chains in parallel everywhere. The previous default of
-#'   \code{detectCores() - 1} took every core but one on any machine, which
-#'   is not what a shared server or a check farm wants.
+#'   default chains in parallel everywhere.
 #' @param seed Integer seed. Default 123.
-#' @param backend "auto" (default), "cmdstanr", or "rstan". "auto" uses
-#'   \pkg{cmdstanr} only when a CmdStan build is actually available, and
+#' @param backend \code{"auto"} (default), \code{"cmdstanr"} or
+#'   \code{"rstan"}.  \code{"auto"} uses \pkg{cmdstanr} only when a CmdStan
+#'   build is available, and
 #'   \pkg{rstan} otherwise, which \pkg{brms} always brings. The \pkg{cmdstanr}
 #'   package is a thin interface and can be installed without a CmdStan build
-#'   (\code{cmdstanr::install_cmdstan()} builds one). An explicit "cmdstanr"
-#'   with no usable CmdStan raises an error that says how to install it, so the
-#'   failure does not come from inside the sampler.
-#' @param control Named list of sampler controls, \emph{merged} over the
-#'   package defaults \code{list(adapt_delta = 0.99, max_treedepth = 12)}
-#'   instead of replacing them.  Passing \code{list(max_treedepth = 15)}
-#'   therefore keeps \code{adapt_delta = 0.99}, which matters, because that is
-#'   exactly the setting the divergence warning tells you to raise.
-#'
-#'   \code{adapt_delta} is 0.99, not Stan's 0.8, because one divergent
-#'   transition sets \code{convergence_ok} to \code{FALSE} (see
-#'   \code{check_convergence}) and lower values leave a few on ordinary data.
-#'   Four layers of 250 points over a smooth field with a 60 km range, fitted
-#'   at the default four chains of 2,000 iterations from three seeds each,
-#'   had 1 to 24 divergent transitions in every fit at 0.9, the default of
-#'   earlier versions, and none at 0.99; at 0.95 and 0.975 some fits still
-#'   had one or more.  The smaller step costs time: sampling took about
-#'   twice as long as at 0.9 (1.3 to 2.7 times).
-#'   \code{list(adapt_delta = 0.9)} runs faster and can leave a few
-#'   divergent transitions.  Some can remain at 0.99 too, for example on a
-#'   layer whose spatial field is weak against the noise; then raise it to
-#'   0.995 or 0.999, which took three to four and a half times the sampling
-#'   time of 0.9 on the four layers.  No transition reached
-#'   \code{max_treedepth = 12} there at any of these settings.
+#'   (\code{cmdstanr::install_cmdstan()} builds one).  An explicit
+#'   \code{"cmdstanr"} with no usable CmdStan raises an error that says how to
+#'   install it, before the sampler starts.
+#' @param control Named list of sampler controls, merged over the package
+#'   defaults \code{list(adapt_delta = 0.99, max_treedepth = 12)} rather than
+#'   replacing them, so \code{list(max_treedepth = 15)} keeps
+#'   \code{adapt_delta = 0.99}.  See "Sampler settings".
 #' @param compute_loo Logical; compute PSIS-LOO. Default TRUE.
-#' @param standardize_predictors Logical; center and scale numeric predictors
-#'   before fitting. Default FALSE. When TRUE, the scaling parameters are
-#'   stored in the return value (\code{$info$predictor_scaling}, a
-#'   \code{center} and \code{scale} per predictor) so predictions can be
-#'   computed correctly.  The model is then fitted on the standardised
+#' @param standardize_predictors Logical; centre and scale numeric predictors
+#'   before fitting.  Default FALSE.  When TRUE, the centre and scale of each
+#'   predictor are stored in \code{$info$predictor_scaling} and applied again
+#'   by \code{predict()}.  The model is then fitted on the standardised
 #'   predictors, so \code{coef()} reports a slope per standard deviation of
 #'   each predictor and an intercept at the predictor means, not the raw-unit
-#'   values \code{stats::lm()} would give; see \code{\link{coef.bayesian_fit}}.
-#' @param check_convergence Logical; after fitting, read the sampler's
-#'   diagnostics and set \code{$info$convergence_ok}.  The verdict follows
-#'   Stan's own diagnostics, with these thresholds:
-#'   \itemize{
-#'     \item any divergent transition after warmup;
-#'     \item bulk or tail effective sample size below 100 per chain for any
-#'       parameter (Vehtari et al. 2021; the rule \pkg{rstan} warns on).  It
-#'       is an absolute count: a share of the draws, which earlier versions
-#'       used, asks for 100 in all at \code{chains = 2, iter = 1000};
-#'     \item rank-normalised split R-hat, in two tiers.  Above 1.05, the
-#'       value \pkg{rstan}'s own sampler warning uses, for any parameter.
-#'       Above 1.01, the value Vehtari et al. (2021) recommend, for a
-#'       parameter whose effective sample size is also below the count in
-#'       the previous item, or cannot be read;
-#'     \item E-BFMI below 0.3 in any chain (Betancourt 2016).
-#'   }
-#'   An R-hat between 1.01 and 1.05 on a parameter with enough effective
-#'   draws is a caution, not a failure: it is stored by name in
-#'   \code{$info$convergence_diagnostics$rhat_caution}, logged, and counted
-#'   by \code{print()}.  The reason is the number of parameters.  This model
-#'   has one weight per basis function, about 540 parameters at the usual
-#'   basis, and the largest of that many R-hat values sits near 1.01 in a
-#'   fit that has converged: four fits at the default four chains of 2,000
-#'   iterations, with \code{adapt_delta} at 0.9 or 0.95, had largest values
-#'   of 1.005, 1.009, 1.009 and 1.011, with every effective sample size at
-#'   least 1,086 against the 400 required.
-#'   Chains that have converged by construction (540 independent
-#'   parameters, four chains of 1,000 draws) had a largest value of 1.008 to
-#'   1.011 at an effective sample size near 1,300, and 130 to 160 values
-#'   above 1.01, none above 1.05, at an effective sample size near 450.
-#'   Vehtari et al. give 1.01 beside an effective sample size above 400, and
-#'   an R-hat of 1.01 is about what an effective sample size of 400 gives
-#'   (1.009 on average in the same chains), so the two are read together
-#'   here.
-#'
-#'   Transitions that stop at \code{max_treedepth} are counted and logged but
-#'   do not change the verdict: Stan treats them as a cost, not as invalid
-#'   draws.  A failed verdict sets \code{convergence_ok} to \code{FALSE},
-#'   raises one R warning of class \code{spatialkit_convergence} naming each
-#'   failed check with its count and its first five parameters, and
-#'   \code{print()} flags it; \code{$info$convergence_diagnostics} holds every
-#'   value.  The warning closes with the remedy for the checks that failed: a
-#'   higher \code{adapt_delta} for divergent transitions, which more
-#'   iterations do not remove, and more iterations for R-hat and effective
-#'   sample size.  \code{\link{cv_bayes}()} marks such folds in
-#'   \code{fold_metrics$convergence_ok} and \code{\link{compare_models}()}
-#'   names such a model.  A short run usually fails, on effective sample
-#'   size: two fits of two chains and 300 post-warmup draws each had two or
-#'   three parameters below 100 effective draws per chain, and 66 and 76 of
-#'   their 537 parameters above R-hat 1.01.
-#'
-#'   The same step checks the GP basis against the posterior and the
-#'   residuals (see "What the basis resolves") and stores the result as
-#'   \code{$info$gp_adequacy}.  The residuals need the fitted values, one
-#'   pass over the posterior that \code{fitted()} caches for later calls.
-#'   That check is about the approximation, not the sampler, so it does not
-#'   change \code{convergence_ok}; \code{print()} and \code{summary()} show
-#'   its status, and two of its states raise a warning of class
-#'   \code{spatialkit_gp_adequacy}.  \code{FALSE} skips
-#'   all of these and leaves \code{convergence_ok} \code{NA} (not checked)
-#'   and the adequacy status \code{"not_checked"}.
-#'   Default TRUE.
-#' @param pointize Strategy for non-point geometry coercion.
+#'   values \code{stats::lm()} would give (see \link{spatial_fit-coef}).
+#' @param check_convergence Logical, default TRUE.  After fitting, read the
+#'   sampler's diagnostics and the GP basis against the posterior and the
+#'   residuals, and set \code{$info$convergence_ok} and
+#'   \code{$info$gp_adequacy}.  See "Convergence checks" and "What the basis
+#'   resolves".  \code{FALSE} skips both, leaves \code{convergence_ok}
+#'   \code{NA} (not checked) and sets the adequacy status to
+#'   \code{"not_checked"}.
+#' @param pointize How a feature that is not a point is reduced to one: one of
+#'   \code{"auto"} (default), \code{"centroid"}, \code{"point_on_surface"},
+#'   \code{"surface"}, \code{"line_midpoint"} or \code{"bbox_center"}; see
+#'   \code{\link{coerce_to_points}()}.
 #' @param boundary Optional polygonal sf/sfc whose CRS the data are projected
 #'   to.  It is not a clip: rows outside it are kept.
-#' @param .already_prepped Logical (internal). If \code{TRUE}, skip the
-#'   \code{prep_model_data()} call because the caller has already projected,
-#'   coerced, and filtered the data.  The data must then have plain POINT
-#'   geometry (an error is raised otherwise).  Used by the CV internals to
-#'   avoid a redundant second pass on every fold.  End users should leave
-#'   this at the default \code{FALSE}.
-#' @details
-#' \strong{GP basis count and boundary factor.}
+#' @param .already_prepped Internal; leave at the default.
+#' @section Sampler settings:
+#' \code{adapt_delta} defaults to 0.99, not Stan's 0.8, because one divergent
+#' transition sets \code{convergence_ok} to \code{FALSE} (see "Convergence
+#' checks") and lower values can leave a few on ordinary data.  A lower
+#' value, such as \code{list(adapt_delta = 0.9)}, runs faster, since the
+#' smaller step of 0.99 costs sampling time.  Some divergent transitions can
+#' remain at 0.99 too, for example on a layer whose spatial field is weak
+#' against the noise; then raise it to 0.995 or 0.999, which costs more time
+#' again.
+#'
+#' @section Convergence checks:
+#' Under \code{check_convergence = TRUE} the verdict in
+#' \code{$info$convergence_ok} follows Stan's own diagnostics, with these
+#' thresholds:
+#' \itemize{
+#'   \item any divergent transition after warmup;
+#'   \item bulk or tail effective sample size below 100 per chain for any
+#'     parameter (Vehtari et al. 2021; the rule \pkg{rstan} warns on).  It
+#'     is an absolute count, not a share of the draws;
+#'   \item rank-normalised split R-hat, in two tiers.  Above 1.05, the
+#'     value \pkg{rstan}'s own sampler warning uses, for any parameter.
+#'     Above 1.01, the value Vehtari et al. (2021) recommend, for a
+#'     parameter whose effective sample size is also below the count in
+#'     the previous item, or cannot be read;
+#'   \item E-BFMI below 0.3 in any chain (Betancourt 2016).
+#' }
+#' An R-hat between 1.01 and 1.05 on a parameter with enough effective
+#' draws is a caution, not a failure: it is stored by name in
+#' \code{$info$convergence_diagnostics$rhat_caution}, logged, and counted
+#' by \code{print()}.  The model has one weight per basis function, about
+#' 540 parameters at the basis derived for points spread evenly over a
+#' square, and among that many the largest R-hat sits near 1.01 in a fit
+#' that has converged.  Vehtari et al. give 1.01 beside an effective sample
+#' size above 400, so the two are read together here.
+#'
+#' Transitions that stop at \code{max_treedepth} are counted and logged but
+#' do not change the verdict: Stan treats them as a cost, not as invalid
+#' draws.  A failed verdict sets \code{convergence_ok} to \code{FALSE},
+#' raises one R warning of class \code{spatialkit_convergence} naming each
+#' failed check with its count and its first five parameters, and
+#' \code{print()} flags it; \code{$info$convergence_diagnostics} holds every
+#' value.  The warning closes with the remedy for the checks that failed: a
+#' higher \code{adapt_delta} for divergent transitions, which more
+#' iterations do not remove, and more iterations for R-hat and effective
+#' sample size.  A short run usually fails on effective sample size.
+#' \code{\link{cv_bayes}()} marks such folds
+#' in \code{fold_metrics$convergence_ok} and \code{\link{compare_models}()}
+#' names such a model.
+#'
+#' The same step checks the GP basis against the posterior and the
+#' residuals (see "What the basis resolves") and stores the result as
+#' \code{$info$gp_adequacy}.  The residuals need the fitted values, one
+#' pass over the posterior that \code{fitted()} caches for later calls.
+#' That check is about the approximation, not the sampler, so it does not
+#' change \code{convergence_ok}; \code{print()} and \code{summary()} show
+#' its status, and two of its states raise a warning of class
+#' \code{spatialkit_gp_adequacy}.
+#'
+#' @section GP basis count and boundary factor:
 #' \code{brms::gp()} builds a full tensor grid over its covariates, so a term
 #' \code{gp(..x, ..y, k = gp_k)} carries \code{gp_k^2} basis functions: the
 #' \code{gp_k} argument is the count \emph{per dimension}, not the total rank.
@@ -1577,20 +1550,20 @@
 #' estimated length-scale to the domain extent, following
 #' Riutort-Mayol et al. (2023): \code{gp_c} is set large enough to contain the
 #' upper length-scale bound, and \code{gp_k} large enough to resolve the lower
-#' one.  The derived value depends on the layout, not on \code{n}: 23 on a
-#' uniform square, 27 to 38 on the census tracts of Iowa, North Carolina and
-#' Texas, and the cap of 50 on California's, whose tracts are clustered.
+#' one.  The derived value depends on the layout, not on \code{n}: about 23
+#' for points spread evenly over a square; other layouts give other values,
+#' up to the cap of 50.
 #'
 #' The domain extent used is the one \code{brms::gp(c = )} itself multiplies:
 #' the full pooled range of the column-centred coordinates
-#' (\code{brms:::choose_L()}, taken over the \strong{unique} coordinate rows,
+#' (\code{brms:::choose_L()}, taken over the unique coordinate rows,
 #' because \code{brms:::.data_gp()} reduces the covariates to unique rows first
 #' under the default \code{gr = TRUE}, so repeat visits to one location do not
 #' widen the domain), not the per-axis half-range in which
-#' Riutort-Mayol et al. state their inequalities.  Both constraints are really
-#' constraints on the boundary \eqn{L = c \times S}, so expressing them in
-#' brms's units is what keeps \code{gp_c}, \code{gp_k} and
-#' \code{$info$gp_ell_min} describing the basis brms actually builds.  A
+#' Riutort-Mayol et al. state their inequalities.  Both constraints are on
+#' the boundary \eqn{L = c \times S}, and stating them in brms's units keeps
+#' \code{gp_c}, \code{gp_k} and \code{$info$gp_ell_min} describing the basis
+#' brms builds.  A
 #' \code{gp_c} derived on the half-range convention and handed to
 #' \code{brms::gp()} produces a boundary twice as wide as intended, against
 #' which \code{gp_k} under-resolves by a factor of two.
@@ -1602,12 +1575,12 @@
 #' adequacy check below are all expressed in those standardised units, a second
 #' normalisation would leave every length-scale quantity in the wrong units.
 #'
-#' \strong{What the basis resolves.}
+#' @section What the basis resolves:
 #' The smallest length-scale the chosen basis can resolve is
 #' \code{1.75 * gp_c * S / gp_k}, stored in standardised units as
 #' \code{$info$gp_ell_min}.  As an effective range (the distance at which the
 #' squared-exponential correlation has fallen to 5 percent, 2.45 length-scales)
-#' and in map units it is \code{$info$gp_resolution}, one value per axis
+#' and in CRS units it is \code{$info$gp_resolution}, one value per axis
 #' because each coordinate is divided by its own standard deviation.  The
 #' floor is soft: the basis keeps 99 percent of a process's variance at the
 #' floor, 69 percent at half of it and 41 percent at a third.  The default
@@ -1624,8 +1597,8 @@
 #'     two other things agree with it.  The same variable is autocorrelated
 #'     at short range (Moran's I over 4 nearest neighbours, one-sided, at 5
 #'     percent): a variogram fitted to a response with no spatial structure
-#'     can still return a short range (in 3 of 60 white-noise draws;
-#'     \code{estimate_sac_range()} refuses most such layers itself).  And it is
+#'     can still return a short range, though
+#'     \code{estimate_sac_range()} refuses most such layers itself.  And it is
 #'     no longer autocorrelated at the floor's distance (Moran's I over the
 #'     pairs 0.75 to 1.25 floors apart is not both above 0.05, the
 #'     correlation that defines an effective range, and significant at 5
@@ -1642,19 +1615,13 @@
 #'     as noise.  Nothing before sampling separates the two; the residuals
 #'     after it do (the third check).  A range that cannot be
 #'     estimated is logged with the reason and shown by \code{print()}; the
-#'     result is in \code{$info$gp_prefit}.  In 60 simulated draws each
-#'     (400 points on a 100 km square, floor 33 km) the warning was raised
-#'     for 59 fields with a range of 8 to 15 km; for 0 or 1 fields
-#'     that were squared-exponential with a range of 60 or 90 km, a sine or
-#'     a plane; for 2 of white noise; and for 5 exponential fields with a
-#'     60 km range.  An exponential field has structure at every scale, and
-#'     a fit of one with a 50 km range had 62 percent of its length-scale
-#'     draws below the floor, so those 5 are not plainly wrong.
+#'     result is in \code{$info$gp_prefit}.  An exponential field has
+#'     structure at every scale, so the warning on one is not plainly
+#'     wrong.
 #'   \item Also before sampling, the share of the length-scale prior below
 #'     the floor is computed (\code{$info$gp_adequacy$prior_mass_below}).  A
-#'     derived basis keeps it near 0.01; a small \code{gp_k} does not (0.98
-#'     at \code{gp_k = 6} where the derived value is 23), and a share above
-#'     0.10 is logged and flagged by \code{print()}.
+#'     derived basis keeps it near 0.01; a small \code{gp_k} does not, and a
+#'     share above 0.10 is logged and flagged by \code{print()}.
 #'   \item After sampling, under \code{check_convergence = TRUE}, the
 #'     posterior and the residuals are read.  The posterior says whether the
 #'     Gaussian process carries a share of the variance and where its
@@ -1698,64 +1665,41 @@
 #'     \code{$info$gp_adequacy$residual_untested}, and \code{print()} keeps
 #'     its flag on a variogram range that was below the floor.
 #'
-#'     The residual test rests on fits of points on a 100 km square whose
-#'     floor is 32 to 33 km.  Sampled fits: ten of a response with a
-#'     component below the floor (a field with an 8 or 12 km range, alone or
-#'     beside a plane or a field with a 90 km range) had p of 5.3e-10 to
-#'     0.014, and five of the ten had a posterior that reads \code{"ok"};
-#'     twelve of a response with none (planes, bowls, a sine, fields with
-#'     ranges of 45 to 200 km) had p of 0.66 to 0.97.  At the posterior mode
-#'     of the same model, computed without sampling, the test was
-#'     significant in 0 of 160 fits of fields with ranges of 45 to 200 km
-#'     and in 3 of 120 fits of a plane, a bowl and a sine (one noise draw of
-#'     the 40, shared by the three, whose own Moran's I has p = 0.003);
-#'     and in 16 to 18 of 20 fits of each of four responses with an 8 km
-#'     field in them, where the length-scale at the mode was below the floor
-#'     in 0 or 1 of the 20.  On a fit with nothing left over the test is
-#'     conservative, because the surface takes up part of the noise and
-#'     leaves the residuals slightly negatively autocorrelated (median I of
-#'     -0.03 to -0.07).  It is not sharp just below the floor: a field with
-#'     a 20 km range was significant in 8 of 20 fits, and there it is the
-#'     length-scale draws that report it (\code{"below_resolution"}).  An
-#'     exponential field has structure at every scale and can be reported
-#'     with a range above the floor (8 of 20 fits at 60 km).  The 5 percent
-#'     level is the usual one and is not tuned; with many rows a small
-#'     leftover autocorrelation is significant, so read the size of I
-#'     beside its p.
+#' On a fit with nothing left over the test is conservative, because the
+#' surface takes up part of the noise and leaves the residuals slightly
+#' negatively autocorrelated.  It is not sharp just below the floor,
+#' where the length-scale draws report the structure
+#' (\code{"below_resolution"}).  An exponential field has structure at
+#' every scale and can be reported with a range above the floor.  The 5
+#' percent level is the usual one and is not tuned; with many rows a small
+#' leftover autocorrelation is significant, so read the size of I beside
+#' its p.
 #'
-#'     "No variance
-#'     that can be told from zero" is decided on the Gaussian process's share
-#'     of the variance, \code{sdgp^2 / (sdgp^2 + sigma^2)}: its 2.5 percent
-#'     quantile is under 0.01.  On nine fits that quantile was 0.000 to 0.003
-#'     for the three with nothing for the process to find and 0.17 to 0.94
-#'     for the six with a surface; the threshold rests on those nine.  It
-#'     does not mark off a response whose structure is all below the floor:
-#'     on five fits of a field with an 8 km range under a 33 km floor the
-#'     quantile was 0.000, 0.000, 0.001, 0.015 and 0.019, so two of the five
-#'     count as carrying a share, and it is the residual test that reports
-#'     them.  The
-#'     share exists for a gaussian or lognormal family.  For any other
-#'     family the length-scales decide instead: the process is not identified
-#'     when on every axis the posterior kept more than three quarters of its
-#'     prior's variance and the largest gap between its distribution function
-#'     and the prior's is under 0.30.  That second rule has been checked on
-#'     the length-scale draws of the same nine gaussian fits, where it agrees
-#'     with the share on eight, and on no fit of another family.
-#'     \code{$info$gp_adequacy$identified_by} says which rule was used.  The width of the length-scale posterior does not
-#'     decide by itself, because a posterior that moved to longer
-#'     length-scales is wider than its prior; and the share of draws below
-#'     the floor cannot detect an unidentified process, because a posterior
-#'     the data did not move puts 1 percent below the floor, the same as the
-#'     prior.
+#' "No variance that can be told from zero" is decided on the Gaussian
+#' process's share of the variance, \code{sdgp^2 / (sdgp^2 + sigma^2)}:
+#' its 2.5 percent quantile is under 0.01.  It does not mark off a
+#' response whose structure is all below the floor: such a process can
+#' still carry a share, and the residual test reports it.  The share
+#' exists for a gaussian or
+#' lognormal family.  For any other family the length-scales decide
+#' instead: the process is not identified when on every axis the
+#' posterior kept more than three quarters of its prior's variance and
+#' the largest gap between its distribution function and the prior's is
+#' under 0.30.  \code{$info$gp_adequacy$identified_by} says which rule
+#' was used.  The width of the length-scale posterior does not decide by
+#' itself, because a posterior that moved to longer
+#' length-scales is wider than its prior; and the share of draws below
+#' the floor cannot detect an unidentified process, because a posterior
+#' the data did not move puts 1 percent below the floor, the same as the
+#' prior.
 #' }
 #' A response whose range is below the floor needs a finer basis and a prior
 #' that allows the shorter length-scale, both of which \code{gp_resolution}
-#' sets, up to the cap.  Past the cap this model is the wrong tool: resolving
-#' a 30 km range on the North Carolina tracts would take 156 functions per
-#' dimension, 24,336 in all for 2,672 points.  Kriging has no such floor; see
+#' sets, up to the cap.  Past the cap this model cannot resolve the range,
+#' and kriging, which has no such floor, is the better tool; see
 #' \code{\link{kriging_adequacy}()} for cell means.
 #'
-#' \strong{Coordinate scaling and anisotropy.}
+#' @section Coordinate scaling and anisotropy:
 #' Before fitting the GP, X and Y coordinates are each centred and divided by
 #' their own standard deviation.  This is a conditioning step: easting and
 #' northing frequently span very different ranges in a projected CRS, and
@@ -1763,15 +1707,14 @@
 #'
 #' Because the axes are scaled independently, a \emph{single} shared
 #' length-scale in the scaled space corresponds to an anisotropic kernel in the
-#' original CRS, stretched by whatever ratio \code{sd(X)/sd(Y)} happens to
-#' take.  That ratio is a property of how the sampling locations are laid out,
-#' not of the process being modelled, so it is not a defensible source of
-#' anisotropy.
+#' original CRS, stretched by the ratio \code{sd(X)/sd(Y)}.  That ratio is a
+#' property of how the sampling locations are laid out, not of the process
+#' being modelled.
 #'
 #' \code{gp_iso = FALSE} (the default) therefore fits one length-scale per
 #' axis, letting the model estimate directional structure from the data instead
-#' of inheriting it from the standardisation.  Set \code{gp_iso = TRUE} to
-#' recover the previous single-length-scale behaviour.
+#' of inheriting it from the standardisation.  Set \code{gp_iso = TRUE} for
+#' one length-scale shared by both standardised axes.
 #'
 #' \code{gp_iso} does not affect cost: \code{brms::gp()} builds a
 #' tensor grid either way, so the model carries \code{gp_k^2} basis functions
@@ -1785,7 +1728,7 @@
 #'   scaled coordinate columns handed to \code{brms::gp()}; coord_scaling,
 #'   predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
 #'   gp_resolution: the smallest effective range the basis resolves, as
-#'   \code{c(x, y)} in map units; gp_resolution_requested: the
+#'   \code{c(x, y)} in CRS units; gp_resolution_requested: the
 #'   \code{gp_resolution} argument, or \code{NULL};
 #'   gp_prefit: the check made before sampling, a list with \code{status}
 #'   (\code{"ok"}; \code{"below_floor"}, the one that warns;
@@ -1793,16 +1736,16 @@
 #'   \code{"below_floor_long_range"}, a range below the floor that the
 #'   short-lag or the floor-distance test did not bear out;
 #'   \code{"not_estimated"} or \code{"not_run"}), \code{range} (the
-#'   estimated range in map units), \code{floor}, \code{k_needed},
+#'   estimated range in CRS units), \code{floor}, \code{k_needed},
 #'   \code{moran} and \code{moran_floor} (the two Moran's I tests, each with
 #'   \code{I}, \code{z} and a one-sided \code{p}; \code{NULL} where the
 #'   test is not run, or where the residuals are the rounding of an exact
 #'   fit), \code{reason} and
 #'   \code{unit};
-#'   gp_adequacy: a list with \code{status} (see Details), \code{frac_below}
+#'   gp_adequacy: a list with \code{status} (see "What the basis resolves"), \code{frac_below}
 #'   (the share of length-scale draws below \code{gp_ell_min}),
 #'   \code{identified} and \code{identified_by} (\code{"spatial_share"} or
-#'   \code{"length_scale"}, the rule that decided it; see Details),
+#'   \code{"length_scale"}, the rule that decided it; see "What the basis resolves"),
 #'   \code{contraction} (one minus the ratio of posterior to prior variance,
 #'   per length-scale, negative when the posterior is the wider of the two)
 #'   and \code{prior_gap} (the largest gap between the posterior's and the
@@ -1811,7 +1754,7 @@
 #'   \code{sdgp} (2.5,
 #'   50 and 97.5 percent quantiles; the share only for a gaussian or lognormal
 #'   family), \code{effective_range} (the posterior effective range per axis
-#'   in map units, same quantiles), \code{residual_moran} (the test on the
+#'   in CRS units, same quantiles), \code{residual_moran} (the test on the
 #'   residuals the status rests on: \code{I}, \code{z}, a one-sided \code{p}
 #'   and \code{k}, the number of neighbours; absent when it could not be
 #'   run, and \code{residual_untested} then says why), \code{resolution},
@@ -1842,13 +1785,17 @@
 #'   \code{rhat_caution}, the parameters whose R-hat is between 1.01 and 1.05
 #'   with enough effective draws, which do not fail the verdict, plus
 #'   \code{gp_lscale_below_resolution} and \code{gp_adequacy}, the share and
-#'   status described under Details; and n_dropped: the rows
+#'   status described under "What the basis resolves"; and n_dropped: the rows
 #'   \code{prep_model_data()} removed for missing or non-finite values or a
 #'   bad geometry, so \code{$n} can be read against \code{nrow(data_sf)});
 #'   response_scaling: the \code{centre} and \code{scale} the response was
 #'   handed to brms with, absent when it was handed over as it is (see "The
 #'   response's centre and scale").
 #'   The raw brmsfit is in \code{$engine}.
+#' @seealso \code{\link{cv_bayes}()} to score the fit on spatial folds;
+#'   \code{predict()} (\link{spatial_fit-predict}) and \code{coef()}
+#'   (\link{spatial_fit-coef}); \code{\link{gp_lengthscale_bounds}()} for the
+#'   length-scale range the prior is set over.
 #' @family model fitting
 #' @section Warnings:
 #' Every warning this function raises carries a condition class, so a caller
@@ -1890,7 +1837,7 @@
 #' priors for the intercept, the residual standard deviation and the
 #' Gaussian process's standard deviation from the response it is given, with
 #' scales of at least 2.5 in its units.  A response at 1e8 plus a spread of 1,
-#' or in units of 1e-20, lies far from both, and its fit missed the data by
+#' or in units of 1e-20, lies far from both, and brms can miss the data by
 #' orders of magnitude.  So under the gaussian, student, skew_normal,
 #' exgaussian and asym_laplace families with an identity link, a response
 #' whose centre is more than 1,000 times its spread from zero is handed to
@@ -1899,12 +1846,8 @@
 #' standard deviation.  Under exgaussian and asym_laplace the rule is
 #' narrower: a centre more than 4 times the spread from zero is taken off,
 #' and a standard deviation outside \eqn{2^{-2}} to \eqn{2^{2}} is divided
-#' out.  brms's default prior on exgaussian's \code{beta} and Stan's
-#' starting values do not follow the response, so an exgaussian fit at a
-#' standard deviation near 1,000, or 300 standard deviations from zero, had
-#' no draws, and an asym_laplace fit 300 standard deviations from zero, or
-#' at a standard deviation near 1e-4, came back with \code{sigma} at twice
-#' its value or more.  Both steps are exact, and the model is the same
+#' out, because brms's default prior on exgaussian's \code{beta} and Stan's
+#' starting values do not follow the response.  Both steps are exact, and the model is the same
 #' model of the response: the shift moves the location only, and the scale
 #' multiplies the location, \code{sigma} and the mean \code{beta} of
 #' exgaussian's exponential part, and leaves the degrees of freedom of
@@ -1930,12 +1873,10 @@
 #'
 #' @section Non-Gaussian responses:
 #' Nothing in this function is Gaussian-specific except its default.  A
-#' numeric count, binary (0/1 or logical) or bounded response passes straight
-#' through to brms under the family you name; zero-inflated and hurdle
-#' counts, negative binomial, Bernoulli, beta, ordinal, categorical and
-#' mixture families have all been verified to reach \code{brms::brm()} with
-#' the GP term intact, the length-scale prior attached to each
-#' distributional parameter's GP.
+#' numeric count, binary (0/1 or logical) or bounded response passes
+#' through to brms under the family you name, with the GP term in the
+#' formula and the length-scale prior attached to each distributional
+#' parameter's GP.
 #'
 #' The response check is family-aware.  A factor or character response is
 #' accepted only under \code{brms::categorical()} or an ordinal family
@@ -1969,12 +1910,10 @@
 #' its mean for a count; the range it reports is then less trustworthy than
 #' for a Gaussian response, and its help page says how.
 #'
-#' One trap.  The response check reads the family's name through
-#' \code{brms}'s own accessor; a family object it cannot name is treated as
-#' unknown and the check is skipped entirely, without falling back to either
-#' rule above.  A malformed \code{family} therefore buys less validation, not
-#' more, and a wrong response type will surface as a Stan error, with no
-#' message from this function.
+#' The response check reads the family's name through \pkg{brms}'s own
+#' accessor.  If brms cannot name the family object, the check is skipped,
+#' and a wrong response type surfaces as a Stan error with no message from
+#' this function.
 #'
 #' @section Spatial confounding:
 #' A fixed-effect coefficient estimated alongside a spatial random effect is a
@@ -1982,32 +1921,33 @@
 #' covariate is itself spatially smooth, the GP term absorbs part of its
 #' effect and the two estimates can disagree sharply; when the response is
 #' smoother than the covariate, the estimate can shrink toward zero regardless
-#' of the true effect (Bolin and Wallin 2025).  Under a correctly specified
+#' of the true effect (Bolin and Wallin 2026).  Under a correctly specified
 #' spatial model this is not a bias but a change of estimand (Zimmerman and
 #' Ver Hoef 2022): the spatial coefficient is the effect \emph{net of} whatever
-#' the spatial field can explain, and the non-spatial one is not.  Which of the
-#' two a user wants depends on the question, so the honest diagnostic is to
-#' report both side by side and leave them unadjusted: fit the same formula
-#' with \code{stats::lm()} or \code{stats::glm()} and compare.  Compare like
+#' the spatial field can explain, and the non-spatial one is not.  The right
+#' one depends on the question, so report both side by side, unadjusted: fit
+#' the same formula with \code{stats::lm()} or \code{stats::glm()} and
+#' compare.  Compare like
 #' with like: under \code{standardize_predictors = TRUE} the coefficients here
 #' are per standard deviation of each predictor, so either fit the
 #' non-spatial model on the same standardised columns or divide these slopes
 #' by \code{$info$predictor_scaling[[name]]$scale} first (see
-#' \code{\link{coef.bayesian_fit}}).
+#' \link{spatial_fit-coef}).
 #'
-#' The literature on remedies is unsettled and this function takes no side.
+#' Published work on remedies is unsettled, and this function takes no side.
 #' Restricted spatial regression (Hughes and Haran 2013) projects the spatial
 #' effect off the covariate space; later work argues it does not deliver what
 #' it promises (Hanks et al. 2015; Khan and Calder 2022).  Within this backend,
 #' modelling the covariate and the spatial field as explicitly correlated
 #' (Marques, Kneib and Klein 2022) is expressible in a brms formula with no
 #' new code, and a spectral adjustment (Guan et al. 2023) is the principled
-#' route a Hilbert-space basis is well placed to support later.
+#' route that suits a Hilbert-space basis; this function does not implement
+#' it.
 #'
 #' @examples
 #' \dontrun{
 #' # Not run: fits with Stan, which needs a working C++ toolchain and takes
-#' # minutes of MCMC -- both outside what an example may assume.
+#' # minutes of sampling.
 #' if (requireNamespace("brms", quietly = TRUE)) {
 #'   library(sf)
 #'   set.seed(1)
@@ -2055,9 +1995,9 @@
 #' \emph{Statistics and Computing} \strong{33}, 17.
 #' \doi{10.1007/s11222-022-10167-2}
 #'
-#' Bolin, D. and Wallin, J. (2025). Spatial self-confounding: smoothness-related
-#' estimation bias in spatial regression models. \emph{Biometrika} \strong{113}.
-#' \doi{10.1093/biomet/asaf076}
+#' Bolin, D. and Wallin, J. (2026). Spatial self-confounding: smoothness-related
+#' estimation bias in spatial regression models. \emph{Biometrika}
+#' \strong{113}(1), asaf076. \doi{10.1093/biomet/asaf076}
 #'
 #' Guan, Y., Page, G. L., Reich, B. J., Ventrucci, M. and Yang, S. (2023).
 #' Spectral adjustment for spatial confounding. \emph{Biometrika}

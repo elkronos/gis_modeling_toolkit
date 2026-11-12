@@ -8,7 +8,7 @@
 # held-out rows of simulated layers.
 #
 # The reference for the values at held-out rows is predict_partition() of
-# the experiments (helper-pool-reference.R).
+# helper-pool-reference.R.
 #
 # Every profile names `partition`, `init`, `nstart`, `estimate`,
 # `obs_per_cell` and `sac`, every selection its `criterion`, every summary
@@ -378,7 +378,7 @@ test_that("the same holds on lon/lat rows, measured in the CRS the count was sco
 })
 
 
-# ---- Held-out rows, against the experiments' function ---------------------------
+# ---- Held-out rows, against the reference function ------------------------------
 
 test_that("with seeds the values at held-out rows are predict_partition()'s, the rows of empty regions included", {
   skip_if_not_installed("FNN")
@@ -400,7 +400,7 @@ test_that("with seeds the values at held-out rows are predict_partition()'s, the
   # Centres in the east hold no scored row, and held-out rows lie in their regions.
   expect_gt(ref$n_empty, 20L)
   expect_lt(ref$n_empty, 150L)
-  # The cell of the nearest scored row, by the experiments' own expression.
+  # The cell of the nearest scored row, by the reference's own expression.
   from <- L$tess$index[g_tr[FNN::get.knnx(xy_tr, xy_te[empty, , drop = FALSE],
                                           k = 1L)$nn.index[, 1L]]]
 
@@ -431,7 +431,7 @@ test_that("with seeds the values at held-out rows are predict_partition()'s, the
 })
 
 test_that("the cell, the fill and its source are those of a search of every pair, with and without FNN", {
-  # The rule written out, without the experiments' function and without FNN: the cell of
+  # The rule written out, without the reference function and without FNN: the cell of
   # the nearest seed; filled when that cell holds no scored row; from the cell of the
   # nearest scored row.  No location of this layer is the same distance from two.
   L <- .va_gap()

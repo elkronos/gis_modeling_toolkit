@@ -473,17 +473,15 @@ test_that("the help and the vignette say \"combined\" ranks by the sag and the c
                           "they would be otherwise"), fixed = TRUE)
   expect_false(grepl("the geometric ranking is returned without diagnostics", rd, fixed = TRUE))
   expect_false(grepl("whether the geometric ranking is returned in its place", rd, fixed = TRUE))
-  # The old average's reason: with no elbow the counts it could not score
-  # ranked last, which is not the |z| being near 0.
-  expect_match(rd, "the counts below the floor took the last place on its axis", fixed = TRUE)
-  # The class list in ?resolution_profile.
-  rp <- read("man", "resolution_profile.Rd")
-  start <- "\\item{\\code{spatialkit_diagnostic_ranking}}"
-  at <- regexpr(start, rp, fixed = TRUE)
+  # The class list in ?spatialkit-conditions: the warning is raised under
+  # "morans_i" alone.
+  cd <- read("man", "spatialkit-conditions.Rd")
+  start <- "\\item \\code{spatialkit_diagnostic_ranking}."
+  at <- regexpr(start, cd, fixed = TRUE)
   expect_true(at > 0L)
-  rest <- substring(rp, at + nchar(start))
-  item <- substring(rest, 1L, regexpr("\\item{", rest, fixed = TRUE) - 1L)
-  expect_match(item, "under \\code{criterion = \"morans_i\"}:", fixed = TRUE)
+  rest <- substring(cd, at + nchar(start))
+  item <- substring(rest, 1L, regexpr("\\item ", rest, fixed = TRUE) - 1L)
+  expect_match(item, "with \\code{criterion = \"morans_i\"}.", fixed = TRUE)
   expect_false(grepl("combined", item, fixed = TRUE))
   expect_false(grepl("upgraded", item, fixed = TRUE))
   # The vignette no longer says "combined" ranks by Moran's z.
@@ -491,13 +489,11 @@ test_that("the help and the vignette say \"combined\" ranks by the sag and the c
   expect_false(grepl("`criterion = \"combined\"` settings rank", vig, fixed = TRUE))
   expect_match(vig, "`criterion = \"combined\"` keeps the elbow's ranking of those counts",
                fixed = TRUE)
-  # The README's entry on the log line where Moran's I is computable nowhere
-  # says what each criterion does next.
-  for (file in c("README.Rmd", "README.md")) {
-    rm <- read(file)
-    expect_match(rm, paste0("Under `criterion = \"morans_i\"` the call then falls back to the ",
-                            "geometric ranking; under `\"combined\"` it ranks the counts as ",
-                            "usual, with `moran_i` and `moran_z` `NA` in the diagnostics."),
-                 fixed = TRUE, info = file)
-  }
+  # The troubleshooting article's entry on the log line where Moran's I is
+  # computable nowhere says what each criterion does next.
+  ts <- read("vignettes", "troubleshooting.Rmd")
+  expect_match(ts, paste0("Under `criterion = \"morans_i\"` the call then falls back to the ",
+                          "geometric ranking; under `\"combined\"` it ranks the counts as ",
+                          "usual, with `moran_i` and `moran_z` `NA` in the diagnostics."),
+               fixed = TRUE)
 })

@@ -259,7 +259,7 @@ test_that("the forest's location index takes the folds and repeat rule a GWR's t
   expect_identical(af$aoa$DI_location, agf$aoa$DI_location)
 })
 
-test_that("the help and NEWS say what changes for a forest", {
+test_that("the help says what changes for a forest", {
   root <- testthat::test_path("..", "..")
   if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
     skip("the help's source is not here to read")
@@ -270,12 +270,26 @@ test_that("the help and NEWS say what changes for a forest", {
   expect_match(rd, paste0("For a forest fitted with \\code{include_coords = TRUE}, unless ",
                           "\\code{coords = \"no\"}, it is the object the computation ran on"),
                fixed = TRUE)
-  news <- read("NEWS.md")
-  expect_match(news, paste0("A row outside on location is `FALSE` also when a predictor is ",
-                            "missing, where it was `NA`"), fixed = TRUE)
-  expect_match(news, paste0("Folds that split repeat visits to a site can give it a location ",
-                            "threshold of 0, with the `spatialkit_aoa_zero_threshold` warning"),
-               fixed = TRUE)
-  expect_match(news, paste0("`train_sf` passed in a geographic CRS (longitude/latitude), which ",
-                            "the predictor index measured in degrees, is refused"), fixed = TRUE)
+})
+
+test_that("print() gives the location threshold in the unit of the CRS", {
+  set.seed(23)
+  trn <- cf_pts(150, 0, 1000)
+  a <- area_of_applicability(cf_pts(20, 0, 2000),
+                             model = cf_fake_gwr(trn, c("a1", "a2")))
+  expect_identical(a$location$unit, "metres")
+  out <- utils::capture.output(print(a))
+  line <- out[grepl("location    : measured on its own", out, fixed = TRUE)]
+  expect_length(line, 1L)
+  expect_match(line, " metres from the nearest training point)$")
+  expect_false(any(grepl("map units", out, fixed = TRUE)))
+  # A unit the record does not carry is called CRS units.
+  a$location$unit <- NA_character_
+  out <- utils::capture.output(print(a))
+  expect_true(any(grepl(" CRS units from the nearest training point)", out,
+                        fixed = TRUE)))
+  a$location$unit <- NULL
+  out <- utils::capture.output(print(a))
+  expect_true(any(grepl(" CRS units from the nearest training point)", out,
+                        fixed = TRUE)))
 })

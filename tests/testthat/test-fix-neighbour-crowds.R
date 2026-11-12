@@ -183,7 +183,7 @@ test_that("with the origin moved far the reach shrinks, and centroids within it 
   # The twelve centroids 0.04 m apart from lattice point 45 at UTM
   # magnitudes are one point of thirteen.  With the origin at the corner of
   # the layer the reach is about 0.000225 m, the twelve lie beyond it, and
-  # each takes the nearest.  The help and NEWS state this limit.
+  # each takes the nearest.  The help states this limit.
   lat <- unname(as.matrix(expand.grid(0:9 * 250, 0:9 * 250))) +
     rep(c(4.5e5, 4.55e6), each = 100L)
   near <- rbind(lat, cbind(lat[45L, 1] + 0.04 * 0:11, lat[45L, 2]))
@@ -194,16 +194,11 @@ test_that("with the origin moved far the reach shrinks, and centroids within it 
     expect_identical(.region_neighbours(local, 8L, f)[112L, ], 111:104, info = fnc_tag(f))
   }
   root <- testthat::test_path("..", "..")
-  skip_if_not(file.exists(file.path(root, "DESCRIPTION")) &&
-                file.exists(file.path(root, "NEWS.md")), "not run from the source tree")
+  skip_if_not(file.exists(file.path(root, "DESCRIPTION")), "not run from the source tree")
   squash <- function(s) gsub("[[:space:]]+", " ", paste(s, collapse = " "))
-  rd   <- squash(readLines(file.path(root, "man", "summarize_by_cell.Rd")))
-  news <- squash(readLines(file.path(root, "NEWS.md")))
-  for (txt in list(rd, news)) {
-    expect_match(txt, "with the origin moved far", fixed = TRUE)
-    expect_match(txt, "taken again at half", fixed = TRUE)
-  }
-  expect_false(grepl("get the same values, in any unit or origin", news, fixed = TRUE))
+  rd <- squash(readLines(file.path(root, "man", "summarize_by_cell.Rd")))
+  expect_match(rd, "with the origin moved far", fixed = TRUE)
+  expect_match(rd, "taken again at half", fixed = TRUE)
   expect_false(grepl("no other centroid lies that close to any of them", rd, fixed = TRUE))
 })
 

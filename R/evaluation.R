@@ -711,55 +711,44 @@
 }
 
 
-#' Compute Moran's I on the residuals of a fitted spatial model
+#' Test the residuals of a fitted model for spatial autocorrelation
 #'
-#' Given a \code{spatial_fit} object, extracts the residuals and the
-#' observation coordinates, builds a spatial weight matrix, and computes
-#' Moran's I together with its analytical expectation and variance under a
-#' stated null.  A z-score and two-sided p-value are provided so the caller can
-#' assess whether statistically significant spatial autocorrelation remains
-#' after fitting.
-#'
-#' By default, weights are constructed as a k-nearest-neighbour (k = 8)
-#' binary matrix, row-standardised.  Users may supply their own weight
-#' matrix via the \code{weights} argument.
+#' Takes the residuals and the observation coordinates of a
+#' \code{spatial_fit}, builds a spatial weight matrix, and computes Moran's I
+#' with its expectation and variance under a stated null.  A z-score and a
+#' p-value say whether spatial autocorrelation remains after fitting.  The
+#' default weights are the row-standardised k-nearest-neighbour matrix
+#' described under \code{weights}.
 #'
 #' @section Which null, and when it is approximate:
-#' Two nulls are available, and the one actually used is reported back in the
-#' \code{null} element of the return value.
+#' Two nulls are available, and the one used is reported in the \code{null}
+#' element of the return value.
 #'
 #' \code{"randomisation"} is the classical exchangeable null:
-#' \eqn{E[I] = -1/(n-1)} with the Cliff & Ord randomisation variance,
+#' \eqn{E[I] = -1/(n-1)} with the Cliff and Ord randomisation variance,
 #' conditioning on the observed kurtosis.  These are the moments of I for a
 #' vector whose elements are equally likely in any order.
 #'
-#' \strong{Model residuals are not exchangeable.}  They are orthogonal to the
-#' design matrix, which pushes \eqn{E[I]} materially below \eqn{-1/(n-1)}
-#' whenever the covariates are spatially smooth, and pushes it further the
-#' more covariates there are.  In a simulation with \eqn{n = 120}, six smooth
-#' covariates and \emph{independent} errors (so the truth is "no residual
-#' autocorrelation"), OLS residuals had mean \eqn{I = -0.031} against the
-#' exchangeable \eqn{E[I] = -0.008}; the z-score averaged \eqn{-0.54} with
-#' \eqn{sd = 0.90} instead of 0 and 1.  The cost is power, which is the point
-#' of the test: at a moderate residual autocorrelation the exchangeable null
-#' rejected 13% of the time where the correct one rejected 31%.
+#' Model residuals are not exchangeable.  They are orthogonal to the design
+#' matrix, which pushes \eqn{E[I]} below \eqn{-1/(n-1)} whenever the
+#' covariates are spatially smooth, and further the more covariates there
+#' are.  Under the exchangeable null the z-score of OLS residuals is then
+#' shifted below 0, and the test loses power.
 #'
-#' \code{"residual"} therefore uses the Cliff & Ord (1981) sec. 8.3 moments for
-#' regression residuals, with \eqn{M = I - X(X'X)^{-1}X'} rebuilt from
-#' \code{predictor_vars} and \code{data_sf}:
+#' \code{"residual"} therefore uses the Cliff and Ord (1981, section 8.3)
+#' moments for regression residuals, with \eqn{M = I - X(X'X)^{-1}X'} rebuilt
+#' from \code{predictor_vars} and \code{data_sf}:
 #' \deqn{E[I] = (n/S_0)\,\mathrm{tr}(MW)/(n-p)}
 #' \deqn{Var[I] = (n/S_0)^2[\mathrm{tr}(MWMW') + \mathrm{tr}((MW)^2) +
 #'   (\mathrm{tr}MW)^2]/[(n-p)(n-p+2)] - E[I]^2}
 #' These assume normal errors and do not condition on the observed
-#' kurtosis.  On the simulation above they restored the z-score to mean
-#' \eqn{-0.09}, \eqn{sd = 1.03}, and the rejection rate to 4.3% against a
-#' nominal 5%.  They agree with \code{spdep::lm.morantest()} to machine
+#' kurtosis.  They agree with \code{spdep::lm.morantest()} to machine
 #' precision.
 #'
-#' \strong{These moments are exact for \eqn{e = My} and for nothing else}, so
+#' The residual moments are exact for \eqn{e = My} and for nothing else, so
 #' \code{null = "auto"} does not guess from the fit's class: it rebuilds
 #' \code{X}, regresses the response on it, and uses the residual moments only
-#' when the supplied residuals \emph{are} those OLS residuals to numerical
+#' when the supplied residuals are those OLS residuals to numerical
 #' tolerance.  A GWR wide enough to have collapsed to global OLS passes that
 #' test; the same GWR at a working bandwidth does not.  The response, and
 #' each predictor whose centre is more than 1000 times its spread, are taken
@@ -778,41 +767,41 @@
 #' the raw design keeps the rank of the centred one: that rounding grows
 #' with the number of rows.
 #'
-#' \strong{For the flexible backends neither null is exact}, and \code{"auto"}
-#' leaves them on \code{"randomisation"} because forcing the OLS moments on
-#' them measurably makes matters worse, not better.  Measured on null data
-#' (\eqn{n = 120}, three smooth covariates, independent errors; nominal 5%,
-#' one-sided):
-#' \tabular{lrr}{
-#'   \strong{backend} \tab \strong{randomisation} \tab \strong{residual} \cr
-#'   OLS              \tab 0.035 \tab 0.060 \cr
-#'   random forest    \tab 0.128 \tab 0.200 \cr
-#'   GWR              \tab 0.000 \tab 0.000
-#' }
-#' The random forest is anticonservative under both.  Its residuals here are
-#' the \strong{out-of-bag} ones (\code{residuals.rf_fit()}), not in-sample
-#' fits.  They are inflated instead of shrunk (measured sd 1.08 against a
-#' true 1.00), but they are not a linear projection of the response and
+#' For the flexible backends neither null is exact, and \code{"auto"} leaves
+#' them on \code{"randomisation"}: forcing the OLS moments on them does not
+#' correct them, and for a forest it raises the false-positive rate.  A
+#' random forest's residuals here are the out-of-bag ones
+#' (\link{spatial_fit-residuals}).  The random forest is anticonservative
+#' under both: its residuals are not a linear projection of the response and
 #' they are spatially heteroscedastic, so neither set of moments describes
-#' their null distribution and the variance is understated whichever is used
-#' (\eqn{sd(z) \approx 1.3}).  GWR is conservative under both, because it
-#' removes far more structure than a rank-p projection does.  Treat the
-#' p-value from those backends as a rough indicator, and prefer
-#' spatially-blocked cross-validated residuals or an explicit spatial
-#' covariance model when the answer has to carry weight.
+#' their null distribution and the variance is understated whichever is
+#' used.  GWR is conservative under both, because it removes far more
+#' structure than a rank-\eqn{p} projection does.  Treat the p-value from
+#' those backends as a rough indicator, and prefer spatially blocked
+#' cross-validated residuals or an explicit spatial covariance model when the
+#' answer has to carry weight.
 #'
-#' A permutation null was considered and rejected: permuting the residual
-#' vector destroys exactly the orthogonality that causes the bias, so its mean
-#' is the exchangeable \eqn{-1/(n-1)} by construction (measured:
-#' \eqn{-0.00840} against \eqn{-1/(n-1) = -0.00840}) and it reproduces the
-#' randomisation null without correcting it.
+#' A permutation null does not help: permuting the residual vector destroys
+#' the orthogonality that causes the bias, so its mean is the exchangeable
+#' \eqn{-1/(n-1)} by construction and it reproduces the randomisation null.
+#'
+#' @section Reading a large I:
+#' A large positive I with a small p-value means the residuals keep spatial
+#' structure the model did not capture (for a forest, read the p-value as
+#' rough; see above): a covariate it lacks, or a scale it cannot represent.
+#' Add the missing covariate if there is one, compare a backend
+#' that models space (\code{\link{fit_gwr_model}()} or
+#' \code{\link{fit_bayesian_spatial_model}()}), and score the model with
+#' blocked folds (\code{\link{cv_spatial}()}).  A z near 0 with a large p-value
+#' means the test found no structure left.
 #'
 #' @param fit A \code{spatial_fit} object (from \code{fit_gwr_model},
 #'   \code{fit_bayesian_spatial_model} or \code{fit_rf_model}).  The
 #'   locations are read from its \code{data_sf}, a feature that is not a
 #'   point reduced to one as \code{\link{coerce_to_points}(, "auto")}
 #'   does.  A layer whose geometries mix XY with XYZ or XYM, or carry M
-#'   (XYM or XYZM), is read in x and y, with no warning.
+#'   (XYM or XYZM), is read in x and y, with no warning (see
+#'   \link{spatialkit-geometry}).
 #' @param alternative Character: \code{"two.sided"} (default),
 #'   \code{"greater"} (positive autocorrelation), or \code{"less"}.
 #' @param weights Optional user-supplied n x n weight matrix: a base
@@ -834,7 +823,7 @@
 #'   distance; the matrix is the one the coordinates as stored give.  On
 #'   distinct, untied
 #'   coordinates it equals
-#'   \code{spdep}'s \code{knearneigh()} + \code{nb2listw(style = "W")}
+#'   \pkg{spdep}'s \code{knearneigh()} + \code{nb2listw(style = "W")}
 #'   exactly.
 #'   If a non-row-standardised matrix is supplied (i.e. rows do not all sum
 #'   to 1), the Cliff & Ord variance formula is still valid for general W
@@ -867,12 +856,11 @@
 #'   \code{"residual"} logs a warning when it does, \code{"auto"} does not,
 #'   and \code{df} in the result is then \eqn{n - 1}.  Read \code{null} in
 #'   the result to see which it was.
-#'   See \strong{Which null, and when it is approximate} above.
+#'   See the section "Which null, and when it is approximate".
 #' @param keep_weights Logical. Return the \eqn{n \times n} weight matrix in
-#'   the result? Defaults to \code{FALSE}: the matrix dominates the object's
-#'   size (50.3 KB of a 53.5 KB result at \eqn{n = 500} in its sparse form,
-#'   and 191 MB at the \eqn{n = 5000} the dense fallback is capped at)
-#'   while most uses read only the statistic and its moments, and
+#'   the result?  Defaults to \code{FALSE}: the matrix makes up most of the
+#'   object's size, while most uses read only the statistic and its moments,
+#'   and
 #'   \code{weights_summary} says what it was. Set \code{TRUE} when you need
 #'   the matrix itself.
 #' @return A list with components:
@@ -942,29 +930,28 @@
 #'   depend on the unit.
 #' @references Cliff, A. D. and Ord, J. K. (1981) \emph{Spatial Processes:
 #'   Models and Applications}. Pion, London. Section 8.3.
-#' @family model evaluation
-#' @examples
-#' # Works on any spatial_fit; a forest keeps the example free of the optional
-#' # GWR/Stan backends.
-#' if (requireNamespace("ranger", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   n <- 120
-#'   dat <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-#'                elev = rnorm(n)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   # A strong east-west trend the predictor cannot explain: the residuals
-#'   # should still carry spatial structure, and this is what detects it.
-#'   dat$price <- 10 + 0.02 * (st_coordinates(dat)[, 1] - 5e5) +
-#'     2 * dat$elev + rnorm(n)
-#'   fit <- fit_rf_model(dat, "price", "elev", num_trees = 100, seed = 1)
-#'   # I = 0.64, z = 15.5: strong positive residual autocorrelation, exactly
-#'   # as constructed.  A z near 0 with a large p-value would be the opposite
-#'   # verdict -- no structure the model failed to capture.
-#'   residual_morans_i(fit)
-#' }
+#' @seealso \code{\link{compare_models}()}, which adds the statistic to a
+#'   comparison of fits.
+#' @family in-sample checks
+#' @examplesIf requireNamespace("ranger", quietly = TRUE)
+#' # Works on any spatial_fit; a forest keeps the example free of the
+#' # optional GWR and Stan backends.
+#' library(sf)
+#' set.seed(1)
+#' n <- 120
+#' dat <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              elev = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' # An east-west trend the predictor cannot explain.
+#' dat$price <- 10 + 0.02 * (st_coordinates(dat)[, 1] - 5e5) +
+#'   2 * dat$elev + rnorm(n)
+#' fit <- fit_rf_model(dat, "price", "elev", num_trees = 100, seed = 1)
+#' # A large positive I and z: the residuals carry the east-west trend the
+#' # forest could not see.  A z near 0 with a large p-value would mean no
+#' # structure was left.
+#' residual_morans_i(fit)
 #' @export
 residual_morans_i <- function(fit,
                               alternative = c("two.sided", "greater", "less"),
@@ -1347,16 +1334,27 @@ residual_morans_i <- function(fit,
 
 #' Print a residual Moran's I result
 #'
-#' Shows the statistic, the null its moments come from and the evidence
-#' behind them.  The weight matrix the result carries gets a one-line
-#' description in place of the matrix: it is \eqn{n \times n}, and
-#' autoprinting it buried the statistic under a thousand lines of matrix.
+#' Prints the statistic, the null its moments come from and the evidence
+#' behind them.  The weight matrix the result carries is described in one
+#' line instead of printed.
 #'
 #' @param x An object of class \code{morans_i}, from
 #'   \code{\link{residual_morans_i}()}.
-#' @param ... Ignored.
+#' @param ... Not used.
 #' @return \code{x}, invisibly.
-#' @family print methods
+#' @seealso \code{\link{residual_morans_i}()}, which makes the object.
+#' @family in-sample checks
+#' @examplesIf requireNamespace("ranger", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' dat <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(80, 0, 1000), y = 5e6 + runif(80, 0, 1000),
+#'              elev = rnorm(80)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' dat$price <- 10 + 2 * dat$elev + rnorm(80)
+#' fit <- fit_rf_model(dat, "price", "elev", num_trees = 100, seed = 1)
+#' print(residual_morans_i(fit))
 #' @export
 print.morans_i <- function(x, ...) {
   cat(sprintf("Residual Moran's I = %.4f   (E[I] = %.4f, sd = %.4f)\n",
@@ -1475,11 +1473,19 @@ print.morans_i <- function(x, ...) {
 # evaluate_insample: metrics from already-fit spatial_fit objects
 # ---------------------------------------------------------------------------
 
-#' Compute in-sample (or out-of-sample) metrics for fitted spatial models
+#' Compute the metrics of several fitted models
 #'
-#' Accepts a single \code{spatial_fit} object or a named list of them.
-#' Does NOT refit.  Uses \code{fitted()} for in-sample and
-#' \code{predict()} for new data.
+#' Runs \code{\link{model_metrics}()} on each fit in a list and binds the
+#' rows, with a \code{model} column and a \code{metric_basis} column saying
+#' whether each row is in-sample, out-of-bag or on \code{newdata}.  It takes
+#' a single \code{spatial_fit} too.  No model is refitted: the fitted values
+#' are read with \code{fitted()}, and \code{newdata} is scored with
+#' \code{predict()}.  \code{\link{compare_models}()} adds information criteria
+#' and residual Moran's I to the same table.
+#'
+#' The metrics are those of \code{\link{model_metrics}()}: see its sections
+#' "What the metrics are computed on" and "Percentage errors on responses
+#' with zeros".
 #'
 #' @param fits A \code{spatial_fit} object, or a named list of them
 #'   (e.g. \code{list(GWR = gwr_obj, Bayesian = bayes_obj)}).  The names are
@@ -1490,9 +1496,9 @@ print.morans_i <- function(x, ...) {
 #' @param newdata Optional sf object for out-of-sample evaluation.
 #'   Must contain the response variable and all predictors.
 #'   If NULL, in-sample metrics are computed.
-#' @param ... Extra arguments passed to predict().
-#' @inheritSection model_metrics What the metrics are computed on
-#' @inheritSection model_metrics Percentage errors on responses with zeros
+#' @param ... Passed to \code{predict()} when \code{newdata} is given.
+#'   Without \code{newdata} nothing reads them, so any argument here is an
+#'   error, which catches a misspelt \code{newdata}.
 #' @return A data.frame with one row per model and columns for
 #'   model name, all regression metrics, and \code{metric_basis}: what the
 #'   row's metrics were computed on, \code{"in-sample"} (fitted values),
@@ -1501,23 +1507,21 @@ print.morans_i <- function(x, ...) {
 #'   bases do not compare like for like.  An element that is not a
 #'   \code{spatial_fit} is skipped, with a logged warning, and has no row;
 #'   a list in which no element is a \code{spatial_fit} is an error.
-#' @family model evaluation
-#' @examples
-#' if (requireNamespace("ranger", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   pts <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
-#'                a = rnorm(60)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
-#'   # Fit on 40 rows and keep 20 back, so the second call really is out of
-#'   # sample; scoring the training rows again would only re-read the fit.
-#'   fit <- fit_rf_model(pts[1:40, ], "z", "a", num_trees = 50, seed = 1)
-#'   print(evaluate_insample(fit))                    # in-sample (out-of-bag for RF)
-#'   evaluate_insample(fit, newdata = pts[41:60, ])   # on the 20 held-out rows
-#' }
+#' @family in-sample checks
+#' @examplesIf requireNamespace("ranger", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' pts <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+#'              a = rnorm(60)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' # An offset keeps the response away from zero, where MAPE is undefined.
+#' pts$z <- 10 + 2 * pts$a + rnorm(60, 0, 0.3)
+#' # Fit on 40 rows and keep 20 back, so the second call is out of sample.
+#' fit <- fit_rf_model(pts[1:40, ], "z", "a", num_trees = 50, seed = 1)
+#' evaluate_insample(fit)                           # out-of-bag for a forest
+#' evaluate_insample(fit, newdata = pts[41:60, ])   # on the 20 held-out rows
 #' @export
 evaluate_insample <- function(fits, newdata = NULL, ...) {
   .check_dots_newdata(list(...), newdata, "evaluate_insample")
@@ -1603,77 +1607,91 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 # compare_models: pure comparison from a list of fit objects
 # ---------------------------------------------------------------------------
 
-#' Side-by-side comparison of fitted spatial models
+#' Compare fitted models in sample
 #'
-#' Takes a named list of already-fit \code{spatial_fit} objects and produces
-#' a tidy comparison table including in-sample (for a forest, out-of-bag)
-#' metrics and model-specific information criteria (AICc, LOOIC).
+#' The table from \code{\link{evaluate_insample}()}, plus AICc (GWR), LOOIC
+#' (Bayesian GP), convergence and GP-adequacy flags and the residual Moran's
+#' I of each fit.  No model is refitted.  For scores on held-out blocks use
+#' \code{\link{compare_models_cv}()}.
 #'
-#' @param fits A named list of \code{spatial_fit} objects.  Names must be
-#'   unique; see \code{\link{evaluate_insample}}.
-#' @param newdata Optional sf for out-of-sample evaluation.
-#' @param ... Extra arguments passed to predict().
-#' @inheritSection model_metrics What the metrics are computed on
-#' @inheritSection model_metrics Percentage errors on responses with zeros
-#' @return A data.frame comparing all models.  Its \code{metric_basis}
-#'   column says what each row's metrics were computed on (see
-#'   \code{\link{evaluate_insample}}); a table that mixes
-#'   \code{"out-of-bag"} and \code{"in-sample"} rows does not rank the
-#'   models, and says so in the log.  \code{AICc} (GWR) and \code{LOOIC}
-#'   (Bayesian) are sums over the rows a model was fitted to, so each column
-#'   is set to \code{NA}, with a warning, when the fits carrying it were
-#'   fitted to different rows (a predictor with missing values drops rows,
-#'   for example) or to different responses (a transformed response on the
-#'   same rows), and the warning says which.  \code{convergence_ok} is
-#'   \code{TRUE} or \code{FALSE} for a Bayesian fit whose convergence was
-#'   checked (see \code{\link{fit_bayesian_spatial_model}}) and \code{NA}
-#'   otherwise; a fit that did not converge is ranked like the others, so it
-#'   also raises a warning.  \code{gp_adequacy} is what the posterior of a
-#'   Bayesian fit said about its Gaussian-process basis (\code{"ok"},
-#'   \code{"below_resolution"}, \code{"unresolved_short_range"},
-#'   \code{"no_signal_above_floor"} or \code{"not_checked"}; see "What the
-#'   basis resolves" in \code{\link{fit_bayesian_spatial_model}}) and
-#'   \code{NA} for the other backends.  A basis found too coarse scores like
-#'   one that was adequate, so read the column beside the metrics.  Alongside
-#'   the metrics it
-#'   carries
-#'   \code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p},
-#'   \code{resid_morans_null} and \code{resid_morans_basis}.
-#'   \code{resid_morans_null} names the null
-#'   \code{\link{residual_morans_i}} scored each model against, since that
-#'   choice is per-fit and governs how much the p-value is worth.
-#'   \code{resid_morans_basis} says which residuals the statistic was
-#'   computed on.  They are always the residuals of the rows the model was
-#'   fitted to, also when \code{newdata} is given, so the column reads
-#'   \code{"in-sample"}, or \code{"out-of-bag"} for a forest, and never
-#'   \code{"newdata"}: beside \code{metric_basis = "newdata"} the Moran
-#'   columns describe the training residuals, not the prediction errors on
-#'   \code{newdata}, and the two can differ in sign.  A
-#'   significant p-value is noted in the log (not raised as an R warning):
+#' The metrics are those of \code{\link{model_metrics}()}: see its sections
+#' "What the metrics are computed on" and "Percentage errors on responses
+#' with zeros".
+#'
+#' @param fits A \code{spatial_fit}, or a named list of them.  The names
+#'   label the rows and must be unique (see \code{\link{evaluate_insample}()});
+#'   a single fit is labelled by its class.
+#' @param newdata Optional sf object of held-out rows, carrying the response
+#'   and the predictors.
+#' @param ... Passed to \code{predict()} when \code{newdata} is given.
+#'   Without \code{newdata} nothing reads them, so any argument here is an
+#'   error, which catches a misspelt \code{newdata}.
+#' @return A data.frame with one row per model and these columns:
+#'   \describe{
+#'     \item{\code{model} and the metric columns}{As in
+#'       \code{\link{evaluate_insample}()}.}
+#'     \item{\code{metric_basis}}{What each row's metrics were computed on
+#'       (see \code{\link{evaluate_insample}}).  A table that mixes
+#'       \code{"out-of-bag"} and \code{"in-sample"} rows does not rank the
+#'       models, and says so in the log.}
+#'     \item{\code{AICc} (GWR) and \code{LOOIC} (Bayesian)}{Sums over the
+#'       rows a model was fitted to, so each column is set to \code{NA}, with
+#'       a warning, when the fits carrying it were fitted to different rows
+#'       (a predictor with missing values drops rows, for example) or to
+#'       different responses (a transformed response on the same rows), and
+#'       the warning says which.}
+#'     \item{\code{convergence_ok}}{\code{TRUE} or \code{FALSE} for a
+#'       Bayesian fit whose convergence was checked (see
+#'       \code{\link{fit_bayesian_spatial_model}}) and \code{NA} otherwise.  A
+#'       fit that did not converge is ranked like the others, so it also
+#'       raises a warning.}
+#'     \item{\code{gp_adequacy}}{What the posterior of a Bayesian fit said
+#'       about its Gaussian-process basis (\code{"ok"},
+#'       \code{"below_resolution"}, \code{"unresolved_short_range"},
+#'       \code{"no_signal_above_floor"} or \code{"not_checked"}; see "What the
+#'       basis resolves" in \code{\link{fit_bayesian_spatial_model}}) and
+#'       \code{NA} for the other backends.  A basis found too coarse scores
+#'       like one that was adequate, so read the column beside the metrics.}
+#'     \item{\code{resid_morans_I}, \code{resid_morans_z},
+#'       \code{resid_morans_p}}{Moran's I of the residuals, from
+#'       \code{\link{residual_morans_i}()}.}
+#'     \item{\code{resid_morans_null}}{The null each model was scored
+#'       against, since that choice is per fit and governs how much the
+#'       p-value is worth.}
+#'     \item{\code{resid_morans_basis}}{Which residuals the statistic was
+#'       computed on: always those of the rows the model was fitted to, also
+#'       when \code{newdata} is given, so the column reads
+#'       \code{"in-sample"}, or \code{"out-of-bag"} for a forest, and never
+#'       \code{"newdata"}.  Beside \code{metric_basis = "newdata"} the Moran
+#'       columns describe the training residuals, not the prediction errors
+#'       on \code{newdata}, and the two can differ in sign.}
+#'   }
+#'   A significant p-value is noted in the log (not raised as an R warning):
 #'   positive autocorrelation as structure the model may have missed,
 #'   negative (\code{resid_morans_z < 0}) as the alternating residuals of a
 #'   model that tracks its data closely.  Read the caveats in
-#'   \code{?residual_morans_i} before treating silence as evidence of no
-#'   residual structure.
-#' @family model evaluation
-#' @examples
-#' if (requireNamespace("ranger", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   pts <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
-#'                a = rnorm(60), b = rnorm(60)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   # An offset keeps the response away from zero, where MAPE is undefined.
-#'   pts$z <- 10 + 2 * pts$a - pts$b + rnorm(60, 0, 0.3)
-#'   # Two predictor sets for the same learner: the model that leaves `b` out
-#'   # against the one that has it.  These are in-sample (out-of-bag) numbers;
-#'   # compare_models_cv() scores the same question on spatial folds.
-#'   fits <- list(a_only = fit_rf_model(pts, "z", "a", num_trees = 100, seed = 1),
-#'                a_and_b = fit_rf_model(pts, "z", c("a", "b"), num_trees = 100, seed = 1))
-#'   compare_models(fits)
-#' }
+#'   \code{\link{residual_morans_i}()} before treating silence as evidence of
+#'   no residual structure.
+#' @family in-sample checks
+#' @examplesIf requireNamespace("ranger", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' pts <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+#'              a = rnorm(60), b = rnorm(60)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' # An offset keeps the response away from zero, where MAPE is undefined.
+#' pts$z <- 10 + 2 * pts$a - pts$b + rnorm(60, 0, 0.3)
+#' # Two predictor sets for the same learner: the model that leaves `b` out
+#' # against the one that has it.  These are out-of-bag numbers;
+#' # compare_models_cv() scores the same question on spatial folds.
+#' fits <- list(
+#'   a_only  = fit_rf_model(pts, "z", "a", num_trees = 100, seed = 1),
+#'   a_and_b = fit_rf_model(pts, "z", c("a", "b"), num_trees = 100, seed = 1))
+#' cmp <- compare_models(fits)
+#' cmp[, c("model", "RMSE", "R2", "metric_basis", "resid_morans_I",
+#'         "resid_morans_p")]
 #' @export
 compare_models <- function(fits, newdata = NULL, ...) {
   .check_dots_newdata(list(...), newdata, "compare_models")
@@ -1955,33 +1973,34 @@ compare_models <- function(fits, newdata = NULL, ...) {
 # compare_models_cv: cross-validated comparison
 # ---------------------------------------------------------------------------
 
-#' Cross-validated comparison of spatial models
+#' Compare models on the same cross-validation folds
 #'
-#' Fits and cross-validates one or more model types, returning a unified
-#' comparison table.  Unlike \code{compare_models()}, this function does
-#' perform fitting (inside CV folds), because CV inherently requires
-#' repeated fitting.
+#' Cross-validates one or more backends on one set of folds and returns a
+#' comparison table.  Unlike \code{\link{compare_models}()}, this fits the
+#' models, once per fold.
 #'
 #' @param data_sf An sf object.  When the folds are built here, a feature
-#'   that is not a point is reduced to one, and a layer whose geometries mix
-#'   XY with XYZ or XYM, or carry M (XYM or XYZM), is read in x and y.
+#'   that is not a point is reduced to one, and the layer is read in x and y
+#'   (see \link{spatialkit-geometry}).
 #' @param response_var Response column name.
 #' @param predictor_vars Predictor column names.
 #' @param models Character vector: any subset of \code{c("GWR", "Bayesian",
 #'   "RF")}, in any order.  Each is cross-validated on the same \code{folds}.
 #'   Names outside that set raise a warning and are dropped; if nothing
-#'   recognised remains, this is an error.  There is no silent fallback.
-#'   A recognised model whose backend package is not installed is dropped with
-#'   a message so the call still returns the models that could run.  But if
-#'   \emph{none} of the requested backends is installed, nothing is left to
-#'   compare and the call errors with \code{"no viable models."}.  Guard with
+#'   recognised remains, this is an error.  A recognised model whose backend
+#'   package is not installed is dropped with a message, so the call still
+#'   returns the models that could run.  If none of the requested backends is
+#'   installed, the call stops with \code{"no viable models."}.  Guard with
 #'   \code{requireNamespace()} when the model set is not known in advance.
 #' @param k Number of folds to build when \code{folds} is \code{NULL}; not
 #'   read when \code{folds} is supplied.  Default 5.
 #' @param seed RNG seed. Default 123.
-#' @param folds Optional fold definitions: a \code{\link{make_folds}()} return
-#'   value, or a bare list of \code{list(train =, test =)} pairs of
-#'   \code{..row_id} values.  Train and test must be disjoint (a fold that
+#' @param folds Optional fold definitions, in any of three shapes: a
+#'   \code{\link{make_folds}()} return value; a bare list of
+#'   \code{list(train =, test =)} pairs of \code{..row_id} values; or a
+#'   vector of fold labels, one per row, which becomes leave-that-label-out
+#'   splits (\code{blockCV::cv_spatial()} returns one as
+#'   \code{$folds_ids}).  Train and test must be disjoint (a fold that
 #'   trains on its own test rows is not a cross-validation split and is refused
 #'   with an error), and IDs naming no row in the prepared data are dropped with
 #'   a logged count (expected when rows were removed for missing values; a sign
@@ -1999,8 +2018,13 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   of the locations the model will predict at, and
 #'   \code{make_folds(method = "knndm", prediction_points = )} builds folds
 #'   matched to them.
-#' @param boundary Optional polygon sf/sfc.
-#' @param pointize Geometry coercion strategy.  It also decides where a
+#' @param boundary Optional polygon sf/sfc.  When the folds are built here,
+#'   the block grid is clipped to it, as in \code{\link{make_folds}()}.  It
+#'   is also passed to each backend's \code{cv_*()} function, which projects
+#'   the data to its CRS before fitting, with supplied \code{folds} too.
+#' @param pointize How a feature that is not a point is reduced to one (see
+#'   \code{\link{coerce_to_points}()}); default \code{"auto"}.  It also
+#'   decides where a
 #'   polygon or line row falls in the shared blocks, so each row is placed by
 #'   the point every model is fitted at.
 #' @param gwr_args Extra arguments for \code{\link{cv_gwr}}.  Only names that
@@ -2016,7 +2040,8 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' @param rf_args Extra arguments for \code{\link{cv_rf}}, which passes
 #'   anything it does not recognise on to \code{\link{fit_rf_model}} and thence
 #'   to \code{ranger::ranger()}.
-#' @param summary "mean" or "median" for Bayesian predictions.
+#' @param summary \code{"mean"} or \code{"median"} for the Bayesian GP's
+#'   predictions.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
@@ -2030,7 +2055,7 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   the autocorrelation range of the response (detrended on
 #'   \code{predictor_vars}) is estimated and used as the minimum block size of
 #'   the shared folds, as in \code{\link{make_folds}()}.  Default
-#'   \code{FALSE}: geometric blocks, as before this argument existed.  Either
+#'   \code{FALSE}: geometric blocks.  Either
 #'   way the fold set is built once and every backend is scored on it.  When
 #'   it cannot be built (a \code{block_size} or estimated range that leaves a
 #'   single block, say) the call is an error, as it is for each backend on
@@ -2039,12 +2064,10 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   backend's \code{cv_*()}: a \code{function(y, yhat)} returning a named
 #'   numeric vector, applied per fold and to each backend's pooled
 #'   predictions, whose names become columns of \code{by_fold} and
-#'   \code{overall} beside the built-in ones.  See \strong{Your own metrics}
-#'   on \code{\link{cv_spatial}()} for the contract.  Because the backends
+#'   \code{overall} beside the built-in ones.  See "Your own metrics" on
+#'   \code{\link{cv_spatial}()} for the contract.  Because the backends
 #'   are scored on the same folds and, in \code{overall}, on the same rows
 #'   (see Value), the columns are comparable across rows of \code{overall}.
-#' @inheritSection model_metrics Percentage errors on responses with zeros
-#' @inheritSection model_metrics Which metrics survive a non-Gaussian response
 #' @section Coverage and CRPS in the overall table:
 #' A model can predict well on average and still be badly calibrated, so a
 #' comparison read from RMSE alone can prefer the model whose uncertainty is
@@ -2057,36 +2080,51 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' weighted by each fold's \code{n_pred}) and \code{mean_CRPS} (the
 #' continuous ranked probability score, lower is better).  They are \code{NA}
 #' on the GWR and RF rows, which produce point predictions and no draws, and
-#' absent when no Bayesian model ran.  Read coverage against its nominal
+#' absent when no Bayesian GP ran.  Read coverage against its nominal
 #' level: 0.95 at \code{coverage_95} is calibrated, well below it is
 #' overconfident, well above it is wider than it needs to be.
-#' @return A list with overall, by_fold, and per-model cv_results
-#'   (\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
-#'   \code{overall} has one row per model with the pooled metrics,
-#'   \code{n_pred} (the rows they are computed on), the
-#'   coverage and CRPS columns described above when a Bayesian model ran, and
-#'   \code{model} as its last column.
-#'   Shared folds do not guarantee shared rows: a model that fails on a fold
-#'   (GWR with a fixed bandwidth across a gap in the data, say) or predicts
-#'   \code{NA} for some rows pools fewer rows, usually without the hardest
-#'   ones.  When the models predicted different rows, the function warns and
-#'   recomputes every model's pooled metrics, your own \code{metrics}
-#'   included, on the rows all of them predicted, so \code{n_pred} is the same
-#'   on every row that has predictions; a model that predicted nothing stays
-#'   an \code{NA} row.  Each model's metrics over all the rows it predicted
-#'   stay in its \code{*_cv} element and in \code{attr(overall, "all_rows")},
-#'   a table of the same shape.  \code{by_fold} and the Bayesian coverage and
-#'   CRPS columns are per fold and are not recomputed.
-#'   Every model is cross-validated on the layer as passed, so the warnings
-#'   \code{\link{prep_model_data}()} raises about that layer (class
-#'   \code{spatialkit_rows_dropped}, counting the incomplete rows dropped,
-#'   and \code{spatialkit_constant_predictor}) are raised once for the
-#'   comparison, not once per model.
-#'   Only the models that actually ran appear, so check which names are
-#'   present; there is not always one entry per requested model, because a
-#'   backend whose package is missing is dropped with a message.  When \strong{no} requested backend
-#'   is available there is nothing to return and the function errors with
-#'   \code{"no viable models."} instead of returning an empty comparison.
+#' @section Rows the overall table is computed on:
+#' Shared folds do not guarantee shared rows: a model that fails on a fold
+#' (GWR with a fixed bandwidth across a gap in the data, say) or predicts
+#' \code{NA} for some rows pools fewer rows, usually without the hardest
+#' ones.  When the models predicted different rows, the function warns and
+#' recomputes every model's pooled metrics, your own \code{metrics}
+#' included, on the rows all of them predicted, so \code{n_pred} is the same
+#' on every row that has predictions; a model that predicted nothing stays
+#' an \code{NA} row.  Each model's metrics over all the rows it predicted
+#' stay in its \code{*_cv} element and in \code{attr(overall, "all_rows")},
+#' a table of the same shape.  \code{by_fold} and the Bayesian coverage and
+#' CRPS columns are per fold and are not recomputed.
+#'
+#' Every model is cross-validated on the layer as passed, so the warnings
+#' \code{\link{prep_model_data}()} raises about that layer (class
+#' \code{spatialkit_rows_dropped}, counting the incomplete rows dropped,
+#' and \code{spatialkit_constant_predictor}) are raised once for the
+#' comparison, not once per model.
+#'
+#' Only the models that ran appear, so check which names are present: a
+#' backend whose package is missing is dropped with a message.  When no
+#' requested backend is available the function stops with
+#' \code{"no viable models."} rather than returning an empty comparison.
+#' @return A list with these elements:
+#'   \describe{
+#'     \item{\code{overall}}{One row per model with the pooled metrics,
+#'       \code{n_pred} (the rows they are computed on, see "Rows the overall
+#'       table is computed on"), the coverage and CRPS columns described in
+#'       "Coverage and CRPS in the overall table" when a Bayesian GP ran,
+#'       and \code{model} as its last column.  \code{MAPE} and \code{SMAPE}
+#'       skip rows whose denominator is zero; \code{n_MAPE} and
+#'       \code{n_SMAPE} count the rows they used, and for a count or other
+#'       non-Gaussian response RMSE, MAE and the Bayesian GP's CRPS are the
+#'       numbers to compare (see "Percentage errors on responses with zeros"
+#'       and "Which metrics survive a non-Gaussian response" in
+#'       \code{\link{model_metrics}()}).}
+#'     \item{\code{by_fold}}{The \code{fold_metrics} of every model that
+#'       ran, stacked, with a \code{model} column.}
+#'     \item{\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv}}{The full
+#'       \code{\link{cv_gwr}()}, \code{\link{cv_bayes}()} and
+#'       \code{\link{cv_rf}()} result of each model that ran.}
+#'   }
 #' @references
 #' Heaton, M. J., Datta, A., Finley, A. O., Furrer, R., Guinness, J.,
 #' Guhaniyogi, R., Gerber, F., Gramacy, R. B., Hammerling, D., Katzfuss, M.,
@@ -2094,28 +2132,29 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' study competition among methods for analyzing large spatial data.
 #' \emph{Journal of Agricultural, Biological and Environmental Statistics},
 #' 24(3), 398--425. \doi{10.1007/s13253-018-00348-w}
-#' @family model evaluation
-#' @examples
-#' if (requireNamespace("ranger", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   n <- 120
-#'   dat <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-#'                elev = rnorm(n)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
-#'     2 * dat$elev + rnorm(n)
-#'   # The random forest, and GWR beside it when sp is installed, on the
-#'   # same folds.  "Bayesian" is left out here because a Stan fit per fold
-#'   # takes minutes; add it to `models` for a run to report.
-#'   models <- c("RF", if (requireNamespace("sp", quietly = TRUE)) "GWR")
-#'   cmp <- compare_models_cv(dat, "price", "elev", models = models, k = 3,
-#'                            rf_args = list(num_trees = 100),
-#'                            gwr_args = list(bandwidth = 30))
-#'   cmp$overall
-#' }
+#' @seealso \code{\link{plot_cv_metrics}()} to draw the per-fold scores of
+#'   every model, and \code{\link{plot_calibration}()} for the Bayesian GP's
+#'   intervals.
+#' @family cross-validation
+#' @examplesIf requireNamespace("ranger", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' n <- 120
+#' dat <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              elev = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
+#'   2 * dat$elev + rnorm(n)
+#' # The random forest, and GWR beside it when sp is installed, on the same
+#' # folds.  "Bayesian" is left out here because a Stan fit per fold takes
+#' # minutes; add it to `models` for a run to report.
+#' models <- c("RF", if (requireNamespace("sp", quietly = TRUE)) "GWR")
+#' cmp <- compare_models_cv(dat, "price", "elev", models = models, k = 3,
+#'                          rf_args = list(num_trees = 100),
+#'                          gwr_args = list(bandwidth = 30))
+#' cmp$overall[, c("model", "RMSE", "R2", "n_pred")]
 #' @export
 compare_models_cv <- function(
     data_sf, response_var, predictor_vars,

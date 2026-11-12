@@ -14,6 +14,8 @@
 # 4. model_metrics() refuses the predict() arguments that return something
 #    other than one value per row.
 # 5. kNNDM folds are named by the functions that label a fold scheme.
+# 6. create_grid_polygons() reads a count as build_tessellation() does, and
+#    plot_tessellation_map() reads ID columns in the order of the join.
 # ---------------------------------------------------------------------------
 
 fic_conditions <- function(expr) {
@@ -424,4 +426,71 @@ test_that("ensure_projected() and make_folds(auto_range = TRUE) give one answer 
   set.seed(3); p <- sample(n)
   expect_identical(.crs_distance_error(ll[p, ], sf::st_crs(5070)),
                    .crs_distance_error(ll, sf::st_crs(5070)))
+})
+
+
+# --- 6. Grid sizes and ID columns read as the other builders read them --------
+
+test_that("create_grid_polygons() takes a selection, a profile or ranked levels as target_cells", {
+  skip_if_not_installed("gstat")
+  s <- fic_layer()
+  bnd <- sf::st_sf(geometry = sf::st_as_sfc(sf::st_bbox(s$pts)))
+  quiet <- function(expr) suppressWarnings(suppressMessages(expr))
+  prof <- quiet(resolution_profile(s$pts, "z"))
+  sel <- quiet(select_resolution(prof))
+  by_number <- create_grid_polygons(bnd, target_cells = sel$best, quiet = TRUE)
+  # A selection is read by its $best, a profile as build_tessellation() reads
+  # it, and ranked levels by the first.
+  expect_identical(nrow(quiet(create_grid_polygons(bnd, target_cells = sel, quiet = TRUE))),
+                   nrow(by_number))
+  expect_identical(nrow(quiet(create_grid_polygons(bnd, target_cells = prof, quiet = TRUE))),
+                   nrow(quiet(build_tessellation(s$pts, bnd, method = "square",
+                                                 approx_n_cells = prof, quiet = TRUE))$cells))
+  expect_identical(nrow(create_grid_polygons(bnd, target_cells = c(9L, 16L, 25L), quiet = TRUE)),
+                   nrow(create_grid_polygons(bnd, target_cells = 9, quiet = TRUE)))
+  # The cached builder keys the grid on the count, so the two forms share it.
+  env <- new.env()
+  g1 <- quiet(create_grid_polygons_cached(bnd, target_cells = sel, cache_env = env))
+  g2 <- create_grid_polygons_cached(bnd, target_cells = sel$best, cache_env = env)
+  expect_identical(g1, g2)
+  expect_length(ls(env, pattern = "^spatialkit_grid::"), 1L)
+  # What a count cannot be read from is refused by name.
+  expect_error(create_grid_polygons(bnd, target_cells = "nine", quiet = TRUE),
+               "`target_cells` must be a number")
+})
+
+test_that("create_grid_polygons() says that n wins over target_cells", {
+  bnd <- sf::st_sf(geometry = sf::st_sfc(sf::st_polygon(list(rbind(
+    c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)))), crs = 32632))
+  lines <- capture_spatialkit_log(g <- create_grid_polygons(bnd, target_cells = 9, n = 5,
+                                                            quiet = TRUE))
+  expect_identical(nrow(g), 25L)
+  expect_true(log_has(lines, "both `n` and `target_cells` were supplied; `n` wins"))
+  quiet_lines <- capture_spatialkit_log(create_grid_polygons(bnd, n = 5, quiet = TRUE))
+  expect_false(log_has(quiet_lines, "target_cells"))
+})
+
+test_that("plot_tessellation_map() labels a layer by the ID column the summary was keyed on", {
+  skip_if_not_installed("ggplot2")
+  bnd <- sf::st_sf(geometry = sf::st_sfc(sf::st_polygon(list(rbind(
+    c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)))), crs = 32632))
+  cells <- create_grid_polygons(bnd, target_cells = 4, quiet = TRUE)
+  # Two ID columns that differ: the label is the one assign_features_to_polygons()
+  # and summarize_by_cell() read first.
+  cells$cell_id <- rev(cells$poly_id)
+  cells$grid_id <- paste0("g", cells$poly_id)
+  p <- plot_tessellation_map(cells, labels = TRUE)
+  geoms <- vapply(p$layers, function(l) class(l$geom)[1L], character(1))
+  txt <- ggplot2::layer_data(p, which(geoms == "GeomText"))
+  expect_setequal(as.character(txt$label), as.character(cells$poly_id))
+  pts <- sf::st_as_sf(data.frame(x = c(10, 60), y = c(10, 60)), coords = c("x", "y"),
+                      crs = 32632)
+  asg <- assign_features_to_polygons(pts, cells, quiet = TRUE)
+  expect_true(all(asg$poly_id %in% cells$poly_id))
+  # Without poly_id the order goes on to polygon_id, id, cell_id, grid_id.
+  cells$poly_id <- NULL
+  p2 <- plot_tessellation_map(cells, labels = TRUE)
+  geoms2 <- vapply(p2$layers, function(l) class(l$geom)[1L], character(1))
+  txt2 <- ggplot2::layer_data(p2, which(geoms2 == "GeomText"))
+  expect_setequal(as.character(txt2$label), as.character(cells$cell_id))
 })

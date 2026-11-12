@@ -2,7 +2,7 @@
 % Please edit documentation in R/cross-validation.R
 \name{cv_spatial}
 \alias{cv_spatial}
-\title{Model-agnostic spatial cross-validation}
+\title{Cross-validate any learner with spatial folds}
 \usage{
 cv_spatial(
   data_sf,
@@ -25,251 +25,263 @@ cv_spatial(
 )
 }
 \arguments{
-\item{data_sf}{An sf object.}
+\item{data_sf}{An sf layer with the response and the predictors.}
 
-\item{response_var}{Response column name.}
+\item{response_var}{Name of the response column.}
 
-\item{predictor_vars}{Predictor column names.}
+\item{predictor_vars}{Character vector of predictor column names.}
 
 \item{fit_fn}{A function of one argument, the training slice of
-\code{data_sf}, returning a \code{spatial_fit} built with
-\code{\link{new_spatial_fit}()}.  It is called once per fold on the
-training rows only, so anything done inside it (scaling, tuning, an inner
-variable sweep) is already nested and leak-free.  The \code{subclass} it
-stamps must have a \code{predict.<subclass>()} method registered, because
-that is how each fold is scored.  The fit models \code{response_var}
-(its \code{response_var} is the call's): a fold whose fit models
-another column fails, with the two names in \code{fold_status}, since
-its predictions are scored against \code{response_var}.}
+\code{data_sf}, returning a \code{spatial_fit} built with \code{\link[=new_spatial_fit]{new_spatial_fit()}}.  It
+is called once per fold on the training rows only, so anything done
+inside it (scaling, tuning, an inner variable sweep) is already nested and
+leak-free.  The \code{subclass} it stamps must have a \verb{predict.<subclass>()}
+method registered, since that is how each fold is scored.  The fit
+models \code{response_var} (its \code{response_var} is the call's): a fold whose
+fit models another column fails, with the two names in \code{fold_status},
+since its predictions are scored against \code{response_var}.}
 
-\item{folds}{Optional fold definitions, in any of three shapes: a
-\code{\link{make_folds}()} return value; a bare list of
-\code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
-of fold labels, one per row, which becomes leave-that-label-out splits.
-The label vector is how folds built by another package are used here
-(\code{blockCV::cv_spatial()} returns one as \code{$folds_ids}), since its
-\code{$folds_list} holds two \emph{unnamed} vectors per fold and is
-refused by name.  Train and test must be disjoint: a fold that trains on
-its own test rows is not a cross-validation split and is refused with an
-error.  IDs naming no row in the prepared data are dropped with
-a logged count.
-Built via \code{block_kfold} when \code{NULL}.
+\item{folds}{Optional fold definitions, in one of three shapes: a
+\code{\link[=make_folds]{make_folds()}} result; a bare list of \code{list(train =, test =)} pairs of
+\code{..row_id} values; or a vector of fold labels, one per row, which becomes
+leave-that-label-out splits.  The label vector is how folds built by
+another package are used here: \code{blockCV::cv_spatial()} returns one as
+\verb{$folds_ids}, while its \verb{$folds_list} holds two unnamed vectors per fold
+and is refused by name.  Train and test must be disjoint; a fold that
+trains on its own test rows is not a cross-validation split and is
+refused with an error.  IDs naming no row of the prepared data are
+dropped with a logged count (expected when rows were removed for missing
+values; a sign the folds came from other data when they were not).  When
+\code{NULL}, the folds are \code{make_folds(method = "block_kfold")}, built with
+\code{k}, \code{seed}, \code{boundary}, \code{block_size} and \code{auto_range}.
 With \code{folds = NULL} the score estimates the error at the distance
 the block grid built here puts between the held-out points and their
 training data, which overstates the error of a map where the samples
 cover the area it predicts over.  The excess is how much the model's
 error grows from the map's distances to the data to the block grid's,
 and is small for a model whose error changes little with the distance
-from the data.  \code{\link{fold_separation}()}
-with \code{prediction_points} compares the held-out distances with those
-of the locations the model will predict at, and
-\code{make_folds(method = "knndm", prediction_points = )} builds folds
-matched to them.}
+from the data.  \code{\link[=fold_separation]{fold_separation()}} with \code{prediction_points} compares
+the held-out distances with those of the locations the model will
+predict at, and \code{make_folds(method = "knndm", prediction_points = )}
+builds folds matched to them.}
 
-\item{k}{Number of folds to build when \code{folds} is \code{NULL}; not
-read when \code{folds} is supplied.}
+\item{k}{Number of folds to build when \code{folds} is \code{NULL}; not read when
+\code{folds} is supplied.  Default 5.}
 
-\item{seed}{RNG seed.}
+\item{seed}{Seed for building the folds when \code{folds} is \code{NULL}, and for
+the one seed drawn per fold before \code{fit_fn} runs, so a learner that draws
+random numbers gives the same scores on every run, sequential or
+parallel.  With a seed, the caller's random stream is restored
+afterwards.  Default 123; \code{NULL} draws the per-fold seeds from the
+session's RNG state, and advances it.}
 
-\item{boundary}{Optional boundary for fold construction.}
+\item{boundary}{Optional polygon layer (sf or sfc).  Data without a CRS are
+aligned to it, and the blocks built when \code{folds} is \code{NULL} are clipped to
+it (see \code{\link[=make_folds]{make_folds()}} and \link{spatialkit-geometry}).}
 
-\item{pointize}{Geometry coercion strategy.}
+\item{pointize}{How a feature that is not a point is reduced to one before
+fitting: a mode of \code{\link[=coerce_to_points]{coerce_to_points()}}.  Default \code{"auto"}.}
 
-\item{predict_args}{Extra arguments for predict().}
+\item{predict_args}{A list of extra arguments for \code{predict()} on each
+fold's fit.}
 
-\item{fold_info_fn}{Optional \code{function(fit, test_sf, y, yhat)}
-returning a named list (or a named vector) of per-fold extras (a
-bandwidth, a tuning value, anything read off the fitted object), added
-as columns of \code{fold_metrics}.  It sees the fit and the held-out
-layer, which
-\code{metrics} does not; it is applied per fold only, and its values
-are not pooled.  An element \code{..per_row} that is a data frame with
-one row per held-out observation is spliced into \code{predictions}
-instead (\code{NA} in the rows of a fold that returned none; one of the
-wrong length is dropped and logged); its columns must be named, once,
-and not reuse a column \code{predictions} already has (\code{..row_id},
-\code{fold}, \code{y}, \code{yhat}, \code{y_train_mean}).  Every
+\item{fold_info_fn}{Optional \verb{function(fit, test_sf, y, yhat)} returning a
+named list (or a named vector) of per-fold extras (a bandwidth, a tuning
+value, anything read off the fitted object), added as columns of
+\code{fold_metrics}.  It sees the fit and the held-out layer, which \code{metrics}
+does not; it is applied per fold only, and its values are not pooled.
+An element \code{..per_row} that is a data frame with one row per held-out
+observation is spliced into \code{predictions} instead (\code{NA} in the rows of a
+fold that returned none; one of the wrong length is dropped and logged);
+its columns must be named, once, and not reuse a column \code{predictions}
+already has (\code{..row_id}, \code{fold}, \code{y}, \code{yhat}, \code{y_train_mean}).  Every
 other element must be named, hold one value, and not reuse a column
-\code{fold_metrics} already has;
-anything else is an error.  A \code{fold_info_fn} that throws on a fold
-is logged, its columns are \code{NA} for that fold, and
-\code{fold_status$message} says so; the fold is kept.}
+\code{fold_metrics} already has; anything else is an error.  A
+\code{fold_info_fn} that throws on a fold is logged, its columns are \code{NA} for
+that fold, and \code{fold_status$message} says so; the fold is kept.}
 
-\item{p}{Number of predictors for Adj R² (NULL to skip).  Only meaningful
-for models with a fixed global parameter count; pass NULL for models
-with spatially varying coefficients (e.g. GWR).}
+\item{p}{Number of predictors for the per-fold adjusted
+\eqn{R^2}{R^2}, or \code{NULL} to skip it.  It applies only to models with
+one global parameter count; pass \code{NULL} for models with spatially
+varying coefficients, such as GWR.}
 
-\item{block_size}{Optional minimum block edge length (projected CRS
-units) for the blocks built when \code{folds} is \code{NULL}; see
-\code{\link{make_folds}()}.  Beside supplied \code{folds} it has
-nothing to size and raises a warning (class
-\code{spatialkit_fold_args_ignored}).}
+\item{block_size}{Optional minimum block edge length, in the units of the
+CRS the folds are built in, for the blocks built when \code{folds} is \code{NULL};
+see \code{\link[=make_folds]{make_folds()}}.  It is a size you choose and is compared with the
+autocorrelation range only when one can be estimated, in which case a
+smaller size is warned about.  Beside supplied \code{folds} it has nothing to
+size and raises a warning of class \code{spatialkit_fold_args_ignored}.}
 
-\item{auto_range}{Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
-estimate the autocorrelation range and use it as the minimum block size.
-Default \code{FALSE}.  \code{TRUE} beside supplied \code{folds} raises
-the same warning as \code{block_size}.}
+\item{auto_range}{Logical, default \code{FALSE}.  \code{TRUE} with \code{folds = NULL}
+estimates the autocorrelation range and uses it as the minimum block
+size.  \code{TRUE} beside supplied \code{folds} raises the same warning as
+\code{block_size}.}
 
-\item{parallel}{Logical or positive integer.  If \code{TRUE},
-auto-detect the number of cores and fit folds in parallel via
-\code{parallel::mclapply()} (macOS / Linux; falls back to sequential
-on Windows).  If an integer > 1, use that many cores.  Default
-\code{FALSE} (sequential).  A learner that runs OpenMP code (a
-function of GWmodel, or an xgboost built with GNU libgomp) can hang the
-forked workers once it has run in the session; keep such a
+\item{parallel}{Logical or positive integer.  \code{TRUE} detects the number of
+cores and fits the folds in parallel with \code{parallel::mclapply()} (macOS
+and Linux; sequential on Windows); an integer above 1 uses that many
+cores.  Default \code{FALSE} (sequential).  A learner that runs OpenMP code (a
+function of \pkg{GWmodel}, or an \pkg{xgboost} built with GNU libgomp)
+can hang the forked workers once it has run in the session; keep such a
 \code{fit_fn} sequential.}
 
-\item{metrics}{Optional scoring function of your own; see \strong{Your
-own metrics} below.  Default \code{NULL}: the built-in metrics only.}
+\item{metrics}{Optional scoring function of your own; see the section
+"Your own metrics".  Default \code{NULL}: the built-in metrics only.}
 
-\item{.caller}{Internal. The name the messages carry, so a wrapper such as
-\code{\link{cv_rf}} reports itself in place of \code{cv_spatial()}.}
+\item{.caller}{For package wrappers; do not set it.}
 }
 \value{
-A list with \code{overall}, \code{fold_metrics}, \code{predictions},
-\code{folds}, the two fold counts \code{n_folds_attempted} and
-\code{n_folds_succeeded}, and four elements that say what happened to
-the difference between them and to the rows: \code{fold_status},
-\code{orphan_rows}, \code{n_unknown_ids} and \code{n_dropped}.  The
-counts are reported deliberately: a
-\code{fit_fn} that fails on every fold otherwise looks like a successful
-run that happened to score \code{NA}, so compare them before trusting
-\code{overall}.  \code{fold_status} is a data.frame with one row per
-fold supplied (\code{fold}, \code{status} and \code{message}), where
-\code{status} is \code{"ok"} (\code{message} is empty unless
-\code{fold_info_fn} failed on the fold); \code{"error"} (the fit or its
-\code{predict()} threw; \code{message} is the error text);
-\code{"skipped"} (nothing scorable: too few matched rows, a prediction
-of the wrong length, or no finite observed/predicted pair);
-\code{"dropped"} (an empty test set, or fewer than two training rows,
-once incomplete rows were removed, so the fold never reached the fitter);
-or \code{"worker_error"} (a parallel worker died, for example killed for
-lack of memory).  Each fold runs in its own worker, so a failure costs
-that fold only, and an error that stops a sequential run (a
-\code{metrics} or \code{fold_info_fn} return value of the wrong shape)
-stops a parallel one too, naming the fold.  Every fold missing
-from \code{fold_metrics} has its reason there, which matters most when
-the console output of a long run is gone.  When some folds, but not
-all, end as \code{"error"}, \code{"skipped"} or \code{"worker_error"},
-the function warns, naming them and how many rows \code{overall}
-covers: it is pooled over the folds that produced predictions, and the
-fold that fails is often the hardest to predict, so it may flatter the
-model.  (A \code{"dropped"} fold has its own warning.)
-\code{orphan_rows} holds the
-\code{..row_id}s of rows in the data that no fold names (they enter no
-training set and are never scored; non-empty only when the folds were
-built on a different or subsetted layer), and \code{n_unknown_ids}
-counts the distinct row IDs the folds name that the data does not have.
-Each such row is named by every fold, once as a test row and once in
-each other fold's training set, and this counts the row, not the
-mentions (expected when rows were removed for missing values).
-\code{n_dropped} is how many rows \code{prep_model_data()} removed for
+A list with:
+\describe{
+\item{\code{overall}}{One row of metrics pooled over the held-out rows of
+every fold that produced predictions.}
+\item{\code{fold_metrics}}{One row per fold that produced predictions:
+\code{fold}, \code{n_train}, \code{n_test}, \code{n_pred}, the metrics, and the columns
+of \code{fold_info_fn} and \code{metrics}.}
+\item{\code{predictions}}{One row per held-out row scored: \code{..row_id},
+\code{fold}, \code{y}, \code{yhat} and \code{y_train_mean}, the mean response of that
+fold's training rows.}
+\item{\code{folds}}{The splits as run, each with its \code{fold_id}.}
+\item{\code{n_folds_attempted}, \code{n_folds_succeeded}}{The folds supplied (or
+built) and the folds scored.  A \code{fit_fn} that fails on every fold
+otherwise looks like a run that scored \code{NA}, so compare the two
+before reading \code{overall}.}
+\item{\code{fold_status}}{A data frame with one row per fold supplied:
+\code{fold}, \code{status} and \code{message}.  \code{status} is one of
+\itemize{
+\item \code{"ok"}: \code{message} is empty unless \code{fold_info_fn} failed on
+the fold;
+\item \code{"error"}: the fit or its \code{predict()} threw, and \code{message} is
+the error text;
+\item \code{"skipped"}: nothing to score (too few matched rows, a
+prediction of the wrong length, or no finite pair of observed and
+predicted values);
+\item \code{"dropped"}: an empty test set, or fewer than two training
+rows once incomplete rows were removed, so the fold never reached
+the fitter;
+\item \code{"worker_error"}: a parallel worker died, for example killed
+for lack of memory.
+}
+Every fold missing from \code{fold_metrics} has its reason here, after the
+console output of a long run is gone.}
+\item{\code{orphan_rows}}{The \code{..row_id}s of rows in the data that no fold
+names: they enter no training set and are never scored.  It is empty
+unless the folds were built on a different or subsetted layer.}
+\item{\code{n_unknown_ids}}{The number of distinct row IDs the folds name
+that the data do not have (expected when rows were removed for
+missing values).  Each such row is named by every fold, once as a
+test row and once in each other fold's training set, and this counts
+the row, not the mentions.}
+\item{\code{n_dropped}}{The number of rows \code{\link[=prep_model_data]{prep_model_data()}} removed for
 missing or non-finite values or a bad geometry before any fold was
-fitted.  The \code{fold} column of
-\code{fold_metrics}, \code{predictions} and \code{fold_status} carries
-the fold's index in the \code{folds} object that was supplied, so it
-lines up with \code{make_folds()$assignment$fold} even when some folds
-were unusable and dropped.  Splits that already carry a \code{fold_id},
-as the \code{folds} of a \code{cv_*()} result do, keep it: handing
-one run's \code{folds} to another labels each fold as the first run
-and \code{\link{fold_separation}()} do, a dropped fold's gap
-included.  \code{R2} is out-of-sample \eqn{R^2}: the
-total sum of squares is taken about the mean of the \emph{training} rows
-(in \code{overall}, each held-out row about its own fold's training
-mean), the null prediction available when the fold is predicted, and
-not about the held-out rows' own mean, a null model that would know the
-test data.  On spatial blocks the two can differ widely; \code{R2} is
-below 0 when the model predicts worse than the training mean.
-\code{\link{model_metrics}(newdata = )} uses the same baseline.
-\code{overall$Adj_R2} is always \code{NA}: the
-pooled out-of-sample predictions come from \code{k} separately fitted
-models and have no single parameter count to adjust for.  The per-fold
-\code{fold_metrics$Adj_R2} carries the adjusted value when \code{p} is
-supplied, and is \code{NA} otherwise.  A \code{fit_fn} that returns a
-\code{gwr_fit} of a response at a large offset gives \code{predictions}
-the columns \code{y_centre}, \code{yhat_centred} and
-\code{y_train_mean_centred} (see \code{\link{cv_gwr}()}).
+fitted.}
+}
+
+A failure costs that fold only: with \code{parallel = TRUE} each fold runs in
+its own worker, and a sequential run catches the error per fold.  An
+error that stops a sequential run (a \code{metrics} or \code{fold_info_fn} return
+value of the wrong shape) stops a parallel one too, naming the fold.  When some folds, but not all, end as \code{"error"}, \code{"skipped"} or
+\code{"worker_error"}, the function warns, naming them and how many rows
+\code{overall} covers: it is pooled over the folds that produced predictions,
+and the fold that fails is often the hardest to predict, so it may
+flatter the model.  A \code{"dropped"} fold has its own warning.
+
+The \code{fold} column of \code{fold_metrics}, \code{predictions} and \code{fold_status}
+carries the fold's index in the \code{folds} object that was supplied, so it
+lines up with \code{make_folds()$assignment$fold} even when some folds were
+unusable and dropped.  Splits that already carry a \code{fold_id}, as the
+\code{folds} of a \verb{cv_*()} result do, keep it: handing one run's \code{folds} to
+another labels each fold as the first run and \code{\link[=fold_separation]{fold_separation()}} do, a
+dropped fold's gap included.
+
+\code{R2} is the out-of-sample \eqn{R^2}{R^2}: the total sum of squares is
+taken about the mean of the training rows (in \code{overall}, each held-out
+row about its own fold's training mean), the null prediction available
+when the fold is predicted, and not about the held-out rows' own mean,
+a null model that would know the test data.  On spatial blocks the two
+can differ widely; \code{R2} is below 0 when the model predicts worse than
+the training mean.  \code{model_metrics(newdata = )} uses the same baseline.
+\code{overall$Adj_R2} is always \code{NA}: the pooled out-of-sample predictions
+come from \code{k} separately fitted models and have no single parameter
+count to adjust for.  The per-fold \code{fold_metrics$Adj_R2} carries the
+adjusted value when \code{p} is supplied, and is \code{NA} otherwise.  A \code{fit_fn}
+that returns a \code{gwr_fit} of a response at a large offset gives
+\code{predictions} the columns \code{y_centre}, \code{yhat_centred} and
+\code{y_train_mean_centred} (see \code{\link[=cv_gwr]{cv_gwr()}}).
 }
 \description{
-Run K-fold CV for any model that returns a \code{spatial_fit} object.
-This is the extensibility point: to plug in a new model type, supply
-a \code{fit_fn(train_sf)} that returns a \code{spatial_fit}.
+You supply \code{fit_fn(train_sf)}, which fits on one fold's training rows and
+returns a \code{spatial_fit}; \code{cv_spatial()} builds or takes the folds, calls
+\code{fit_fn} once per fold, predicts the held-out rows and returns pooled and
+per-fold scores.  \code{\link[=cv_rf]{cv_rf()}} is a wrapper over it.
 }
 \section{Name collision with blockCV}{
 
 The \pkg{blockCV} package exports a function of the same name that does
-the opposite job: \code{blockCV::cv_spatial()} \emph{builds} spatial
-folds, where this function \emph{runs} a cross-validation over folds it is
-given.  With both packages attached, whichever was attached last masks the
-other; \code{spatialkit::cv_spatial()} always resolves to this one.  The
-two cooperate: \code{blockCV::cv_spatial()} returns
-its fold assignment as \code{$folds_ids}, a vector of fold labels, and
-that vector is accepted directly as the \code{folds} argument here and in
-every other \code{cv_*()} function.  Fold construction is
-\pkg{blockCV}'s home ground and this package does not try to match its
-breadth there; what this package adds is the path from irregular points
-through data-drawn regions to a cross-validated, compared model.
+the opposite job: \code{blockCV::cv_spatial()} builds spatial folds, where this
+function runs a cross-validation over folds it is given.  With both
+packages attached, whichever was attached last masks the other;
+\code{spatialkit::cv_spatial()} always resolves to this one.  The two work
+together: \code{blockCV::cv_spatial()} returns its fold assignment as
+\verb{$folds_ids}, a vector of fold labels, and that vector is accepted as the
+\code{folds} argument here and in every other \verb{cv_*()} function.
 }
 
 \section{Your own metrics}{
 
-The built-in columns (\code{RMSE}, \code{MAE}, \code{MAPE},
-\code{SMAPE}, \code{R2}, \code{Adj_R2}) are the Gaussian regression
-set, and the section below says which of them survive a count or a
-bounded response.  \code{metrics} is the way to score what they cannot: a
-\code{function(y, yhat)} that returns a named numeric vector (a named
-list of scalars, or a one-row data frame, also serve), for example a
-Poisson deviance, a log score on a probability, or a loss with your own
-weights.  It is applied twice, in the same way the built-in metrics are:
-once per fold, to that fold's held-out rows, so each name becomes a column
-of \code{fold_metrics}; and once to the pooled out-of-sample predictions
-of every fold, so each name becomes a column of \code{overall}.  Only the
-pairs the built-in metrics use reach the function (both \code{y} and
-\code{yhat} finite), so its columns describe the same rows as
-\code{RMSE}, and \code{n_pred} counts them.
+The built-in columns (\code{RMSE}, \code{MAE}, \code{MAPE}, \code{SMAPE}, \code{R2}, \code{Adj_R2}) are
+the Gaussian regression set; see "Which metrics survive a non-Gaussian
+response" in \code{\link[=model_metrics]{model_metrics()}} for which of them hold up on a count or a
+bounded response.  \code{metrics} scores what they cannot: a
+\verb{function(y, yhat)} that returns a named numeric vector (a named list of
+scalars, or a one-row data frame, also serve), for example a Poisson
+deviance, a log score on a probability, or a loss with your own weights.
+It is applied twice, as the built-in metrics are: once per fold, to that
+fold's held-out rows, so each name becomes a column of \code{fold_metrics}; and
+once to the pooled out-of-sample predictions of every fold, so each name
+becomes a column of \code{overall}.  Only the pairs the built-in metrics use
+reach the function (both \code{y} and \code{yhat} finite), so its columns describe
+the same rows as \code{RMSE}, and \code{n_pred} counts them.
 
 The contract: every element named, names unique and not one of the
 built-in column names, one number per name.  The built-in names include
-the per-fold extras of the backend or of your \code{fold_info_fn}
-(\code{bandwidth} for \code{cv_gwr()}; \code{CRPS}, \code{coverage_*},
-\code{gp_k}, \code{gp_n_basis} and \code{n_draws} for \code{cv_bayes()}),
-and \code{mean_CRPS}, which \code{compare_models_cv()} writes.  Anything
-else is an error,
-because a scoring function that returns the wrong shape is a mistake to
-surface instead of a fold to skip.  A function that \emph{throws} on a
-fold is logged and its columns are \code{NA} for that fold (and for
+the per-fold extras of the backend or of your \code{fold_info_fn} (\code{bandwidth}
+for \code{cv_gwr()}; \code{CRPS}, \verb{coverage_*}, \code{gp_k}, \code{gp_n_basis} and \code{n_draws}
+for \code{cv_bayes()}), and \code{mean_CRPS}, which \code{compare_models_cv()} writes.
+Anything else is an error, since a scoring function that returns the wrong
+shape is a mistake to report, not a fold to skip.  A function that throws
+on a fold is logged and its columns are \code{NA} for that fold (and for
 \code{overall}, if it throws on the pooled predictions); a fold is never
 dropped for it.  When no fold produced a prediction the empty
-\code{fold_metrics} frame still carries the function's columns, typed,
-provided the function can be called on zero-length input.
+\code{fold_metrics} frame still carries the function's columns, typed, provided
+the function can be called on zero-length input.
 
-\code{fold_info_fn} is the per-fold half of the same mechanism, with
-access to the fitted object and the held-out layer; \code{metrics} sees
-only the two vectors but is also pooled.  \code{compare_models_cv()}
-hands one \code{metrics} to every backend, so the columns are comparable
-across the rows of its \code{overall}.
+\code{fold_info_fn} is the per-fold half of the same mechanism, with access to
+the fitted object and the held-out layer; \code{metrics} sees only the two
+vectors but is also pooled.  \code{compare_models_cv()} hands one \code{metrics} to
+every backend, so the columns are comparable across the rows of its
+\code{overall}.
 }
 
 \section{Warnings a learner raises in every fold}{
 
-A warning from a fold's fit or from its \code{predict()} reaches the
-caller as it is raised, so a learner that warns in every fold warns once
-per fold.  Two groups of the package's own warnings are collected over the
-folds instead and raised once per call, under this function's name and
-with the class they had:
+A warning from a fold's fit or from its \code{predict()} reaches the caller as
+it is raised, so a learner that warns in every fold warns once per fold.
+Two groups of the package's own warnings are collected over the folds
+instead and raised once per call, under this function's name and with the
+class they had:
 \itemize{
 \item the two in which \code{predict()} on a GWR counts locations
 (\code{"spatialkit_gwr_not_estimable"} and
-\code{"spatialkit_gwr_extrapolation"}), with the totals over the folds
-that had any, as \code{\link{cv_gwr}()} raises them (see
-\code{\link{predict.gwr_fit}});
-\item the four \code{\link{fit_bayesian_spatial_model}()} raises about
-a fit, naming the folds, as \code{\link{cv_bayes}()} raises them (see
-\strong{Warnings from the folds} there).
+\code{"spatialkit_gwr_extrapolation"}), with the totals over the folds that
+had any, as \code{\link[=cv_gwr]{cv_gwr()}} raises them (see \code{\link[=predict.gwr_fit]{predict.gwr_fit()}});
+\item the four \code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}} raises about a fit, naming
+the folds, as \code{\link[=cv_bayes]{cv_bayes()}} raises them (see the section "Warnings from
+the folds" there).
 }
-With \code{parallel} above one core a fold's warnings are raised after
-the folds have run, once per distinct text; one of the package's own
-classes keeps its class and its fields.
+With \code{parallel} above one core a fold's warnings are raised after the folds
+have run, once per distinct text; one of the package's own classes keeps
+its class and its fields.
 }
 
 \section{Percentage errors on responses with zeros}{
@@ -282,24 +294,24 @@ Non-zero is judged at the scale of the data: a denominator no larger
 than 100 machine epsilons times the largest one counts as zero, so the
 rule does not depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
-the \code{n} column counts finite observation/prediction pairs.  Read a
-percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
-an average over a subset of the data, whatever its value.
+the \code{n} column (\code{n_pred} in a cross-validation result) counts
+finite observation/prediction pairs.  Read a percentage error next to that
+count: when \code{n_MAPE} is smaller, \code{MAPE} is an average over a
+subset of the data, whatever its value.
 
-This bites on any response taking exact zeros: counts, rainfall,
-abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
-120, \code{MAPE} is an average over the 58 non-zero rows, which
-\code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
-subtly: it drops the rows where observation and prediction are both near
-zero (which on a well-fitted zero-inflated model are the rows it got
-\emph{right}), so it averages the harder rows only and reads worse than
-the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
-count is only a label, not a repair.
+Any response taking exact zeros is affected: counts, rainfall, abundance,
+claim amounts.  On a zero-inflated response with 62 zeros out of 120,
+\code{MAPE} averages the 58 non-zero rows and \code{n_MAPE} is 58.
+\code{SMAPE} drops the rows where observation and prediction are both
+near zero, which on a well-fitted zero-inflated model are the rows it got
+right, so it averages the harder rows only and reads worse than the fit
+deserves.  \code{n_SMAPE} shows how many rows it kept; it does not correct
+the average.
 
-\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row and are
-unaffected; prefer them whenever the response can be zero.  For a Bayesian
-fit, \code{\link{cv_bayes}()} additionally reports CRPS and interval
-coverage, which are proper scoring rules and have no such failure mode.
+\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row; prefer them
+whenever the response can be zero.  For a Bayesian GP fit,
+\code{\link{cv_bayes}()} also reports CRPS and interval coverage, which
+are proper scoring rules and are defined at zero.
 }
 
 \examples{
@@ -336,7 +348,7 @@ registerS3method("predict", "lm_fit", predict.lm_fit)
 
 cv <- cv_spatial(site, "price", "elev", fit_fn = lm_fit, k = 3, seed = 1)
 cv$overall
-# Compare these before trusting the metrics above; fold_status says why
+# Compare these before reading the metrics above; fold_status says why
 # any fold is missing from fold_metrics.
 c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
 cv$fold_status
@@ -349,22 +361,15 @@ cv2$overall$MedAE
 cv2$fold_metrics[, c("fold", "RMSE", "MedAE")]
 }
 \seealso{
-\code{\link{new_spatial_fit}()} for the constructor a \code{fit_fn}
-must use; \code{\link{cv_gwr}()}, \code{\link{cv_bayes}()} and
-\code{\link{cv_rf}()} for the built-in backends, which are thin wrappers
-over this function.
+\code{\link[=new_spatial_fit]{new_spatial_fit()}} for the constructor a \code{fit_fn} must use;
+\code{\link[=cv_gwr]{cv_gwr()}}, \code{\link[=cv_bayes]{cv_bayes()}} and \code{\link[=cv_rf]{cv_rf()}} for the built-in backends.
 
 Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=compare_models_cv]{compare_models_cv()}},
 \code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
 \code{\link[=cv_gwr]{cv_gwr()}},
 \code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=fold_separation]{fold_separation()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=sac_nugget]{sac_nugget()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+\code{\link[=plot_calibration]{plot_calibration()}},
+\code{\link[=plot_cv_metrics]{plot_cv_metrics()}}
 }
 \concept{cross-validation}

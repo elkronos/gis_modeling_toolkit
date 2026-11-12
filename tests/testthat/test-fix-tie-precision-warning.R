@@ -289,7 +289,7 @@ test_that("a watch inside another leaves the warning to the outer call", {
   expect_false(isTRUE(.tie_state$open))
 })
 
-test_that("the help pages and NEWS say so", {
+test_that("the help pages say so", {
   root <- testthat::test_path("..", "..")
   if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
     skip("the help's source is not here to read")
@@ -301,9 +301,6 @@ test_that("the help pages and NEWS say so", {
   expect_match(read("man", "fit_gwr_model.Rd"), paste0(
     "where a neighbour lies past the edge by less than that rounding the call ",
     "warns, with class \\code{\"spatialkit_xy_imprecise\"}"), fixed = TRUE)
-  expect_match(read("NEWS.md"), "past a tie by less than that rounding", fixed = TRUE)
-  expect_match(read("NEWS.md"), "the edge of a GWR's boxcar window moved with the origin",
-               fixed = TRUE)
 })
 
 # The originals of the searches that a test below silences, so that the

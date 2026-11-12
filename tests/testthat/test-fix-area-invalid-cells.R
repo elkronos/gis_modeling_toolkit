@@ -198,7 +198,7 @@ test_that("valid projected cells get the densities and the figure they got", {
   expect_equal(r$cell_area[r$cell_id == 4], 1e8, tolerance = 1e-12)
 })
 
-test_that("the help and NEWS say how invalid cells are refused", {
+test_that("the help says how invalid cells are refused", {
   root <- testthat::test_path("..", "..")
   if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
     skip("the help's source is not here to read")
@@ -214,9 +214,4 @@ test_that("the help and NEWS say how invalid cells are refused", {
                           "(a hole outside its shell), whose planar area is not the area it ",
                           "encloses."), fixed = TRUE)
   expect_match(ep, "(exact copies of a polygon count once)", fixed = TRUE)
-  news <- read("NEWS.md")
-  expect_match(news, paste0("`summarize_by_cell(area = TRUE)` gave a projected cell whose edges ",
-                            "cross a density over GEOS's area of its ring."), fixed = TRUE)
-  expect_match(news, paste0("A layer with a polygon GEOS calls invalid is now measured on the 6 ",
-                            "by 6 grid over its extent"), fixed = TRUE)
 })

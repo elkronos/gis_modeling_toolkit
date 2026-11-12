@@ -541,7 +541,7 @@
 #' times, dates or time differences (\code{POSIXt}, \code{Date},
 #' \code{difftime}), which \code{lm()} reads as numbers, is read as the
 #' same numbers.  A column of one value is returned as it is, and is
-#' dropped by the fit as before.
+#' dropped by the fit.
 #'
 #' @param P A numeric matrix or a data frame of predictor columns.
 #' @return \code{P} with each column at an offset less its centre, as a

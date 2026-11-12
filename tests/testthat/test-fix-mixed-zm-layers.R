@@ -365,9 +365,14 @@ test_that("the help says mixed layers are read in x and y", {
                            "their spread taken, without Z and M"), fixed = TRUE)
   for (nm in c("ensure_projected.Rd", "harmonize_crs.Rd"))
     expect_match(page(nm), "spatialkit_zm_dropped", fixed = TRUE)
+  # A boundary that mixes dimensions is read as ?spatialkit-geometry says,
+  # in x and y.
   for (nm in c("clip_target_for.Rd", "create_voronoi_polygons.Rd",
                "create_grid_polygons.Rd", "build_tessellation.Rd"))
-    expect_match(page(nm), "XYM) geometries is read without Z and M", fixed = TRUE, info = nm)
+    expect_match(page(nm), "mixed dimensions are handled as \"Boundaries\" in spatialkit-geometry",
+                 fixed = TRUE, info = nm)
+  expect_match(page("spatialkit-geometry.Rd"),
+               "A boundary that mixes dimensions or carries M is read in x and y.", fixed = TRUE)
 })
 
 test_that("the scored-cells path joins mixed cells and mixed points as in XY", {

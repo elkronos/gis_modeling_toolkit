@@ -9,7 +9,7 @@
 \arguments{
 \item{x}{A \code{gwr_model_selection} object.}
 
-\item{...}{Ignored.}
+\item{...}{Not used.}
 }
 \value{
 A \code{ggplot} object.
@@ -18,39 +18,33 @@ A \code{ggplot} object.
 \code{\link{gwr_model_selection}()} ranks every model it evaluated on
 AICc.  This draws each model's criterion against its number of
 predictors, the winner in red, so the gap between the best model and the
-runners-up (which the ranked table shows only as numbers) is read
-as a shape: a winner well below the rest was chosen by the data, a
-winner a fraction of an AICc unit ahead of three others was chosen by the
-tie-break.  The criterion is in-sample and the caption carries the label
-\code{gwr_model_selection()} attached to it, including any note saying it
-was read positionally.
+runners-up (which the ranked table shows only as numbers) is read as a
+shape.  A winner well below the rest is preferred; one within 2
+AICc units of others is not separated from them (see "Printing" in
+\code{\link{gwr_model_selection}()}).  The criterion is in-sample, and the
+caption says so.
 }
 \examples{
-if (requireNamespace("sp", quietly = TRUE) &&
-    requireNamespace("ggplot2", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  n <- 80
-  dat <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               a = rnorm(n), b = rnorm(n), noise = rnorm(n)),
-    coords = c("x", "y"), crs = 32632)
-  dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
-  sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 30)
-  # Every model tried, AICc against its size; the winner (a and b) marked.
-  plot(sel)
-}
+\dontshow{if (requireNamespace("sp", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+set.seed(1)
+n <- 80
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             a = rnorm(n), b = rnorm(n), noise = rnorm(n)),
+  coords = c("x", "y"), crs = 32632)
+dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
+sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 30)
+# Every model tried, AICc against its size; the winner (a and b) marked.
+plot(sel)
+\dontshow{\}) # examplesIf}
 }
 \seealso{
-Other plotting:
-\code{\link[=plot.aoa]{plot.aoa()}},
-\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
+\code{\link{gwr_model_selection}()}, which makes the object.
+
+Other predictor selection:
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
 \code{\link[=plot.feature_selection]{plot.feature_selection()}},
-\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
-\code{\link[=plot.sac_range]{plot.sac_range()}},
-\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
-\code{\link[=plot_calibration]{plot_calibration()}},
-\code{\link[=plot_cv_metrics]{plot_cv_metrics()}},
-\code{\link[=plot_folds]{plot_folds()}}
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
-\concept{plotting}
+\concept{predictor selection}

@@ -501,25 +501,6 @@ test_that("the default's NA stops the functions that take a count, and they say 
   expect_identical(t_new, t_old)
 })
 
-test_that("the README offers determine_optimal_levels() for what it does", {
-  src <- fne_source()
-  if (is.null(src)) skip("the README is not here to read")
-  for (file in c("README.Rmd", "README.md")) {
-    lines <- readLines(file.path(src, file), warn = FALSE, encoding = "UTF-8")
-    row <- grep("^\\|.*\\| *`determine_optimal_levels\\(\\)` *\\|$", lines, value = TRUE)
-    expect_length(row, 1L)
-    task <- trimws(strsplit(row, "|", fixed = TRUE)[[1L]][2L])
-    # It reads a count off the elbow of the WSS curve and returns NA where
-    # there is none; it does not choose a count for any layer, quickly or
-    # not, and it does not count clusters (an elongated extent bends too).
-    expect_false(grepl("choose how many cells", task, fixed = TRUE), info = file)
-    expect_false(grepl("count the clusters", task, fixed = TRUE), info = file)
-    expect_identical(task, paste0("read a cell count off the elbow of the clustering of my ",
-                                  "points (coordinates only; `NA` when there is none)"),
-                     info = file)
-  }
-})
-
 test_that("the help, ?spatialkit and the resolution vignette say what the NA means", {
   src <- fne_source()
   if (is.null(src)) skip("the help's source is not here to read")
@@ -527,7 +508,8 @@ test_that("the help, ?spatialkit and the resolution vignette say what the NA mea
                              paste(readLines(file.path(src, ...), warn = FALSE), collapse = " "))
   # ?spatialkit and the vignette tie the NA to the elbow, not to clusters.
   pkg <- read("man", "spatialkit-package.Rd")
-  expect_match(pkg, "returns \\code{NA} when the WSS curve of their k-means clustering has no elbow",
+  expect_match(pkg, paste0("reads a count off the elbow of the k-means WSS curve of the ",
+                           "coordinates alone, and returns \\code{NA} when the curve has no elbow."),
                fixed = TRUE)
   expect_false(grepl("when the points have no clusters", pkg, fixed = TRUE))
   vig <- read("vignettes", "resolution.Rmd")
@@ -545,6 +527,4 @@ test_that("the help, ?spatialkit and the resolution vignette say what the NA mea
   expect_false(grepl("a logged warning says why", rd, fixed = TRUE))
   rp <- read("man", "resolution_profile.Rd")
   expect_false(grepl("raises neither", rp, fixed = TRUE))
-  expect_match(rp, "A warning beside the \\code{NA} the function returns at the default",
-               fixed = TRUE)
 })

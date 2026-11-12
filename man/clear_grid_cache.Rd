@@ -7,28 +7,35 @@
 clear_grid_cache(cache_env = .gmt_cache)
 }
 \arguments{
-\item{cache_env}{Environment to clear. Default .gmt_cache.}
+\item{cache_env}{The cache to clear. The default is the package's own;
+pass an environment only if you passed the same one to
+\code{create_grid_polygons_cached(cache_env = )}.}
 }
 \value{
 Invisibly, the number of entries removed.
 }
 \description{
-Removes all memoized grid results from the internal cache environment.
+Empties the cache that \code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}} fills, and returns
+the number of grids removed.
 }
 \examples{
 library(sf)
 bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
+invisible(clear_grid_cache())   # start from an empty cache
 g1 <- create_grid_polygons_cached(bnd, target_cells = 9)
 g2 <- create_grid_polygons_cached(bnd, target_cells = 9)   # cache hit
-clear_grid_cache()   # returns the number of entries removed, invisibly
-print(clear_grid_cache())                                   # 0: already empty
+print(clear_grid_cache())   # 1: the grid cached above
+print(clear_grid_cache())   # 0: already empty
 }
 \seealso{
-Other package options and caches:
+\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}}, which fills the cache.
+
+Other options and caches:
 \code{\link[=clear_fitted_cache]{clear_fitted_cache()}},
-\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
+\code{\link{spatialkit-conditions}},
+\code{\link{spatialkit-options}},
 \code{\link[=spatialkit_quiet]{spatialkit_quiet()}}
 }
-\concept{package options and caches}
+\concept{options and caches}

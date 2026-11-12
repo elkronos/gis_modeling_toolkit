@@ -639,7 +639,7 @@ test_that("the largest-overlap join does not advise `largest = FALSE` for an err
     "please install it first)."))
 })
 
-test_that("?assign_features_to_polygons and NEWS say what the joins do with these layers", {
+test_that("?assign_features_to_polygons says what the joins do with these layers", {
   root <- testthat::test_path("..", "..")
   if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
     skip("the help's source is not here to read")
@@ -666,19 +666,9 @@ test_that("?assign_features_to_polygons and NEWS say what the joins do with thes
                fixed = TRUE)
   expect_match(rd, "is measured on a copy repaired with \\code{sf::st_make_valid()}, with a warning",
                fixed = TRUE)
-  news <- read("NEWS.md")
-  expect_no_match(news, "still repairs the polygons s2 refuses, with its warning, and runs;",
-                  fixed = TRUE)
-  expect_match(news, paste0("it now stops with an error of class `spatialkit_features_degenerate`"),
-               fixed = TRUE)
-  expect_match(news, "The smallest-area tie-break of `assign_features_to_polygons()` gave a",
-               fixed = TRUE)
-  expect_match(news, "now run on s2 whatever the session says", fixed = TRUE)
-  expect_match(news, paste0("With s2 off, the error of the largest-overlap join for a polygon s2 ",
-                            "refuses offers `largest = FALSE`"), fixed = TRUE)
 })
 
-test_that("the help and NEWS say whether s2 refuses a piece of a repaired figure eight follows the platform", {
+test_that("the help says whether s2 refuses a piece of a repaired figure eight can follow the platform", {
   root <- testthat::test_path("..", "..")
   # The page's source where it is here, else the installed page as Rd text.
   rd <- if (file.exists(file.path(root, "man", "assign_features_to_polygons.Rd"))) {
@@ -691,22 +681,11 @@ test_that("the help and NEWS say whether s2 refuses a piece of a repaired figure
   }
   rd <- gsub("[[:space:]]+", " ", rd)
   expect_match(rd, paste0(
-    "Whether s2 refuses such a piece follows the last bits of the vertices s2 computes for it, ",
-    "which differ between platforms and s2 versions: a figure eight pinched on the edge of a ",
-    "polygon of the other layer can give a piece that s2 refuses on macOS on arm64 and accepts ",
-    "on Linux on x86-64. Where s2 accepts the piece, the join runs and gives each feature the ",
-    "polygon of its largest overlap."), fixed = TRUE)
-  if (!file.exists(file.path(root, "NEWS.md"))) skip("NEWS.md is not here to read")
-  news <- gsub("[[:space:]]+", " ",
-               paste(readLines(file.path(root, "NEWS.md"), warn = FALSE), collapse = " "))
-  expect_match(news, paste0(
-    "Whether s2 refuses such a piece follows the last bits of the vertices s2 computes for it, ",
-    "which differ between platforms and s2 versions: a figure eight pinched on the edge of two ",
-    "cells can give a piece that s2 refuses on macOS on arm64 and accepts on Linux on x86-64, ",
-    "and where s2 accepts the piece the join runs and gives each feature the polygon of its ",
+    "Whether s2 refuses such a piece can differ between platforms and s2 versions. ",
+    "Where s2 accepts the piece, the join runs and gives each feature the polygon of its ",
     "largest overlap."), fixed = TRUE)
   # Most figure eights pinched on that edge get the same outcome on both
   # platforms (some refused, some accepted on each); only some differ, so
-  # NEWS does not say that every one does.
-  expect_no_match(news, "cells gives a piece that s2 refuses", fixed = TRUE)
+  # the help does not say that every one does.
+  expect_no_match(rd, "gives a piece that s2 refuses", fixed = TRUE)
 })

@@ -225,11 +225,11 @@ test_that("plot_folds' subtitle gives the CRS's linear unit, not its identifier"
   # The proj string, the whole ~1300-character WKT, or "EPSG:32632 units".
   for (pts in list(pts_p4, pts_wkt, pts_epsg)) {
     sub <- sub_of(pts, k = 5, method = "block_kfold", block_size = 300)
-    expect_match(sub, "^Block size 300 \\(metre\\)\n")
+    expect_match(sub, "^Blocks [0-9.,]+ x [0-9.,]+ m, block_size 300\n")
     expect_lt(nchar(sub), 120)
   }
   expect_identical(sub_of(pts_epsg, method = "buffered_loo", buffer = 100),
-                   "Leave-one-out with a 100 buffer (metre)")
+                   "Leave-one-out with a 100 m buffer")
 })
 
 
@@ -279,7 +279,9 @@ test_that("plot_cv_metrics draws no pooled line for a count column", {
   for (m in c("n_pred", "n_MAPE")) {
     p <- plot_cv_metrics(cv, m)
     expect_false("GeomHline" %in% r3_layer_geoms(p))
-    expect_match(p$labels$caption, sprintf("No pooled value: `%s` is a count per fold; `overall` holds the total", m))
+    expect_match(p$labels$caption,
+                 sprintf("No pooled value: %s is a count per fold; overall holds the total", m),
+                 fixed = TRUE)
     expect_no_error(ggplot2::ggplot_build(p))
   }
   # RMSE is unchanged.
@@ -299,7 +301,7 @@ test_that("plot_cv_metrics names a model with no per-fold values and keeps the s
                          stringsAsFactors = FALSE))
   p <- plot_cv_metrics(cmp, "bandwidth")
   expect_match(p$labels$caption, "No pooled value")
-  expect_match(p$labels$caption, "Not drawn: RF \\(no finite per-fold `bandwidth`\\)")
+  expect_match(p$labels$caption, "Not drawn: RF (no finite per-fold bandwidth)", fixed = TRUE)
   expect_s3_class(p$facet, "FacetWrap")
   b <- ggplot2::ggplot_build(p)
   expect_identical(as.character(b$layout$layout$model), "GWR")

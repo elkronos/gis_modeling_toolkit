@@ -121,7 +121,8 @@
     else expect_identical(p$own_weight[i], NA_real_, info = at)
     expect_identical(p$share_alone[i], ref$share_alone, info = at)
     expect_identical(p$scored_per_cell[i], ref$N / ref$K, info = at)
-    # The share of regions with one row, which the experiment's summary keeps.
+    # The share of rows alone in their cell, times the rows per cell, is the
+    # share of cells that hold one row.
     expect_equal(p$share_alone[i] * ref$N / ref$K, ref$one_row, tolerance = 1e-12, info = at)
     expect_identical(est$cells[[i]], ref$K, info = at)
     expect_equal(est$sigma2[[i]], ref$sigma2, tolerance = 1e-10, info = at)

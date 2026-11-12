@@ -850,7 +850,7 @@ test_that("the help lists the two classes, the source of Cp's noise variance and
   rp <- rd("resolution_profile")
   expect_match(rp, "spatialkit_variogram_unusable", fixed = TRUE)
   expect_match(rp, "spatialkit_cp_noise", fixed = TRUE)
-  expect_match(rp, "The remaining warnings of these functions (points dropped, a variogram of another variable) are R warnings without a class",
+  expect_match(rp, "The other warnings of this function (points dropped, a variogram of another variable) are R warnings without a class",
                fixed = TRUE)
   expect_false(grepl("a zero nugget, a variogram of another variable", rp, fixed = TRUE))
   expect_match(rp, "is the fit's lower bound and not an estimate", fixed = TRUE)
@@ -865,7 +865,7 @@ test_that("the help lists the two classes, the source of Cp's noise variance and
   # Which profiles are refitted, and which are not.
   expect_match(sr, "On a profile without an estimate whose centres were fitted to a subsample",
                fixed = TRUE)
-  expect_match(sr, "which every such profile this version builds carries; on one built before it the centres scored are the seeds, and a log line says so",
+  expect_match(sr, "on a profile without that attribute the centres scored are the seeds, and a log line says so",
                fixed = TRUE)
   expect_match(sr, "A profile with an estimate scores it on every row of the layer in the cells of the centres fitted to the subsample, so its seeds are those centres",
                fixed = TRUE)
@@ -873,7 +873,7 @@ test_that("the help lists the two classes, the source of Cp's noise variance and
                fixed = TRUE)
   expect_match(rp, "a profile with an estimate scores it on every row in the cells of the centres fitted, and hands those centres on",
                fixed = TRUE)
-  expect_match(rp, "when the centres were fitted to a subsample and the profile has no estimate, refit_rows",
+  expect_match(rp, "When the centres were fitted to a subsample and the profile has no estimate: a list with xy, the coordinates of every point",
                fixed = TRUE)
   expect_match(rp, "gives cp its nugget (held to the semivariance of nearest-neighbour pairs, and not at all when it is at the fit's lower bound), with a warning",
                fixed = TRUE)
@@ -881,9 +881,8 @@ test_that("the help lists the two classes, the source of Cp's noise variance and
                fixed = TRUE)
 })
 
-test_that("NEWS and ?spatialkit say what the ways back to the earlier results no longer give", {
+test_that("?spatialkit sends the reader to NEWS for the ways back to the 2.0.0 results", {
   root <- testthat::test_path("..", "..")
-  # ?spatialkit: the paragraph on the two choices.
   file <- file.path(root, "man", "spatialkit-package.Rd")
   flat <- function(x)
     paste(unlist(lapply(x, function(el) if (is.character(el)) el else flat(el))), collapse = "")
@@ -893,10 +892,8 @@ test_that("NEWS and ?spatialkit say what the ways back to the earlier results no
   # Whether `text` says `x`, failing with `x` alone and not the whole text.
   says <- function(text, x) expect_true(grepl(x, text, fixed = TRUE), info = x)
   never <- function(text, x) expect_false(grepl(x, text, fixed = TRUE), info = x)
-  says(pk, "the profile it returned before, with three exceptions.")
-  says(pk, "so on gridded locations the regions can differ, and elsewhere the centres, and the cells numbered by them, can come in another order.")
-  says(pk, "so cp and the count it chooses differ wherever either applies, and nothing gives the earlier noise variance back.")
-  says(pk, "is refitted to every point before its seeds are handed on; the centres the profile scored are attr(profile, \"centres\")[[as.character(sel$best)]].")
+  # The ways back, with their exceptions, are listed in NEWS.
+  says(pk, "The defaults that change results from 2.0.0, and the argument that restores each, are listed under Breaking changes")
   never(pk, "the profile it returned before. The seeding functions")
 
   news_file <- file.path(root, "NEWS.md")
@@ -905,18 +902,6 @@ test_that("NEWS and ?spatialkit say what the ways back to the earlier results no
   lines <- readLines(news_file, warn = FALSE, encoding = "UTF-8")
   top <- grep("^# ", lines)
   dev <- lines[seq.int(top[1L], top[2L] - 1L)]
-  breaking <- dev[seq.int(grep("^## Breaking changes", dev), grep("^## New features", dev) - 1L)]
-  bc <- gsub("[[:space:]]+", " ", paste(breaking, collapse = " "))
-  # The promises that no longer hold are gone.
-  never(bc, "On a profile without an estimate nothing changes.")
-  never(bc, "returns the centres it scored, as before. ")
-  never(bc, "For the count Cp gave before, build the profile")
-  # Each of the three entries names the exceptions, and two entries say
-  # what changed and what, if anything, gives the earlier result.
-  says(bc, "gives Cp's count, with the noise variance of the entry on Cp below.")
-  says(bc, "obs_per_cell = NULL` gives the previous ladder and columns, except `cp` wherever the entry on Cp's noise variance below applies")
-  says(bc, "returns the centres it scored, as before, except off a profile without an estimate fitted to a subsample, whose chosen level is refitted to every point")
-  says(bc, "Cp's noise variance is then the variogram's nugget, as in 2.0.0, wherever that nugget is above the fit's lower bound and no more than the semivariance of nearest-neighbour pairs.")
-  says(bc, "and no argument gives the earlier noise variance back.")
-  says(bc, "are not the centres 2.0.0 returned, `partition = \"kmeans\"` and `estimate = NULL, obs_per_cell = NULL` included. The centres the profile scored, which 2.0.0 returned, are `attr(profile, \"centres\")[[as.character(sel$best)]]`")
+  # The entry ?spatialkit points to has a Breaking changes section.
+  expect_length(grep("^## Breaking changes", dev), 1L)
 })

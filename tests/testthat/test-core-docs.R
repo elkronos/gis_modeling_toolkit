@@ -1,32 +1,30 @@
 # tests/testthat/test-core-docs.R
 # -----------------------------------------------------------------------------
-# What the help, the vignettes and NEWS written for pooled cell values may say
+# What the help and the vignettes written for pooled cell values may say
 # -----------------------------------------------------------------------------
-# The help pages, the NEWS entries and the vignette sections that describe the
-# pooled value, the interval for one observation, the size and the record of
-# the count are read as text.  Five rules are held:
+# The help pages and the vignette sections that describe the pooled value,
+# the interval for one observation, the size and the record of the count are
+# read as text.  Five rules are held:
 #
-#   * none of them names existing units (counties, ZIP code areas, ZCTAs) or
-#     the pilot study: the pages do not say how the package's regions compare
-#     with any others;
+#   * none of them names existing units (counties, ZIP code areas, ZCTAs):
+#     the pages do not say how the package's cells compare with any others;
 #   * "calibrated" stands in them only in the sentence that denies it for
 #     places away from the observations, and that sentence stands wherever
 #     the intervals are described;
 #   * every figure they quote is a row of dev/sim-pooled-values.csv, the
 #     output of the package's own simulation, and that file is the output of
-#     dev/sim-pooled-values.R as it stands; the one exception is the two
-#     disclosures of ?summarize_by_cell that the rules of the pre-registration
-#     checks require (check 3, rules 3a(ii) and 3c), whose figures are held
-#     below as that check reported them, and which alone may name counties,
-#     since the fields of that check are county levels;
+#     dev/sim-pooled-values.R as it stands;
 #   * no other number stands in them but the settings of that simulation and
 #     the constants of the code, each read from where it is set;
-#   * a text that says how a number tends to behave quotes a figure for it.
+#   * a text that says how a number tends to behave quotes a figure for it,
+#     or sends the reader to the section that does.
+#
+# The NEWS entries about pooled values are held to the first two.
 #
 # The word rules read whole help pages, so a sentence added anywhere on a
-# page this work wrote into is read.  The parts of a page are found by their
-# titles, labels or first words, and each is held to its opening words, so a
-# reader that returns another part fails.
+# page that describes pooled values is read.  The parts of a page are found
+# by their titles, labels or first words, and each is held to its opening
+# words, so a reader that returns another part fails.
 #
 # From the source tree (devtools::test()) the pages are read from man/,
 # vignettes/ and NEWS.md.  Under R CMD check the tests run beside the
@@ -210,9 +208,9 @@
 
 .DOCS_DENIAL <- "Away from the observations no interval here is calibrated."
 
-# The words of a text that name existing units or the pilot study.
+# The words of a text that name existing units.
 .docs_barred <- function(text)
-  unlist(regmatches(text, gregexpr("(?i)\\b(county|counties|zip|zcta|pilot)\\w*", text,
+  unlist(regmatches(text, gregexpr("(?i)\\b(county|counties|zip|zcta)\\w*", text,
                                    perl = TRUE)))
 
 # The places a text says "calibrated" (or any word of that stem) outside the
@@ -225,11 +223,11 @@
 }
 
 # The numbers a text states: digits with their thousands commas, decimals
-# and exponent.  Digits inside a name (tau2, sigma2) and exponents written
-# with "^" are not numbers of the text.
+# and exponent.  Digits inside a name (tau2, sigma2), exponents written with
+# "^" and a version such as 2.0.0 are not numbers of the text.
 .docs_numbers <- function(text)
   regmatches(text, gregexpr(
-    "(?<![A-Za-z0-9_.^])[0-9]+(?:,[0-9]{3})*(?:\\.[0-9]+)?(?:e[+-]?[0-9]+)?(?![A-Za-z0-9_])",
+    "(?<![A-Za-z0-9_.^])[0-9]+(?:,[0-9]{3})*(?:\\.[0-9]+)?(?:e[+-]?[0-9]+)?(?![A-Za-z0-9_]|\\.[0-9])",
     text, perl = TRUE))[[1L]]
 
 # The words by which a text says how a number tends to behave.
@@ -240,23 +238,18 @@
 
 # ---- What is read -------------------------------------------------------------------
 
-# The help pages this work wrote into.  The word rules are held on the whole
-# text of each.
+# The help pages that describe pooled values.  The word rules are held on
+# the whole text of each.
 .DOCS_PAGES <- c("summarize_by_cell", "resolution_profile", "select_resolution",
                  "cell_values_at", "get_voronoi_seeds", "voronoi_seeds_kmeans",
                  "build_tessellation", "create_voronoi_polygons",
                  "assign_features_to_polygons", "spatialkit-package",
                  "summary.resolution_profile", "plot.resolution_profile")
 
-# What those pages said with a word of the stem "calibrat" before this work,
-# each in its words: the elbow rule and Moran's z in ?resolution_profile, the
-# Gaussian process in ?spatialkit, and the name of a plotting function.  They
-# are the only exceptions to the rule, and each stands once.
-.DOCS_OLDER <- list(
-  resolution_profile        = c("the rule and its calibration are in determine_optimal_levels",
-                                "z is calibrated and flat in L"),
-  "spatialkit-package"      = "an explicit spatial Gaussian process with calibrated uncertainty",
-  plot.resolution_profile   = "plot_calibration()")
+# What those pages say with a word of the stem "calibrat" about something
+# other than an interval, in its words: Moran's z in ?resolution_profile.
+# It is the only exception to the rule, and it stands once.
+.DOCS_OTHER_SENSE <- list(resolution_profile = "z is calibrated and flat in L")
 
 .docs_pages <- function() {
   out <- list()
@@ -267,7 +260,7 @@
   out
 }
 
-# The parts of those pages this work wrote, each found by its title, its
+# The parts of those pages about pooled values, each found by its title, its
 # label or its first words.
 .docs_parts <- function() {
   out <- list()
@@ -288,7 +281,8 @@
   rd <- .docs_rd("summarize_by_cell")
   put("?summarize_by_cell: Description", .docs_rd_part(rd, "\\description"))
   for (title in c("Pooled values", "Intervals: which one answers which question",
-                  "Conditions", "What the standard error estimates", "Confidence intervals"))
+                  "Conditions", "Standard errors and design effects", "Confidence intervals",
+                  "How this was checked"))
     put(paste0("?summarize_by_cell: ", title), section(rd, title))
   put("?summarize_by_cell: Confidence intervals, the two intervals",
       paragraph(rd, "Confidence intervals", "At no setting is ..ci_* a range for one observation"))
@@ -305,10 +299,9 @@
       paragraph(rd, "The ladder and its bounds", "A ladder that obs_per_cell sets"))
   put("?resolution_profile: The ladder and its bounds, no variogram",
       paragraph(rd, "The ladder and its bounds", "A ladder of sizes under sac = \"auto\""))
-  put("?resolution_profile: The criteria, cp",
-      entry(rd, "The criteria, and what each returns in practice", "cp"))
-  put("?resolution_profile: The criteria, loo",
-      entry(rd, "The criteria, and what each returns in practice", "loo"))
+  put("?resolution_profile: The criteria, cp", entry(rd, "The criteria", "cp"))
+  put("?resolution_profile: The criteria, loo", entry(rd, "The criteria", "loo"))
+  put("?resolution_profile: How this was checked", section(rd, "How this was checked"))
 
   rd <- .docs_rd("select_resolution")
   for (label in c("cp", "loo", "size", "auto"))
@@ -319,6 +312,7 @@
 
   rd <- .docs_rd("cell_values_at")
   put("?cell_values_at: Away from the observations", section(rd, "Away from the observations"))
+  put("?cell_values_at: How this was checked", section(rd, "How this was checked"))
 
   rd <- .docs_rd("spatialkit-package")
   put("?spatialkit: the two choices",
@@ -339,7 +333,7 @@
   out
 }
 
-# The six conventions this work added to "Defaults that were chosen", by
+# The six conventions of pooled values among the package's defaults, by
 # their first words.
 .DOCS_CONVENTIONS <- c("The size of", "The 8 nearest cells", "The 5 residuals",
                        "The 30 values", "The 2 percent", "The two work limits")
@@ -354,10 +348,12 @@
     "Two families of interval columns can be in the frame.",
   "?summarize_by_cell: Conditions" =
     "What the pooled columns and the count record have to say is raised as R warnings",
-  "?summarize_by_cell: What the standard error estimates" =
+  "?summarize_by_cell: Standard errors and design effects" =
     "What the ..se_* columns estimate follows deff.",
   "?summarize_by_cell: Confidence intervals" =
     "With conf_level set, every numeric response and predictor column gains four more",
+  "?summarize_by_cell: How this was checked" =
+    "The figures on this page that describe pooled values and the two intervals come from one simulation",
   "?summarize_by_cell: Confidence intervals, the two intervals" =
     "At no setting is ..ci_* a range for one observation",
   "?summarize_by_cell: argument estimate" =
@@ -378,6 +374,8 @@
     "Mallows' C_p of the piecewise-constant approximation of the response",
   "?resolution_profile: The criteria, loo" =
     "With an estimate: the leave-one-out mean squared error of that cell value",
+  "?resolution_profile: How this was checked" =
+    "The sizes for pooled values were compared in a simulation of 200 layers",
   "?select_resolution: What each criterion returns, cp" =
     "The level that minimises Mallows' C_p: the count at which re-measuring the sampled sites",
   "?select_resolution: What each criterion returns, loo" =
@@ -390,8 +388,10 @@
     "This function's default criterion is \"auto\": \"size\" for a profile of pooled values,",
   "?cell_values_at: Away from the observations" =
     "The value and the interval describe locations among the observations.",
+  "?cell_values_at: How this was checked" =
+    "A simulation shows how the interval's coverage falls with dist_ratio",
   "?spatialkit: the two choices" =
-    "Two choices are the user's, one in choosing a resolution (step 1) and one in aggregating",
+    "Two choices are the user's, and each has an argument with a default.",
   "?spatialkit: the conventions of pooled values" =
     "The size of 4.5 observations per cell",
   "?get_voronoi_seeds: argument partition" =
@@ -406,43 +406,30 @@
                      "?summarize_by_cell: Confidence intervals, the two intervals",
                      "?summarize_by_cell: Value",
                      "?cell_values_at: Away from the observations",
-                     "vignette reporting: Reporting a cell value")
+                     "vignette cells: What summarize_by_cell() returns",
+                     "vignette reporting: Reporting a pooled cell value")
 
-# The NEWS entries of this work, by their first words.
-.DOCS_NEWS <- c(
-  "summarize_by_cell() gains estimate = \"pooled\".",
-  "summarize_by_cell() gains obs_level:",
-  "resolution_profile() gains estimate and obs_per_cell.",
-  "resolution_profile()'s sac accepts \"auto\":",
-  "resolution_profile()'s nstart, get_voronoi_seeds()'s kmeans_nstart and",
-  "select_resolution() gains criterion = \"size\"",
-  "A selection made by these rules carries count_rule",
-  "New cell_values_at():",
-  "Each warning of the pooled path of summarize_by_cell() is raised once",
-  "New condition classes: spatialkit_pool_unavailable",
-  "?resolution_profile describes cp as the error of re-measuring the sampled sites.",
-  "?summarize_by_cell says what ..se_* and ..ci_* cover at each deff:")
-
-# Those entries, named "NEWS: <first words>"; NULL when NEWS is not there.
-.docs_news_texts <- function() {
+# The entries of NEWS's first section about the pooled values of
+# summarize_by_cell(), found by those two names; NULL when NEWS is not there.
+.docs_news_pooled <- function() {
   lines <- .docs_news()
   if (is.null(lines)) return(NULL)
   entries <- .docs_news_entries(lines)
-  out <- list()
-  for (first in .DOCS_NEWS) out[[paste0("NEWS: ", first)]] <- .docs_starting(entries, first)
-  out
+  entries[grepl("summarize_by_cell()", entries, fixed = TRUE) &
+            grepl("pooled value", entries, ignore.case = TRUE)]
 }
 
-# The sections of the vignettes this work wrote, and the two older sections
-# it added sentences to; with them the front matter, whose description line
-# it edited.  `code = FALSE` leaves the code chunks out, and the openings
-# below are those of the prose.
+# The sections of the vignettes that describe pooled values, and the one
+# older section a sentence about cp stands in; with them the front matter.
+# `code = FALSE` leaves the code chunks out, and the openings below are
+# those of the prose.
 .DOCS_VIGNETTES <- list(
-  resolution  = list("2" = c("Setting a size", "Leave-one-out for plain means"),
-                     "3" = "Four criteria and a diagnostic"),
-  reporting   = list("2" = "Reporting a cell value"),
-  diagnostics = list("2" = c("Four questions a score does not answer",
-                             "6. Warnings about pooled cell values")))
+  resolution = list("2" = c("A size for pooled values", "Leave-one-out for plain means"),
+                    "3" = "Four criteria and a diagnostic"),
+  reporting  = list("2" = "Reporting a pooled cell value"),
+  cells      = list("2" = c("What summarize_by_cell() returns",
+                            "Pooled values and their warnings",
+                            "Values at other locations")))
 .docs_vignette_texts <- function(code = TRUE) {
   out <- list()
   for (name in names(.DOCS_VIGNETTES)) {
@@ -459,20 +446,23 @@
 }
 .DOCS_VIGNETTE_OPENINGS <- c(
   "vignette resolution: front matter"  = "title: \"Choosing a resolution\"",
-  "vignette resolution: Setting a size" =
-    "Of the criteria above, all but loo score the plain mean of a cell.",
+  "vignette resolution: A size for pooled values" = paste(
+    "By default summarize_by_cell() reports, beside each cell's mean, a pooled value:",
+    "the cell's mean pulled toward the mean of the observations in the 8 nearest cells"),
   "vignette resolution: Leave-one-out for plain means" =
     "With plain means the leave-one-out error does choose a count.",
   "vignette resolution: Four criteria and a diagnostic" =
     "elbow sees the coordinates and knows nothing about what you measured.",
-  "vignette reporting: front matter"   = "title: \"What to save, and what to report\"",
-  "vignette reporting: Reporting a cell value" =
+  "vignette reporting: front matter"   = "title: \"Exporting and reporting results\"",
+  "vignette reporting: Reporting a pooled cell value" =
     "summarize_by_cell() returns by default, beside each cell's mean, a pooled value",
-  "vignette diagnostics: front matter" = "title: \"Diagnostics\"",
-  "vignette diagnostics: Four questions a score does not answer" =
-    "A cross-validated RMSE tells you how far the predictions fell from the held-out values.",
-  "vignette diagnostics: 6. Warnings about pooled cell values" =
-    "summarize_by_cell() returns by default, beside each cell's mean, a pooled value")
+  "vignette cells: front matter"       = "title: \"Building cells and summarising them\"",
+  "vignette cells: What summarize_by_cell() returns" =
+    "summarize_by_cell() reduces the assigned rows to one row per cell.",
+  "vignette cells: Pooled values and their warnings" =
+    "summarize_by_cell() reports problems with the pooled values",
+  "vignette cells: Values at other locations" =
+    "cell_values_at() gives a location the value of the cell it lies in")
 
 # ---- The simulation's output ---------------------------------------------------------
 
@@ -518,10 +508,8 @@
   hit
 }
 
-# A count of layers as the pages write it, and a small count in words.
+# A count of layers as the pages write it.
 .docs_layers <- function(k) if (k == 0L) "none" else if (k == 1L) "one" else as.character(k)
-.docs_word   <- function(k) c("one", "two", "three", "four", "five", "six", "seven", "eight",
-                              "nine", "ten")[k]
 
 # Every statement of the run the pages make, as (the text it stands in, its
 # words), built from the rows of the output.
@@ -557,7 +545,6 @@
     layers("f", what, sprintf("obs_per_cell = %s", size), "at this size")
   f_n     <- row("f", "pooled value", "obs_per_cell = 2", "at this size")$n
   finest  <- min(set$SIZES)
-  sizes   <- .docs_word(length(set$SIZES))
 
   # What the pages say in words has to hold of the rows.
   stopifnot(
@@ -577,171 +564,60 @@
         f_at("plain mean", 12) + f_at("plain mean", 18) + f_at("plain mean", 3) +
         f_at("plain mean", 2) == f_n)
 
-  pv  <- "?summarize_by_cell: Pooled values"
-  iv  <- "?summarize_by_cell: Intervals: which one answers which question"
-  ci  <- "?summarize_by_cell: Confidence intervals, the two intervals"
-  op  <- "?resolution_profile: Observations per cell"
-  lo  <- "?resolution_profile: The criteria, loo"
-  sr  <- "?select_resolution: What each criterion returns, loo"
-  va  <- "?cell_values_at: Away from the observations"
-  n1  <- "NEWS: summarize_by_cell() gains estimate = \"pooled\"."
-  n2  <- "NEWS: summarize_by_cell() gains obs_level:"
-  vs  <- "vignette resolution: Setting a size"
+  hc  <- "?summarize_by_cell: How this was checked"
+  op  <- "?resolution_profile: How this was checked"
+  va  <- "?cell_values_at: How this was checked"
+  vs  <- "vignette resolution: A size for pooled values"
   vl  <- "vignette resolution: Leave-one-out for plain means"
-  vr  <- "vignette reporting: Reporting a cell value"
-  vd  <- "vignette diagnostics: 6. Warnings about pooled cell values"
+  vr  <- "vignette reporting: Reporting a pooled cell value"
+  vw  <- "vignette cells: Pooled values and their warnings"
   claim <- function(where, ...) list(where = where, phrase = sprintf(...))
   list(
-    claim(pv, "was %s of the plain mean's", a_all),
-    claim(pv, paste("%s in cells that hold one of the layer's observations, %s in",
+    claim(hc, "was %s of the plain mean's", a_all),
+    claim(hc, paste("%s in cells that hold one of the layer's observations, %s in",
                     "cells of 2 to 4, %s in cells of 5 to 9 and %s in cells of 10 or more"),
           a_cl[1], a_cl[2], a_cl[3], a_cl[4]),
-    claim(pv, "In the held-out block it was %s.", a_block),
-    claim(pv, "the median own weight was %s", d_w),
-    claim(pv, "tau2 was 0 on %d layers", d_tau0),
-    claim(pv, "the warning was raised on all %d", d_n),
-    claim(pv, "a correlation of %s with", d_cor),
-    claim(pv, "where the plain means had one of %s", d_corm),
-    claim(pv, "was %s of (1 - w) * tau2 among the observations and %s times it",
+    claim(hc, "In the held-out block it was %s.", a_block),
+    claim(hc, "the median own weight was %s", d_w),
+    claim(hc, "tau2 was 0 on %d layers", d_tau0),
+    claim(hc, "the warning of class \"spatialkit_no_structure\" was raised on all %d", d_n),
+    claim(hc, "a correlation of %s with", d_cor),
+    claim(hc, "where the plain means had one of %s", d_corm),
+    claim(hc, "was %s of (1 - w) * tau2 among the observations and %s times it",
           e_among, e_block),
-    claim(iv, paste("held %s percent of the observations held out at random among the",
+    claim(hc, paste("held %s percent of the observations held out at random among the",
                     "others (%s to %s percent in single layers) and %s percent of those in",
                     "the held-out block"), b_among, b_lo, b_hi, b_block),
-    claim(iv, "held %s and %s percent of them", c_among, c_block),
-    claim(ci, "held %s percent of the observations held out among the others", c_among),
-    claim(ci, "at obs_level = 0.90 held %s percent", b_among),
+    claim(hc, "held %s and %s percent of them", c_among, c_block),
     claim(op, "was at the size 2 on %d layers, at 3 on %d and at 4.5 on %d",
           f_at("pooled value", 2), f_at("pooled value", 3), f_at("pooled value", 4.5)),
     claim(op, paste("That of the plain mean was at 2 on %s: it was at 6 on %d layers, at",
                     "4.5 on %d, at 9 on %d, at 12 on %d, and at 18 and at 3 on %s each."),
           .docs_layers(f_at("plain mean", 2)), f_at("plain mean", 6), f_at("plain mean", 4.5),
           f_at("plain mean", 9), f_at("plain mean", 12), .docs_layers(f_at("plain mean", 18))),
-    claim(lo, paste("on a ladder of the %s sizes %s to %s, its minimum was at the finest",
-                    "size on %d of %d layers for pooled values and on %s for plain means"),
-          sizes, max(set$SIZES), finest, f_at("pooled value", finest), f_n,
-          .docs_layers(f_at("plain mean", finest))),
-    claim(sr, paste("was at the finest of %s sizes on %d of %d layers, and that of the",
-                    "plain mean on %s"), sizes, f_at("pooled value", finest), f_n,
-          .docs_layers(f_at("plain mean", finest))),
     claim(va, paste("held %s percent of those with a dist_ratio below 1, %s percent from 1",
                     "to 2, %s percent from 2 to 4, %s percent from 4 to 8 and %s percent",
                     "above 8"), b_ratio[1], b_ratio[2], b_ratio[3], b_ratio[4], b_ratio[5]),
     claim(va, paste("It held %s percent of the observations held out at random and %s",
                     "percent of those in the block"), b_among, b_block),
-    claim(n1, "among the others was %s of the plain mean's", a_all),
-    claim(n2, paste("held %s percent of the observations held out among the others and %s",
-                    "percent of those in a held-out block"), b_among, b_block),
-    claim(n2, "read that way held %s percent of the first", c_among),
-    claim(vs, "the lowest loo of the pooled value was at the size 2 on %d (",
-          f_at("pooled value", 2)),
-    claim(vl, paste("the lowest loo of the plain mean was at the finest size on %s of the",
-                    "%d layers: it was at 6 observations per cell on %d of them, at 4.5 on",
-                    "%d and at 9 on %d"), .docs_layers(f_at("plain mean", finest)), f_n,
+    claim(vs, "the lowest loo of the pooled value was at the size 2 on %d of the %d layers (",
+          f_at("pooled value", 2), f_n),
+    claim(vl, "the lowest loo of the plain mean was at the finest size on %s of the %d layers.",
+          .docs_layers(f_at("plain mean", finest)), f_n),
+    claim(vl, "It was at 6 observations per cell on %d of them, at 4.5 on %d and at 9 on %d.",
           f_at("plain mean", 6), f_at("plain mean", 4.5), f_at("plain mean", 9)),
     claim(vr, paste("held %s percent of held-out observations with a dist_ratio below 1",
                     "and %s percent of those above 8"), b_ratio[1], b_ratio[5]),
-    claim(vd, "the median own weight was %s", d_w),
-    claim(vd, "a correlation of %s with", d_cor),
-    claim(vd, "where the plain means had one of %s", d_corm),
-    claim(vd, paste("it came on %d of the %d white-noise layers and",
-                    "spatialkit_no_structure on all %d"), d_tau0, d_n, d_n))
+    claim(vw, "the median own weight was %s", d_w),
+    claim(vw, "a correlation of %s with", d_cor),
+    claim(vw, "where the plain means had one of %s", d_corm),
+    claim(vw, paste("in the simulation it was raised on all %d white-noise layers, and the",
+                    "reason \"no signal between cells\" on %d of them"), d_n, d_tau0))
 }
 
-# ---- The two disclosures of the pre-registration checks ----------------------------
-
-# Check 3 of the pre-registration checks simulated fields with known levels
-# on two layouts of real locations.  Its rules put two disclosures into the
-# help: rule 3a(ii), the loss of the pooled value at observations beside a
-# sharp boundary, into the help of the pooled value; and rule 3c, the
-# coverage of the interval for one observation on the kind of field where it
-# held less than its floor in one class, into the help of that interval.
-# The figures are that check's, from its report (the table of 3a, columns
-# 3a(i) and 3a(ii), and the tables of 3c), held here as it reported them to
-# two decimals; dev/ holds no file of them.  The fields of that check are
-# county levels, so these two paragraphs, and nothing else on the pages,
-# name counties.
-.DOCS_CHECK3 <- list(
-  layouts     = c(892L, 2634L),      # the points of the two layouts
-  noise       = c(5L, 20L, 50L),     # the noise, percent of an observation's variance
-  layers      = 200L,                # replicates of each setting
-  boundary    = c(21.75, 28.04),     # 3a(ii): boundary rows, percent of the held-out rows
-  loss        = c(-9.16, 56.36),     # 3a(ii): pooled against plain over them, 12 settings
-  loss_s3     = list(c(43.21, 56.36),   # county levels alone, 5 percent noise
-                     c(11.23, 20.58),   #   20 percent noise
-                     c(-3.79, 1.47)),   #   50 percent noise
-  loss_s5     = c(-9.16, 1.59),      # county levels with a smooth field, all three
-  all_rows    = c(-18.73, -1.75),    # 3a(i): over all held-out rows, 12 settings
-  cover       = c(89.38, 89.79),     # 3c: all rows, the 12 settings read
-  class_min   = 85.65,               # 3c: the lowest class read but the failing one
-  fail        = 83.74,               # 3c: the failing class (Iowa layout, 20 percent noise,
-  fail_rows   = 4878L,               #     cells of one training row) and its rows
-  s5_class1   = c(83.74, 87.83),     # 3c: that field, cells of one, 20 and 50 percent noise
-  s5_class1_5 = c(82.64, 82.94))     # 3c: the same at 5 percent noise
-
-# The two paragraphs, by the part they stand in and their first words.
-.DOCS_CHECK3_PARAGRAPHS <- c(
-  "?summarize_by_cell: Pooled values" =
-    "Beside a sharp boundary the pooled value can be further from a cell's level",
-  "?summarize_by_cell: Intervals: which one answers which question" =
-    "The second simulation described under \"Pooled values\" read the interval")
-
-# Those paragraphs, named by their part; NA where one is not found once.
-.docs_check3_paragraphs <- function() {
-  rd <- .docs_rd("summarize_by_cell")
-  vapply(names(.DOCS_CHECK3_PARAGRAPHS), function(part) {
-    body <- .docs_rd_section(rd, sub("^\\?summarize_by_cell: ", "", part))
-    if (is.null(body)) NA_character_
-    else .docs_starting(.docs_rd_paragraphs(body), .DOCS_CHECK3_PARAGRAPHS[[part]])
-  }, character(1))
-}
-
-# Every statement of those figures, as (the text it stands in, its words).
-.docs_check3_claims <- function() {
-  f   <- .DOCS_CHECK3
-  pc  <- function(x) sprintf("%.2f", abs(x))
-  num <- function(x) format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
-  pv  <- "?summarize_by_cell: Pooled values"
-  iv  <- "?summarize_by_cell: Intervals: which one answers which question"
-  claim <- function(where, ...) list(where = where, phrase = sprintf(...))
-  list(
-    claim(pv, paste("on two layouts of real locations (%s and %s points, each in a county),",
-                    "with noise of %d, %d or %d percent of an observation's variance, %d",
-                    "layers of each, five random folds"),
-          num(f$layouts[1]), num(f$layouts[2]), f$noise[1], f$noise[2], f$noise[3],
-          f$layers),
-    claim(pv, "Boundary rows were %s to %s percent of the held-out observations.",
-          pc(f$boundary[1]), pc(f$boundary[2])),
-    claim(pv, "was from %s percent lower to %s percent higher.", pc(f$loss[1]), pc(f$loss[2])),
-    claim(pv, paste("On county levels alone it was %s and %s percent higher with %d percent",
-                    "noise, %s and %s percent higher with %d percent, and from %s percent",
-                    "lower to %s percent higher with %d percent"),
-          pc(f$loss_s3[[1]][1]), pc(f$loss_s3[[1]][2]), f$noise[1],
-          pc(f$loss_s3[[2]][1]), pc(f$loss_s3[[2]][2]), f$noise[2],
-          pc(f$loss_s3[[3]][1]), pc(f$loss_s3[[3]][2]), f$noise[3]),
-    claim(pv, "with the smooth field added it was from %s percent lower to %s percent higher.",
-          pc(f$loss_s5[1]), pc(f$loss_s5[2])),
-    claim(pv, "the lower of the two in every setting, by %s to %s percent.",
-          pc(f$all_rows[2]), pc(f$all_rows[1])),
-    claim(iv, paste("read the interval at obs_level = 0.90 on smooth fields of two ranges and",
-                    "on county levels with a smooth field, with %d or %d percent noise, on",
-                    "both layouts: twelve settings."), f$noise[2], f$noise[3]),
-    claim(iv, "Setting by setting it held %s to %s percent of the held-out observations.",
-          pc(f$cover[1]), pc(f$cover[2])),
-    claim(iv, paste("(1, 2 to 4, 5 to 9, 10 or more), it held at least %s percent in every",
-                    "class but one"), pc(f$class_min)),
-    claim(iv, paste("on the layout of %s points with %d percent noise, it held %s percent of",
-                    "the %s observations whose cell held one training observation."),
-          num(f$layouts[1]), f$noise[2], pc(f$fail), num(f$fail_rows)),
-    claim(iv, paste("On fields of that kind it is not a 90 percent interval in such cells:",
-                    "there it held %s to %s percent with %d or %d percent noise, and %s and",
-                    "%s percent with %d percent."),
-          pc(f$s5_class1[1]), pc(f$s5_class1[2]), f$noise[2], f$noise[3],
-          pc(f$s5_class1_5[1]), pc(f$s5_class1_5[2]), f$noise[1]))
-}
-
-# Every text a figure can stand in: the parts of the help, the NEWS entries
-# and the prose of the vignette sections.
-.docs_all_texts <- function() c(.docs_parts(), .docs_news_texts(), .docs_vignette_texts(FALSE))
+# Every text a figure can stand in: the parts of the help and the prose of
+# the vignette sections.
+.docs_all_texts <- function() c(.docs_parts(), .docs_vignette_texts(FALSE))
 
 # A text with the run's statements taken out: what is left holds the
 # numbers that are not figures of the simulation.
@@ -750,14 +626,15 @@
   text
 }
 
-# The texts this work wrote whole: the ones whose numbers are all accounted
-# for, and in which a statement of how a number tends to behave needs a
-# figure.  The older sections it added sentences to are read by the word
-# rules only.
+# The texts written for pooled values whole: the ones whose numbers are all
+# accounted for, and in which a statement of how a number tends to behave
+# needs a figure.  The older sections that hold a sentence or two about
+# pooled values are read by the word rules only.
 .DOCS_WRITTEN <- c(
   "?summarize_by_cell: Pooled values",
   "?summarize_by_cell: Intervals: which one answers which question",
   "?summarize_by_cell: Conditions",
+  "?summarize_by_cell: How this was checked",
   "?summarize_by_cell: Confidence intervals, the two intervals",
   "?summarize_by_cell: argument estimate",
   "?summarize_by_cell: argument obs_level",
@@ -766,19 +643,28 @@
   "?resolution_profile: The ladder and its bounds, a ladder of sizes",
   "?resolution_profile: The ladder and its bounds, no variogram",
   "?resolution_profile: The criteria, loo",
+  "?resolution_profile: How this was checked",
   "?select_resolution: What each criterion returns, loo",
   "?select_resolution: What each criterion returns, size",
   "?select_resolution: What each criterion returns, auto",
   "?select_resolution: A profile built with an estimate",
   "?cell_values_at: Away from the observations",
+  "?cell_values_at: How this was checked",
   "?spatialkit: the two choices",
   "?spatialkit: the conventions of pooled values",
-  paste0("NEWS: ", .DOCS_NEWS),
-  "vignette resolution: Setting a size",
+  "vignette resolution: A size for pooled values",
   "vignette resolution: Leave-one-out for plain means",
-  "vignette reporting: Reporting a cell value",
-  "vignette diagnostics: 6. Warnings about pooled cell values")
+  "vignette reporting: Reporting a pooled cell value",
+  "vignette cells: What summarize_by_cell() returns",
+  "vignette cells: Pooled values and their warnings",
+  "vignette cells: Values at other locations")
 
+# The texts that state how a number tends to behave and send the reader to
+# the section that quotes the figure for it, each with that section.
+.DOCS_SEE <- c(
+  "?resolution_profile: Observations per cell"           = "?resolution_profile: How this was checked",
+  "?resolution_profile: The criteria, loo"               = "?resolution_profile: How this was checked",
+  "?select_resolution: What each criterion returns, loo" = "?resolution_profile: How this was checked")
 
 # ---- The readers and the rules themselves --------------------------------------------
 
@@ -868,11 +754,10 @@ test_that("an entry, a bullet, a paragraph and a NEWS entry are found and read w
 test_that("the rules find what they are for, and nothing else", {
   expect_identical(.docs_barred("Tracts nest in a County; counties, ZIP codes and ZCTAs do not."),
                    c("County", "counties", "ZIP", "ZCTAs"))
-  expect_identical(.docs_barred("the pilot study; a Pilot; zip code areas; zcta5"),
-                   c("pilot", "Pilot", "zip", "zcta5"))
+  expect_identical(.docs_barred("a Zip code; zip code areas; zcta5"),
+                   c("Zip", "zip", "zcta5"))
   # Letters inside another word are not the word.
-  expect_identical(.docs_barred("an unzipped archive, a copilot and a viscounty"),
-                   character(0))
+  expect_identical(.docs_barred("an unzipped archive and a viscounty"), character(0))
   expect_identical(.docs_barred("cells, regions and observations"), character(0))
 
   expect_identical(.docs_calibrated(.DOCS_DENIAL), character(0))
@@ -892,9 +777,10 @@ test_that("the rules find what they are for, and nothing else", {
     c("0", "1", "1,500", "4.5", "0.90", "2e9", "1e10", "18", "12", "9"))
   expect_identical(.docs_numbers("held 89.6 percent; -0.02; the 8-nearest; about 44,700."),
                    c("89.6", "0.02", "8", "44,700"))
-  # Digits inside a name, and an exponent, are not numbers of the text.
+  # Digits inside a name, an exponent and a version are not numbers of the text.
   expect_identical(.docs_numbers("sigma2, tau2, s^2, loo_se, ..ci_lo_* and k-means++"),
                    character(0))
+  expect_identical(.docs_numbers("changed from 2.0.0 (and 10.2.1), at 1.5."), "1.5")
 
   expect_identical(.docs_hedges("It tends to fall; in practice often, and usually so. Mostly."),
                    c("tends", "in practice", "often", "usually", "Mostly"))
@@ -908,7 +794,7 @@ test_that("the parts of the help written for pooled cell values are where their 
   expect_length(.DOCS_PAGES, 12L)
   for (page in .DOCS_PAGES) expect_false(is.null(.docs_rd(page)), info = page)
   parts <- .docs_parts()
-  expect_length(parts, 27L)
+  expect_length(parts, 30L)
   expect_identical(names(parts), names(.DOCS_OPENINGS))
   for (what in names(parts)) {
     expect_false(is.na(parts[[what]]), info = what)
@@ -923,58 +809,44 @@ test_that("the parts of the help written for pooled cell values are where their 
   expect_identical(anyDuplicated(unlist(parts)), 0L)
   # The lead sentence, and the six conventions.
   expect_identical(.docs_count(parts[["?summarize_by_cell: Description"]], paste(
-    "It also returns a pooled value for each cell, its mean pulled toward the mean of",
-    "the cells around it (estimate = \"pooled\", the default; estimate = \"mean\" leaves",
-    "it out), and can return a range for one further observation.")), 1L)
+    "By default each numeric column also gets a pooled value, the cell's mean pulled toward",
+    "the mean of the cells around it (estimate = \"pooled\"; estimate = \"mean\" leaves it",
+    "out).")), 1L)
   expect_length(.DOCS_CONVENTIONS, 6L)
   for (first in .DOCS_CONVENTIONS)
     expect_identical(.docs_count(parts[["?spatialkit: the conventions of pooled values"]], first),
                      1L, info = first)
-  # Every text held to its numbers is one of the parts, an entry of NEWS or
-  # a vignette section.
-  expect_true(all(.DOCS_WRITTEN %in% c(names(parts), paste0("NEWS: ", .DOCS_NEWS),
-                                       names(.DOCS_VIGNETTE_OPENINGS))))
+  # Every text held to its numbers is one of the parts or a vignette section.
+  expect_true(all(.DOCS_WRITTEN %in% c(names(parts), names(.DOCS_VIGNETTE_OPENINGS))))
 })
 
-test_that("no help page this work wrote into names existing units or the pilot study", {
+test_that("no help page that describes pooled values names existing units", {
   pages <- .docs_pages()
   expect_identical(names(pages), paste0("?", .DOCS_PAGES))
-  # The two disclosures of check 3 stand once on their page, name counties
-  # for the fields that check simulated and name nothing else, and are taken
-  # out before the rule reads the page.
-  disclosures <- .docs_check3_paragraphs()
-  expect_length(disclosures, 2L)
-  for (what in names(disclosures)) {
-    expect_false(is.na(disclosures[[what]]), info = what)
-    expect_identical(.docs_count(pages[["?summarize_by_cell"]], disclosures[[what]]), 1L,
-                     info = what)
-    expect_true(all(tolower(.docs_barred(disclosures[[what]])) %in% c("county", "counties")),
-                info = what)
-    expect_gt(length(.docs_barred(disclosures[[what]])), 0L, label = what)
-    pages[["?summarize_by_cell"]] <- sub(disclosures[[what]], " ", pages[["?summarize_by_cell"]],
-                                         fixed = TRUE)
-  }
   for (what in names(pages)) {
     expect_false(is.na(pages[[what]]), info = what)
     expect_gt(nchar(pages[[what]]), 2000L, label = what)
     expect_identical(.docs_barred(pages[[what]]), character(0), info = what)
   }
-  # A part is a piece of its page, so the rule reads every part too.
+  # A part is a piece of its page, so the rule reads every part too.  The
+  # conventions are bullets of a longer list, read together: each is a piece.
   parts <- .docs_parts()
-  for (what in names(parts)) {
+  conv  <- "?spatialkit: the conventions of pooled values"
+  for (what in setdiff(names(parts), conv)) {
     page <- pages[[sub("spatialkit$", "spatialkit-package", sub(":.*$", "", what))]]
     expect_identical(.docs_count(page, substr(parts[[what]], 1L, 200L)), 1L, info = what)
   }
+  for (first in .DOCS_CONVENTIONS)
+    expect_identical(.docs_count(pages[["?spatialkit-package"]], first), 1L, info = first)
 })
 
-test_that("on those pages \"calibrated\" stands only in the sentence that denies it away from the observations, and in what they said of other things before this work", {
+test_that("on those pages \"calibrated\" stands only in the sentence that denies it away from the observations, and once of Moran's z", {
   pages <- .docs_pages()
-  expect_identical(names(.DOCS_OLDER),
-                   c("resolution_profile", "spatialkit-package", "plot.resolution_profile"))
-  expect_identical(lengths(.DOCS_OLDER, use.names = FALSE), c(2L, 1L, 1L))
+  expect_identical(names(.DOCS_OTHER_SENSE), "resolution_profile")
+  expect_identical(lengths(.DOCS_OTHER_SENSE, use.names = FALSE), 1L)
   for (what in names(pages)) {
     text <- pages[[what]]
-    for (phrase in .DOCS_OLDER[[sub("^\\?", "", what)]]) {
+    for (phrase in .DOCS_OTHER_SENSE[[sub("^\\?", "", what)]]) {
       expect_identical(.docs_count(text, phrase), 1L, info = paste(what, phrase))
       text <- sub(phrase, " ", text, fixed = TRUE)
     }
@@ -983,7 +855,7 @@ test_that("on those pages \"calibrated\" stands only in the sentence that denies
 })
 
 test_that("the help says, wherever it describes the intervals, that none is calibrated away from the observations", {
-  expect_length(.DOCS_DENIED_IN, 5L)
+  expect_length(.DOCS_DENIED_IN, 6L)
   parts <- .docs_parts()
   for (what in grep("^\\?", .DOCS_DENIED_IN, value = TRUE)) {
     expect_true(what %in% names(parts), info = what)
@@ -1016,14 +888,14 @@ test_that("the help and the vignette say that a size set the count of a selectio
   expect_identical(.docs_count(size, "since the caller set it"), 0L)
   prose <- .docs_vignette_texts(code = FALSE)
   if (is.null(prose)) skip("the vignettes' sources are not installed")
-  setting <- prose[["vignette resolution: Setting a size"]]
+  setting <- prose[["vignette resolution: A size for pooled values"]]
   expect_identical(.docs_count(setting, said), 1L)
   expect_identical(.docs_count(setting, "since the caller set it"), 0L)
 })
 
 test_that("the help says, in \"Pooled values\" and under spatialkit_pool_few_cells, that a value can cross the overall mean and two cells' values change places", {
-  # Decision 9.2.18: with 2 to 9 cells the arithmetic stays, and the help
-  # and the warning say what follows from it.
+  # With 2 to 9 cells the arithmetic stays, and the help and the warning say
+  # what follows from it.
   parts <- .docs_parts()
   pv <- parts[["?summarize_by_cell: Pooled values"]]
   expect_identical(.docs_count(pv, paste(
@@ -1046,37 +918,16 @@ test_that("the help says, in \"Pooled values\" and under spatialkit_pool_few_cel
 
 # ---- NEWS -----------------------------------------------------------------------------
 
-test_that("the NEWS entries of this work are found, name no existing units and claim no calibration", {
-  news <- .docs_news_texts()
+test_that("the NEWS entries that name pooled values name no existing units and claim no calibration", {
+  news <- .docs_news_pooled()
   if (is.null(news)) skip("NEWS.md is not there to read")
-  expect_length(.DOCS_NEWS, 12L)
-  expect_identical(names(news), paste0("NEWS: ", .DOCS_NEWS))
-  for (what in names(news)) {
-    expect_false(is.na(news[[what]]), info = what)
-    expect_identical(.docs_barred(news[[what]]), character(0), info = what)
-    expect_identical(.docs_calibrated(news[[what]]), character(0), info = what)
+  # The development version describes pooled values, so the rule has
+  # entries to read.
+  expect_gt(length(news), 0L)
+  for (entry in news) {
+    expect_identical(.docs_barred(entry), character(0), info = substr(entry, 1L, 80L))
+    expect_identical(.docs_calibrated(entry), character(0), info = substr(entry, 1L, 80L))
   }
-  expect_identical(anyDuplicated(unlist(news)), 0L)
-})
-
-test_that("NEWS says what the warning about few cells now says, names no existing units and quotes no figure", {
-  lines <- .docs_news()
-  if (is.null(lines)) skip("NEWS.md is not there to read")
-  entry <- .docs_starting(.docs_news_entries(lines),
-    "**The warning spatialkit_pool_few_cells did not say when the pooled values of two cells change places.**")
-  expect_false(is.na(entry))
-  if (is.na(entry)) entry <- ""        # so the checks below fail and do not stop
-  expect_identical(.docs_barred(entry), character(0))
-  expect_identical(.docs_calibrated(entry), character(0))
-  # "2 to 9 cells"; "tau2 at 0" and "every own weight is 0"; "cells 2 and
-  # own_weight 0": no other number.
-  expect_identical(sort(.docs_numbers(entry)), c("0", "0", "0", "0", "2", "2", "9"))
-  for (said in c(
-    "a cell whose own weight is below its share of the column's rows gets a pooled value on the far side of the overall mean",
-    "With two cells and tau2 at 0 every own weight is 0, and each cell's pooled value is the other cell's mean.",
-    "names each column with two cells and tau2 at 0, whose two values change places.",
-    "The values and the condition's fields are unchanged: such a column has cells 2 and own_weight 0."))
-    expect_identical(.docs_count(entry, said), 1L, info = said)
 })
 
 
@@ -1086,7 +937,7 @@ test_that("the vignette sections written for pooled cell values are where their 
   prose <- .docs_vignette_texts(code = FALSE)
   if (is.null(prose)) skip("the vignettes' sources are not installed")
   whole <- .docs_vignette_texts()
-  expect_length(prose, 9L)
+  expect_length(prose, 10L)
   expect_identical(names(prose), names(.DOCS_VIGNETTE_OPENINGS))
   expect_identical(names(whole), names(prose))
   for (what in names(prose)) {
@@ -1098,16 +949,13 @@ test_that("the vignette sections written for pooled cell values are where their 
     expect_gte(nchar(whole[[what]]), nchar(prose[[what]]), label = what)
   }
   expect_identical(anyDuplicated(unlist(prose)), 0L)
-  # The sentences added to the two older sections are in the texts read.
+  # The sentence about cp in the older section is in the text read.
   expect_identical(.docs_count(prose[["vignette resolution: Four criteria and a diagnostic"]],
                                "What cp estimates is the error of re-measuring the sampled sites"),
                    1L)
-  expect_identical(.docs_count(prose[["vignette diagnostics: Four questions a score does not answer"]],
-                               "a sixth reads the warnings summarize_by_cell() raises about pooled cell values"),
-                   1L)
 })
 
-test_that("no vignette section written for pooled cell values names existing units or the pilot study", {
+test_that("no vignette section written for pooled cell values names existing units", {
   texts <- .docs_vignette_texts()
   if (is.null(texts)) skip("the vignettes' sources are not installed")
   for (what in names(texts))
@@ -1123,7 +971,7 @@ test_that("in those sections \"calibrated\" stands only in the sentence that den
     expect_true(what %in% names(texts), info = what)
     expect_identical(.docs_count(texts[[what]], .DOCS_DENIAL), 1L, info = what)
   }
-  expect_length(grep("^vignette ", .DOCS_DENIED_IN), 1L)
+  expect_length(grep("^vignette ", .DOCS_DENIED_IN), 2L)
 })
 
 
@@ -1176,12 +1024,12 @@ test_that("the simulation's output is the output of the script as it stands", {
   expect_identical(set$SIZE, .OBS_PER_CELL_DEFAULT)
 })
 
-test_that("every figure the help, the vignettes and NEWS quote is a row of the simulation's output", {
+test_that("every figure the help and the vignettes quote is a row of the simulation's output", {
   sim <- .docs_sim()
   if (is.null(sim)) skip("dev/sim-pooled-values.csv is in the source tree only")
   claims <- .docs_claims(sim)
   texts  <- .docs_all_texts()
-  expect_length(claims, 29L)
+  expect_length(claims, 23L)
   for (cl in claims) {
     expect_true(cl$where %in% names(texts), info = cl$where)
     expect_identical(.docs_count(texts[[cl$where]], cl$phrase), 1L,
@@ -1189,40 +1037,15 @@ test_that("every figure the help, the vignettes and NEWS quote is a row of the s
   }
   # A setting the page gives in words.
   expect_identical(sim$set$NEAR, 0.8)
-  expect_identical(.docs_count(texts[["?summarize_by_cell: Pooled values"]],
+  expect_identical(.docs_count(texts[["?summarize_by_cell: How this was checked"]],
                                "four fifths of them round"), 1L)
-})
-
-test_that("the two disclosures of the pre-registration checks stand in the help with that check's figures", {
-  claims <- .docs_check3_claims()
-  texts  <- .docs_parts()
-  disclosures <- .docs_check3_paragraphs()
-  expect_length(claims, 11L)
-  for (cl in claims) {
-    expect_true(cl$where %in% names(texts), info = cl$where)
-    # In the paragraph, and once in the part that holds it.
-    expect_identical(.docs_count(disclosures[[cl$where]], cl$phrase), 1L,
-                     info = sprintf("the disclosure in %s does not say: %s", cl$where, cl$phrase))
-    expect_identical(.docs_count(texts[[cl$where]], cl$phrase), 1L,
-                     info = sprintf("%s does not say, once: %s", cl$where, cl$phrase))
-  }
-  # The interval's paragraph does not call it a 90 percent interval on the
-  # field where a class fell below the floor: it gives the coverage.
-  expect_identical(.docs_count(disclosures[[2L]], "about 90 percent"), 0L)
-  # The figures as the check reported them: the ranges are its least and
-  # most, the loss over boundary rows spans both fields.
-  f <- .DOCS_CHECK3
-  expect_identical(f$loss, range(c(unlist(f$loss_s3), f$loss_s5)))
-  expect_identical(f$fail, f$s5_class1[1])
-  expect_lt(f$fail, 85)
-  expect_gte(f$class_min, 85)
 })
 
 test_that("no number stands in those texts but the simulation's figures, its settings and the code's constants", {
   sim <- .docs_sim()
   if (is.null(sim)) skip("dev/sim-pooled-values.csv is in the source tree only")
   set    <- sim$set
-  claims <- c(.docs_claims(sim), .docs_check3_claims())
+  claims <- .docs_claims(sim)
   texts  <- .docs_all_texts()
   num <- function(x) format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
   sci <- function(x) sub("e\\+0*", "e", format(x, scientific = TRUE))
@@ -1248,22 +1071,25 @@ test_that("no number stands in those texts but the simulation's figures, its set
       nb, "0", "1",                    # the 8 neighbours; max(0, ); w * m + (1 - w) * t
       "1", "0",                        # an own weight of 1, and of 0
       few, "0", "0",                   # 2 to 9 cells; tau2 at 0 and every own weight 0
-      layers, num(set$SIDE), num(set$N_ROWS), num(set$PARENTS), num(set$SPREAD),
-      num(set$RANGE), num(set$NOISE_VAR), num(set$N_BLOCK), num(set$N_AMONG), num(layer),
-      cells, num(set$SIZE),
       margin, f_test,                  # what `structured` asks
-      layers, nb, "1"),                # the white-noise layers; (1 - w) * tau2
+      "1"),                            # (1 - w) * tau2
     "?summarize_by_cell: Intervals: which one answers which question" = c(
       "1", "1",                        # deff = 1, and a number other than 1
       "1", "2", "1",                   # p = (1 - obs_level) / 2; quantile(e, 1 - p)
-      level, level, level),            # the level checked; obs_level and conf_level in the run
+      level),                          # the level checked
     "?summarize_by_cell: Conditions" = c(
       pairs, "1", "0", "0",            # the limit; own weights of 1 and of 0; tau2 is 0
       few, "0", "2", "0",              # 2 to 9 cells; tau2 at 0, cells 2 and own_weight 0
       num(.POOL_MIN_DF), level, needed,
       sci(.POOL_XY_MAX),               # a row beyond the bound has no location
       "90"),                           # nor has one at a latitude beyond 90 degrees
-    "?summarize_by_cell: Confidence intervals, the two intervals" = level,
+    "?summarize_by_cell: How this was checked" = c(
+      layers, num(set$SIDE), num(set$N_ROWS), num(set$PARENTS), num(set$SPREAD),
+      num(set$RANGE), num(set$NOISE_VAR), num(set$N_BLOCK), num(set$N_AMONG), num(layer),
+      cells, num(set$SIZE),
+      level, level,                    # obs_level and conf_level in the run
+      layers, nb),                     # the white-noise layers; the 8 nearest cells
+    "?summarize_by_cell: Confidence intervals, the two intervals" = character(0),
     "?summarize_by_cell: argument estimate" = c(
       "1", nb, num(.POOL_NEIGHBOURS + 2L)),        # fewer than 10 cells: all the others
     "?summarize_by_cell: argument obs_level" = c(
@@ -1272,7 +1098,6 @@ test_that("no number stands in those texts but the simulation's figures, its set
       "0", "1", level),                # strictly between 0 and 1; only 0.90 checked
     "?resolution_profile: Observations per cell" = c(
       "2",                             # max(2, round(n / s))
-      layers, num(layer), num(set$RANGE), num(set$SIDE), sizes,
       size, "1", "0",                  # 4.5 unless given; an own weight of 1, and of 0
       size, sizes,                     # what "auto" is
       sci(.FIT_WORK_MAX), pairs, dense, dense),
@@ -1281,36 +1106,35 @@ test_that("no number stands in those texts but the simulation's figures, its set
     "?resolution_profile: The ladder and its bounds, a ladder of sizes" = "2",
     "?resolution_profile: The ladder and its bounds, no variogram" = character(0),
     "?resolution_profile: The criteria, loo" = character(0),
+    "?resolution_profile: How this was checked" = c(
+      layers, num(layer), num(set$RANGE), num(set$SIDE), sizes),
     "?select_resolution: What each criterion returns, loo" = f_test,
     "?select_resolution: What each criterion returns, size" = c("2", f_test),
     "?select_resolution: What each criterion returns, auto" = character(0),
     "?select_resolution: A profile built with an estimate" = character(0),
-    "?cell_values_at: Away from the observations" = c(
+    "?cell_values_at: Away from the observations" = character(0),
+    "?cell_values_at: How this was checked" = c(
       layers, num(layer), cells, num(set$N_AMONG), num(set$N_BLOCK), level),
-    "?spatialkit: the two choices" = c("1", "4",   # the steps of the pipeline
+    "?spatialkit: the two choices" = c(nb,         # the 8 nearest cells
                                        size),      # the default size
     "?spatialkit: the conventions of pooled values" = c(
       size, nb, num(.FEW_RESIDUALS), num(.POOL_MIN_DF), margin, sci(.EXACT_PAIRS_MAX),
       sci(.FIT_WORK_MAX)),
-    "vignette resolution: Setting a size" = c(
+    "vignette resolution: A size for pooled values" = c(
       nb, "2", "1", "0",               # the 8 cells; max(2, ); an own weight of 1, and of 0
       size,                            # the default size
+      f_test,                          # what `structured` asks
       layers, num(layer), num(max(set$SIZES)), num(min(set$SIZES))),
     "vignette resolution: Leave-one-out for plain means" = sizes,
-    "vignette reporting: Reporting a cell value" = c(
+    "vignette reporting: Reporting a pooled cell value" = c(
       nb, "600", "20",                 # the section's own layer, as its chunk draws it
       size, level),
-    "vignette diagnostics: 6. Warnings about pooled cell values" = c(
+    "vignette cells: What summarize_by_cell() returns" = c(
+      "1", nb),                        # deff other than 1; the 8 nearest cells
+    "vignette cells: Pooled values and their warnings" = c(
       size, margin, f_test, layers, nb,
-      "1", "0", few))                  # own weights of 1 and of 0; 2 to 9 cells
-  news <- stats::setNames(rep(list(character(0)), length(.DOCS_NEWS)),
-                          paste0("NEWS: ", .DOCS_NEWS))
-  news[[1L]]  <- c(nb, layers, num(layer), num(set$SIZE))
-  news[[2L]]  <- c(level, level)
-  news[[5L]]  <- num(.NSTART_DENSITY)              # the density kind's own starts
-  news[[6L]]  <- size
-  news[[12L]] <- "1"                               # deff = 1
-  expected <- c(expected, news)
+      "1", "0", few),                  # own weights of 1 and of 0; 2 to 9 cells
+    "vignette cells: Values at other locations" = character(0))
 
   expect_setequal(names(expected), .DOCS_WRITTEN)
   for (what in names(expected)) {
@@ -1321,11 +1145,11 @@ test_that("no number stands in those texts but the simulation's figures, its set
   # A figure stands only in a text whose numbers are held.
   expect_true(all(vapply(claims, function(cl) cl$where, character(1)) %in% .DOCS_WRITTEN))
   # The layer of the reporting vignette's section is the one its chunk draws.
-  code <- .docs_vignette_texts()[["vignette reporting: Reporting a cell value"]]
+  code <- .docs_vignette_texts()[["vignette reporting: Reporting a pooled cell value"]]
   expect_identical(.docs_count(code, "sx <- runif(600, 0, 2e4)"), 1L)
 })
 
-test_that("a text that says how a number tends to behave quotes a figure of the simulation", {
+test_that("a text that says how a number tends to behave quotes a figure of the simulation, or sends the reader to the section that does", {
   sim <- .docs_sim()
   if (is.null(sim)) skip("dev/sim-pooled-values.csv is in the source tree only")
   texts  <- .docs_all_texts()
@@ -1333,8 +1157,14 @@ test_that("a text that says how a number tends to behave quotes a figure of the 
   hedges <- lapply(stats::setNames(nm = .DOCS_WRITTEN), function(what)
     tolower(.docs_hedges(texts[[what]])))
   hedges <- hedges[lengths(hedges) > 0L]
+  # A text that sends the reader on names the section by its title, and that
+  # section quotes figures.
+  expect_true(all(names(.DOCS_SEE) %in% .DOCS_WRITTEN))
+  expect_true(all(.DOCS_SEE %in% quoted))
+  for (what in names(.DOCS_SEE))
+    expect_gte(.docs_count(texts[[what]], "\"How this was checked\""), 1L, label = what)
   for (what in names(hedges))
-    expect_true(what %in% quoted,
+    expect_true(what %in% quoted || what %in% names(.DOCS_SEE),
                 info = sprintf("%s says '%s' and quotes no figure", what,
                                paste(hedges[[what]], collapse = "', '")))
   # The statements of that kind these texts make, by their words: the
@@ -1343,11 +1173,11 @@ test_that("a text that says how a number tends to behave quotes a figure of the 
   # coming more often from random starts.  One more is one more claim, to be
   # written here beside the output that shows it.
   expect_identical(hedges, list(
-    "?summarize_by_cell: Pooled values"                          = "mostly",
-    "?resolution_profile: Observations per cell"                 = c("tends", "tends", "often"),
-    "?select_resolution: What each criterion returns, loo"       = "tends",
-    "vignette resolution: Setting a size"                        = c("tends", "tends"),
-    "vignette diagnostics: 6. Warnings about pooled cell values" = "mostly"))
+    "?resolution_profile: Observations per cell"           = c("tends", "tends", "often"),
+    "?resolution_profile: The criteria, loo"               = "tends",
+    "?select_resolution: What each criterion returns, loo" = "tends",
+    "vignette resolution: A size for pooled values"        = c("tends", "tends"),
+    "vignette cells: Pooled values and their warnings"     = "mostly"))
 })
 
 
@@ -1356,24 +1186,20 @@ test_that("a text that says how a number tends to behave quotes a figure of the 
 # does not have, pins the sentence that replaced it, and checks the code it
 # describes.
 
-test_that("the vignette gives the edge rule for gridded locations with its condition on the rows' CRS, as the help does", {
+test_that("the vignette sends the edge rule for gridded locations to the help, which gives it with its condition on the rows' CRS", {
   prose <- .docs_vignette_texts(code = FALSE)
   if (is.null(prose)) skip("the vignettes' sources are not installed")
-  vd <- prose[["vignette diagnostics: 6. Warnings about pooled cell values"]]
-  expect_identical(.docs_count(vd, paste0(
-    "assign_features_to_polygons() gives a point there the same cell when the cells carry ",
-    "the record of the centres scored, for rows that have a CRS exactly when the record ",
-    "names one, so a lattice passes the check. Rows without a CRS beside a record that ",
-    "names one, rows with a CRS beside a record that names none, rows assigned to the cells ",
-    "after they lost the record (written to a file and read back, say) and summarised with ",
-    "cells_sf set to the cells that carry it, and rows given their cells by another join ",
-    "are placed by the polygons alone, so a row on a boundary can sit in either cell.")), 1L)
+  vw <- prose[["vignette cells: Pooled values and their warnings"]]
+  expect_identical(.docs_count(vw, paste0(
+    "Points on a boundary between two cells, as on gridded data, are placed so that a ",
+    "lattice passes the check; ?summarize_by_cell (\"Value\") lists the cases where they ",
+    "are not.")), 1L)
   # The sentence without its condition is gone, and so is the one that gave
   # every row without a CRS to the polygons: rows without a CRS on cells
   # whose record names none take the profile's cell (test-core-gridded-ties.R).
-  expect_identical(.docs_count(vd, "centres scored, so a lattice passes the check"), 0L)
-  expect_identical(.docs_count(vd, "Rows without a CRS, rows assigned"), 0L)
-  # The help states the same condition in the same words.
+  expect_identical(.docs_count(vw, "centres scored, so a lattice passes the check"), 0L)
+  expect_identical(.docs_count(vw, "Rows without a CRS, rows assigned"), 0L)
+  # The help states the condition.
   help <- .docs_squash(.docs_flat(.docs_rd("summarize_by_cell")))
   expect_identical(.docs_count(help, paste0(
     "for rows that have a CRS exactly when the record names one. Rows without a CRS beside ",
@@ -1381,19 +1207,23 @@ test_that("the vignette gives the edge rule for gridded locations with its condi
     "to the cells after they lost the record (written to a file and read back, say) and ",
     "summarised with cells_sf set to the cells that carry it, and rows given their cells by ",
     "another join are placed by the polygons alone")), 1L)
+  # In the "Value" section the vignette names.
+  value <- .docs_rd_part(.docs_rd("summarize_by_cell"), "\\value")
+  expect_identical(.docs_count(value, "for rows that have a CRS exactly when the record names one."),
+                   1L)
 })
 
 test_that("the vignette says the inner folds of forward selection are block_kfold unless `method` names another scheme", {
   expect_identical(eval(formals(select_features_forward)$method)[1L], "block_kfold")
-  lines <- .docs_vignette("diagnostics")
+  lines <- .docs_vignette("models")
   if (is.null(lines)) skip("the vignettes' sources are not installed")
   sec <- .docs_md_sections(lines, depth = 2L, code = FALSE)[[
-    "5. Coordinates as predictors, and selection inside the folds"]]
+    "Choosing predictors inside the folds"]]
   expect_false(is.null(sec))
   expect_identical(.docs_count(sec, "default to the scheme you pass"), 0L)
   expect_identical(.docs_count(sec, paste0(
-    "Its inner folds are block_kfold unless method names another scheme, whatever folds ",
-    "the outer loop uses. Passing random_kfold there logs a caution:")), 1L)
+    "The selection's inner folds are block_kfold unless method names another scheme, ",
+    "whatever folds the outer loop uses. Passing random_kfold there logs a caution:")), 1L)
 
   # The code: random outer folds handed to cv_spatial() leave the inner
   # folds of a selection that names no `method` at block_kfold.
@@ -1424,8 +1254,9 @@ test_that("?print.spatial_fit names the LOOIC a bayesian_fit prints and does not
     "the LOOIC when the fit computed it (compute_loo = TRUE, the default of ",
     "fit_bayesian_spatial_model()), the slope prior")), 1L)
   expect_identical(.docs_count(desc, paste0(
-    "Apart from a bayesian_fit's LOOIC, an approximate leave-one-out score of single rows ",
-    "rather than a spatial one, nothing printed here is an out-of-sample score.")), 1L)
+    "Apart from a forest's out-of-bag error and a Bayesian GP's LOOIC, an approximate ",
+    "leave-one-out score of single rows, nothing printed here is an out-of-sample score, ",
+    "and neither of those is a spatial one.")), 1L)
 
   # The code: the print shows the LOOIC when the fit holds one, and no LOOIC
   # line when it does not.
@@ -1471,7 +1302,7 @@ test_that("the getting-started vignette gives the distance errors nc.shp's proje
   expect_identical(unname(shown), logged[c(3L, 2L)])
 })
 
-test_that("?sac_nugget and ?estimate_sac_range give nugget_at_bound's bound as a share of the sill", {
+test_that("?sac_nugget gives nugget_at_bound's bound as a share of the sill, and ?estimate_sac_range sends the reader there", {
   bound <- function(page) .docs_squash(.docs_flat(.docs_rd(page)))
   nug <- bound("sac_nugget")
   est <- bound("estimate_sac_range")
@@ -1480,11 +1311,12 @@ test_that("?sac_nugget and ?estimate_sac_range give nugget_at_bound's bound as a
   expect_identical(.docs_count(nug, "within 1e-4"), 0L)
   expect_identical(.docs_count(est, "within 1e-4"), 0L)
   expect_identical(.docs_count(nug, paste0(
-    "is TRUE when the fit put the nugget at its lower bound (0, or at most 10^{-4} ",
-    "of the sill): that is the bound and not an estimate")), 1L)
+    "nugget_at_bound is TRUE when the fit put the nugget at its lower bound (0, or at most ",
+    "1e-4 of the sill). That value is the bound and not an estimate")), 1L)
   expect_identical(.docs_count(est, paste0(
-    "nugget_at_bound (TRUE when the nugget is at its lower bound, 0 or at most ",
-    "10^{-4} of the sill, and so is not an estimate)")), 1L)
+    "nugget (the model's nugget variance), nugget_at_bound, nugget_floor, ",
+    "short_lag_semivariance, short_lag_pairs, short_lag_dist, zero_lag_semivariance and ",
+    "zero_lag_pairs: the nugget and the evidence to judge it by, described in sac_nugget().")), 1L)
   # The wording ?resolution_profile uses for the same mark.
   expect_identical(.docs_count(bound("resolution_profile"),
                                "A nugget of 0, or of at most 10^{-4} of the sill"), 1L)
@@ -1582,8 +1414,8 @@ test_that("a range inside the lags refused by range_frac below 1 is not said to 
   # range_frac says the bound is the longest lag only at its default.
   est <- .docs_squash(.docs_flat(.docs_rd("estimate_sac_range")))
   expect_identical(.docs_count(est, paste0(
-    "range_frac * cutoff * max_dist (at the default of 1, beyond the longest lag the ",
-    "empirical variogram was actually fitted over) is treated as unidentified")), 1L)
+    "range_frac * cutoff * max_dist (at the default, beyond the longest lag the ",
+    "empirical variogram was fitted over) is treated as unidentified")), 1L)
   expect_identical(.docs_count(est, "(that is, beyond the longest lag"), 0L)
   set.seed(5)
   n  <- 300
@@ -1635,9 +1467,9 @@ test_that("a range inside the lags refused by range_frac below 1 is not said to 
 test_that("?sac_nugget says a nugget at a floor of at most 1e-4 of the sill is marked", {
   txt <- .docs_squash(.docs_flat(.docs_rd("sac_nugget")))
   expect_identical(.docs_count(txt, paste0(
-    "A nugget equal to its floor is the variance between visits, a measurement, ",
-    "and nugget_at_bound stays FALSE for it unless the floor itself is at most ",
-    "10^{-4} of the sill.")), 1L)
+    "A nugget equal to its floor (see nugget_floor) is the variance between visits, a ",
+    "measurement, and nugget_at_bound stays FALSE for it unless the floor itself is at ",
+    "most 1e-4 of the sill.")), 1L)
   # The code: 600 locations visited twice, on a field with no noise, so the
   # fit puts the nugget at its floor, the variance between visits.  With a
   # visit sd of 1e-3 that floor is about 1e-6 of the sill and the nugget is

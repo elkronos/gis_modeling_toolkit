@@ -486,39 +486,30 @@ test_that("the help says these layers are read in x and y", {
     expect_s3_class(rd, "Rd")
     gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
   }
-  pts_text <- paste0("A layer that mixes XY and XYZ (or XYM) geometries is read in x and y, ",
-                     "before and after it is reduced to points, since sf reads a layer in ",
-                     "the dimension of its first geometry.")
+  # resolution_profile() and determine_optimal_levels() state the rule on
+  # data_sf; the full rules are on ?spatialkit-geometry, which they link.
+  pts_text <- paste0("a layer that mixes XY and XYZ geometries or carries M is read in x and y ",
+                     "(see spatialkit-geometry).")
   expect_match(page("resolution_profile.Rd"), pts_text, fixed = TRUE)
   expect_match(page("determine_optimal_levels.Rd"), pts_text, fixed = TRUE)
   mf <- page("make_folds.Rd")
-  expect_match(mf, pts_text, fixed = TRUE)
-  expect_match(mf, paste0("A boundary that mixes XY and XYZ (or XYM) geometries is read in x ",
-                          "and y"), fixed = TRUE)
-  expect_match(mf, paste0("Blocks that mix XY and XYZ (or XYM) polygons are read in x and y, ",
-                          "since sf reads a layer in the dimension of its first geometry, and ",
+  expect_match(mf, paste0("A layer that mixes dimensions or carries M is read in x and y, before ",
+                          "and after it is reduced to points (spatialkit-geometry)."), fixed = TRUE)
+  expect_match(mf, paste0("Blocks that mix dimensions or carry M are read in x and y, and ",
                           "params$blocks holds them in XY."), fixed = TRUE)
   fs <- page("fold_separation.Rd")
-  expect_match(fs, paste0("A layer that mixes XY and XYZ (or XYM) geometries is read in x and ",
-                          "y, for the distances and for that check"), fixed = TRUE)
-  expect_match(fs, paste0("one that mixes XY and XYZ (or XYM) geometries is read in x and y ",
-                          "first."), fixed = TRUE)
+  expect_match(fs, paste0("A layer that mixes dimensions or carries M is read in x and y, for the ",
+                          "distances and for that check (spatialkit-geometry)."), fixed = TRUE)
+  expect_match(fs, paste0("It is brought into the CRS the distances are measured in, and read in ",
+                          "x and y when it mixes dimensions or carries M (spatialkit-geometry)."),
+               fixed = TRUE)
   expect_match(page("prep_model_data.Rd"),
                "One that mixes XY and XYZ (or XYM) geometries is read in x and y",
                fixed = TRUE)
-  # Layers that carry M, and the points a layer is reduced to.
-  m_text <- "So is a layer whose geometries carry M (XYM or XYZM), which GEOS refuses."
-  red_text <- paste0("The points a layer is reduced to are read in x and y when they mix ",
-                     "dimensions, as those of a layer XYZ throughout that holds points and ",
-                     "polygons do.")
-  for (pg in list(page("resolution_profile.Rd"), page("determine_optimal_levels.Rd"), mf, fs)) {
-    expect_match(pg, m_text, fixed = TRUE)
-    expect_match(pg, red_text, fixed = TRUE)
-  }
-  expect_match(mf, paste0("and so is one whose polygons carry M (XYM or XYZM), which GEOS ",
-                          "refuses."), fixed = TRUE)
-  expect_match(mf, "So are blocks whose polygons carry M (XYM or XYZM), which GEOS refuses.",
+  # The boundary make_folds() takes is read by the rule for boundaries.
+  geo <- page("spatialkit-geometry.Rd")
+  expect_match(geo, "A boundary that mixes dimensions or carries M is read in x and y.",
                fixed = TRUE)
-  expect_match(fs, paste0("So is one whose geometries carry M (XYM or XYZM), and so are the ",
-                          "points it is reduced to when they mix dimensions."), fixed = TRUE)
+  expect_match(geo, paste0("is read in x and y when it mixes dimensions or its geometries carry M ",
+                           "(XYM or XYZM)."), fixed = TRUE)
 })

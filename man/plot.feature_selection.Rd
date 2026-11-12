@@ -9,7 +9,7 @@
 \arguments{
 \item{x}{The list returned by \code{\link{select_features_forward}()}.}
 
-\item{...}{Ignored.}
+\item{...}{Not used.}
 }
 \value{
 A \code{ggplot} object.
@@ -19,14 +19,15 @@ A \code{ggplot} object.
 step and keeps the best; its \code{history} holds all of them.  This draws
 the accepted variable's score at each step as the path, every other
 candidate's score at that step as a faint point, and the step at which the
-selection stopped in red.  When it stopped because no candidate cleared
-\code{tol}, the path runs one step further to the best of the rejected
-candidates, drawn hollow and labelled "not added", so the stop reads as a
-flattening rather than a cut.  The picture then says whether the last variable
-was a clear gain or the first that happened to clear \code{tol}, and
-whether the runner-up would have done as well.  The scores are the
-selection's own cross-validated criterion, optimistically biased by the
-selection (see the help page's section on that); when a hold-out score
+selection stopped in red.  When it stopped because no candidate passed
+the acceptance rule (\code{rule} in \code{\link{select_features_forward}()}),
+the path runs one step further to the best of the rejected candidates,
+drawn hollow and labelled "not added", so the stop reads as a flattening
+rather than a cut.  The picture then shows whether the last variable was a
+clear gain or a marginal one, and whether the runner-up would have done as
+well.  The scores are the selection's own cross-validated criterion,
+optimistically biased by the selection (see "Selection score" in
+\code{\link{select_features_forward}()}); when a hold-out score
 was computed (\code{select_on = "split"}) it is drawn as a separate mark
 at the final step and named in the caption.
 }
@@ -38,33 +39,28 @@ walked, with that variable hollow and labelled "dropped at the end", and
 the red mark is the selected set, scored without it.
 }
 \examples{
-if (requireNamespace("ranger", quietly = TRUE) &&
-    requireNamespace("ggplot2", quietly = TRUE)) {
-  library(sf)
-  set.seed(4)
-  n <- 150
-  dat <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               a = rnorm(n), b = rnorm(n), c = rnorm(n)),
-    coords = c("x", "y"), crs = 32632)
-  dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
-  fit_fn <- function(train_sf, vars)
-    fit_rf_model(train_sf, "z", vars, num_trees = 80, seed = 1)
-  sel <- select_features_forward(dat, "z", c("a", "b", "c"), fit_fn = fit_fn,
-                                 k = 3, quiet = TRUE)
-  plot(sel)
-}
+\dontshow{if (requireNamespace("ranger", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+set.seed(4)
+n <- 150
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             a = rnorm(n), b = rnorm(n), c = rnorm(n)),
+  coords = c("x", "y"), crs = 32632)
+dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
+fit_fn <- function(train_sf, vars)
+  fit_rf_model(train_sf, "z", vars, num_trees = 80, seed = 1)
+sel <- select_features_forward(dat, "z", c("a", "b", "c"), fit_fn = fit_fn,
+                               k = 3, quiet = TRUE)
+plot(sel)
+\dontshow{\}) # examplesIf}
 }
 \seealso{
-Other plotting:
-\code{\link[=plot.aoa]{plot.aoa()}},
-\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
+\code{\link{select_features_forward}()}, which makes the object.
+
+Other predictor selection:
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
 \code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
-\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
-\code{\link[=plot.sac_range]{plot.sac_range()}},
-\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
-\code{\link[=plot_calibration]{plot_calibration()}},
-\code{\link[=plot_cv_metrics]{plot_cv_metrics()}},
-\code{\link[=plot_folds]{plot_folds()}}
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
-\concept{plotting}
+\concept{predictor selection}

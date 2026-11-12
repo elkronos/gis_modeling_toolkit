@@ -13,11 +13,11 @@ pts <- tour_points()
 bnd <- tour_boundary(pts)
 
 step("01.1", "Voronoi cells grown from density-weighted k-means seeds")
-# Voronoi cells grow from SEEDS, so place the seeds first and tessellate those.
+# Voronoi cells grow from seeds, so place the seeds first and tessellate those.
 # Hand build_tessellation() the observations instead and you get one cell per
 # observation, which is section 01.5. The seeds are density-weighted k-means
-# from 3 starts, the default; partition = "kmeans" gives the plain k-means
-# seeds of earlier versions.
+# centres from 3 starts, the default; partition = "kmeans" gives plain k-means
+# centres from 10 starts.
 seeds <- get_voronoi_seeds(boundary = bnd, method = "kmeans", n = 25,
                            sample_points = pts, set_seed = 1)
 vor   <- build_tessellation(seeds, boundary = bnd, method = "voronoi",
@@ -56,7 +56,7 @@ if (!skip_without("ggplot2", "the maps")) {
     # the pooled values it adds by default.
     cel <- summarize_by_cell(asg, "z", cells_sf = t_$cells, deff = 1,
                              estimate = "mean")
-    look_for(sprintf("%s -- %s", nm, notes[[nm]]))
+    look_for(sprintf("%s: %s", nm, notes[[nm]]))
     show_plot(plot_tessellation_map(cel, boundary = bnd, features_sf = pts,
                                     fill_col = "resp_mean_z",
                                     title = sprintf("%s: mean of z per cell", nm)),
@@ -66,11 +66,10 @@ if (!skip_without("ggplot2", "the maps")) {
 
 step("01.5", "Voronoi over the observations themselves")
 # `approx_n_cells` sizes the grid methods, and only those. Ask for it with
-# method = "voronoi" and the package says so -- the WARN line below is the
-# package talking, not this script -- before handing back one cell per
-# observation: a nearest-neighbour interpolation, where every cell holds a
-# single point, there is no within-cell variation, and every standard error
-# comes back NA.
+# method = "voronoi" and build_tessellation() warns (the WARN line below comes
+# from the package) and returns one cell per observation. That is a
+# nearest-neighbour interpolation: every cell holds a single point, nothing
+# varies within a cell, and every standard error is NA.
 trap <- build_tessellation(pts, boundary = bnd, method = "voronoi",
                            approx_n_cells = 25, quiet = TRUE)
 asg1 <- assign_features_to_polygons(pts, trap$cells)
@@ -79,10 +78,10 @@ cel1 <- summarize_by_cell(asg1, "z", cells_sf = trap$cells, deff = 1,
 cat(sprintf("  asked for 25 cells, got %d; %d hold one point or none, %d SEs are NA\n",
             nrow(cel1), sum(cel1$n <= 1, na.rm = TRUE),
             sum(is.na(cel1$..se_resp_z))))
-# The warning goes to the console and nowhere else: params$approx_n_cells is
-# still NULL, so a result saved now and reopened next month carries no sign
-# that 25 was ever asked for.
-cat(sprintf("  the console warning is the only record: params$approx_n_cells is %s\n",
+# The warning is the only record of the request. params$approx_n_cells stays
+# NULL, so a result saved now and reopened later carries no sign that 25 was
+# asked for.
+cat(sprintf("  the warning is the only record: params$approx_n_cells is %s\n",
             if (is.null(trap$params$approx_n_cells)) "NULL" else
               trap$params$approx_n_cells))
 cat("  Seed first (01.1), or use a grid method, which is what approx_n_cells sizes.\n")

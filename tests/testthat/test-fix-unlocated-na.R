@@ -163,7 +163,9 @@ test_that("kriging_adequacy() leaves out a cell with a vertex at NA, Inf or 1e20
   expect_true(any(grepl("1 cell\\(s\\) of `cells_sf` left out .*no location", ctl$msgs)))
   # The empty cell is not described as thin for its bounding box.
   expect_false(any(grepl("max_box_ratio", ctl$msgs)))
-  expect_output(print(ctl$value), "1 left out as empty or without a location")
+  # The report wraps at getOption("width"); print it on lines that do not wrap.
+  expect_output(withr::with_options(list(width = 10000), print(ctl$value)),
+                "1 left out as empty or without a location")
   for (nm in names(.fun_bad)) {
     r <- .fun_run(kriging_adequacy(pts, "y", cells(.fun_bad[[nm]]), k = 3L, nmax = 20L))
     expect_identical(r$value, ctl$value, label = nm)

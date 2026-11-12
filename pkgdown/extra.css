@@ -1,0 +1,10 @@
+/* A wide table scrolls inside its column instead of running off a narrow
+   screen, and code in a table cell is not hyphenated. */
+main table {
+  display: block;
+  overflow-x: auto;
+}
+
+code {
+  hyphens: none;
+}

@@ -5,148 +5,162 @@
 
 #' Cross-validate at a ladder of block sizes
 #'
-#' A cross-validated error is the error at the distance the folds put
-#' between the held-out points and their training data, and the wider the
-#' blocks, the farther that is.  The single number a \code{cv_*()} call
-#' returns is the error at one such distance.  This runs the same
-#' cross-validation at a ladder of block sizes, and by default once with
-#' random folds as the reference, whose held-out points keep most of their
-#' neighbours in the training data.  It returns the metric at each, with the
-#' estimated autocorrelation range alongside.  The rise of the curve with
+#' Runs [cv_spatial()] once per block size on a ladder of sizes, and by
+#' default once with random folds as the reference, whose held-out points keep
+#' most of their neighbours in the training data.  It returns the pooled
+#' metric and its fold-to-fold spread at each size, with the estimated
+#' autocorrelation range alongside.  The wider the blocks, the farther the
+#' held-out points sit from their training data.  The rise of the curve with
 #' block size measures the error at that distance from the data: how much
 #' worse the model predicts a location the farther it lies from the
 #' observations.  It is the error of a map only at locations that far from
 #' the data, so the curve does not by itself say which size to report.  The
 #' size to read is the one whose held-out distances match those of the
-#' locations the model will predict at: \code{\link{fold_separation}()} with
-#' \code{prediction_points} reads the folds of each size (the \code{$folds}
-#' of each element of \code{attr(x, "results")}) against them.
+#' locations the model will predict at: [fold_separation()] with
+#' `prediction_points` reads the folds of each size (the `$folds` of each
+#' element of `attr(x, "results")`) against them.
 #'
 #' @section The fit budget:
 #' Each block size is a full cross-validation, so the cost is
-#' \code{length(block_sizes) * k} fits, plus \code{k} for the random
-#' reference.  \code{max_fits} caps that (default 60: room for up to eleven
-#' sizes at \code{k = 5} plus the reference; the default six-size ladder at
-#' \code{k = 5} needs at most 35).  A sweep that would run past the cap
-#' refuses to start, naming the number of fits it would have needed; lower
-#' \code{n_sizes} or \code{k} to cut it (with \code{block_sizes}
-#' supplied: pass fewer \code{block_sizes} or a smaller \code{k}), or pass
-#' \code{include_random = FALSE} when the count includes the reference.
-#' Raise \code{max_fits} deliberately; the RF example below takes seconds, a
-#' Bayesian \code{fit_fn} takes minutes per fit.
+#' `length(block_sizes) * k` fits, plus `k` for the random reference.
+#' `max_fits` caps that (default 60: room for up to eleven sizes at `k = 5`
+#' plus the reference; the default six-size ladder at `k = 5` needs at most
+#' 35).  A sweep that would run past the cap refuses to start, naming the
+#' number of fits it would have needed; lower `n_sizes` or `k` to cut it
+#' (with `block_sizes` supplied: pass fewer `block_sizes` or a smaller `k`),
+#' or pass `include_random = FALSE` when the count includes the reference.
+#' The random forest of the example takes seconds; a Bayesian `fit_fn` takes
+#' minutes per fit, so raise `max_fits` with that in mind.
 #'
 #' @section The ladder:
-#' When \code{block_sizes} is \code{NULL}, \code{n_sizes} values are
-#' log-spaced from a twenty-fifth of the shorter side of the data's extent
-#' (of the longer side when the points lie on one line parallel to an axis)
-#' to the largest size, at most half that side, at which the grid still
-#' holds \code{k} blocks.  Half the side gives a grid two blocks across,
-#' enough for \code{k} up to 4 and, for larger \code{k}, on an extent long
-#' enough in the other direction; on a roughly square extent at the default
-#' \code{k = 5} the top is about a third of the side.  Any size at which the
-#' grid would hold more than the 1,000,000 \code{make_folds()} will build is
-#' dropped; when that drops every size, the sweep refuses and names the
-#' largest size whose grid holds \code{k} blocks, to pass as
-#' \code{block_sizes}.  The count is of grid cells: on clustered data a grid
-#' of \code{k} or more cells can have fewer than \code{k} that hold points,
-#' and \code{make_folds()} then lowers \code{k} at that size, which the
-#' \code{k} column shows; the sweep warns once, naming the sizes.  On an extent much longer than it is wide every
-#' rung can fall below the autocorrelation range while longer blocks would
-#' still fit \code{k} times along the longer side; the sweep warns when
-#' that happens, and \code{block_sizes} is then the way to reach past the
-#' range.  Sizes are in the units of the CRS the folds are built in
-#' (\code{make_folds()}'s \code{params$crs}, metres for geographic input),
-#' and the returned table records that CRS.  Each is the \emph{minimum} block
-#' edge handed to \code{make_folds()}, which fits a whole number of cells
-#' across each axis of the extent, so on an axis at least as long as the
-#' size the cells are somewhat longer than it (up to just under twice as
-#' long).  An axis shorter than the size is spanned by one row or column of
-#' cells, which are then shorter than the size there.  The
-#' \code{block_width} and \code{block_height} columns give the cells built
-#' at each size.
+#' When `block_sizes` is `NULL`, `n_sizes` values are log-spaced from a
+#' twenty-fifth of the shorter side of the data's extent (of the longer side
+#' when the points lie on one line parallel to an axis) to the largest size,
+#' at most half that side, at which the grid still holds `k` blocks.  Half
+#' the side gives a grid two blocks across, enough for `k` up to 4 and, for
+#' larger `k`, on an extent long enough in the other direction; on a roughly
+#' square extent at the default `k = 5` the top is about a third of the side.
+#' Any size at which the grid would hold more than the 1,000,000 blocks
+#' [make_folds()] will build is dropped; when that drops every size, the
+#' sweep refuses and names the largest size whose grid holds `k` blocks, to
+#' pass as `block_sizes`.  The count is of grid cells: on clustered data a
+#' grid of `k` or more cells can have fewer than `k` that hold points, and
+#' [make_folds()] then lowers `k` at that size, which the `k` column shows;
+#' the sweep warns once, naming the sizes.  On an extent much longer than it
+#' is wide every rung can fall below the autocorrelation range while longer
+#' blocks would still fit `k` times along the longer side; the sweep warns
+#' when that happens, and `block_sizes` is then the way to reach past the
+#' range.
+#'
+#' Sizes are in the units of the CRS the folds are built in (the
+#' `params$crs` of [make_folds()], metres for lon/lat input), and the
+#' returned table records that CRS.  Each is the minimum block edge handed to
+#' [make_folds()], which fits a whole number of cells across each axis of the
+#' extent, so on an axis at least as long as the size the cells are somewhat
+#' longer than it (up to just under twice as long).  An axis shorter than the
+#' size is spanned by one row or column of cells, which are then shorter than
+#' the size there.  The `block_width` and `block_height` columns give the
+#' cells built at each size.
 #'
 #' @section Warnings raised once for the sweep:
-#' Every size is a \code{\link{cv_spatial}()} on the same layer.  The
-#' warnings \code{\link{prep_model_data}()} raises about that layer (class
-#' \code{spatialkit_rows_dropped}, counting the incomplete rows dropped, and
-#' \code{spatialkit_constant_predictor}) are raised once, not once per
-#' size.  With a GWR learner, the two warnings in
-#' which \code{predict()} counts held-out locations
-#' (\code{"spatialkit_gwr_not_estimable"} and
-#' \code{"spatialkit_gwr_extrapolation"}) are raised once each, under this
+#' Every size is a [cv_spatial()] on the same layer.  The warnings
+#' [prep_model_data()] raises about that layer (class
+#' `spatialkit_rows_dropped`, counting the incomplete rows dropped, and
+#' `spatialkit_constant_predictor`) are raised once, not once per size.  With
+#' a GWR learner, the two warnings in which `predict()` counts held-out
+#' locations (`"spatialkit_gwr_not_estimable"` and
+#' `"spatialkit_gwr_extrapolation"`) are raised once each, under this
 #' function's name, with the totals over every size; the same rows are
 #' predicted at every size, so a location can be counted once per size (see
-#' \code{\link{predict.gwr_fit}}).
+#' [predict.gwr_fit()]).
 #'
-#' @param data_sf An sf object with the response and predictors.
-#' @param response_var,predictor_vars Column names.
-#' @param fit_fn A \code{function(train_sf)} returning a \code{spatial_fit},
-#'   as for \code{\link{cv_spatial}()}; see the example for wrapping a
-#'   built-in backend.
+#' @section The plot:
+#' `plot()` draws the curve as a \pkg{ggplot2} object: the pooled metric at
+#' each block size asked for, the fold-to-fold range as a band, the
+#' random-fold reference as a dashed line, and the estimated autocorrelation
+#' range as a dotted vertical line.  The curve rises as the blocks widen
+#' because the held-out points sit farther from their training data: its
+#' height at a size is the error at that distance from the data, and the
+#' error of a map only where the locations it predicts at sit that far from
+#' the observations.  The caption says which way is better: higher for `R2`
+#' and `Adj_R2`, closer to the nominal level for a `coverage_*` column (0.975
+#' for `coverage_97.5`), since over-coverage is miscalibration too, and lower
+#' for everything else.  `print()` shows the same results as a table.
+#'
+#' @param data_sf An sf layer with the response and the predictors.
+#' @param response_var Name of the response column.
+#' @param predictor_vars Character vector of predictor column names.
+#' @param fit_fn A `function(train_sf)` returning a `spatial_fit`, as for
+#'   [cv_spatial()]; see the example for wrapping a built-in backend.
 #' @param block_sizes Optional numeric vector of block edge lengths to sweep,
-#'   in the CRS units the folds are built in (plain numbers; a \code{units}
-#'   object is refused).  Default \code{NULL}: the ladder described above.
-#'   A size at which the grid would hold fewer than \code{k} blocks is not
-#'   run, with a warning naming it and the largest size that still gives
-#'   \code{k} blocks; if no size is left, the call is an error.
+#'   in the units of the CRS the folds are built in (plain numbers; a `units`
+#'   object is refused).  Default `NULL`: the ladder described in the section
+#'   "The ladder".  A size at which the grid would hold fewer than `k` blocks
+#'   is not run, with a warning naming it and the largest size that still
+#'   gives `k` blocks; if no size is left, the call is an error.
 #' @param n_sizes Number of sizes in the default ladder.  Default 6.
 #' @param k Folds per cross-validation.  Default 5.
-#' @param metric Which column of \code{overall} to read.  Default
-#'   \code{"RMSE"}.
+#' @param metric Which column of `overall` to read.  Default `"RMSE"`.
 #' @param include_random Also cross-validate with random folds, as the
 #'   reference: the error of predicting among the samples, where each
 #'   held-out point keeps most of its neighbours in the training data.
-#'   Default \code{TRUE}.
-#' @param max_fits The fit budget; see above.  Default 60.
-#' @param sac Optional \code{sac_range} from \code{\link{estimate_sac_range}()}
-#'   to mark on the curve, or a single number in the units of the CRS the
-#'   folds are built in.  An \code{estimate_sac_range()} result records the
-#'   CRS it was fitted in; when that is not the sweep's, the range is
-#'   converted to the sweep's units, with a warning.  Default \code{NULL}:
-#'   estimated here from the response, detrended on \code{predictor_vars},
-#'   when \pkg{gstat} is installed.
-#' @param seed Seed for the fold construction at every size.
-#' @param quiet Suppress the progress messages.  Default \code{FALSE}.
-#' @param ... Passed to \code{\link{cv_spatial}()} at every size
-#'   (\code{predict_args}, \code{p}, \code{parallel}, \code{metrics}, ...).
-#'   \code{block_size}, \code{folds}, \code{k}, \code{seed} and
-#'   \code{auto_range} are set here and cannot be passed.
-#' @return A data.frame of class \code{"block_size_sweep"} with one row per
-#'   cross-validation: \code{block_size} (\code{NA} for the random
-#'   reference), \code{method}, \code{blocks_used}, \code{k} (the folds
-#'   actually built), \code{n_folds_succeeded}, \code{value} (the pooled
-#'   metric), \code{fold_min}, \code{fold_max} and \code{fold_sd} (its spread
-#'   across folds), and \code{block_width} and \code{block_height} (the
-#'   width and height of the grid cells built at that size, \code{NA} for
-#'   the random reference).  Attributes: \code{metric}, \code{sac_range} (the
-#'   effective range, or \code{NA}), \code{crs}, \code{k} (the folds
-#'   requested, which \code{print()} and \code{plot()} report),
-#'   \code{n_fits} (the fits planned, which the \code{max_fits} check
-#'   reads; \code{print()} and \code{plot()} count the fits made from the
-#'   \code{k} column), \code{response_var}, and \code{results}, the full
-#'   \code{cv_spatial()} result at every size.
-#'   \code{plot()} draws it.
-#' @family cross-validation
-#' @seealso \code{\link{plot.block_size_sweep}()}.
-#' @examples
-#' if (requireNamespace("ranger", quietly = TRUE) &&
-#'     requireNamespace("gstat", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   n <- 200
-#'   x <- 5e5 + runif(n, 0, 1000); y <- 5e6 + runif(n, 0, 1000)
-#'   d <- as.matrix(dist(cbind(x, y)))
-#'   field <- as.numeric(t(chol(exp(-d / 100) + diag(1e-6, n))) %*% rnorm(n))
-#'   dat <- st_as_sf(data.frame(x = x, y = y, a = rnorm(n)), coords = c("x", "y"),
-#'                   crs = 32632)
-#'   dat$z <- field + 0.5 * dat$a + rnorm(n, 0, 0.2)
-#'   rf_fn <- function(train_sf)
-#'     fit_rf_model(train_sf, "z", "a", include_coords = TRUE, num_trees = 100, seed = 1)
-#'   sw <- cv_block_size_sweep(dat, "z", "a", fit_fn = rf_fn, k = 4, n_sizes = 4,
-#'                             quiet = TRUE)
-#'   print(sw)               # the curve as a table, with the random-fold reference
-#'   if (requireNamespace("ggplot2", quietly = TRUE)) plot(sw)
-#' }
+#'   Default `TRUE`.
+#' @param max_fits The most model fits the sweep may run, the random
+#'   reference included; a sweep that needs more refuses to start.  Default
+#'   60.  See the section "The fit budget".
+#' @param sac Optional `sac_range` from [estimate_sac_range()] to mark on the
+#'   curve, or a single number in the units of the CRS the folds are built
+#'   in.  An [estimate_sac_range()] result records the CRS it was fitted in;
+#'   when that is not the sweep's, the range is converted to the sweep's
+#'   units, with a warning.  Default `NULL`: estimated here from the
+#'   response, detrended on `predictor_vars`, when \pkg{gstat} is installed.
+#' @param seed Seed for the folds at every size, for each [cv_spatial()] run
+#'   (which draws one seed per fold for `fit_fn`, so a learner that draws
+#'   random numbers gives the same curve on every run), and for the range
+#'   estimate when `sac` is `NULL`.  Default 123.
+#' @param quiet Suppress the progress messages.  Default `FALSE`.
+#' @param ... For `cv_block_size_sweep()`, passed to [cv_spatial()] at every
+#'   size (`predict_args`, `p`, `parallel`, `metrics`, ...); `block_size`,
+#'   `folds`, `k`, `seed` and `auto_range` are set here and cannot be passed.
+#'   Ignored by `plot()`.
+#' @param x A `block_size_sweep`, for `plot()`.
+#' @return A data.frame of class `"block_size_sweep"` with one row per
+#'   cross-validation: `block_size` (`NA` for the random reference),
+#'   `method`, `blocks_used`, `k` (the folds built), `n_folds_succeeded`,
+#'   `value` (the pooled metric), `fold_min`, `fold_max` and `fold_sd` (its
+#'   spread across folds), and `block_width` and `block_height` (the width and
+#'   height of the grid cells built at that size, `NA` for the random
+#'   reference).  Attributes: `metric`, `sac_range` (the effective range, or
+#'   `NA`), `crs`, `k` (the folds requested, which `print()` and `plot()`
+#'   report), `n_fits` (the fits planned, which the `max_fits` check reads;
+#'   `print()` and `plot()` count the fits made from the `k` column),
+#'   `response_var`, and `results`, the full [cv_spatial()] result at every
+#'   size.
+#'
+#'   `plot()` returns a `ggplot` object (see the section "The plot").
+#' @family folds
+#' @seealso [fold_separation()] to read the folds of each size against the
+#'   locations a map will predict at, and [make_folds()] for the blocks.
+#' @examplesIf requireNamespace("ranger", quietly = TRUE) && requireNamespace("gstat", quietly = TRUE)
+#' library(sf)
+#' set.seed(1)
+#' n <- 200
+#' x <- 5e5 + runif(n, 0, 1000); y <- 5e6 + runif(n, 0, 1000)
+#' d <- as.matrix(dist(cbind(x, y)))
+#' field <- as.numeric(t(chol(exp(-d / 100) + diag(1e-6, n))) %*% rnorm(n))
+#' dat <- st_as_sf(data.frame(x = x, y = y, a = rnorm(n)), coords = c("x", "y"),
+#'                 crs = 32632)
+#' dat$z <- field + 0.5 * dat$a + rnorm(n, 0, 0.2)
+#' rf_fn <- function(train_sf)
+#'   fit_rf_model(train_sf, "z", "a", include_coords = TRUE, num_trees = 100,
+#'                seed = 1)
+#' sw <- cv_block_size_sweep(dat, "z", "a", fit_fn = rf_fn, k = 4, n_sizes = 4,
+#'                           quiet = TRUE)
+#' sw        # the curve as a table, with the random-fold reference
+#'
+#' # Dashed: the random-fold reference.  Dotted: the estimated
+#' # autocorrelation range.
+#' if (requireNamespace("ggplot2", quietly = TRUE)) plot(sw)
 #' @export
 cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
                                 block_sizes = NULL, n_sizes = 6L, k = 5L,
@@ -630,54 +644,18 @@ print.block_size_sweep <- function(x, ...) {
   else cat("  autocorrelation range: not identified\n")
   df <- as.data.frame(x)
   df$block_size <- ifelse(is.na(df$block_size), "random", format(signif(df$block_size, 4)))
-  print(df[, c("block_size", "method", "blocks_used", "k", "n_folds_succeeded",
-               "value", "fold_min", "fold_max")], row.names = FALSE, digits = 4)
+  # No method column: block_size already reads "random" for the reference.
+  # With it and the long n_folds_succeeded header the table ran past 80
+  # columns and fold_max wrapped onto a block of its own.
+  tab <- df[, c("block_size", "blocks_used", "k", "n_folds_succeeded",
+                "value", "fold_min", "fold_max")]
+  names(tab)[names(tab) == "n_folds_succeeded"] <- "folds_ok"
+  print(tab, row.names = FALSE, digits = 4)
   invisible(x)
 }
 
 
-#' Plot cross-validation error against block size
-#'
-#' The curve from \code{\link{cv_block_size_sweep}()}: the pooled metric at
-#' each block size, the fold-to-fold range as a band, the random-fold
-#' reference as a dashed line, and the estimated autocorrelation range as a
-#' vertical marker.  The curve rises as the blocks widen because the
-#' held-out points sit farther from their training data: its height at a
-#' size is the error at that distance from the data, and the error of a map
-#' only where the locations it predicts at sit that far from the
-#' observations.  The caption says
-#' which way is better: higher for \code{R2} and \code{Adj_R2}, closer to
-#' the nominal level for a \code{coverage_*} column (0.975 for
-#' \code{coverage_97.5}), since over-coverage is miscalibration too, and
-#' lower for everything else.
-#'
-#' @param x A \code{block_size_sweep}.
-#' @param ... Ignored.
-#' @return A \code{ggplot} object.
-#' @family plotting
-#' @examples
-#' if (requireNamespace("ranger", quietly = TRUE) &&
-#'     requireNamespace("gstat", quietly = TRUE) &&
-#'     requireNamespace("ggplot2", quietly = TRUE)) {
-#'   library(sf)
-#'   set.seed(1)
-#'   n <- 200
-#'   x <- 5e5 + runif(n, 0, 1000); y <- 5e6 + runif(n, 0, 1000)
-#'   d <- as.matrix(dist(cbind(x, y)))
-#'   field <- as.numeric(t(chol(exp(-d / 100) + diag(1e-6, n))) %*% rnorm(n))
-#'   dat <- st_as_sf(data.frame(x = x, y = y, a = rnorm(n)), coords = c("x", "y"),
-#'                   crs = 32632)
-#'   dat$z <- field + 0.5 * dat$a + rnorm(n, 0, 0.2)
-#'   rf_fn <- function(train_sf)
-#'     fit_rf_model(train_sf, "z", "a", include_coords = TRUE, num_trees = 100,
-#'                  seed = 1)
-#'   sw <- cv_block_size_sweep(dat, "z", "a", fit_fn = rf_fn, k = 4, n_sizes = 4,
-#'                             quiet = TRUE)
-#'   # Error rises from the random-fold reference (dashed) as the blocks grow,
-#'   # since the held-out points sit farther from their training data.  The
-#'   # vertical marker is the estimated autocorrelation range.
-#'   plot(sw)
-#' }
+#' @rdname cv_block_size_sweep
 #' @export
 plot.block_size_sweep <- function(x, ...) {
   .need_ggplot("plot.block_size_sweep()")
@@ -687,7 +665,9 @@ plot.block_size_sweep <- function(x, ...) {
   if (!nrow(blk))
     stop("plot.block_size_sweep(): no block size produced a finite metric.", call. = FALSE)
   rnd <- df[df$method == "random_kfold" & is.finite(df$value), , drop = FALSE]
-  unit <- attr(x, "crs") %||% "CRS units"
+  # The CRS's linear unit, not its identifier ("EPSG:32632, log scale").
+  unit <- .crs_unit_short(attr(x, "crs"))
+  if (is.na(unit)) unit <- "CRS units"
 
   p <- ggplot2::ggplot(blk, ggplot2::aes(x = .data$block_size, y = .data$value))
   if (any(is.finite(blk$fold_min) & is.finite(blk$fold_max)))
@@ -712,6 +692,7 @@ plot.block_size_sweep <- function(x, ...) {
                 if (all(is.finite(df$k) & df$k == attr(x, "k"))) "" else "up to ",
                 attr(x, "k"), .sweep_fits_made(x), .sweep_better(metric))),
         collapse = "\n"),
-      x = sprintf("Block edge length (%s, log scale)", unit), y = metric) +
+      x = sprintf("Smallest block edge asked for (%s, log scale)", unit),
+      y = metric) +
     ggplot2::theme_minimal()
 }

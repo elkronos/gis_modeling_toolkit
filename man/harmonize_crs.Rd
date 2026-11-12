@@ -2,7 +2,7 @@
 % Please edit documentation in R/crs-geometry.R
 \name{harmonize_crs}
 \alias{harmonize_crs}
-\title{Harmonize CRS between two spatial objects}
+\title{Bring two spatial objects to one CRS}
 \usage{
 harmonize_crs(
   a,
@@ -15,55 +15,50 @@ harmonize_crs(
 \arguments{
 \item{a, b}{Objects of class sf or sfc.}
 
-\item{prefer}{Which object's CRS to keep ("a" or "b").}
+\item{prefer}{Which object's CRS both are brought to when they differ:
+\code{"a"} (default) or \code{"b"}.  Ignored when \code{target_crs} is given.}
 
 \item{target_crs}{Optional target CRS to apply to both: anything
 \code{\link[sf:st_crs]{sf::st_crs()}} accepts, including an sf or sfc object, whose CRS is used.}
 
-\item{on_transform_error}{What to do when st_transform() fails:
-\code{"stop"} (default) raises an error immediately;
-\code{"set_crs"} falls back to st_set_crs() (UNSAFE: coordinates are
-NOT reprojected, only the CRS label is overwritten). The \code{"set_crs"}
-option exists only for rare edge cases where you are certain the
-coordinates already match the target CRS definition.}
+\item{on_transform_error}{What to do when \code{\link[sf:st_transform]{sf::st_transform()}} fails:
+\code{"stop"} (default) raises an error; \code{"set_crs"} relabels the CRS with
+\code{\link[sf:st_set_crs]{sf::st_set_crs()}} without moving the coordinates.  Use \code{"set_crs"} only
+when the coordinates are already in the target CRS.}
 }
 \value{
-A named list with components a and b.  A layer that is
-transformed and mixes XY and XYZ (or XYM) geometries is returned in XY,
-with a warning of class \code{"spatialkit_zm_dropped"}:
-\code{\link[sf:st_transform]{sf::st_transform()}} reads a layer in the dimension of its first
-geometry and misplaces the others.  A layer in one dimension is
-transformed with its Z and M, and so is a layer whose only geometries
-of another dimension than the first are empty and not points.  A row
-of a transformed layer with a coordinate that is not finite or lies
-beyond 1e150 comes back empty, in its own geometry type: it has no
-location to move, and \code{\link[sf:st_transform]{sf::st_transform()}} would drop that vertex and
-return the rest of the feature, or put the coordinate at a finite
-place.  So does a row of a projected layer moved to a CRS in degrees
-with a coordinate beyond 1e10 in its CRS's own unit, further out than
-any projected CRS places a point of the Earth.  A row that has a
-location and that the target CRS cannot place in full, such as a point
-far outside a UTM zone or a ring with a vertex at a latitude beyond 90,
-comes back empty, or without the vertices the CRS cannot place, and a
-warning of class \code{"spatialkit_rows_unplaced"} names such rows of
-\code{a} or \code{b} (\code{rows} on the condition).  A layer that is
-not transformed is returned as it came.
+A named list with components \code{a} and \code{b}, each of the class it
+came in.  A layer that is not transformed is returned as it came.
 }
 \description{
-Aligns two sf objects to a common CRS.
+Brings two sf or sfc objects to one CRS: the CRS of \code{a} or \code{b}, as
+\code{prefer} says, or \code{target_crs} when it is given.  Without \code{target_crs},
+two objects that both lack a CRS are returned unchanged.
 }
 \details{
-When one input carries no CRS, the same lon/lat heuristic
-\code{\link[=ensure_projected]{ensure_projected()}} uses decides what happens, so both entry points place
-identical data in the same place: coordinates that look like degrees are
-taken as EPSG:4326 and \strong{reprojected} to the other object's CRS (or
-\code{target_crs}); coordinates that do not are \emph{stamped} with
-\code{\link[sf:st_set_crs]{sf::st_set_crs()}}, which relabels without moving them.  Either way the
-assumption is announced with a warning.  A CRS in longitude and latitude
-is not stamped on coordinates that cannot be in it: a layer with an x
-outside -180 to 360 or a y beyond 90 north or south, read on the
-coordinates that have a location, stops the call with an error that names
-\code{a} or \code{b}, its box and the target CRS.
+When one input has no CRS, the lon/lat test that \code{\link[=ensure_projected]{ensure_projected()}}
+uses decides what happens (see \link{spatialkit-geometry}, "Layers without a
+CRS"), so both functions place the same data in the same place:
+coordinates the test takes for degrees are read as EPSG:4326 and
+reprojected to the other object's CRS (or \code{target_crs}); other
+coordinates are stamped with that CRS by \code{\link[sf:st_set_crs]{sf::st_set_crs()}}, which
+relabels them without moving them.  Either way a warning says so.  A CRS
+in longitude and latitude is not stamped on coordinates that cannot be
+in it: a layer with an x outside -180 to 360 or a y beyond 90 north or
+south, read on the coordinates that have a location, stops the call with
+an error that names \code{a} or \code{b}, its box and the target CRS.
+
+A layer that is transformed is read as \link{spatialkit-geometry} describes:
+a layer that mixes XY and XYZ (or XYM) geometries comes back in XY, with
+a warning of class \code{spatialkit_zm_dropped}, and a row without a location
+comes back empty, in its own geometry type.  So does a row of a projected
+layer moved to a CRS in degrees with a coordinate beyond 1e10 in its
+CRS's own unit, further out than any projected CRS places a point of the
+Earth.  A row that has a location and that the target CRS cannot place
+in full, such as a point far outside a UTM zone or a ring with a vertex
+at a latitude beyond 90, comes back empty, or without the vertices the
+CRS cannot place, and a warning of class \code{spatialkit_rows_unplaced} names
+such rows of \code{a} or \code{b} (\code{rows} on the condition).
 }
 \examples{
 library(sf)
@@ -75,10 +70,13 @@ c(a = st_crs(h$a)$epsg, b = st_crs(h$b)$epsg)
 st_crs(h$a) == st_crs(h$b)
 }
 \seealso{
-Other spatial data preparation:
-\code{\link[=clip_target_for]{clip_target_for()}},
+\link{spatialkit-geometry} for how input geometry and CRSs are read.
+
+Other data preparation:
+\code{\link[=[.spatialkit_rows]{[.spatialkit_rows()}},
 \code{\link[=coerce_to_points]{coerce_to_points()}},
 \code{\link[=ensure_projected]{ensure_projected()}},
-\code{\link[=prep_model_data]{prep_model_data()}}
+\code{\link[=prep_model_data]{prep_model_data()}},
+\code{\link{spatialkit-geometry}}
 }
-\concept{spatial data preparation}
+\concept{data preparation}

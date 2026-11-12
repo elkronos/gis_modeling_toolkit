@@ -1,27 +1,27 @@
 # tests/testthat/test-core-pool-helper.R
 # ---------------------------------------------------------------------------
-# The reference functions of helper-pool-reference.R are the text they were
-# copied as, and they run on the layouts the engine is checked on.
+# The reference functions of helper-pool-reference.R hold their text, and
+# they run on the layouts the engine is checked on.
 #
 # The functions are a fixed point for the tests of R/pool.R, so the first
 # test holds their text still.  The second holds the layouts still: their
 # settings, and the coordinates, response and regions each gives.  The others
 # run the functions on every layout and check what they return against the
-# same quantities worked out row by row: a copy that had lost a line would
-# not pass.
+# same quantities worked out row by row: a reference that had lost a line
+# would not pass.
 # ---------------------------------------------------------------------------
 
-test_that("the copied block of the reference helper has not been edited", {
+test_that("the reference block of the helper has not been edited", {
   lines <- sub("\r$", "", readLines(test_path("helper-pool-reference.R"), warn = FALSE))
-  from <- grep("^# ---- core-factorial/20_estimates.R", lines)
+  from <- grep("^# ---- Region estimates", lines)
   to   <- grep("^# ---- Layouts", lines)
   expect_length(from, 1L)
   expect_length(to, 1L)
   block <- paste(lines[from:(to - 1L)], collapse = "\n")
-  # The block as it was copied from the experiments' files.  A change here is
-  # a change to the reference, not a correction of it.
+  # The block as it stands, comments included.  A change here is a change
+  # to the reference, not a correction of it.
   expect_identical(digest::digest(block, algo = "sha256", serialize = FALSE),
-                   "d3cc783800fa057f4762a5ea57f78c183833c69e816b766ef1b3c869b926529c")
+                   "4a5354c3a1f4735463481d773b390ff68bb51a693988569f8af41633740ede3b")
   expect_identical(EST, c("P", "R", "L", "PAR"))
   expect_identical(NEIGHBOURS, 8L)
   for (f in c("oneway", "reml_oneway", "weight", "reldiff", "parent_of", "region_estimates",

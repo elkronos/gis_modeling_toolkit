@@ -12,18 +12,26 @@
 # Stable polygon IDs
 # -----------------------------------------------------------------------------
 
-#' Create deterministic, stable polygon IDs based on spatial sort keys
+#' Give cells IDs that follow their position
 #'
-#' Ensures that a polygon layer has a reproducible, deterministic identifier
-#' column by sorting features using representative point coordinates (and
-#' secondary tie-breakers) and then assigning sequential IDs.
+#' Numbers the polygons of a layer from west to east, and from south to
+#' north among polygons at the same longitude, by a representative point of
+#' each (its centroid by default) taken by default in EPSG:4326
+#' (`transform_for_sort`); ties go to the smaller area. The same polygons get
+#' the same IDs whatever their row order or projection, except as
+#' `transform_for_sort` says, so use it before joining summaries made from
+#' different runs.
 #'
 #' @param polygons_sf An sf or sfc object containing polygonal features.
 #'   Polygons that mix XY and XYZ (or XYM) geometries are keyed without Z
 #'   and M, since sf reads a layer in the dimension of its first geometry
 #'   (see \code{make_valid} for the rows returned).
-#' @param id_col Character scalar; name of the identifier column.
-#' @param method One of "centroid", "surface_point", "bbox_center".
+#' @param id_col Name of the ID column to write. Default `"poly_id"`. An
+#'   existing column of that name is replaced.
+#' @param method The point each polygon is sorted by: `"centroid"`
+#'   (default), `"surface_point"` (a point inside the polygon,
+#'   [sf::st_point_on_surface()]) or `"bbox_center"` (the centre of its
+#'   bounding box).
 #' @param make_valid Logical; apply st_make_valid() first. Default TRUE.
 #'   The copy the sort key is measured on is repaired as well, after it has
 #'   been transformed (see Details); with \code{FALSE} neither is. On a layer
@@ -62,13 +70,11 @@
 #'   the log says so. In a geographic CRS the
 #'   sort key is rounded to 7 decimal degrees (about 1 cm) before ordering, so
 #'   the floating-point noise of a round trip through a different projection
-#'   does not usually reverse two neighbouring cells. It can where two cells'
+#'   does not reverse two neighbouring cells, except where two cells'
 #'   centres lie within about that step of the same longitude, as fine cells
-#'   stacked north-south near a projection's central meridian do: 36 of 2,500
-#'   100 m cells straddling a UTM central meridian changed ID after a
-#'   transform to EPSG:3035. No rounding step removes that, so to match cells
-#'   computed in different projections, join them on geometry rather than on
-#'   the ID. The key is computed on the sphere (s2) whether or not
+#'   stacked north-south near a projection's central meridian do. No
+#'   rounding step removes that, so to match cells computed in different
+#'   projections, join them on geometry rather than on the ID. The key is computed on the sphere (s2) whether or not
 #'   \code{sf::sf_use_s2()} is on, so the session setting does not change the
 #'   IDs. Set to NULL to sort in the input CRS, which gives IDs that are
 #'   reproducible but not comparable across projections.
@@ -88,9 +94,7 @@
 #' are joined by great-circle arcs, so a long edge that is straight in the
 #' layer's CRS and passes about a metre from another vertex of the same ring
 #' can end up on the other side of that vertex. The ring then crosses itself,
-#' and s2 refuses it (1 of 291 Voronoi cells of Texas clipped to the state
-#' outline in EPSG:5070; "Loop 1 is not valid: Edge 36 crosses edge 52"). The
-#' repair of the sort copy does not split crossing edges, so a feature s2
+#' and s2 refuses it. The repair of the sort copy does not split crossing edges, so a feature s2
 #' still refuses is handled on its own. Its sort copy is repaired a second
 #' time with the crossing edges split. If s2 refuses that as well, or with
 #' \code{make_valid = FALSE}, which asks for no repair, the feature's
@@ -100,33 +104,28 @@
 #' because those points are not taken with s2.
 #'
 #' The function warns once, saying how many features took each route. Their
-#' keys are close to the spherical ones and not equal to them. The second
-#' repair moved the Texas cell's area by about 40 square metres in 2,949
-#' square kilometres. Its centroid taken in the plane lay 20 m from the one
-#' the second repair gave on the sphere, and the two kinds of centroid lay
-#' 5 m apart at the median and 61 m at most for the other 290 cells. A
-#' feature measured in the plane can therefore sort on the other side of a
-#' neighbour whose centre is that close to its own in longitude. Every other
-#' feature's key is unaffected, and the geometry returned is never the sort
-#' copy.
+#' keys are close to the spherical ones and not equal to them, so a feature
+#' measured in the plane can sort on the other side of a neighbour whose
+#' centre is nearly at its own longitude. Every other feature's key is
+#' unaffected, and the geometry returned is never the sort copy.
 #'
 #' A polygon of a layer in a geographic CRS with a vertex at a latitude
 #' beyond 90 degrees is no place on the Earth. It is keyed as an empty
 #' polygon is, after every polygon with a location, it is not repaired and
 #' comes back as it came, and a warning of class `spatialkit_lat_beyond_90`
 #' gives its rows of `polygons_sf` (`rows`).
-#' @return An sf polygon layer re-ordered with sequential IDs in id_col.
-#'   Non-polygonal rows are **dropped** (with a warning), so the result can
+#' @return An sf polygon layer re-ordered, with sequential IDs in `id_col`.
+#'   Non-polygonal rows are dropped (with a warning), so the result can
 #'   have fewer rows than the input; if no polygonal rows remain, an error is
 #'   raised.
-#' @family tessellation
+#' @family cell building
 #' @examples
 #' library(sf)
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 #'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 #' ))), crs = 32632))
 #' g <- create_grid_polygons(bnd, target_cells = 9)
-#' # Reverse the rows and re-derive the IDs: the SAME cell gets the same ID,
+#' # Reverse the rows and re-derive the IDs: the same cell gets the same ID,
 #' # which is the property a row-position ID does not have.  The check joins
 #' # the two layers on geometry, because comparing sorted ID vectors would
 #' # pass for any two permutations of 1:9.
@@ -1220,8 +1219,9 @@ ensure_stable_poly_id <- function(polygons_sf,
 
 #' Create and cache grid polygons over a boundary
 #'
-#' Builds a grid via \code{create_grid_polygons()} and memoizes the result
-#' so repeated calls with the same inputs return instantly.
+#' Builds a grid with [create_grid_polygons()], gives it stable IDs with
+#' [ensure_stable_poly_id()], and keeps it, so a repeat call with the same
+#' arguments returns the kept grid.
 #'
 #' A grid returned in degrees (a geographic `crs` passed through `...`) is
 #' cached once per [sf::sf_use_s2()] setting: a grid laid in degrees is
@@ -1242,33 +1242,40 @@ ensure_stable_poly_id <- function(polygons_sf,
 #'   geographic CRS with a latitude beyond 90 degrees, is refused, as in
 #'   [create_grid_polygons()]; a boundary shares its cache entry with its
 #'   rows that have a location.
-#' @param target_cells Approximate desired number of cells. Default `NULL`,
-#'   as in [create_grid_polygons()], so the grid can be sized by `cellsize`
-#'   or `n` passed through `...` instead.
+#' @param target_cells Approximate desired number of cells, or what
+#'   `target_cells` of [create_grid_polygons()] accepts besides a number (a
+#'   selection, a profile or ranked levels, read as a count first). Default
+#'   `NULL`, as in [create_grid_polygons()], so the grid can be sized by
+#'   `cellsize` or `n` passed through `...` instead.
 #' @param type Grid type: `"square"` (the default) or `"hex"`, matching
 #'   [create_grid_polygons()].
-#' @param ... Additional arguments forwarded to create_grid_polygons().
-#' @param cache_env Environment for memoized grids. Default .gmt_cache.
+#' @param ... Further arguments to [create_grid_polygons()], such as
+#'   `cellsize`, `n` or `crs`.
+#' @param cache_env Environment the grids are kept in. The default is the
+#'   package's own cache, which [clear_grid_cache()] empties; pass a new
+#'   environment to keep a separate cache.
 #' @param max_entries Maximum number of grids the cache holds.  Default 50.
 #'   Once full, adding a grid evicts the one added earliest, so a loop over
 #'   many boundaries holds at most this many grids (about 2 MB per 2,500-cell
 #'   grid) rather than every grid it ever built for the life of the session.
 #'   \code{\link{clear_grid_cache}} empties it outright.
-#' @return An sf data frame with a stable poly_id column.  The rows are
-#'   re-ordered and re-numbered by \code{\link{ensure_stable_poly_id}},
-#'   which \code{\link{create_grid_polygons}} does not do: the same cell
-#'   therefore carries a different \code{poly_id} depending on which of the two
-#'   builders produced it.  Use one builder throughout an analysis; joining a
+#' @return An sf data frame with a stable `poly_id` column. The rows are
+#'   re-ordered and re-numbered by [ensure_stable_poly_id()], which
+#'   [create_grid_polygons()] does not do: the same cell therefore carries a
+#'   different `poly_id` depending on which of the two builders produced
+#'   it.  Use one builder throughout an analysis; joining a
 #'   summary keyed on IDs from one onto geometries from the other draws the
 #'   values on the wrong polygons.
-#' @family tessellation
-#' @family package options and caches
+#' @family cell building
+#' @seealso [clear_grid_cache()] to empty the cache.
 #' @examples
 #' library(sf)
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 #'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 #' ))), crs = 32632))
 #' g <- create_grid_polygons_cached(bnd, target_cells = 16, type = "hex")
+#' # 27, not 16: clipping keeps every hexagon that overhangs the boundary,
+#' # which adds more at a small target (see ?create_grid_polygons)
 #' nrow(g)
 #' # The IDs come from ensure_stable_poly_id(), so they follow the geometry:
 #' # the same request with the boundary's vertices in another order gives the
@@ -1292,6 +1299,20 @@ create_grid_polygons_cached <- function(boundary,
     stop("create_grid_polygons_cached(): `max_entries` must be a single number >= 1.",
          call. = FALSE)
   max_entries <- as.integer(max_entries)
+  # A selection, a profile or the ranked levels of determine_optimal_levels()
+  # is read as a count first, by the rule create_grid_polygons() applies, so
+  # the key holds the count and the same grid is found whichever form gave it.
+  if (!is.null(target_cells) &&
+      !(is.numeric(target_cells) && length(target_cells) == 1L &&
+        is.null(attributes(target_cells))))
+    target_cells <- .without_refit(
+      .resolve_cell_count(target_cells, "target_cells",
+                          "create_grid_polygons_cached"))$n
+  # A whole count is keyed as a double, so an integer such as a selection's
+  # `$best` and the double read off the selection itself share one entry.
+  if (is.integer(target_cells) && length(target_cells) == 1L &&
+      is.null(attributes(target_cells)))
+    target_cells <- as.numeric(target_cells)
 
   bnd <- if (inherits(boundary, "sfc")) sf::st_as_sf(boundary) else boundary
   if (!inherits(bnd, "sf"))
@@ -1375,20 +1396,25 @@ create_grid_polygons_cached <- function(boundary,
 
 #' Clear the in-session grid cache
 #'
-#' Removes all memoized grid results from the internal cache environment.
+#' Empties the cache that [create_grid_polygons_cached()] fills, and returns
+#' the number of grids removed.
 #'
-#' @param cache_env Environment to clear. Default .gmt_cache.
+#' @param cache_env The cache to clear. The default is the package's own;
+#'   pass an environment only if you passed the same one to
+#'   `create_grid_polygons_cached(cache_env = )`.
 #' @return Invisibly, the number of entries removed.
-#' @family package options and caches
+#' @family options and caches
+#' @seealso [create_grid_polygons_cached()], which fills the cache.
 #' @examples
 #' library(sf)
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 #'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 #' ))), crs = 32632))
+#' invisible(clear_grid_cache())   # start from an empty cache
 #' g1 <- create_grid_polygons_cached(bnd, target_cells = 9)
 #' g2 <- create_grid_polygons_cached(bnd, target_cells = 9)   # cache hit
-#' clear_grid_cache()   # returns the number of entries removed, invisibly
-#' print(clear_grid_cache())                                   # 0: already empty
+#' print(clear_grid_cache())   # 1: the grid cached above
+#' print(clear_grid_cache())   # 0: already empty
 #' @export
 clear_grid_cache <- function(cache_env = .gmt_cache) {
   # Only OUR entries.  rm(ls()) wiped every binding in the environment it was

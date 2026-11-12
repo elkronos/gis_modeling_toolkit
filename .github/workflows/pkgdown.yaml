@@ -21,6 +21,7 @@ permissions: read-all
 jobs:
   pkgdown:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     # Only restrict concurrency for non-PR jobs
     concurrency:
       group: pkgdown-${{ github.event_name != 'pull_request' || github.run_id }}
@@ -34,21 +35,29 @@ jobs:
       - uses: r-lib/actions/setup-pandoc@v2
 
       - uses: r-lib/actions/setup-r@v2
+        timeout-minutes: 15
         with:
           use-public-rspm: true
 
-      # Hard dependencies plus the optional packages the six vignettes gate
-      # their chunks on: ggplot2, gstat, sp and GWmodel, geometry, ranger and
-      # patchwork.  Every gate is requireNamespace()-guarded, so a missing
-      # package does not fail the build -- it silently renders that article
-      # as code with no output, which is worse.  FNN, Matrix and tibble are
-      # also installed: the package uses them when present and the `backends`
-      # job of R-CMD-check.yaml has them, so the articles are built in the
-      # environment the vignettes are checked in.  brms is deliberately
-      # absent, as it is there: no vignette evaluates a Bayesian fit (the one
-      # chunk that shows one is eval = FALSE), and the Stan toolchain is not
-      # worth installing to build a website.
+      # Hard dependencies plus the optional packages the articles and the
+      # reference examples gate their code on: ggplot2, gstat, sp, geometry,
+      # ranger and patchwork.  Seven of the nine articles gate chunks on them
+      # (Get started, Choosing a resolution, Building cells, Spatial
+      # cross-validation, Fitting and checking models, Exporting and
+      # reporting, and the North Carolina example); Troubleshooting and the
+      # glossary run on the hard dependencies alone.  Every gate is
+      # requireNamespace()-guarded, so a missing package does not fail the
+      # build: the page silently shows that code with no output, which is
+      # worse.  GWmodel is installed so that the reference pages' mentions of
+      # its functions, such as GWmodel::gwr.basic(), link to its help.  FNN,
+      # Matrix and tibble are also installed: the package uses them when
+      # present and the `backends` job of R-CMD-check.yaml has them, so the
+      # articles are built in the environment the vignettes are checked in.
+      # brms is left out, as it is there: no article evaluates a Bayesian
+      # fit (the chunks that show one are eval = FALSE), and the Stan
+      # toolchain is not worth installing to build a website.
       - uses: r-lib/actions/setup-r-dependencies@v2
+        timeout-minutes: 40
         with:
           dependencies: '"hard"'
           extra-packages: |

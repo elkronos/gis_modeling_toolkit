@@ -24,7 +24,7 @@ behind \code{"elbow"}: both are drawn as curves with no selected point.}
 
 \item{tol}{Passed to \code{\link{select_resolution}()} for the flat region.}
 
-\item{...}{Ignored.}
+\item{...}{Not used.}
 }
 \value{
 A \code{ggplot} object.
@@ -33,7 +33,7 @@ A \code{ggplot} object.
 The criteria of a \code{\link{resolution_profile}()} against the number of
 cells, one panel per criterion on a shared x axis, with the level each
 criterion selects marked and the region over which it is within \code{tol}
-of its optimum shaded.  That shaded band is the flat region
+of its optimum shaded.  The shading marks the flat region
 \code{\link{select_resolution}()} reports.  A criterion whose optimum sits
 at an end of the levels it was scored at is captioned with which bound that
 is (the support ceiling, the range floor, the ladder's own end, or the
@@ -49,33 +49,30 @@ no selected level and no band, and the caption says that the size set
 the count.
 }
 \examples{
-if (requireNamespace("gstat", quietly = TRUE) &&
-    requireNamespace("ggplot2", quietly = TRUE)) {
-  library(sf)
-  # The same field as ?resolution_profile: an exponential covariance with
-  # range parameter 200 and a nugget of 0.6 on a unit sill.
-  set.seed(4)
-  n <- 400
-  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-  D  <- as.matrix(dist(xy))
-  xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) \%*\% rnorm(n))
-  pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-  prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
-  print(plot(prof))                     # one panel per criterion it scored: no
-                                        # elbow on these uniform points
-  plot(prof, criteria = c("cp", "wss")) # Cp beside the raw WSS curve
-}
+\dontshow{if (requireNamespace("gstat", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+# The same field as ?resolution_profile: an exponential covariance with
+# range parameter 200 and a nugget of 0.6 on a unit sill.
+set.seed(4)
+n <- 400
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+D  <- as.matrix(dist(xy))
+xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) \%*\% rnorm(n))
+pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
+# Two of the criteria it scored (plot(prof) draws every one, a panel each)
+plot(prof, criteria = c("cp", "reliability"))
+plot(prof, criteria = c("cp", "wss")) # Cp beside the raw WSS curve
+\dontshow{\}) # examplesIf}
 }
 \seealso{
-Other plotting:
-\code{\link[=plot.aoa]{plot.aoa()}},
-\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
-\code{\link[=plot.feature_selection]{plot.feature_selection()}},
-\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
-\code{\link[=plot.sac_range]{plot.sac_range()}},
-\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
-\code{\link[=plot_calibration]{plot_calibration()}},
-\code{\link[=plot_cv_metrics]{plot_cv_metrics()}},
-\code{\link[=plot_folds]{plot_folds()}}
+\code{\link{resolution_profile}()}, which makes the object, and
+\code{\link{select_resolution}()}.
+
+Other resolution:
+\code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
+\code{\link[=resolution_profile]{resolution_profile()}},
+\code{\link[=select_resolution]{select_resolution()}},
+\code{\link[=summary.resolution_profile]{summary.resolution_profile()}}
 }
-\concept{plotting}
+\concept{resolution}

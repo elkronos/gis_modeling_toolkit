@@ -1801,10 +1801,13 @@ test_that("a profile of one level prints \"1 level\" and no count of steps the W
   two <- .cl_profile(pts, obs_per_cell = c(9, 4.5))
   out <- utils::capture.output(print(two))
   expect_identical(out[1L], "Resolution profile: 2 levels on 600 points")
+  # The clause counts the steps the curve rises at, and is left out when
+  # there are none.
   expect_identical(out[4L],
-                   sprintf(paste0("  scored on   : response; 3 density-weighted k-means++ starts ",
-                                  "(power 1, 8 neighbours) per level; WSS rises at %d step(s)"),
-                           attr(two, "wss_bumps")))
+                   paste0("  scored on   : response; 3 density-weighted k-means++ starts ",
+                          "(power 1, 8 neighbours) per level",
+                          if (attr(two, "wss_bumps") > 0L)
+                            sprintf("; WSS rises at %d step(s)", attr(two, "wss_bumps"))))
   # A row subset of one level prints as one level.
   out <- utils::capture.output(print(two[1L, ]))
   expect_identical(out[1L], "Resolution profile: 1 level on 600 points")
@@ -1832,9 +1835,12 @@ test_that("a subset of a profile's rows counts the steps the WSS rises at over i
   expect_identical(attr(p, "wss_bumps"), sum(up))
   expect_identical(clause(p), sprintf("WSS rises at %d step(s)", sum(up)))
   # Two levels across a step where the curve falls: no rise, whatever the
-  # rest of the ladder does.
+  # rest of the ladder does, and no clause for it.
   down <- which(!up)[1L]
-  expect_identical(clause(p[c(down, down + 1L), ]), "WSS rises at 0 step(s)")
+  expect_identical(clause(p[c(down, down + 1L), ]), character(0))
+  expect_false(any(grepl("WSS rises",
+                         utils::capture.output(print(p[c(down, down + 1L), ])),
+                         fixed = TRUE)))
   # Two levels across a rise, in either order of the rows: one.
   rise <- which(up)[1L]
   expect_identical(clause(p[c(rise, rise + 1L), ]), "WSS rises at 1 step(s)")

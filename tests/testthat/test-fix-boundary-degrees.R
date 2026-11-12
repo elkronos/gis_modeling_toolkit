@@ -392,25 +392,32 @@ test_that("the help of the seeders states the remedy of the no-height refusal", 
   root <- testthat::test_path("..", "..")
   flat <- function(x)
     paste(unlist(lapply(x, function(el) if (is.character(el)) el else flat(el))), collapse = "")
-  for (page in c("get_voronoi_seeds", "voronoi_seeds_random")) {
+  page_text <- function(page) {
     file <- file.path(root, "man", paste0(page, ".Rd"))
     rd <- if (file.exists(file)) tools::parse_Rd(file)
           else tools::Rd_db("spatialkit")[[paste0(page, ".Rd")]]
     expect_s3_class(rd, "Rd")
-    text <- gsub("[[:space:]]+", " ", flat(rd))
-    expect_true(grepl(paste0(
-      "A boundary whose bounding box has no height or no width (three vertices on one ",
-      "parallel) is refused. In longitude and latitude s2 reads the edges as great ",
-      "circles, which leave the bounding box read from the coordinates, and sf (without ",
-      "the lwgeom package) draws in that box: a boundary whose box has less than half its ",
-      "area on the sphere (three vertices on or near one parallel) is refused too. That ",
-      "error, and the error for a box with no height whose vertices lie on one parallel ",
-      "other than the equator, say to transform boundary to a projected CRS in which a ",
-      "parallel is a curve, such as the one ensure_projected() picks for it (a polar one, ",
-      "such as EPSG:3413 or 3031, for a ring around a pole), where the region has an area ",
-      "and lies in its box."), text, fixed = TRUE),
-      label = page)
+    gsub("[[:space:]]+", " ", flat(rd))
   }
+  # The rules stand once, in "Sampling inside the boundary" of
+  # ?get_voronoi_seeds; ?voronoi_seeds_random draws its seeds as that section
+  # describes and points to it.
+  expect_true(grepl(paste0(
+    "A boundary whose bounding box has no height or no width (three vertices on one ",
+    "parallel) is refused. In longitude and latitude s2 reads the edges as great ",
+    "circles, which leave the bounding box read from the coordinates, and sf (without ",
+    "lwgeom) draws in that box: a boundary whose box has less than half its ",
+    "area on the sphere (three vertices on or near one parallel) is refused too. That ",
+    "error, and the error for a box with no height whose vertices lie on one parallel ",
+    "other than the equator, say to transform boundary to a projected CRS in which a ",
+    "parallel is a curve, such as the one ensure_projected() picks for it (a polar one, ",
+    "such as EPSG:3413 or 3031, for a ring around a pole), where the region has an area ",
+    "and lies in its box."), page_text("get_voronoi_seeds"), fixed = TRUE),
+    label = "get_voronoi_seeds")
+  expect_true(grepl(paste0(
+    "The seeds are drawn as \"Sampling inside the boundary\" in get_voronoi_seeds() ",
+    "describes"), page_text("voronoi_seeds_random"), fixed = TRUE),
+    label = "voronoi_seeds_random")
 })
 
 # ---------------------------------------------------------------------------

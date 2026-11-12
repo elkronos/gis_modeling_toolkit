@@ -3,22 +3,22 @@
 # Reference implementations of the region values, their leave-one-out errors
 # and the size rule, for the tests of R/pool.R.
 #
-# Everything above the line "Layouts" is copied unchanged, comments and all,
-# from the experiments that tested the estimates, with the constants the
-# functions read.  It is what the package's pooled value, its own-data
+# Everything above the line "Layouts" is a fixed reference, written apart
+# from R/pool.R, with the constants its functions read; test-core-pool-helper.R
+# holds its text still.  It is what the package's pooled value, its own-data
 # weight, its two leave-one-out errors and its count at a size have to
-# reproduce.  The comments are the experiments' own: a "tract" there is a
-# row, and a "training" row is a row with a value.
+# reproduce.  In its comments a "tract" is a row, a "region" a cell, a
+# "rung" a level of the ladder, and a "training" row is a row with a value.
 #
-#   local-outputs/core-factorial/20_estimates.R
+#   Region estimates
 #     EST, NEIGHBOURS, PAR_DIV, PAR_NSTART, PAR_SEED, oneway(), reml_oneway(),
 #     weight(), reldiff(), parent_of(), region_estimates(),
 #     predict_partition()
-#   local-outputs/core-factorial/30_count_rules.R
+#   Count rules
 #     loo_plain(), pick_rung()
-#   local-outputs/core-factorial/10_partitions.R
+#   The count at a size
 #     rung_k()
-#   local-outputs/estimate-design/20_lib.R
+#   Pooled values and their leave-one-out errors
 #     wfun(), reml_means(), fit_regions(), loo_int()
 #
 # region_estimates(want = "L") is the pooled value and want = "P" the plain
@@ -31,7 +31,7 @@
 # The functions call FNN: a test that uses them skips without it.
 # ---------------------------------------------------------------------------
 
-# ---- core-factorial/20_estimates.R ---------------------------------------------
+# ---- Region estimates ----------------------------------------------------------
 
 EST        <- c("P", "R", "L", "PAR")
 NEIGHBOURS <- 8L
@@ -39,7 +39,7 @@ PAR_DIV    <- 6
 PAR_NSTART <- 5L
 PAR_SEED   <- 123L
 
-# ---- copied from the prototype -----------------------------------------------------
+# ---- One-way decomposition and weights ----------------------------------------------
 
 oneway <- function(y, gi, K) {
   n  <- tabulate(gi, K)
@@ -139,8 +139,8 @@ region_estimates <- function(y, gi, K, xy, want = EST) {
 }
 
 # One fold, one grouping: g_tr and g_te are the group ids of the training and
-# the held-out tracts (any type).  `p_empty`: the study's saved prediction,
-# used under P for a held-out tract of an empty group (NULL: the rule itself).
+# the held-out tracts (any type).  `p_empty`: a saved prediction, used under
+# P for a held-out tract of an empty group (NULL: the rule itself).
 predict_partition <- function(g_tr, g_te, y_tr, xy_tr, xy_te, want = EST, p_empty = NULL) {
   u  <- sort(unique(g_tr))
   K  <- length(u)
@@ -162,7 +162,7 @@ predict_partition <- function(g_tr, g_te, y_tr, xy_tr, xy_te, want = EST, p_empt
        fill_gap = fill_gap, n_empty = sum(empty))
 }
 
-# ---- core-factorial/30_count_rules.R -------------------------------------------
+# ---- Count rules ---------------------------------------------------------------
 
 # Mean squared closed-form leave-one-out error of plain averages.  `a` is
 # oneway() of the training values in the regions `gi`; `nn1` the index of
@@ -178,12 +178,12 @@ loo_plain <- function(y_tr, gi, a, nn1) {
 # The rung a criterion chooses (lower is better; the first of equals).
 pick_rung <- function(crit) which.min(crit)
 
-# ---- core-factorial/10_partitions.R --------------------------------------------
+# ---- The count at a size --------------------------------------------------------
 
 # The count of a rung: m training tracts per region.
 rung_k <- function(n_train, m) max(2L, as.integer(round(n_train / m)))
 
-# ---- estimate-design/20_lib.R --------------------------------------------------
+# ---- Pooled values and their leave-one-out errors --------------------------------
 
 wfun <- function(tau2, v) ifelse(tau2 + v > 0, tau2 / (tau2 + v), 1)
 
@@ -205,8 +205,8 @@ reml_means <- function(m, v) {
 # Everything about one fold and one grouping.  g_tr, g_te: the group of every
 # training and held-out tract.  nn1: each training tract's nearest other
 # training tract.  s2_tr: the training tracts' sampling variances (NULL: the
-# dataset has none).  p_empty: the study's saved prediction, used under P for
-# a held-out tract of an empty group (NULL: the fill rule itself).
+# dataset has none).  p_empty: a saved prediction, used under P for a
+# held-out tract of an empty group (NULL: the fill rule itself).
 fit_regions <- function(g_tr, g_te, y_tr, xy_tr, xy_te, nn1, s2_tr = NULL, p_empty = NULL) {
   stopifnot(all(is.finite(y_tr)), is.null(s2_tr) || all(is.finite(s2_tr) & s2_tr > 0))
   u  <- sort(unique(g_tr))
@@ -338,8 +338,8 @@ pool_layout <- function(N, per = NA, clustered = FALSE, K = NULL,
   list(xy = xy, y = y, gi = gi, K = max(gi))
 }
 
-# Each row's nearest other row, as the reference functions take it: the
-# experiments' own expression.  It serves layouts without repeated locations
+# Each row's nearest other row, as the reference functions take it, in the
+# expression they use.  It serves layouts without repeated locations
 # only.  Where a location repeats, FNN can return a row as its own
 # neighbour, and which of several rows at one distance it returns is not
 # fixed; such a layout is refused.

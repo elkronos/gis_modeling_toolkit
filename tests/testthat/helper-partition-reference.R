@@ -3,9 +3,8 @@
 # Reference implementations of two partition kinds, for
 # test-core-partition-reference.R.
 #
-# local_density(), wkmeanspp(), den_centres() and rnd_centres() are copied
-# unchanged from the experiment that tested the kinds
-# (local-outputs/core-factorial/10_partitions.R), with the constants they
+# local_density(), wkmeanspp(), den_centres() and rnd_centres() are a fixed
+# reference, written apart from the package's code, with the constants they
 # read.  They are what the package's density kind and its random starts have
 # to reproduce.
 #

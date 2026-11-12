@@ -11,7 +11,7 @@ plot_calibration(cv, ...)
 \code{\link{compare_models_cv}()} result that ran the Bayesian backend
 (its \code{$bayes_cv} is used).}
 
-\item{...}{Ignored.}
+\item{...}{Not used.}
 }
 \value{
 A \code{ggplot} object.
@@ -19,12 +19,11 @@ A \code{ggplot} object.
 \description{
 \code{\link{cv_bayes}()} scores every fold's posterior predictive intervals
 at each of \code{coverage_levels}: the share of held-out observations the
-interval of that nominal level contained.  One coverage number cannot show
-a pattern; the pairs can.  This draws observed coverage against nominal
-with the diagonal, one point per level for the fold-weighted pooled value
-(from \code{predictive_coverage}) and one faint point per fold, so
-systematic over-confidence (points below the line) or intervals wider than
-they need to be (above it) are read at a glance.  Three levels is a thin
+interval of that nominal level contained.  This draws observed coverage
+against nominal with the diagonal, one point per level for the
+fold-weighted pooled value (from \code{predictive_coverage}) and one faint
+point per fold, so you can see systematic over-confidence (points below
+the line) or intervals wider than they need to be (above it).  Three levels is a thin
 curve; pass \code{coverage_levels = seq(0.1, 0.9, by = 0.1)} to
 \code{cv_bayes()} for a full one.  Each level is drawn at the nominal value
 \code{cv_bayes()} records in \code{coverage_levels}, so whatever was
@@ -50,15 +49,14 @@ plot_calibration(cv)
 }
 }
 \seealso{
-Other plotting:
-\code{\link[=plot.aoa]{plot.aoa()}},
-\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
-\code{\link[=plot.feature_selection]{plot.feature_selection()}},
-\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
-\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
-\code{\link[=plot.sac_range]{plot.sac_range()}},
-\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
-\code{\link[=plot_cv_metrics]{plot_cv_metrics()}},
-\code{\link[=plot_folds]{plot_folds()}}
+\code{\link{cv_bayes}()}, which makes the result.
+
+Other cross-validation:
+\code{\link[=compare_models_cv]{compare_models_cv()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=plot_cv_metrics]{plot_cv_metrics()}}
 }
-\concept{plotting}
+\concept{cross-validation}

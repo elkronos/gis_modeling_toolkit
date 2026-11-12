@@ -11,6 +11,8 @@
 ^cran-comments\.md$
 ^\.Rhistory$
 ^\.gitignore$
+# In a git worktree .git is a file, which R CMD build would otherwise ship.
+^\.git$
 # Stray graphics-device output. Base plot() called with no open device writes
 # Rplots.pdf into the working directory, and R CMD build will happily ship it.
 # NOT anchored to the package root: the copy that actually gets made is the one

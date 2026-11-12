@@ -2,12 +2,10 @@
 # ---------------------------------------------------------------------------
 # summarize_by_cell(deff = "variogram") when the request cannot be met.
 #
-# It used to fall back to deff = 1: the uncorrected interval, under the same
-# column names, with deff_applied FALSE.  That interval has the worst coverage
-# of the grand mean (0.41 to 0.64 on real tract layers against 0.93 to 0.96
-# for Kish), and the variogram's range goes unidentified on about half of
-# such layers.  The fallback is "kish" now, with the classed warning kept and
-# a `deff_method` column that says which correction each row carries.
+# The fallback is "kish", with a classed warning and a `deff_method` column
+# that says which correction each row carries.  It is not deff = 1, whose
+# uncorrected interval would stand under the same column names with
+# deff_applied FALSE and ignore the correlation the call asked to correct.
 # ---------------------------------------------------------------------------
 
 # Six cells of 25 points on a correlated field with a cell effect, so the

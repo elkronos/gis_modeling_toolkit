@@ -2,7 +2,8 @@
 % Please edit documentation in R/model-selection-gwr.R
 \name{gwr_model_selection}
 \alias{gwr_model_selection}
-\title{Forward model selection for geographically weighted regression}
+\alias{print.gwr_model_selection}
+\title{Select GWR predictors by forward selection on AICc}
 \usage{
 gwr_model_selection(
   data_sf,
@@ -17,13 +18,15 @@ gwr_model_selection(
   quiet = TRUE,
   .engine = .gwr_ms_engine
 )
+
+\method{print}{gwr_model_selection}(x, n = 10L, ...)
 }
 \arguments{
 \item{data_sf}{An \code{sf} object with response, predictors and geometry.}
 
 \item{response_var}{Response column name.}
 
-\item{candidate_vars}{Character vector naming at least two \strong{numeric}
+\item{candidate_vars}{Character vector naming at least two numeric
 predictors to choose among.  Factor, character and logical candidates are
 refused: a factor is several model-matrix columns while this
 sweep counts it as one variable, so the criteria would not be comparable,
@@ -37,7 +40,7 @@ candidate, by the grid-then-refine search of
 what the search scored is returned in \code{bandwidth_search}. Integer
 neighbour count when
 \code{adaptive = TRUE}; otherwise a distance in the units of the
-\strong{projected} CRS the sweep runs in, which \code{prep_model_data()} may
+projected CRS the sweep runs in, which \code{prep_model_data()} may
 have chosen for you.  Geographic input is projected before the bandwidth
 is used, so a value in degrees would be read as metres; a fixed
 bandwidth below a ten-thousandth of the data's extent raises a warning
@@ -54,13 +57,15 @@ One above the number of observations is capped at it, with a warning.}
 \item{adaptive}{Logical; adaptive (nearest-neighbour) bandwidth. Default
 \code{TRUE}.}
 
-\item{kernel}{Weighting kernel. One of \code{"bisquare"} (default),
-\code{"gaussian"}, \code{"tricube"}, \code{"boxcar"},
-\code{"exponential"}.}
+\item{kernel}{Weighting kernel: one of \code{"bisquare"} (default),
+\code{"gaussian"}, \code{"tricube"}, \code{"boxcar"} or
+\code{"exponential"}, as in \code{\link{fit_gwr_model}()}.}
 
-\item{bw_approach}{Criterion for the bandwidth search: \code{"AICc"}
-(default) or \code{"CV"}, the leave-one-out sum of squared prediction
-errors. Matches \code{\link{fit_gwr_model}}'s default.  When
+\item{bw_approach}{Criterion for the bandwidth search on the full model:
+\code{"AICc"} (default, the criterion \code{\link{fit_gwr_model}()}
+uses) or \code{"CV"}, the leave-one-out sum of squared prediction
+errors.  \code{fit_gwr_model()} has no CV option, so with \code{"CV"}
+pass the selected bandwidth to it explicitly.  When
 observations share a location the search leaves out whole locations
 whichever is asked for; see \strong{Observations that share a
 location}.}
@@ -73,52 +78,61 @@ window and builds no \code{n} x \code{n} distance matrix, so a fixed
 bandwidth works at any \code{n}.  The argument is accepted so that calls
 written with it run.}
 
-\item{quiet}{Print no progress. Default \code{TRUE}. With \code{FALSE} one
+\item{quiet}{Print no progress.  Default \code{TRUE}, unlike
+\code{\link{select_features_forward}()}.  With \code{FALSE} one
 line is written (with \code{cat()}) as each model is fitted, to watch a
 long sweep progress.}
 
-\item{.engine}{Internal; injectable backend used for testing.}
+\item{.engine}{Internal; leave at the default.}
+
+\item{x}{A \code{gwr_model_selection} object.}
+
+\item{n}{Number of top-ranked models \code{print()} shows.  Default 10.}
+
+\item{...}{Not used.}
 }
 \value{
 An object of class \code{gwr_model_selection}, a list with:
-\code{best} (character vector of the selected predictors, the model with
-the lowest criterion; \code{character(0)} when that is the model without
-predictors);
-\code{table} (ranked data.frame of every model evaluated, with columns
-\code{rank}, \code{n_vars}, \code{variables}, \code{criterion} and
-\code{delta}, the criterion minus the best model's; the model without
-predictors is the row \code{<none>};
-\code{criterion} is \code{NA}, and the model ranked last, where it
-could not be evaluated or where AICc is undefined because the model's
-effective number of parameters \eqn{tr(S)} is not below \eqn{n - 2},
-which raises a warning);
-\code{within_2} (the rows of \code{table} whose \code{delta} is at most
-2) and \code{smallest_within_2} (the predictors of the smallest model
-among them);
-\code{criterion} (label for the criterion actually read, noting when it
-had to be located positionally);
-\code{criterion_by_name} (logical: whether that column was found by
-its name rather than by the documented position),
-\code{criterion_column} (the column it was read from) and
-\code{criterion_verified} (logical: \code{FALSE} exactly when the
-column was read positionally from a table that did not have the four
-documented columns, which is the case the log calls unverified.  Gate
-a script on this field instead of on the label);
-\code{response_var} and \code{candidate_vars} (the response and the full
-candidate set the sweep ran over, both echoed by \code{print()});
-\code{bandwidth}, \code{bandwidth_source}, \code{adaptive} and
-\code{kernel} (the smoothing held fixed across the sweep, and where it
-came from: \code{"supplied"}, or the criterion's name followed by
+\describe{
+\item{\code{best}}{Character vector of the selected predictors, the
+model with the lowest criterion; \code{character(0)} when that is
+the model without predictors.}
+\item{\code{table}}{Ranked data.frame of every model evaluated, with
+columns \code{rank}, \code{n_vars}, \code{variables},
+\code{criterion} and \code{delta}, the criterion minus the best
+model's.  The model without predictors is the row \code{<none>}.
+\code{criterion} is \code{NA}, and the model is ranked last, where it
+could not be evaluated or where AICc is undefined because the
+model's effective number of parameters \eqn{tr(S)} is not below
+\eqn{n - 2} (with a warning).}
+\item{\code{within_2}, \code{smallest_within_2}}{The rows of
+\code{table} whose \code{delta} is at most 2, and the predictors of
+the smallest model among them.}
+\item{\code{criterion}}{\code{"AICc"}.}
+\item{\code{criterion_by_name}, \code{criterion_column},
+\code{criterion_verified}}{Where the criterion was read from the
+diagnostic table: \code{TRUE}, 3 and \code{TRUE} with the built-in
+engine.}
+\item{\code{response_var}, \code{candidate_vars}}{The response and the
+full candidate set the sweep ran over, both echoed by
+\code{print()}.}
+\item{\code{bandwidth}, \code{bandwidth_source}, \code{adaptive},
+\code{kernel}}{The smoothing held fixed across the sweep, and where
+it came from: \code{"supplied"}, or the criterion's name followed by
 \code{"search on the full model"}, the criterion being
-\code{"leave-one-location-out CV"} when observations share a location);
-\code{bandwidth_search} (what the search scored, as
-\code{\link{fit_gwr_model}} keeps it; \code{NULL} when the bandwidth was
-supplied);
-\code{n_obs}, \code{n_models} (the rows of \code{table}),
-\code{used_dmat} (always \code{FALSE}); and \code{raw}
-(the forward sweep in the layout \code{GWmodel::gwr.model.selection()}
-returns: the two-element list of its model list and its diagnostic
-table, without the model that has no predictors).
+\code{"leave-one-location-out CV"} when observations share a
+location.}
+\item{\code{bandwidth_search}}{What the search scored, as
+\code{\link{fit_gwr_model}} keeps it; \code{NULL} when the bandwidth
+was supplied.}
+\item{\code{n_obs}, \code{n_models}}{The number of observations,
+and the number of rows of \code{table}.}
+\item{\code{used_dmat}}{Always \code{FALSE}.}
+\item{\code{raw}}{The forward sweep in the layout
+\code{GWmodel::gwr.model.selection()} returns: the two-element list
+of its model list and its diagnostic table, without the model that
+has no predictors.}
+}
 }
 \description{
 Grows a GWR model one predictor at a time and scores every intermediate
@@ -126,35 +140,26 @@ model with a corrected Akaike information criterion, the sweep
 \code{GWmodel::gwr.model.selection()} defines, and returns a ranked table
 with each model's distance from the best.  The model without predictors is
 scored too.  Every model is fitted by the package's own local solve (see
-\code{\link{fit_gwr_model}}, \strong{The local solve}), so a candidate
+"The local solve" in \code{\link{fit_gwr_model}}), so a candidate
 that is constant inside some windows, a regional indicator say, is scored
 on what those windows do estimate and neither stops the sweep nor scores
 as rounding error.
 }
-\section{What this optimises, and what it does not}{
+\section{Scope of the criterion}{
 
-The criterion is \strong{in-sample}. AICc penalises the effective number of
-parameters, so it is not the same thing as maximising fit, but it is still
-computed on the data the model was fitted to, and under spatial
-autocorrelation an in-sample criterion is optimistic in a way that a
-spatially blocked estimate is not. Treat this as fast screening.
-\code{\link{select_features_forward}} performs the same forward search
-against a spatially blocked cross-validated score; it costs far more and is
-the one to trust when the answer matters. When the two disagree, the
-disagreement is itself informative. It usually means a candidate is
-predictive only locally.
+AICc penalises the effective number of parameters but is computed on the
+data the model was fitted to, and under spatial autocorrelation an
+in-sample criterion is optimistic in a way that a spatially blocked
+estimate is not.  Use this function as a
+fast screen and confirm with \code{\link{select_features_forward}()},
+which runs the same forward search on a spatially blocked cross-validated
+score at a higher cost.
 
-One further limitation follows from the method itself:
-
-\itemize{
-\item \strong{One bandwidth for every model.} Comparing criteria across
-models requires holding the smoothing fixed, but the bandwidth is itself
-a fitted quantity, and the value chosen for the full model is not
-optimal for a one-predictor model. This is how the method is defined
-(Lu et al. 2014); it is not an implementation shortcut. Refit the
-selected model with \code{bandwidth = NULL} to re-optimise once the
-variable set is settled.
-}
+Every model is fitted at one bandwidth, as Lu et al. (2014) define the
+method: comparing criteria across models needs the smoothing held fixed.
+The bandwidth chosen for the full model is not optimal for smaller ones,
+so refit the selected model with \code{bandwidth = NULL} once the set is
+settled.
 }
 
 \section{The model without predictors, and the gaps}{
@@ -214,23 +219,37 @@ are named so); the \code{criterion} column of \code{$table} is its third
 column.
 }
 
-\examples{
-if (requireNamespace("sp", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  n <- 80
-  dat <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               a = rnorm(n), b = rnorm(n), noise = rnorm(n)),
-    coords = c("x", "y"), crs = 32632
-  )
-  dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
-  sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 30)
-  print(sel)              # every model tried, by AICc, with the gaps
-  print(sel$best)         # the winning predictor set: a and b, not noise
-  fit <- fit_gwr_model(dat, "z", sel$best)
-  fit
+\section{Printing}{
+
+\code{print()} shows the response, the candidate predictors, and the
+top-ranked models with their criterion values and, in the \code{delta}
+column, how far each is from the best.  Below the table it lists the
+models within 2 of the best, which a difference in AICc does not separate
+(Burnham and Anderson 2002), and names the smallest of them.  When several
+models are that close, treat the choice of predictors as unsettled; when
+the model without predictors (\code{<none>}) is among them, no candidate
+has been shown to help.  \code{print()} returns \code{x} invisibly.
 }
+
+\examples{
+\dontshow{if (requireNamespace("sp", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+set.seed(1)
+n <- 80
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             a = rnorm(n), b = rnorm(n), noise = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+# The slope on a rises from 1 in the west to 3 in the east.
+east <- (st_coordinates(dat)[, 1] - 5e5) / 1000
+dat$z <- (1 + 2 * east) * dat$a - dat$b + rnorm(n, 0, 0.3)
+sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 30)
+sel                     # every model tried, by AICc, with the gaps
+sel$best                # the winning predictor set
+# Refit with the bandwidth chosen afresh for the selected set.
+fit_gwr_model(dat, "z", sel$best)
+\dontshow{\}) # examplesIf}
 }
 \references{
 Burnham, K. P. and Anderson, D. R. (2002). \emph{Model Selection and
@@ -243,21 +262,14 @@ geographically weighted models. \emph{Geo-spatial Information Science}
 17(2), 85--101. \doi{10.1080/10095020.2014.917453}
 }
 \seealso{
-\code{\link{select_features_forward}} for the blocked
-cross-validated counterpart, \code{\link{fit_gwr_model}} to fit the
-selected model.
+\code{\link{select_features_forward}()} for the blocked
+cross-validated counterpart, \code{\link{plot.gwr_model_selection}()} to
+draw the models, and \code{\link{fit_gwr_model}()} to fit the selected
+model.
 
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=fold_separation]{fold_separation()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=sac_nugget]{sac_nugget()}},
+Other predictor selection:
+\code{\link[=plot.feature_selection]{plot.feature_selection()}},
+\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
 \code{\link[=select_features_forward]{select_features_forward()}}
 }
-\concept{cross-validation}
+\concept{predictor selection}

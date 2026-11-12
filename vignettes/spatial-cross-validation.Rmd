@@ -1,9 +1,8 @@
 ---
 title: "Spatial cross-validation"
 description: >
-  What a fold's score estimates, the six fold schemes, block sizes and the autocorrelation range, and reading a cross-validation result down to the last row.
+  Choose folds whose score matches the map you will make, size the blocks, and read every part of the result.
 author: "Justin Chase"
-date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
   rmarkdown::html_vignette:
     toc: true
@@ -17,15 +16,20 @@ vignette: >
 
 ```{r setup, include=FALSE}
 # gstat estimates the autocorrelation range that sizes the blocks, and ggplot2
-# draws the folds and the sweep. Both are Suggests, so the vignette is gated on
-# them and R CMD build succeeds without either.
-# `eval` below gates CHUNKS only: knitr does not apply it to inline `r ...`
-# code, which runs regardless. Any inline reference to something a chunk
-# defines has to guard itself -- `r if (runs) x else NA` -- or the vignette
-# fails to build on a machine without these packages instead of skipping.
+# draws the folds and the curves. Both are Suggests, so every chunk is gated
+# on them and R CMD build succeeds without either.
+# `eval` gates chunks only: knitr does not apply it to inline `r ...` code,
+# which runs regardless. An inline reference to something a chunk defines
+# has to guard itself, as in `r if (runs) x else NA`, and so does a fig.alt
+# built from the output, or the article fails to build where a package is
+# missing.
 has_gstat  <- requireNamespace("gstat",   quietly = TRUE)
 has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
 runs <- has_gstat && has_ggplot
+
+# A reading written inline as code, "matched" in backticks. Inline code cannot
+# hold a backtick, so the helper writes it as \x60.
+as_code <- function(x) sprintf("\x60\"%s\"\x60", x)
 
 knitr::opts_chunk$set(
   echo      = TRUE,
@@ -38,36 +42,43 @@ knitr::opts_chunk$set(
 ```
 
 ```{r missing-deps, echo=FALSE, eval=!runs, results='asis'}
-cat("**gstat or ggplot2 is not installed, so the code below is shown but not",
-    "run.** Install them with `install.packages(c(\"gstat\", \"ggplot2\"))`",
-    "and rebuild.\n")
+cat("*`gstat` or `ggplot2` is not installed, so the code below is shown but",
+    "not run. Install them with `install.packages(c(\"gstat\", \"ggplot2\"))`",
+    "and rebuild.*\n")
 ```
 
-*This article needs two optional packages: **gstat**, which fits the variogram
-behind the autocorrelation range, and **ggplot2** for the figures. When either
-is missing the code is shown but not run, and a note at the top says so.*
+This article shows what a cross-validated error measures, how to choose
+[folds](glossary.html#fold) whose score matches the map you will make, how to
+size the [blocks](glossary.html#block), and how to read every part of the
+result.
 
-## What a fold measures
+*This article needs two optional packages: `gstat` for the autocorrelation
+range and `ggplot2` for the figures. Where one is missing, the code that
+needs it is shown but not run.*
 
-A random fold puts a test point's neighbours in the training set. When the field
-is spatially autocorrelated, those neighbours carry the test point's value, and
-a model that draws on nearby observations uses them. The cross-validation score
-then measures the error of predicting among the samples. Blocks hold out whole
-areas, and their score measures the error of predicting into an unsampled gap
-the size of a block.
+## What a cross-validated error measures
+
+A random fold puts a held-out point's neighbours in the training set. When the
+field is spatially autocorrelated, those neighbours carry the held-out point's
+value, and a model that draws on nearby observations uses them. The
+cross-validation score then measures the error of predicting among the samples.
+Blocks hold out whole areas, and their score measures the error of predicting
+into an unsampled gap the size of a block (Roberts et al. 2017).
 
 A cross-validated error is the error at the distance the folds put between the
 held-out points and their training data. It reads low for a map whose locations
 sit farther from the data than that, and high for one whose locations sit
-closer. Everything else in this vignette follows from matching the folds to the
-map.
+closer.
 
-## A learner you can read
+## A learner and a simulated field
 
-The effect is easiest to see with a model whose memorising is obvious.
-`new_spatial_fit()` is the extension point for putting your own learner on the
-package's folds, and five-nearest-neighbour smoothing is about the simplest
-thing that fits through it.
+Each function that scores a model takes the folds from `make_folds()` through
+its `folds` argument: `cv_rf()`, `cv_gwr()` and `cv_bayes()` for the built-in
+backends, `compare_models_cv()` to score several on the same folds, and
+`cv_spatial()` for a learner of your own. This article uses a
+five-nearest-neighbour smoother written for `cv_spatial()`. It needs no
+optional package and predicts from the five nearest observations alone, so how
+far the folds hold those observations away decides its score.
 
 ```{r learner}
 library(sf)
@@ -94,22 +105,19 @@ predict.knnsurf_fit <- function(object, newdata = NULL, ...) {
     mean(e$y[order(d)[seq_len(min(e$k, length(d)))]])
   }, numeric(1))
 }
-residuals.knnsurf_fit <- function(object, ...) object$engine$y - predict(object)
-fitted.knnsurf_fit    <- function(object, ...) predict(object)
-
-registerS3method("predict",   "knnsurf_fit", predict.knnsurf_fit)
-registerS3method("residuals", "knnsurf_fit", residuals.knnsurf_fit)
-registerS3method("fitted",    "knnsurf_fit", fitted.knnsurf_fit)
+registerS3method("predict", "knnsurf_fit", predict.knnsurf_fit)
 
 knn_fn <- function(train_sf, ...) knn_fit(train_sf, "z", k = 5L)
 ```
 
-Three methods and a constructor. `cv_spatial()` asks nothing else of a learner,
-and `?new_spatial_fit` documents what each backend in the package supplies
-beyond this minimum.
+`cv_spatial()` needs only the constructor and a `predict()` method.
+`?new_spatial_fit` lists what `summary()` and `model_metrics()` need on top of
+that, and `vignette("models")` explains the pattern.
 
-A simulated exponential field to run it on, with an effective range of 180 units
-over a 1000-unit square:
+The data are 400 points in a 1,000 m square (EPSG:32632) over a simulated
+exponential field with range parameter 60 m, so its correlation falls to 5
+percent at about 180 m, three times the range parameter. The `sd = 0.3` term
+adds measurement noise.
 
 ```{r fixture}
 set.seed(7)
@@ -121,16 +129,15 @@ xy$z <- as.numeric(t(chol(exp(-D / 60) + diag(1e-8, n))) %*% rnorm(n)) +
 pts  <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 ```
 
-## The size of the effect
+## Random folds against blocks
 
-Same data, same learner, two fold schemes.
+The next chunk scores the same learner on the same data with random folds and
+with blocks, and prints the size of the blocks built.
 
 ```{r the-gap}
-# The field was simulated with an effective range of 180 units, so 200-unit
-# blocks hold out whole patches of it.  Sizing blocks from the data, when the
-# range is not known, is the next section.
 fr <- make_folds(pts, k = 5, method = "random_kfold", seed = 1)
 fb <- make_folds(pts, k = 5, method = "block_kfold", block_size = 200, seed = 1)
+c(width = fb$params$block_width, height = fb$params$block_height)
 
 cv_random  <- cv_spatial(pts, "z", character(0), fit_fn = knn_fn, folds = fr)
 cv_blocked <- cv_spatial(pts, "z", character(0), fit_fn = knn_fn, folds = fb)
@@ -140,173 +147,399 @@ c(random  = cv_random$overall$RMSE,
   ratio   = cv_blocked$overall$RMSE / cv_random$overall$RMSE)
 ```
 
-```{r gap-text, echo=FALSE, results='asis'}
-r <- cv_blocked$overall$RMSE / cv_random$overall$RMSE
-cat(sprintf(paste("Blocked folds put the error %.0f%% higher on this fixture.",
-                  "Both numbers come from the same 400 observations and the",
-                  "same smoother; the difference is entirely in which rows",
-                  "were allowed to train on which.\n"), 100 * (r - 1)))
-```
+`block_size` is the smallest edge a block may have. `make_folds()` fits a whole
+number of blocks across each axis, so over this square `block_size = 200`
+builds a `r if (runs) fb$params$grid_nx else NA` by
+`r if (runs) fb$params$grid_ny else NA` grid of blocks
+`r if (runs) round(fb$params$block_width) else NA` m wide and
+`r if (runs) round(fb$params$block_height) else NA` m tall, wider than the
+180 m range. "Choosing a block size" below sizes the blocks from the data.
+Without `folds`, `cv_spatial()` builds block folds itself; build them with
+`make_folds()` when you want to inspect or reuse them.
 
-Neither number is the error of every map. The random one is the error of
-predicting among the samples; the blocked one is the error of predicting into a
-gap a block wide. Which one a map has is a question of where it predicts, and
-`fold_separation()` answers it: given the locations the map will predict at, it
-sets their distances to the data beside the held-out distances of each design.
-For a map of the square, the cells of a grid over it:
+Blocked folds put the error
+`r if (runs) round(100 * (cv_blocked$overall$RMSE / cv_random$overall$RMSE - 1)) else NA`
+percent higher on this fixture. Both numbers come from the same 400
+observations and the same smoother; only the fold assignment differs.
+
+Two choices made outside the folds change what either score measures. A model
+given the coordinates as predictors (`fit_rf_model(include_coords = TRUE)`) can
+learn the training surface by location, so its error grows quickly with the
+distance from the data. Predictors chosen on the whole data set have seen every
+held-out row, and `select_features_forward()` chooses them inside the folds
+instead. `vignette("models")` covers both.
+
+## Which score matches your map
+
+The number that applies depends on where the map predicts. `fold_separation()`
+takes the locations the map will predict at and compares two sets of
+distances: from each of those locations to the nearest training point, and
+from each held-out point to the nearest point of its fold's training data.
+Here the map is a 30 by 30 grid of points over the square, and `reading()`
+returns the one-word reading of a set of folds against it.
 
 ```{r separation}
-cells <- st_make_grid(pts, n = c(30, 30), what = "centers")
-c(random  = attr(fold_separation(fr, pts, prediction_points = cells), "target")$reading,
-  blocked = attr(fold_separation(fb, pts, prediction_points = cells), "target")$reading)
+map_pts <- st_make_grid(pts, n = c(30, 30), what = "centers")
+
+reading <- function(folds, data = pts) {
+  sep <- fold_separation(folds, data, prediction_points = map_pts)
+  attr(sep, "target")$reading
+}
+c(random = reading(fr), blocked = reading(fb))
 ```
 
-`"matched"` says the held-out points sit about as far from their training data
-as the map's cells do, so the score is the error of that map; `"farther"` says
-they sit farther, and the score reads high for it; `"closer"`, the reading of
-random folds on clustered samples with a map of the whole region, says it reads
-low. `print()` on a `fold_separation()` result gives the distances fold by fold,
-and `make_folds(method = "knndm", prediction_points = cells)` builds folds
-matched to the cells.
+The reading is one of four:
+
+- `"matched"`: the held-out points sit about as far from their training data
+  as the map's points do, so the score estimates the error at the map's
+  distances.
+- `"farther"`: they sit farther, and the score tends to read high for this map.
+- `"closer"`: they sit closer, and the score tends to read low for this map.
+  Random folds on clustered samples, with a map of the whole region, read this
+  way.
+- `"mixed"`: closer at some distances and farther at others, so the distances
+  give no single direction.
+
+The reading compares nearest-neighbour distances only. On clustered samples, a
+learner that averages several neighbours can still score low when those
+distances match.
+
+`print()` gives the distances fold by fold:
+
+```{r separation-print}
+sep_blocked <- fold_separation(fb, pts, prediction_points = map_pts)
+sep_blocked
+```
+
+`min_dist` and `median_dist` run from each held-out point to its nearest
+training point, `target` is the median distance from the map's points to the
+same training data, and `gap` is the fold's mean held-out distance minus its
+mean prediction distance. The lines under the table pool the folds: the
+held-out points sit a median of
+`r if (runs) round(attr(sep_blocked, "target")$held_out_median, 1) else NA` m
+from their training data, and the map's points
+`r if (runs) round(attr(sep_blocked, "target")$target_median, 1) else NA` m.
+
+### Clustered samples
+
+The points of this fixture cover the square evenly, so random folds read
+`r if (runs) as_code(reading(fr)) else NA` for a map of it. The next
+chunk keeps only the points within 120 m of six of them, a clustered sample,
+and reads random folds and kNNDM folds against the same map of the whole
+square.
+
+```{r clustered}
+set.seed(2)
+centres <- pts[sample(nrow(pts), 6), ]
+cl <- pts[lengths(st_is_within_distance(pts, centres, dist = 120)) > 0, ]
+nrow(cl)
+
+fr_cl <- make_folds(cl, k = 5, method = "random_kfold", seed = 1)
+fk_cl <- make_folds(cl, k = 5, method = "knndm", prediction_points = map_pts,
+                    seed = 1)
+c(random = reading(fr_cl, cl), knndm = reading(fk_cl, cl))
+
+cv_random_cl <- cv_spatial(cl, "z", character(0), fit_fn = knn_fn,
+                           folds = fr_cl)
+cv_knndm_cl  <- cv_spatial(cl, "z", character(0), fit_fn = knn_fn,
+                           folds = fk_cl)
+c(random = cv_random_cl$overall$RMSE, knndm = cv_knndm_cl$overall$RMSE)
+```
+
+```{r clustered-text, include=FALSE}
+sep_cl <- attr(fold_separation(fr_cl, cl, prediction_points = map_pts),
+               "target")
+```
+
+Random folds read `r if (runs) as_code(reading(fr_cl, cl)) else NA`:
+each held-out point keeps training points from its own cluster, a median of
+`r if (runs) round(sep_cl$held_out_median, 1) else NA` m away, while the
+map's points sit a median of
+`r if (runs) round(sep_cl$target_median, 1) else NA` m from the same
+training data. `method = "knndm"` (Linnenbrink et al. 2024) builds `k` folds
+whose held-out distances come as close as it can to the distances from
+`map_pts` to the samples, here by grouping the samples into
+`r if (runs) fk_cl$params$n_clusters else NA` clusters, and reads `r if (runs) as_code(reading(fk_cl, cl)) else NA`. Its RMSE of
+`r if (runs) round(cv_knndm_cl$overall$RMSE, 2) else NA`, against
+`r if (runs) round(cv_random_cl$overall$RMSE, 2) else NA` for random folds, is
+the score at the distances the map has to reach. For this five-neighbour
+learner it can still read low for this map, as the caveat on clustered samples
+above says.
 
 ## The six fold schemes
 
-```{r methods-table, echo=FALSE, results='asis'}
-cat(
-"| `method` | holds out | use it when |\n",
-"|---|---|---|\n",
-"| `random_kfold` | a random 1/k of rows | the map predicts among the samples (an area they cover evenly), or the data are not autocorrelated |\n",
-"| `block_kfold` | contiguous spatial blocks | the map predicts into unsampled gaps; size the blocks from the width of the gaps, or from the correlation range |\n",
-"| `buffered_loo` | one point, and everything within `buffer` of it | n is small and you can afford n fits |\n",
-"| `leave_location_out` | every observation from one site, named by `group_var` | you have repeat visits and the site is the unit |\n",
-"| `nndm` | one point, and a distance-matched exclusion | you know where you will predict, and want the fold geometry to match it |\n",
-"| `knndm` | one of `k` folds built from clusters of the points, matched to the prediction distances | the same, with more rows than `nndm` takes (5,000) or too many for one fit per point; the match is coarser |\n",
-sep = "")
+`make_folds(method = )` builds six fold schemes:
+
+| `method` | held out in each fold | also left out of training | needs | suits a map that |
+|---|---|---|---|---|
+| `random_kfold` | a random 1/k of the rows | nothing | `k` | predicts among the samples, over an area they cover evenly |
+| `block_kfold` | the points in whole blocks of a grid, or of `blocks` | nothing | `k`; optionally `block_size`, `auto_range`, `block_nx`/`block_ny` or `blocks` (otherwise about `block_multiplier * k` blocks) | predicts into unsampled gaps about as wide as the blocks |
+| `buffered_loo` | one point | every point within `buffer` of it | `buffer`; `max_test` limits the number of fits | predicts at a known distance from the data |
+| `leave_location_out` | every row of one or more locations | nothing | `group_var` | predicts at sites with no measurements, from repeated measurements at others |
+| `nndm` | one point | neighbours, chosen to match the prediction distances (Milà et al. 2022) | `prediction_points`; at most 5,000 rows | predicts at known locations, with a model cheap enough to refit once per point |
+| `knndm` | one of `k` folds, from clusters of the points or a random partition, whichever comes closer to the prediction distances | nothing | `prediction_points` | predicts at known locations, from a larger layer or with a costly model |
+
+```{r alt-folds, include=FALSE}
+per_fold <- range(lengths(fb$params$fold_blocks))
+alt_folds <- sprintf(paste(
+  "A square study area divided into a %d by %d grid of blocks, with the points",
+  "coloured by fold and the axes in metres of EPSG:32632. Every block belongs",
+  "to one fold, and each fold is %d to %d blocks spread over the square."),
+  fb$params$grid_nx, fb$params$grid_ny, per_fold[1], per_fold[2])
 ```
 
 `plot_folds()` draws the assignment, with the blocks behind it when the scheme
 has any:
 
-```{r plot-folds, fig.height=4.5, fig.alt="A square study area divided into a grid of blocks, with the points coloured by fold. Each fold occupies whole blocks rather than being scattered, so held-out points sit away from the points used to train."}
+```{r plot-folds, fig.height=4.5, fig.alt=if (runs) alt_folds else NULL}
 plot_folds(fb, pts)
 ```
 
-Look at whether any fold is a thin sliver or a single corner. Fold geometry that
-looks wrong on the map produces a score that is wrong in a way no summary
-statistic will tell you about.
+Check whether any fold is a thin sliver or a single corner. If one is, change
+the block design: a different `block_size`, or polygons of your own through
+`make_folds(blocks = )`.
 
-## How wide should a block be?
+The next chunk runs three more schemes on the same data: kNNDM matched to the
+map's points; buffered leave-one-out with a buffer of 180 m, the field's
+effective range, scored on 50 of the points through `max_test`; and blocks
+taken from Voronoi cells around 16 k-means seeds in place of the grid.
+`leave_location_out` needs repeated measurements at the same sites, which this
+fixture does not have.
 
-As wide as the gaps the map has to bridge. The wider the blocks, the farther the
-held-out points sit from their training data, and the score is the error at that
-distance. The autocorrelation range is the distance beyond which an observation
-says little about a location; `auto_range` uses it as the block size, which is
-one way to choose a separation distance, and suits a map that has to reach that
-far from the data.
+```{r more-schemes}
+fk   <- make_folds(pts, k = 5, method = "knndm", prediction_points = map_pts,
+                   seed = 1)
+floo <- make_folds(pts, method = "buffered_loo", buffer = 180, max_test = 50,
+                   seed = 1)
+vor  <- build_tessellation(voronoi_seeds_kmeans(pts, 16), quiet = TRUE)
+fv   <- make_folds(pts, k = 5, method = "block_kfold", blocks = vor$cells,
+                   seed = 1)
+
+schemes <- list(knndm = fk, buffered_loo = floo, voronoi_blocks = fv)
+data.frame(
+  folds   = sapply(schemes, function(f) f$k),
+  reading = sapply(schemes, reading),
+  RMSE    = sapply(schemes, function(f)
+    cv_spatial(pts, "z", character(0), fit_fn = knn_fn, folds = f)$overall$RMSE)
+)
+```
+
+kNNDM keeps the random partition here (`fk$params$chosen` is
+`r if (runs) as_code(fk$params$chosen) else NA`), as it does for samples
+spread evenly over the map. The 180 m buffer and the Voronoi blocks, about
+`r if (runs) round(fv$params$block_scale) else NA` m across, both hold the
+held-out points farther from their training data than the map's points sit.
+`make_folds(blocks = )` takes any polygons of your own the same way, such as
+the cells of another tessellation or a set of watersheds.
+
+## Choosing a block size
+
+Make the blocks as wide as the gaps the map has to bridge. The wider the
+blocks, the farther the held-out points sit from their training data, and the
+score is the error at that distance.
+
+### From the autocorrelation range
+
+The [autocorrelation range](glossary.html#autocorrelation-range) is the
+distance beyond which two observations are close to uncorrelated. Using it as the smallest block edge is one way to
+choose the separation, and suits a map that has to reach that far from the data
+(Roberts et al. 2017; Valavi et al. 2019).
 
 ```{r sac}
 sac <- estimate_sac_range(pts, "z")
-c(range = as.numeric(sac), nugget = sac_nugget(sac))
+c(range  = as.numeric(sac),
+  nugget = sac_nugget(sac),
+  sill   = sum(attr(sac, "variogram_model")$psill))
 ```
 
-`sac_nugget()` reads the nugget off the same fitted model. A nugget that is most
-of the sill says the field has little spatial structure for nearby observations
-to carry, and the blocked and random scores will be close.
+The estimated range, `r if (runs) round(as.numeric(sac), 1) else NA` m, is
+close to the 180 m the field was simulated with. `sac_nugget()` reads the
+nugget off the same fitted model; here it is
+`r if (runs) round(100 * sac_nugget(sac) / sum(attr(sac, "variogram_model")$psill)) else NA`
+percent of the sill. A nugget that is most of the sill means nearby
+observations carry little information, and the blocked and random scores tend
+to be close.
 
-`make_folds(auto_range = TRUE)` runs this estimate and uses it as a minimum
-block size:
+```{r alt-sac, include=FALSE}
+alt_sac <- sprintf(paste(
+  "Empirical variogram of z: semivariance against distance in metres, with",
+  "points sized by the number of point pairs, a fitted curve that levels off",
+  "near %.2f, and a dotted vertical line at the effective range of %.1f m."),
+  sum(attr(sac, "variogram_model")$psill), as.numeric(sac))
+```
+
+`plot()` draws the variogram behind the estimate:
+
+```{r plot-sac, fig.height=4, fig.alt=if (runs) alt_sac else NULL}
+plot(sac)
+```
+
+The points are the empirical semivariances, sized by the number of point pairs
+behind each, the curve is the fitted model, and the dotted line marks the
+effective range given in the subtitle. When no range is identified, the
+subtitle gives the reason and no line is drawn.
+
+`make_folds(auto_range = TRUE)` runs this estimate and uses it as the smallest
+block edge:
 
 ```{r auto-range}
 fa <- make_folds(pts, k = 5, method = "block_kfold", response_var = "z",
                  auto_range = TRUE, seed = 1)
-c(block_size = as.numeric(fa$params$block_size),
-  sac_range  = as.numeric(fa$params$sac_range))
+c(range  = as.numeric(fa$params$sac_range),
+  width  = fa$params$block_width,
+  height = fa$params$block_height)
 ```
 
-`params$block_size` holds the range object itself, so printing it whole also
-prints the directional summary; `as.numeric()` above keeps the output to the two
-numbers.
+The blocks are a little wider than the range because a whole number of them
+has to fit across the square.
 
-When the variogram identifies no range, `estimate_sac_range()` returns `NA` with
-the reason attached, `auto_range` warns that it is falling back to geometric
-blocks, and you are back to choosing a size yourself. An `NA` there is a finding
-about the data. `?estimate_sac_range` lists the reasons and what each one
-means; `plot()` on the returned object draws the variogram that produced it.
+When the variogram identifies no range, `estimate_sac_range()` returns `NA`
+with the reason attached. `auto_range` then warns and falls back to the default
+grid, about `block_multiplier * k` blocks over the extent (15 at `k = 5`), and
+you are back to choosing a size yourself. `?estimate_sac_range` lists each
+reason and what it means, and `plot()` draws the variogram wherever one was
+computed.
 
-## The error at each block size
+### The error at each block size
 
 `cv_block_size_sweep()` runs the cross-validation at several block sizes and
-reports the curve, with a random-fold run as the reference.
+reports the curve, with a random-fold run as the reference. Each size is a full
+cross-validation, so five sizes at `k = 5` make 25 fits, plus 5 for the random
+reference; `max_fits` caps that.
 
 ```{r sweep}
 sw <- cv_block_size_sweep(pts, "z", character(0), fit_fn = knn_fn,
-                          k = 4, n_sizes = 5, max_fits = 40,
-                          seed = 1, quiet = TRUE)
+                          k = 5, n_sizes = 5, seed = 1, quiet = TRUE)
 sw
 ```
 
-```{r plot-sweep, fig.height=4.5, fig.alt="Cross-validated RMSE against block edge length on a log scale. The error rises steadily as the blocks grow, from about 0.80 at the smallest to about 1.13 at the largest, staying above the dashed random-fold reference throughout. A dotted line marks the estimated autocorrelation range."}
+```{r alt-sweep, include=FALSE}
+sw_df  <- data.frame(sw)
+sw_blk <- sw_df[!is.na(sw_df$block_size), ]
+alt_sweep <- sprintf(paste(
+  "Cross-validated RMSE against the smallest block edge asked for, in metres",
+  "on a log scale. The error rises from %.2f at %.0f m to %.2f at %.0f m,",
+  "above the dashed random-fold reference of %.2f. A shaded band gives the",
+  "range across folds at each size, and a dotted line marks the estimated",
+  "autocorrelation range of %.0f m."),
+  sw_blk$value[1], sw_blk$block_size[1],
+  sw_blk$value[nrow(sw_blk)], sw_blk$block_size[nrow(sw_blk)],
+  sw_df$value[is.na(sw_df$block_size)], attr(sw, "sac_range"))
+```
+
+```{r plot-sweep, fig.height=4.5, fig.alt=if (runs) alt_sweep else NULL}
 plot(sw)
 ```
 
-Error climbs away from the random-fold reference as blocks widen, and the
-estimated range is marked. The climb is the error growing with the distance from
-the data: each point of the curve is the error of a map whose locations sit as
-far from the data as that size's held-out points do. The curve does not say
-which size to report; the size to read is the one whose folds match the map,
-which `fold_separation()` checks on the folds of each size (the `$folds` of each
-element of `attr(sw, "results")`).
+The error climbs away from the random-fold reference as the blocks widen, and
+the dotted line marks the estimated range. Each point of the curve is the
+error of a map whose locations sit as far from the data as that size's held-out
+points do. To choose a size, run `fold_separation()` on the folds of each size,
+the `$folds` of each element of `attr(sw, "results")`, against the map's
+points. `block_size` is the smallest edge asked for and `block_width` the edge
+built:
 
-Watch `blocks_used` as the blocks grow. Once it approaches `k`, each fold is
-holding out a large contiguous piece of the study area, and the model is being
-asked to extrapolate across it, which is the error of a map only if the map has
-to do the same.
+```{r sweep-separation}
+sizes <- data.frame(sw)[, c("block_size", "block_width", "value")]
+sizes$reading <- sapply(attr(sw, "results"), function(r) reading(r$folds))
+sizes
+```
 
-## Reading the result
+```{r sweep-text, include=FALSE}
+blk      <- !is.na(sizes$block_size)
+matched  <- blk & sizes$reading == "matched"
+largest  <- which.max(sizes$block_size)
+```
 
-`overall` is the pooled score and `fold_metrics` is one row per fold.
-`plot_cv_metrics()` shows the spread, which matters because a pooled RMSE built
-from one catastrophic fold and four good ones describes neither.
+For a map of this square the random folds read
+`r if (runs) as_code(sizes$reading[!blk][1]) else NA`, and so do the
+blocks asked for at
+`r if (runs) paste(round(sizes$block_size[matched], 1), collapse = ", ") else NA`
+m. Their scores,
+`r if (runs) paste(round(sizes$value[!blk | matched], 2), collapse = " and ") else NA`,
+are the errors at the map's distances; the larger sizes read
+`r if (runs) as_code(unique(sizes$reading[blk & !matched])) else NA`.
 
-```{r plot-metrics, fig.height=4, fig.alt="RMSE for each of five folds, with point size showing how many rows each held out. The values run from about 0.94 to 1.12 around a dashed pooled line near 1.01, so the pooled number hides a spread of nearly twenty percent."}
+Watch `blocks_used` as the blocks grow. At the largest size,
+`r if (runs) round(sizes$block_size[largest], 1) else NA` m asked for and
+`r if (runs) round(sizes$block_width[largest], 1) else NA` m built,
+`r if (runs) sw_df$blocks_used[largest] else NA` blocks hold the points for
+`r if (runs) sw_df$k[largest] else NA` folds, so each fold holds out a large
+piece of the square. That score is the error of a map that has to reach across
+such a piece.
+
+## Reading a cross-validation result
+
+`overall` is the pooled score and `fold_metrics` has one row per fold.
+
+### Spread across folds
+
+```{r alt-metrics, include=FALSE}
+fold_rmse <- cv_blocked$fold_metrics$RMSE
+alt_metrics <- sprintf(paste(
+  "RMSE for each of %d folds, with point size showing how many rows each held",
+  "out. The values run from %.2f to %.2f around a dashed pooled line at %.2f."),
+  length(fold_rmse), min(fold_rmse), max(fold_rmse),
+  cv_blocked$overall$RMSE)
+```
+
+`plot_cv_metrics()` shows the spread across folds. The pooled RMSE cannot
+tell one bad fold from an even spread of error; here the five blocked folds
+run from `r if (runs) round(min(fold_rmse), 2) else NA` to
+`r if (runs) round(max(fold_rmse), 2) else NA`.
+
+```{r plot-metrics, fig.height=4, fig.alt=if (runs) alt_metrics else NULL}
 plot_cv_metrics(cv_blocked, metric = "RMSE")
 ```
 
-### Every row and every fold is accounted for
+### Folds and rows accounted for
 
-Four fields say what happened to the data on the way through:
-`n_folds_attempted` against `n_folds_succeeded`, `n_dropped` (rows the data
-lost), `orphan_rows` (rows no fold names) and `n_unknown_ids` (fold rows the
-data does not have). On the clean run above nothing went missing:
+Two counts and four fields say what happened on the way through:
+`n_folds_attempted` against `n_folds_succeeded`; `fold_status`, one row per
+fold; `n_dropped`, rows removed for a missing or non-finite value;
+`orphan_rows`, rows no fold names; and `n_unknown_ids`, row IDs the folds name
+that the data do not have. On the clean run above nothing went missing:
 
 ```{r accounting-clean}
-c(attempted = cv_blocked$n_folds_attempted, succeeded = cv_blocked$n_folds_succeeded,
-  dropped = cv_blocked$n_dropped, orphans = length(cv_blocked$orphan_rows))
+c(attempted = cv_blocked$n_folds_attempted,
+  succeeded = cv_blocked$n_folds_succeeded,
+  dropped   = cv_blocked$n_dropped,
+  orphans   = length(cv_blocked$orphan_rows),
+  unknown   = cv_blocked$n_unknown_ids)
 ```
 
-So here are two runs where something does.
+The next three runs each lose something: a learner that fails on one fold,
+data with three missing values scored on folds built on the first 300 rows,
+and the first 300 rows scored on folds built on all 400.
 
-A learner that fails on one fold:
+### Folds that failed
 
-```{r failing-fold}
+The next chunk scores a learner that fails on one fold.
+
+```{r failing-fold, warning=TRUE}
 flaky <- function(train_sf, ...) {
-  if (nrow(train_sf) < 320) stop("not enough training rows for this toy learner")
+  if (nrow(train_sf) < 320) stop("not enough training rows for this learner")
   knn_fit(train_sf, "z", k = 5L)
 }
 cv_flaky <- cv_spatial(pts, "z", character(0), fit_fn = flaky, folds = fb)
 
 cv_flaky$fold_status
-c(attempted = cv_flaky$n_folds_attempted, succeeded = cv_flaky$n_folds_succeeded)
+c(attempted = cv_flaky$n_folds_attempted,
+  succeeded = cv_flaky$n_folds_succeeded)
 ```
 
 `fold_status` names every fold supplied and what became of it, with the error
 text for the ones that failed. `status` is one of `ok`, `error`, `skipped`,
-`dropped` or `worker_error`. Before this existed, a partial failure left its
-causes in console scrollback, which a script or a knitted document does not keep.
+`dropped` or `worker_error`. `overall` then pools the
+`r if (runs) cv_flaky$n_folds_succeeded else NA` folds that ran,
+`r if (runs) nrow(cv_flaky$predictions) else NA` of the 400 rows, and
+`cv_spatial()` warns about it, since a fold that fails is often the hardest one
+to predict. `fold_status` keeps each cause with the result, so a script or a
+knitted report still has it after the console output is gone.
 
-Rows the data lost, and rows no fold names:
+### Rows left out
 
-```{r accounting}
+```{r accounting, warning=TRUE}
 holed <- pts
 holed$z[c(3, 17, 42)] <- NA                       # three rows will be dropped
 part  <- make_folds(pts[1:300, ], k = 4, method = "block_kfold", seed = 1)
@@ -322,39 +555,72 @@ c(n_dropped     = cv_acc$n_dropped,
 non-finite value before any fold was fitted. `orphan_rows` holds the row IDs no
 fold names, which here is rows 301 to 400, because the folds were built on the
 first 300. `n_unknown_ids` counts the distinct row IDs the folds name that the
-data does not have, which here is the three rows the `NA`s removed.
+data do not have, which here is the three rows the `NA`s removed.
 
 The two mirror each other, and which one is non-zero tells you which way the
 mismatch runs:
 
 ```{r mirror}
-cv_rev <- cv_spatial(pts[1:300, ], "z", character(0), fit_fn = knn_fn, folds = fb)
+cv_rev <- cv_spatial(pts[1:300, ], "z", character(0), fit_fn = knn_fn,
+                     folds = fb)
 c(n_orphans = length(cv_rev$orphan_rows), n_unknown_ids = cv_rev$n_unknown_ids)
 ```
 
 Folds built on more rows than the data has give `n_unknown_ids`; folds built on
-fewer give `orphan_rows`. Both are zero when the folds and the data agree, which
-is the only case in which the score covers every observation.
+fewer give `orphan_rows`. Rows in `orphan_rows` are never scored, so the score
+covers every observation only when `orphan_rows` is empty, no row was dropped
+and every fold ran. Unknown IDs cost the folds rows but leave every
+observation scored: the run above predicts
+`r if (runs) nrow(cv_rev$predictions) else NA` of its 300 rows.
 
-## Calibration, for a model with intervals
+## Interval calibration (Bayesian GP)
 
-A Bayesian fit predicts an interval, and the question becomes whether the
-intervals are the width they claim. `plot_calibration()` draws nominal coverage
-against realised coverage per fold, from a `cv_bayes()` result.
+A Bayesian GP predicts an interval for each held-out value, and a calibration
+check compares the share of values each interval contains with the share it
+claims. `plot_calibration()` draws, for each nominal level, the share of held-out
+values the intervals contained, pooled and fold by fold, from a `cv_bayes()`
+result. The chunk below is not run here, because it needs `brms` and a Stan
+toolchain and takes minutes. Nine coverage levels give a curve in place of the
+default three.
 
 ```{r calibration, eval=FALSE}
-cvb <- cv_bayes(pts, "z", character(0), folds = fb)   # needs brms
+cvb <- cv_bayes(pts, "z", character(0), folds = fb,
+                coverage_levels = seq(0.1, 0.9, by = 0.1),
+                fit_args = list(chains = 2, iter = 1000))
 plot_calibration(cvb)
 ```
 
-Points below the diagonal are intervals that are too narrow: a nominal 90
-percent interval containing 70 percent of the held-out values is the model
-reporting more confidence than it has earned. This chunk is not run here,
-because it needs `brms` and a Stan toolchain.
+Points below the diagonal are intervals that are too narrow: an 80 percent
+interval that contains 60 percent of the held-out values claims more certainty
+than the model has.
 
 ## Next
 
-`vignette("resolution")` covers choosing a cell count before any of this.
-`vignette("spatialkit_nc_demo")` runs the whole pipeline on real boundaries.
-`?make_folds` documents every scheme and its arguments, `?cv_spatial` the return
-value in full, and `?cv_block_size_sweep` the fit budget that `max_fits` caps.
+The next article in reading order is `vignette("models")`, which fits the
+backends, compares them on the same folds, checks the residuals and maps where
+the predictions apply. `vignette("reporting")` lists what to report from a
+cross-validation. This article relied on `?make_folds`, `?fold_separation`,
+`?plot_folds`, `?estimate_sac_range`, `?sac_nugget`, `?cv_block_size_sweep`,
+`?cv_spatial`, `?new_spatial_fit`, `?plot_cv_metrics` and `?plot_calibration`.
+`vignette("glossary")` defines the terms it uses.
+
+## References
+
+Linnenbrink, J., Milà, C., Ludwig, M. and Meyer, H. (2024). kNNDM CV: k-fold
+nearest-neighbour distance matching cross-validation for map accuracy
+estimation. *Geoscientific Model Development* 17, 5897–5912.
+<https://doi.org/10.5194/gmd-17-5897-2024>
+
+Milà, C., Mateu, J., Pebesma, E. and Meyer, H. (2022). Nearest neighbour
+distance matching leave-one-out cross-validation for map validation.
+*Methods in Ecology and Evolution* 13(6), 1304–1316.
+<https://doi.org/10.1111/2041-210X.13851>
+
+Roberts, D. R., Bahn, V., Ciuti, S., et al. (2017). Cross-validation strategies
+for data with temporal, spatial, hierarchical, or phylogenetic structure.
+*Ecography* 40, 913–929. <https://doi.org/10.1111/ecog.02881>
+
+Valavi, R., Elith, J., Lahoz-Monfort, J. J. and Guillera-Arroita, G. (2019).
+blockCV: An R package for generating spatially or environmentally separated
+folds for k-fold cross-validation of species distribution models. *Methods in
+Ecology and Evolution* 10, 225–232. <https://doi.org/10.1111/2041-210X.13107>

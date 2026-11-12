@@ -2,7 +2,7 @@
 % Please edit documentation in R/crs-geometry.R
 \name{coerce_to_points}
 \alias{coerce_to_points}
-\title{Coerce arbitrary geometries to representative points}
+\title{Reduce each geometry to one representative point}
 \usage{
 coerce_to_points(
   x,
@@ -14,46 +14,83 @@ coerce_to_points(
 \arguments{
 \item{x}{An sf object.}
 
-\item{mode}{One of "auto", "centroid", "point_on_surface", "surface",
-"line_midpoint", "bbox_center".}
+\item{mode}{How each geometry becomes a point: \code{"auto"} (default),
+\code{"centroid"}, \code{"point_on_surface"}, \code{"surface"} (an alias for
+\code{"point_on_surface"}), \code{"line_midpoint"} or \code{"bbox_center"}.  See
+"Modes".}
 
-\item{tmp_project}{Logical; temporarily project for line-based midpoints.
-When \code{x} has no CRS and the lon/lat heuristic of
-\code{\link{ensure_projected}()} takes its coordinates for degrees
-(inside the lon/lat envelope and more than one unit across, or with
-decimal-degree precision), that temporary projection interprets them as
-EPSG:4326 (with a warning) and the midpoints returned are geodesic ones
-brought back to the input's numbers, not planar midpoints.  Set the CRS,
-or pass \code{tmp_project = FALSE}, for planar data.}
+\item{tmp_project}{Logical; take line midpoints in a temporary
+projection.  Default \code{TRUE}.  With \code{FALSE}, lines in longitude and
+latitude get their centroid.  When \code{x} has no CRS and the lon/lat test
+of \code{\link[=ensure_projected]{ensure_projected()}} takes its coordinates for degrees, the temporary
+projection reads them as EPSG:4326 (with a warning), and the midpoints
+returned are geodesic ones brought back to the input's numbers, not
+planar midpoints.  Set the CRS, or pass \code{tmp_project = FALSE}, for
+planar data.}
 }
 \value{
-An sf object with geometry coerced to POINTs, row for row with
-\code{x}; an empty input geometry gives an empty POINT.
+An sf object with its geometry reduced to POINTs, row for row
+with \code{x}; an empty input geometry gives an empty POINT.
 }
 \description{
-Converts the geometry column of an sf object to POINTs using one of several
-strategies.
+Replaces the geometry of each row of an sf object with a point, by the
+rule \code{mode} names.  The result has one row per row of \code{x}, in the same
+order.
 }
-\details{
-The result has one row per row of \code{x}, in the same order.  An EMPTY
-geometry of any type, lines included, becomes an EMPTY POINT in its own
-row; \code{\link[=prep_model_data]{prep_model_data()}} and \code{\link[=make_folds]{make_folds()}} then drop such rows, as they
-drop any other empty geometry.  Empty lines are never handed to
-\code{\link[sf:st_line_sample]{sf::st_line_sample()}}: it yields no midpoint for them, which would
-misalign the result, and with sf 1.0.x an empty MULTILINESTRING (or an
-empty part of one) crashed the R session.  An empty part inside a
-non-empty feature is ignored, so the feature gets the point its other
-parts give; GEOS's interior point, used by \code{"point_on_surface"} and by
-the temporary projection's choice of CRS, segfaulted on an empty line
-part too.
+\section{Modes}{
 
-A geometry of any type with a coordinate that is not finite (\code{NA},
-\code{NaN}, \code{Inf}) or lies beyond 1e150 has no location (see
-\code{\link[=ensure_projected]{ensure_projected()}}, "Rows without a location"), and gets an EMPTY
-POINT in every mode, as an empty geometry does.  So does a geometry of a
-layer in a geographic CRS with a vertex at a latitude beyond 90 degrees,
-which is no place on the Earth, and a warning of class
+\describe{
+\item{\code{"auto"} (default)}{POINT rows are kept.  POLYGON and MULTIPOLYGON
+rows get a point on the surface.  A LINESTRING gets its midpoint, and
+a MULTILINESTRING the midpoint of its longest part (see "Lines").
+MULTIPOINT rows and rows of other types, such as geometry
+collections, get their centroid.}
+\item{\code{"centroid"}}{The centroid of every row.}
+\item{\code{"point_on_surface"} (alias \code{"surface"})}{A point that lies on
+each geometry, taken with GEOS.}
+\item{\code{"line_midpoint"}}{The midpoint of each LINESTRING, taken in a
+temporary projection (with \code{tmp_project = FALSE} on lon/lat data, its
+centroid).  Rows of other types (points, polygons and their MULTI
+forms) get their centroid.  A MULTILINESTRING or GEOMETRYCOLLECTION
+row is an error: cast it to LINESTRING first, or use \code{"auto"}, which
+takes the midpoint of a MULTILINESTRING's longest part.}
+\item{\code{"bbox_center"}}{The centre of each row's bounding box.}
+}
+}
+
+\section{Empty geometries and rows without a location}{
+
+An empty geometry of any type, lines included, becomes an empty POINT in
+its own row; \code{\link[=prep_model_data]{prep_model_data()}} and \code{\link[=make_folds]{make_folds()}} then drop such rows,
+as they drop any other empty geometry.  An empty part inside a non-empty
+feature is ignored, so the feature gets the point its other parts give.
+
+A geometry with no location (see \link{spatialkit-geometry}, "Rows without a
+location") gets an empty POINT in every mode, as an empty geometry does.
+So does a geometry of a layer in a geographic CRS with a vertex at a
+latitude beyond 90 degrees, and a warning of class
 \code{spatialkit_lat_beyond_90} gives its rows of \code{x} (\code{rows}).
+}
+
+\section{Lines}{
+
+Modes \code{"auto"} and \code{"line_midpoint"} take the midpoint of a line in a
+temporary projection (\code{tmp_project}), the one \code{\link[=ensure_projected]{ensure_projected()}}
+chooses for the lines.  A line that projection returns empty or without
+some of its vertices is not sampled: the call stops with an error of
+class \code{spatialkit_features_degenerate} (see "Errors").
+
+In mode \code{"auto"} a MULTILINESTRING gets the midpoint of its longest part.
+When several parts share the greatest length (to one part in ten
+million, measured in the projection used), their midpoints are taken
+and the one lowest in x, then in y, is kept, so the point does not depend
+on the order in which the feature lists its parts.  x values within one
+part in ten million of the diagonal of the midpoints' bounding box count
+as one, so y decides between midpoints whose x differ only in their last
+bits, and the point does not move with the origin of the coordinates.
+}
+
+\section{Longitude and latitude}{
 
 Modes \code{"auto"} (for polygons) and \code{"point_on_surface"} take the point
 with GEOS, which reads a layer in longitude and latitude on the plane in
@@ -67,45 +104,45 @@ with the longitudes below 0 read from 180 to 360, and brought back into
 -180 to 180. A polygon whose point lies on it neither way, or that s2
 cannot read, keeps GEOS's point, and a warning of class
 \code{spatialkit_surface_point_off} gives its rows of \code{x} (\code{rows}). When \code{x}
-has no CRS and the lon/lat heuristic of \code{\link[=ensure_projected]{ensure_projected()}} takes its
+has no CRS and the lon/lat test of \code{\link[=ensure_projected]{ensure_projected()}} takes its
 coordinates for degrees, its polygons that span more than 180 units are
 read so too, as EPSG:4326, and a warning names the rows whose point that
 reading moves; the points keep the missing CRS.
 
-Mode \code{"bbox_center"}, and mode \code{"centroid"} (with the centroids
-\code{"line_midpoint"} takes of the rows that are not a LINESTRING, and
-\code{"auto"} of a MULTIPOINT and of the rows that are not points, lines or
-polygons, such as geometry collections) where GEOS takes the centroid on
-the plane in degrees (a lon/lat layer with s2 off), read a geometry
-written across longitude 180 the same way: one that spans more
-than 180 degrees of longitude as written, and no more than 180 with the
-longitudes below 0 read from 180 to 360, gets the centre of that box, or
-GEOS's centroid of the geometry so read, brought back into -180 to 180.
-A layer without a CRS that the lon/lat heuristic takes for degrees is
-read so too, with the same warning. A geometry wider than 180 degrees in
-both readings, such as one around a pole, keeps the centre of its box on
-the plane, or GEOS's planar centroid. The centroids s2 takes on the
-sphere are not changed.
+Mode \code{"bbox_center"}, and the centroids that GEOS takes on the plane in
+degrees (a lon/lat layer with s2 off) under \code{"centroid"}, for the rows
+other than LINESTRINGs under \code{"line_midpoint"}, and for MULTIPOINTs and
+collections under \code{"auto"}, read a geometry written across longitude 180
+the same way: one that spans more than 180 degrees of longitude as
+written, and no more than 180 with the longitudes below 0 read from 180
+to 360, gets the centre of that box, or GEOS's centroid of the geometry
+so read, brought back into -180 to 180. A layer without a CRS that the
+lon/lat test takes for degrees is read so too, with the same warning. A
+geometry wider than 180 degrees in both readings, such as one around a
+pole, keeps the centre of its box on the plane, or GEOS's planar
+centroid. The centroids s2 takes on the sphere are not changed.
 
-In mode \code{"auto"} a MULTILINESTRING gets the midpoint of its longest part.
-When several parts share the greatest length (to one part in ten
-million, measured in the projection used), their midpoints are taken
-and the one lowest in x, then in y, is kept, so the point does not depend
-on the order in which the feature lists its parts.  x values within one
-part in ten million of the diagonal of the midpoints' bounding box count
-as one, so y decides between midpoints whose x differ only in their last
-bits, and the point does not move with the origin of the coordinates.
+With s2 on, sf takes the centroids of a lon/lat layer with s2 (under
+\code{"centroid"}, for the rows other than LINESTRINGs under
+\code{"line_midpoint"}, and for collections under \code{"auto"}), and s2 refuses
+some polygons GEOS accepts.  A polygon s2 refuses because a vertex
+repeats the one before it, on its own or inside a collection, gets the
+centroid of the same ring without the repeat; the ring's points are
+unchanged.  A polygon s2 refuses for another reason (edges that cross, a
+figure eight) is an error (see "Errors").  With s2 off, the centroids
+are GEOS's, planar in degrees.
+}
+
+\section{Z and M coordinates}{
 
 A layer whose geometries do not all have the same dimensions (XY beside
 XYZ or XYM, as \code{rbind()} of an XY and an XYZ layer gives) is read in x
-and y: sf hands GEOS and s2 every geometry in the dimension of the first,
-and the points of such a layer are returned in one dimension.
-Z and M are dropped, the points come back in XY, and a warning of class
-\code{spatialkit_zm_dropped} says so, with the rows that carried Z or M as its
-\code{rows}.  Mode \code{"bbox_center"} reads the box of each geometry and gives XY
-points for any layer, with no warning about Z or M.  A layer in one dimension, XY or
-XYZ throughout, is read as it is, and so is a layer whose only
-geometries of another dimension than the first are empty and not points.
+and y, and its points come back in XY with a warning of class
+\code{spatialkit_zm_dropped} whose \code{rows} are the rows that carried Z or M
+(see \link{spatialkit-geometry}, "Mixed dimensions, Z and M").  A layer in one
+dimension, XY or XYZ throughout, is read as it is, and so is a layer
+whose only geometries of another dimension than the first are empty and
+not points.
 
 GEOS does not read M coordinates.  When the mode reduces a geometry that
 carries M (XYM or XYZM) to a point (any such geometry under
@@ -113,47 +150,39 @@ carries M (XYM or XYZM) to a point (any such geometry under
 not a POINT under \code{"auto"}), the layer is reduced in x and y: Z and M
 are dropped from every geometry, the points come back in XY, and a
 warning of class \code{spatialkit_zm_dropped} says so, with the rows whose
-geometry carries M as its \code{rows}.  Empty geometries are not counted.
-A POINT layer that carries M is returned as it is under \code{"auto"}, and
-\code{"bbox_center"} gives XY points with no warning about M, as for any
-layer.
+geometry carries M as its \code{rows}.  Empty geometries are not counted.  A
+POINT layer that carries M is returned as it is under \code{"auto"}.  Mode
+\code{"bbox_center"} reads the box of each geometry and gives XY points for
+any layer, with no warning about Z or M.
+}
 
-On a layer in longitude and latitude with \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} on, sf takes
-centroids with s2 (under \code{"centroid"}, for the rows other than
-LINESTRINGs under \code{"line_midpoint"}, and for collections under
-\code{"auto"}), and s2 refuses some polygons GEOS accepts.  A polygon s2
-refuses because a vertex repeats the one before it, on its own or inside
-a collection, gets the centroid of the same ring without the repeat; the
-ring's points are unchanged.  A
-polygon s2 refuses for another reason (edges that cross, a figure eight)
-stops the call with an error of class \code{spatialkit_features_degenerate}
-that gives its rows of \code{x} (\code{rows} on the condition), quotes s2, and
-says to transform \code{x} to a projected CRS or to use another \code{mode}.  With
-s2 off, the centroids are GEOS's, planar in degrees, as before.
+\section{Errors}{
 
-GEOS, which takes the centroids in a projected CRS, without a CRS, and in
-degrees with s2 off, weights each part of a ring by its signed area.
-Where the edges of a ring cross (a bowtie), or a hole lies outside its
-shell, parts of the feature count with opposite signs, and the point can
-lie far outside the feature: a bowtie 10 km across, one corner 1 m off
-symmetric, got a point over 33,000 km away.  A centroid outside the bounding
-box of a feature GEOS reports invalid stops the call with an error of
-the same class, \code{spatialkit_features_degenerate}, that gives its rows of
-\code{x} (\code{rows}), quotes GEOS's reason for each (\code{reasons}), carries
-\code{site = "geos_centroid"}, and says to pass \code{mode = "point_on_surface"}
-or to repair the features with \code{\link[sf:st_make_valid]{sf::st_make_valid()}}.  A centroid
-inside the box is returned as GEOS gives it.
-
-Modes \code{"auto"} and \code{"line_midpoint"} take the midpoint of a line in a
-temporary projection (\code{tmp_project}), the one \code{\link[=ensure_projected]{ensure_projected()}}
-chooses for the lines.  A line that projection returns empty or without
-some of its vertices is never sampled, since \code{\link[sf:st_line_sample]{sf::st_line_sample()}} ends
-the R session on an empty line: the call stops with an error of the
-same class, \code{spatialkit_features_degenerate}, that gives its rows of \code{x}
-(\code{rows}), carries \code{site = "projection"}, and says to pass
+Each of these is an error of class \code{spatialkit_features_degenerate} that
+gives the rows of \code{x} (\code{rows} on the condition):
+\describe{
+\item{A polygon s2 refuses}{In longitude and latitude with s2 on, a
+polygon whose centroid s2 cannot take even without its repeated
+vertices.  The message quotes s2 and says to transform \code{x} to a
+projected CRS or to use another \code{mode}.}
+\item{A centroid outside its feature}{GEOS, which takes the centroids
+in a projected CRS, without a CRS, and in degrees with s2 off,
+weights each part of a ring by its signed area.  Where the edges of a
+ring cross (a bowtie), or a hole lies outside its shell, parts of the
+feature count with opposite signs, and the point can lie far outside
+the feature.  A centroid outside the bounding box of a feature GEOS
+reports invalid is refused: the condition carries
+\code{site = "geos_centroid"} and GEOS's reason for each row
+(\code{reasons}), and the message says to pass
+\code{mode = "point_on_surface"} or to repair the features with
+\code{\link[sf:st_make_valid]{sf::st_make_valid()}}.  A centroid inside the box is returned as GEOS
+gives it.}
+\item{A line the temporary projection cannot place}{A line that the
+projection returns empty or without some of its vertices.  The
+condition carries \code{site = "projection"}, and the message says to pass
 \code{mode = "centroid"} or \code{tmp_project = FALSE}, which take the point in
-longitude and latitude, without the projection.
-
+longitude and latitude, without the projection.}
+}
 The functions that reduce a layer they are given to points this way
 (\code{\link[=prep_model_data]{prep_model_data()}}, \code{\link[=make_folds]{make_folds()}}, \code{\link[=fold_separation]{fold_separation()}},
 \code{\link[=estimate_sac_range]{estimate_sac_range()}}, \code{\link[=resolution_profile]{resolution_profile()}},
@@ -161,8 +190,9 @@ The functions that reduce a layer they are given to points this way
 \code{\link[=select_features_forward]{select_features_forward()}}, \code{\link[=compare_models_cv]{compare_models_cv()}},
 \code{\link[=area_of_applicability]{area_of_applicability()}}, \code{\link[=predict_surface]{predict_surface()}}) raise each of these
 errors in their own name, with the same class and fields, naming their
-argument and its rows.
+argument and its rows.  \link{spatialkit-conditions} lists every class.
 }
+
 \examples{
 library(sf)
 poly <- st_sf(
@@ -171,13 +201,16 @@ poly <- st_sf(
     c(0, 0), c(2, 0), c(2, 2), c(0, 2), c(0, 0)
   ))), crs = 32632)
 )
-coerce_to_points(poly, "auto")  # interior representative point
+coerce_to_points(poly, "auto")  # a point on the polygon's surface
 }
 \seealso{
-Other spatial data preparation:
-\code{\link[=clip_target_for]{clip_target_for()}},
+\link{spatialkit-geometry} for how input geometry and CRSs are read.
+
+Other data preparation:
+\code{\link[=[.spatialkit_rows]{[.spatialkit_rows()}},
 \code{\link[=ensure_projected]{ensure_projected()}},
 \code{\link[=harmonize_crs]{harmonize_crs()}},
-\code{\link[=prep_model_data]{prep_model_data()}}
+\code{\link[=prep_model_data]{prep_model_data()}},
+\code{\link{spatialkit-geometry}}
 }
-\concept{spatial data preparation}
+\concept{data preparation}

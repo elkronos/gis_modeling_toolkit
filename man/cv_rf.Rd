@@ -53,7 +53,7 @@ matched to them.}
 
 \item{k}{Number of folds when \code{folds} is \code{NULL}. Default 5.}
 
-\item{seed}{RNG seed. Default 123.  It seeds fold construction \strong{and},
+\item{seed}{RNG seed.  Default 123.  It seeds fold construction and,
 through a per-fold draw, each fold's forest, so two different seeds give
 different results even on identical \code{folds}. To grow every fold's
 forest from one fixed ranger seed instead, call \code{\link{cv_spatial}}
@@ -87,100 +87,74 @@ reaches \code{fit_rf_model()} through here; see \code{seed} above for
 growing every fold's forest from one fixed seed.}
 }
 \value{
-The \code{\link{cv_spatial}} result.
+The \code{\link{cv_spatial}()} result.  \code{MAPE} and
+\code{SMAPE} skip rows whose denominator is zero; \code{n_MAPE} and
+\code{n_SMAPE} count the rows they used (see "Percentage errors on
+responses with zeros" in \code{\link{model_metrics}()}).
 }
 \description{
-Thin wrapper over \code{\link{cv_spatial}} that refits a \code{ranger}
-forest on each training fold. Unlike the out-of-bag error, this holds out
-whole spatial blocks by default, so most neighbours of a held-out point are
-not in the training set; \code{folds} says what that score estimates.
+A wrapper over \code{\link{cv_spatial}()} that refits a \pkg{ranger}
+forest on each training fold.  By default it holds out whole spatial
+blocks, so most neighbours of a held-out point are not in the training
+set; the forest's out-of-bag error holds out single rows.  The folds you
+pass decide what the score measures (see "Fold methods" in
+\code{\link{make_folds}()}).
 }
 \section{Comparing the forest with and without coordinates}{
 
 Whether \code{include_coords = TRUE} lowers the error depends on how far
-from the training data the predictions are (see \emph{Coordinates as
-predictors} in \code{\link{fit_rf_model}}), so it is a comparison to make
+from the training data the predictions are (see "Coordinates as
+predictors" in \code{\link{fit_rf_model}}), so it is a comparison to make
 on your own data, at the block size the map will be used at. Score the
 two forests on the same folds: build the folds once with
 \code{\link{make_folds}} and pass the result as \code{folds} to two
 calls, one with \code{include_coords = TRUE} and one without. Each fold
 then holds out the same rows in both, so the two \code{overall} rows
 compare like with like and the two \code{fold_metrics} tables pair up
-fold by fold. A difference in \code{overall} that is small beside the
+fold by fold.  A difference in \code{overall} that is small beside the
 spread of the per-fold differences is not evidence for either forest.
-The example below runs the comparison. \code{\link{compare_models_cv}}
+The example below runs the comparison.  \code{\link{compare_models_cv}()}
 takes one set of forest arguments (\code{rf_args}) per call, so it scores
-one of the two forests, not both.
-}
-
-\section{Percentage errors on responses with zeros}{
-
-\code{MAPE} divides by the observed value and \code{SMAPE} by
-\eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
-Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
-whose denominator is non-zero, and are \code{NA} when no row qualifies.
-Non-zero is judged at the scale of the data: a denominator no larger
-than 100 machine epsilons times the largest one counts as zero, so the
-rule does not depend on the units of the response.
-The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
-the \code{n} column counts finite observation/prediction pairs.  Read a
-percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
-an average over a subset of the data, whatever its value.
-
-This bites on any response taking exact zeros: counts, rainfall,
-abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
-120, \code{MAPE} is an average over the 58 non-zero rows, which
-\code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
-subtly: it drops the rows where observation and prediction are both near
-zero (which on a well-fitted zero-inflated model are the rows it got
-\emph{right}), so it averages the harder rows only and reads worse than
-the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
-count is only a label, not a repair.
-
-\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row and are
-unaffected; prefer them whenever the response can be zero.  For a Bayesian
-fit, \code{\link{cv_bayes}()} additionally reports CRPS and interval
-coverage, which are proper scoring rules and have no such failure mode.
+only one of the two forests.
 }
 
 \examples{
-if (requireNamespace("ranger", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  n <- 200
-  dat <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               a = rnorm(n)),
-    coords = c("x", "y"), crs = 32632
-  )
-  dat$z <- 2 * dat$a + rnorm(n, 0, 0.3)
-  cv_rf(dat, "z", "a", k = 4)$overall
+\dontshow{if (requireNamespace("ranger", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+set.seed(1)
+n <- 200
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             a = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+# An offset keeps the response away from zero, where MAPE is undefined.
+dat$z <- 10 + 2 * dat$a + rnorm(n, 0, 0.3)
+cv_rf(dat, "z", "a", k = 4)$overall
 
-  # The forest with and without the coordinates, on the same blocked
-  # folds.  (The second call logs the include_coords caution, once per
-  # session; this comparison is what it asks for.)  This response has no
-  # spatial structure, so here the coordinates can only cost accuracy.
-  folds   <- make_folds(dat, k = 4, method = "block_kfold", seed = 1)
-  plain   <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200)
-  with_xy <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200,
-                   include_coords = TRUE)
-  c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
-  # Fold by fold: positive where the coordinates lowered the error.
-  plain$fold_metrics$RMSE - with_xy$fold_metrics$RMSE
-}
+# The forest with and without the coordinates, on the same blocked
+# folds.  The second call logs the include_coords caution once per
+# session.  This response has no spatial structure, so here the
+# coordinates can only cost accuracy.
+folds   <- make_folds(dat, k = 4, method = "block_kfold", seed = 1)
+plain   <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200)
+with_xy <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200,
+                 include_coords = TRUE)
+c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
+# Fold by fold: positive where the coordinates lowered the error.
+plain$fold_metrics$RMSE - with_xy$fold_metrics$RMSE
+\dontshow{\}) # examplesIf}
 }
 \seealso{
+\code{\link{fit_rf_model}()} for the forest's arguments, and
+\code{\link{plot_cv_metrics}()} to draw the per-fold scores.
+
 Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=compare_models_cv]{compare_models_cv()}},
 \code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
 \code{\link[=cv_gwr]{cv_gwr()}},
 \code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=fold_separation]{fold_separation()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=sac_nugget]{sac_nugget()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+\code{\link[=plot_calibration]{plot_calibration()}},
+\code{\link[=plot_cv_metrics]{plot_cv_metrics()}}
 }
 \concept{cross-validation}

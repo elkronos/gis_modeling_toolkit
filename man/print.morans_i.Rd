@@ -10,22 +10,37 @@
 \item{x}{An object of class \code{morans_i}, from
 \code{\link{residual_morans_i}()}.}
 
-\item{...}{Ignored.}
+\item{...}{Not used.}
 }
 \value{
 \code{x}, invisibly.
 }
 \description{
-Shows the statistic, the null its moments come from and the evidence
-behind them.  The weight matrix the result carries gets a one-line
-description in place of the matrix: it is \eqn{n \times n}, and
-autoprinting it buried the statistic under a thousand lines of matrix.
+Prints the statistic, the null its moments come from and the evidence
+behind them.  The weight matrix the result carries is described in one
+line instead of printed.
+}
+\examples{
+\dontshow{if (requireNamespace("ranger", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+set.seed(1)
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(80, 0, 1000), y = 5e6 + runif(80, 0, 1000),
+             elev = rnorm(80)),
+  coords = c("x", "y"), crs = 32632
+)
+dat$price <- 10 + 2 * dat$elev + rnorm(80)
+fit <- fit_rf_model(dat, "price", "elev", num_trees = 100, seed = 1)
+print(residual_morans_i(fit))
+\dontshow{\}) # examplesIf}
 }
 \seealso{
-Other print methods:
-\code{\link[=print.aoa]{print.aoa()}},
-\code{\link[=print.gwr_model_selection]{print.gwr_model_selection()}},
-\code{\link[=print.resolution_profile]{print.resolution_profile()}},
-\code{\link[=print.sac_range]{print.sac_range()}}
+\code{\link{residual_morans_i}()}, which makes the object.
+
+Other in-sample checks:
+\code{\link[=compare_models]{compare_models()}},
+\code{\link[=evaluate_insample]{evaluate_insample()}},
+\code{\link[=model_metrics]{model_metrics()}},
+\code{\link[=residual_morans_i]{residual_morans_i()}}
 }
-\concept{print methods}
+\concept{in-sample checks}

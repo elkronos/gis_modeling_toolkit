@@ -443,7 +443,9 @@ test_that("why a range was not identified is kept on the result and said as it i
   expect_true(any(grepl("range was not identified \\(variogram model did not converge\\)", w)))
   expect_false(any(grepl("sill was never reached", w)))
   expect_identical(attr(ka, "rejected_reason"), "variogram model did not converge")
-  expect_output(print(ka), "range not identified (variogram model did not converge)", fixed = TRUE)
+  # The report wraps at the console width; a wide one keeps the phrase on one line.
+  expect_output(withr::with_options(list(width = 10000), print(ka)),
+                "range not identified (variogram model did not converge)", fixed = TRUE)
   ok <- kriging_adequacy(asg, "z", cells, sac = ka_true_sac(), folds = lab)
   expect_identical(attr(ok, "rejected_reason"), NA_character_)
 })

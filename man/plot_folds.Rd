@@ -7,63 +7,61 @@
 plot_folds(folds, points_sf, boundary = NULL, blocks = TRUE)
 }
 \arguments{
-\item{folds}{A list returned by \code{make_folds()}.}
+\item{folds}{A list returned by \code{\link[=make_folds]{make_folds()}}.}
 
-\item{points_sf}{The \code{sf} layer the folds were built from.  Drawn in
-x and y: a layer whose geometries mix XY with XYZ or XYM (as
-\code{rbind()} of an XY and an XYZ layer gives) is drawn without its Z
-and M, and so are \code{boundary} and the blocks.  A row without a
-location (a coordinate that is not finite or lies beyond 1e150, or a
-point that \code{make_folds()} left out of every fold because it is
-empty or the CRS the folds were built in cannot place it) is not
-drawn, and neither is a row of \code{boundary} with such a coordinate;
-one warning says how many.}
+\item{points_sf}{The sf layer the folds were built from.  It is drawn in x
+and y (\link{spatialkit-geometry}), and so are \code{boundary} and the blocks.  A
+row without a location (a coordinate that is not finite or lies beyond
+1e150, or a point that \code{\link[=make_folds]{make_folds()}} left out of every fold because it
+is empty or the CRS the folds were built in cannot place it) is not
+drawn, and neither is a row of \code{boundary} with such a coordinate; one
+warning says how many.}
 
-\item{boundary}{Optional polygonal \code{sf}/\code{sfc} to draw underneath.}
+\item{boundary}{Optional polygon layer (sf or sfc) to draw underneath.}
 
-\item{blocks}{Logical; draw the block polygons when \code{folds} carries
-them.  Default \code{TRUE}.}
+\item{blocks}{Logical; draw the block polygons when \code{folds} carries them.
+Default \code{TRUE}.}
 }
 \value{
 A \code{ggplot} object.
 }
 \description{
-Shows which fold each observation belongs to.  This is the fastest way to
-see whether spatial blocks are actually separating the data, and how wide
-they are beside the autocorrelation range.
-For \code{"block_kfold"} folds the block outlines are drawn too, from
-\code{folds$params$blocks}, so a fold can be seen to be one region or
-several and an empty block can be seen to be empty.  The subtitle states
-the parameter that sets how far the held-out points sit from their
-training data, read from
-\code{folds$params}: the block size (and the estimated range when
-\code{auto_range} found one), the buffer, the number of location groups,
-the median NNDM exclusion, or, for kNNDM folds, that they are matched to
-the prediction distances.
+Maps the fold each observation belongs to, as a \pkg{ggplot2} object.  Use
+it to check that the blocks separate the data, and how wide they are beside
+the autocorrelation range when \code{make_folds(auto_range = TRUE)} estimated
+one.  For \code{"block_kfold"} folds the block outlines are drawn too, from
+\code{folds$params$blocks}, so a fold can be seen to be one area or several and
+an empty block can be seen to be empty.
+}
+\details{
+The subtitle states the setting that decides how far the held-out points
+sit from their training data, read from \code{folds$params}: the size of the
+blocks built and the \code{block_size} asked for (with the estimated range
+when there is one), the buffer, the number of location groups, the median
+NNDM exclusion, or, for kNNDM folds, that they are matched to the
+prediction distances.  Lengths are in the units of the CRS the folds were
+built in.
 }
 \examples{
-if (requireNamespace("ggplot2", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  n <- 80
-  pts <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000)),
-    coords = c("x", "y"), crs = 32632
-  )
-  f <- make_folds(pts, k = 5, method = "block_kfold", block_size = 300)
-  plot_folds(f, pts)
-}
+\dontshow{if (requireNamespace("ggplot2", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+set.seed(1)
+n <- 80
+pts <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000)),
+  coords = c("x", "y"), crs = 32632
+)
+f <- make_folds(pts, k = 5, method = "block_kfold", block_size = 300)
+plot_folds(f, pts)
+\dontshow{\}) # examplesIf}
 }
 \seealso{
-Other plotting:
-\code{\link[=plot.aoa]{plot.aoa()}},
-\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
-\code{\link[=plot.feature_selection]{plot.feature_selection()}},
-\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
-\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
-\code{\link[=plot.sac_range]{plot.sac_range()}},
-\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
-\code{\link[=plot_calibration]{plot_calibration()}},
-\code{\link[=plot_cv_metrics]{plot_cv_metrics()}}
+\code{\link[=make_folds]{make_folds()}}, which builds the folds, and \code{\link[=fold_separation]{fold_separation()}}
+to measure how far the held-out points sit from their training data.
+
+Other folds:
+\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
+\code{\link[=fold_separation]{fold_separation()}},
+\code{\link[=make_folds]{make_folds()}}
 }
-\concept{plotting}
+\concept{folds}

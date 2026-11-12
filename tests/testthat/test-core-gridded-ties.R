@@ -339,7 +339,7 @@ test_that("the cells of centres refitted to every point, returned in EPSG:4326, 
   expect_identical(.gt_bare(join(tess$cells)), join(.gt_bare(tess$cells)))
 })
 
-test_that("the help and NEWS say which cells in lon/lat are joined in the record's CRS, and which are not", {
+test_that("the help says which cells in lon/lat are joined in the record's CRS, and which are not", {
   # Only the Voronoi cells of the scored centres are: a hex lattice sized by
   # a selection and the cells of centres refitted to every point (above)
   # carry a record that says scored_cells = FALSE, and cells of a count
@@ -360,8 +360,8 @@ test_that("the help and NEWS say which cells in lon/lat are joined in the record
                           "profile scored, and holds its centres in a projected CRS (the Voronoi ",
                           "cells \\code{\\link[=build_tessellation]{build_tessellation()}} builds ",
                           "on the centres a profile scored and returns in a geographic ",
-                          "\\code{crs}; see Value), were drawn in the record's CRS, and the join ",
-                          "runs there."), fixed = TRUE)
+                          "\\code{crs}; see \"Cells from a resolution profile\"), were drawn in ",
+                          "the record's CRS, and the join runs there."), fixed = TRUE)
   expect_match(rd, paste0("Otherwise (other polygons in lon/lat, such as a hex or square lattice ",
                           "sized by a selection or the cells of centres refitted to every point, ",
                           "or polygons without a CRS) the join runs in the CRS of ",
@@ -372,19 +372,9 @@ test_that("the help and NEWS say which cells in lon/lat are joined in the record
                           "geographic \\code{crs} are joined in the record's CRS while they carry ",
                           "it)"), fixed = TRUE)
   rd <- read("man", "create_voronoi_polygons.Rd")
-  expect_match(rd, paste0("a join of rows in degrees to other cells (cells without the record, such ",
-                          "as those of a count given as a number or those a verb that drops ",
-                          "attributes has stripped of it, and cells whose record says ",
-                          "\\code{scored_cells = FALSE}, such as those of centres refitted to ",
-                          "every point) go to s2 and stop on such a cell"), fixed = TRUE)
-  news <- read("NEWS.md")
-  expect_match(news, paste0("so features that are not points get their cell from overlaps and areas ",
-                            "measured in that CRS"), fixed = TRUE)
-  expect_match(news, paste0("Other cells in lon/lat are joined as before: cells without the record ",
-                            "(from a count given as a number, or after a verb that drops ",
-                            "attributes) and cells whose record says they are not the cells the ",
-                            "profile scored (`scored_cells = FALSE`, such as the cells of centres ",
-                            "refitted to every point)."), fixed = TRUE)
+  expect_match(rd, paste0("joins the cells of the centres a profile scored in the CRS they were ",
+                          "built in, while they carry the record that says so ",
+                          "(\\code{scored_cells = TRUE})."), fixed = TRUE)
 })
 
 test_that("the same lattices in two units and two CRSs are placed as the profile placed them in each", {
@@ -733,7 +723,7 @@ test_that("cells transformed to another projected CRS keep the record and are jo
   }
 })
 
-test_that("the help and NEWS name rows the polygons alone place among the causes of what = \"loo\"", {
+test_that("the help names rows the polygons alone place among the causes of what = \"loo\"", {
   root <- testthat::test_path("..", "..")
   if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
     skip("the help's source is not here to read")
@@ -753,14 +743,6 @@ test_that("the help and NEWS name rows the polygons alone place among the causes
                           "near a boundary, on it or not, can sit in another cell than the ",
                           "profile put it in."), fixed = TRUE)
   expect_match(rd, "and the warning names these cases.", fixed = TRUE)
-  news <- read("NEWS.md")
-  expect_match(news, paste0("for rows that have a CRS exactly when the record names one. The ",
-                            "warning now names the cases that remain: rows the polygons alone ",
-                            "placed (rows without a CRS beside a count record that names one or ",
-                            "the reverse, rows assigned to cells without their count record, ",
-                            "such as cells read back from a file, and rows given their cells by ",
-                            "another join), cells built in, or transformed to, another CRS than ",
-                            "the one the profile measured the rows in,"), fixed = TRUE)
 })
 
 test_that("on cells whose record names no CRS, rows without a CRS take the profile's cell and rows with one are placed by the polygons alone", {

@@ -2,7 +2,7 @@
 % Please edit documentation in R/assignment.R
 \name{assign_features_to_polygons}
 \alias{assign_features_to_polygons}
-\title{Assign features to polygons and attach a polygon ID}
+\title{Assign features to cells and attach a cell ID}
 \usage{
 assign_features_to_polygons(
   features_sf,
@@ -18,7 +18,8 @@ assign_features_to_polygons(
 \arguments{
 \item{features_sf}{An sf object containing features to assign. A layer
 whose geometries mix dimensions or carry M (XYM or XYZM) is joined in x
-and y, and the rows returned keep their Z and M (see Details).}
+and y, and the rows returned keep their Z and M (see "Z and M
+coordinates").}
 
 \item{polygons_sf}{An sf or sfc polygonal layer. Polygons whose
 geometries mix dimensions or carry M (XYM or XYZM) are read in x and y.}
@@ -81,7 +82,7 @@ feature in the layer, so pass \code{largest = FALSE} to ask for that.
 In longitude and latitude with s2 on (sf's default), where s2 refuses
 a polygon of either layer as it arrived, the join by \code{predicate}
 meets that refusal too, and the error names the polygons and the
-transform instead (see Details).
+transform instead (see "Joins in longitude and latitude").
 In longitude and latitude the validity check, the repair and the
 overlaps run on s2 whatever \code{sf::sf_use_s2()} says; with s2 off
 the join by \code{predicate} runs with GEOS, and the error that names
@@ -115,12 +116,13 @@ whose geometry is invalid (a ring whose edges cross, whose lobes GEOS
 measures as cancelling) is measured on a copy repaired with
 \code{sf::st_make_valid()}, with a warning, and returned as it arrived;
 in degrees, one s2 refuses even repaired (a bowtie) stops the call with
-the error of class \code{"spatialkit_cells_degenerate"} (see Details).
-\code{"first"} keeps the first match, the polygon that comes first
-in the rows of \code{polygons_sf} (original order-dependent
-behavior). On cells built from the centres a profile scored, a point on
-the edge between two of them is placed by the profile's rule whichever
-is given (see Value).}
+the error of class \code{"spatialkit_cells_degenerate"} (see "Joins in
+longitude and latitude").
+\code{"first"} keeps the polygon that comes first in the rows of
+\code{polygons_sf}, so the result depends on their order. On cells
+built from the centres a profile scored, a point on the edge between
+two of them is placed by the profile's rule whichever is given (see
+"Cells from a resolution profile").}
 
 \item{quiet}{Logical; suppress this function's \code{message()}s (the one
 naming a fallback ID column). It does not silence R warnings. Default
@@ -145,6 +147,22 @@ without a CRS is brought into the other layer's CRS as
 with an x outside -180 to 360 or a y beyond 90 north or south cannot be
 in degrees, and the call stops with an error that names \code{features_sf}
 or \code{polygons_sf} and gives its box.
+}
+\description{
+Gives every feature the ID of the polygon it falls in and returns the
+features, one row each, with that ID column added. Features in several
+polygons are settled by \code{tie_break}, and features in none are dropped or
+kept by \code{keep_unassigned}.
+}
+\details{
+This is the step before \code{\link[=summarize_by_cell]{summarize_by_cell()}}, which aggregates over the
+IDs. Unlike \code{\link[sf:st_join]{sf::st_join()}}, it settles a feature that matches several
+polygons by an explicit \code{tie_break} rule instead of duplicating the row,
+so the assigned layer keeps one row per input feature and each feature is
+counted in one cell. How the input layers are read in general (CRS,
+dimensions, rows without a location) is in \link{spatialkit-geometry}.
+}
+\section{Ties and unassigned features}{
 
 Features that fall inside no polygon are counted on the attribute
 \code{"unassigned"}: a list with \code{n}, \code{which} (their row positions in
@@ -166,12 +184,9 @@ A polygon of \code{polygons_sf} with a coordinate that is not finite or lies
 beyond 1e150 (read as given) has no location either: it takes no
 feature, and the features inside the rest of its ring are unassigned.
 
-The
-attribute \code{"ties"} records how many features matched more than one
+The attribute \code{"ties"} records how many features matched more than one
 polygon (with \code{largest}, overlapped several by exactly the same area)
-and had the \code{tie_break} rule decide for them (on cells built from the
-centres a profile scored, the profile's rule then places the points
-among them, as the last paragraph says): a list with \code{n},
+and had the \code{tie_break} rule decide for them: a list with \code{n},
 \code{which} (their row positions in \code{features_sf}), \code{rule}, \code{n_rows}
 (the number of rows returned, which the record was made for) and, when
 the rule gave some of them no polygon (see \code{tie_break}), \code{unresolved},
@@ -185,6 +200,9 @@ for a different set of rows. \code{sf::st_drop_geometry()} keeps the record,
 since the rows are the same; see \code{\link{[.spatialkit_rows}} for
 what binding such data frames does. The \code{"unassigned"} record is
 stamped and removed the same way.
+}
+
+\section{Cells from a resolution profile}{
 
 When \code{polygons_sf} carries \code{attr(, "count_rule")}, the record of how
 its cell count was set (cells from \code{\link[=build_tessellation]{build_tessellation()}} on seeds
@@ -237,7 +255,7 @@ back in (unless its \code{crs} names another projected CRS), so their corners
 carry only the rounding of that computation, far less than the margin.
 Cells it returns in a
 geographic \code{crs} are moved back into the record's CRS for the join (see
-Details). In a UTM zone the round trip through degrees moves a corner by
+"Joins in longitude and latitude"). In a UTM zone the round trip through degrees moves a corner by
 about 2e-9 m; in the equal-area CRS the profile works in for a layer
 wider than a zone it can move one by more than the margin (how far
 depends on the PROJ build), so a point on such an edge can keep the
@@ -256,24 +274,16 @@ the caller brings, and cells whose record says \code{scored_cells} is
 \code{FALSE} or \code{NA} (other cells built from the count, such as a lattice
 sized by it) are placed by the polygons alone.
 }
-\description{
-Joins an sf layer of input features to a polygon layer via spatial join.
-}
-\details{
-This is the second step of the package's pipeline: it labels every
-observation with the cell it falls in, which is what
-\code{\link[=summarize_by_cell]{summarize_by_cell()}} then aggregates over. Prefer it to \code{\link[sf:st_join]{sf::st_join()}}
-when the join has to be \emph{unambiguous}. It resolves features matching
-several polygons by an explicit \code{tie_break} rule instead of silently
-duplicating rows, so the assigned layer keeps one row per input feature
-and cell-level counts mean what they say.
+
+\section{Joins in longitude and latitude}{
 
 The join runs in the CRS of \code{polygons_sf} whenever that CRS is projected,
 so cell edges are the straight lines the cells were drawn with and overlap
 areas are planar. Cells in lon/lat whose record of their count says they
 are the cells a profile scored, and holds its centres in a projected CRS
 (the Voronoi cells \code{\link[=build_tessellation]{build_tessellation()}} builds on the centres a profile
-scored and returns in a geographic \code{crs}; see Value), were drawn in the
+scored and returns in a geographic \code{crs}; see "Cells from a resolution
+profile"), were drawn in the
 record's CRS, and the join runs there. A copy of \code{features_sf} is
 transformed for it, and the features come back with the coordinates they
 arrived with. Otherwise (other polygons in lon/lat, such as a hex or
@@ -284,7 +294,8 @@ sf's default), sf joins on the sphere with s2, which refuses a polygon
 that is not valid there, such as one with two corners it reads as one
 point or with edges that cross; cells returned in lon/lat can hold two
 corners that differ only by rounding and fall on one point in degrees
-(see \code{crs} in \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}). A join by \code{predicate} then
+(see "Polygons in degrees" in \link{spatialkit-geometry}). A join by
+\code{predicate} then
 stops with an error of class \code{"spatialkit_cells_degenerate"} that gives
 the rows of the polygons s2 refuses (the condition carries them as
 \code{rows}), names the cause and says to transform \code{polygons_sf} to a
@@ -304,12 +315,9 @@ hold that point twice), the join stops with the error for the layer whose
 polygons s2 refused as they arrived; with s2 on (sf's default), the join
 by \code{predicate} meets those polygons too. When s2 refused no polygon of
 either layer as it arrived, the error says to pass \code{largest = FALSE} or to
-project both layers. Whether s2 refuses such a piece follows the last bits
-of the vertices s2 computes for it, which differ between platforms and s2
-versions: a figure eight pinched on the edge of a polygon of the other
-layer can give a piece that s2 refuses on macOS on arm64 and accepts on
-Linux on x86-64. Where s2 accepts the piece, the join runs and gives each
-feature the polygon of its largest overlap.
+project both layers. Whether s2 refuses such a piece can differ between
+platforms and s2 versions. Where s2 accepts the piece, the join runs and
+gives each feature the polygon of its largest overlap.
 In longitude and latitude the largest-overlap join
 runs on s2, and the areas \code{tie_break} compares are measured on the sphere
 with s2, whatever \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} says, as the package's other areas in
@@ -317,6 +325,9 @@ degrees are; the join by \code{predicate} runs with the engine the session
 names. With s2 off that engine is GEOS, which reads these polygons in
 degrees, so the largest-overlap join's error for a polygon s2 refuses also
 offers \code{largest = FALSE}.
+}
+
+\section{Z and M coordinates}{
 
 sf reads a layer in the dimension of its first geometry, so s2, GEOS and
 \code{\link[sf:st_transform]{sf::st_transform()}} read a layer that mixes XY and XYZ (or XYM)
@@ -332,6 +343,9 @@ another dimension than the first are empty and not points. Features
 without a CRS in one dimension that carry M come back with their own
 geometry: with the CRS they were given, or moved from lon/lat with
 \code{\link[sf:st_transform]{sf::st_transform()}}, which keeps their M.
+}
+
+\section{Coordinates far from the origin}{
 
 Layers so far from the origin of their coordinates that doubles there are
 spaced more than a millionth of the extent of the two layers apart (0.125
@@ -341,6 +355,7 @@ an edge near the origin can fall in the polygon beside it. The join runs,
 and a warning of class \code{"spatialkit_xy_imprecise"} gives the spacing and
 the extent (the condition carries them as \code{spacing} and \code{extent}).
 }
+
 \examples{
 library(sf)
 set.seed(1)
@@ -361,13 +376,9 @@ table(assigned$poly_id)
 \code{\link[=build_tessellation]{build_tessellation()}} to build the polygon layer;
 \code{\link[=summarize_by_cell]{summarize_by_cell()}} for the aggregation step that consumes the result.
 
-Other aggregation:
+Other assign and summarise:
 \code{\link[=cell_values_at]{cell_values_at()}},
-\code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
 \code{\link[=kriging_adequacy]{kriging_adequacy()}},
-\code{\link[=resolution_profile]{resolution_profile()}},
-\code{\link[=select_resolution]{select_resolution()}},
-\code{\link[=summarize_by_cell]{summarize_by_cell()}},
-\code{\link[=summary.resolution_profile]{summary.resolution_profile()}}
+\code{\link[=summarize_by_cell]{summarize_by_cell()}}
 }
-\concept{aggregation}
+\concept{assign and summarise}

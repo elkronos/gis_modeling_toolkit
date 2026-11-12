@@ -14,15 +14,16 @@ or \code{\link{compare_models_cv}()}.}
 \item{metric}{Character(1) naming a column of \code{fold_metrics} (or of
 \code{by_fold}).  Default \code{"RMSE"}.}
 
-\item{...}{Ignored.}
+\item{...}{Not used.}
 }
 \value{
 A \code{ggplot} object.
 }
 \description{
-A pooled RMSE of 3.2 can come from 3.2 in every fold or from 1.1 in eight
-folds and 14 in one (a model that works, and a model that fails in one
-region), and the pooled number cannot tell the two apart.  This draws the
+One pooled RMSE can come from the same error in every fold or from small
+errors in most folds and a large one in a single fold (a model that
+works, and a model that fails in one block), and the pooled number cannot
+tell the two apart.  This draws the
 metric of each fold as a point, sized by the number of held-out
 predictions the fold contributed, with the pooled value from
 \code{overall} as a horizontal line, so the spread behind the number is
@@ -47,32 +48,31 @@ per-fold value gets no panel and no pooled line, and the caption
 names it.
 }
 \examples{
-if (requireNamespace("ranger", quietly = TRUE) &&
-    requireNamespace("ggplot2", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  n <- 150
-  dat <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               a = rnorm(n)),
-    coords = c("x", "y"), crs = 32632
-  )
-  dat$z <- 2 * dat$a + 0.003 * (st_coordinates(dat)[, 1] - 5e5) +
-    rnorm(n, 0, 0.5)
-  cv <- cv_rf(dat, "z", "a", k = 5, num_trees = 100)
-  plot_cv_metrics(cv, "RMSE")
-}
+\dontshow{if (requireNamespace("ranger", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+library(sf)
+set.seed(1)
+n <- 150
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             a = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+dat$z <- 2 * dat$a + 0.003 * (st_coordinates(dat)[, 1] - 5e5) +
+  rnorm(n, 0, 0.5)
+cv <- cv_rf(dat, "z", "a", k = 5, num_trees = 100)
+plot_cv_metrics(cv, "RMSE")
+\dontshow{\}) # examplesIf}
 }
 \seealso{
-Other plotting:
-\code{\link[=plot.aoa]{plot.aoa()}},
-\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
-\code{\link[=plot.feature_selection]{plot.feature_selection()}},
-\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
-\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
-\code{\link[=plot.sac_range]{plot.sac_range()}},
-\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
-\code{\link[=plot_calibration]{plot_calibration()}},
-\code{\link[=plot_folds]{plot_folds()}}
+\code{\link{cv_spatial}()} and \code{\link{compare_models_cv}()},
+which make the results.
+
+Other cross-validation:
+\code{\link[=compare_models_cv]{compare_models_cv()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=plot_calibration]{plot_calibration()}}
 }
-\concept{plotting}
+\concept{cross-validation}
