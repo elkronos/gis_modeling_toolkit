@@ -246,11 +246,12 @@ test_that("the help gives both reasons cp has no noise variance, and the record 
   says(paste0("or there is none and cp is NA at every level: the finest level whose cells hold ",
               "two scored rows on average has a residual mean square of 0 to within rounding, ",
               "or, with the nugget at its bound, no level's cells hold that many."))
-  says(paste0("when the finest level whose cells hold two scored rows on average has a residual ",
-              "mean square of 0 to within rounding, source and value NA, level, that level, ",
-              "rows_per_cell, its scored rows a cell, rms, its residual mean square (0, or the ",
-              "rounding it was read as), and reason, which select_resolution() gives; NULL when ",
-              "cp has none for another reason"))
+  says(paste0("When the finest level whose cells hold two scored rows on average has a ",
+              "residual mean square of 0 to within rounding, source and value are NA, and the ",
+              "list has level (that level), rows_per_cell (its scored rows a cell), rms (its ",
+              "residual mean square: 0, or the rounding it was read as) and reason, which ",
+              "select_resolution() gives."))
+  says("NULL when cp has no noise variance for another reason")
   says(paste0("is NA, and cp takes its noise variance from the finest level whose cells hold at ",
               "least two scored rows on average (see cp above)."))
 })

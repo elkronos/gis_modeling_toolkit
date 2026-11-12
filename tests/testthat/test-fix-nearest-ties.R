@@ -270,24 +270,22 @@ test_that("the help pages state the tie rules", {
     expect_s3_class(rd, "Rd")
     gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
   }
-  expect_match(page("predict_surface.Rd"),
-               paste0("A grid point the same distance from several points of covariates ",
-                      "(a squared distance no more than the square of the least distance ",
-                      "lengthened by a margin, plus one part in ten million of the least ",
-                      "squared distance; the margin is one part in 1e10 of the largest ",
-                      "coordinate of the points that have a location, at most a millionth of ",
-                      "the diagonal of their bounding box and at least four times the spacing ",
-                      "of doubles at that coordinate) takes the one lowest in x, x values within one part in ten million of the ",
-                      "diagonal of the points' bounding box, or within one part in 1e10 of ",
-                      "their largest coordinate (at most a millionth of that diagonal, and ",
-                      "at least four times the spacing of doubles at that coordinate) where ",
-                      "that is more, counting as one, then the ",
-                      "one lowest in y, y values read the same way, then the first in row ",
-                      "order"), fixed = TRUE)
-  # sf::st_nearest_feature() searches a layer in degrees with s2, not GEOS.
-  expect_match(page("predict_surface.Rd"),
-               "order its search meets the features (GEOS, or s2 for a layer in degrees",
-               fixed = TRUE)
+  ps <- page("predict_surface.Rd")
+  expect_match(ps, paste0("Distances count as equal when the squared distance is no more than the ",
+                          "square of the least distance lengthened by a margin, plus one part in ",
+                          "ten million of the least squared distance. Among them the point lowest ",
+                          "in x is taken, then the one lowest in y, then the first in row order. ",
+                          "x values count as one when they lie within one part in ten million of ",
+                          "the diagonal of the points' bounding box, or within the margin where ",
+                          "that is more; y values are read the same way."), fixed = TRUE)
+  expect_match(ps, paste0("It is one part in 1e10 of the largest coordinate of the features that ",
+                          "have a location, at most a millionth of the diagonal of their bounding ",
+                          "box and at least four times the spacing of doubles at that ",
+                          "coordinate."), fixed = TRUE)
+  # sf::st_nearest_feature() searches a layer in degrees with s2, not GEOS,
+  # while s2 is on.
+  expect_match(ps, paste0("order its search meets the features (GEOS, or s2 while ",
+                          "sf::sf_use_s2() is on)"), fixed = TRUE)
   expect_match(page("coerce_to_points.Rd"),
                paste0("x values within one part in ten million of the diagonal of the ",
                       "midpoints' bounding box count as one, so y decides"), fixed = TRUE)

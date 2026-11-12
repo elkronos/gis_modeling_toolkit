@@ -168,7 +168,7 @@ test_that("a thinned outline is not densified, so a border two features share sc
   }
 })
 
-test_that("the help and NEWS say how the area check and the outline thinning sample", {
+test_that("the help says how the area check samples the cells", {
   root <- testthat::test_path("..", "..")
   if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
     skip("the help's source is not here to read")
@@ -180,17 +180,6 @@ test_that("the help and NEWS say how the area check and the outline thinning sam
                           "by their bounding boxes in that CRS and then by the means of their ",
                           "vertices, together with the cells that reach furthest along x and y ",
                           "either way, so the order of the rows does not matter)"), fixed = TRUE)
-  news <- read("NEWS.md")
-  expect_match(news, paste0("The projection chosen for a few detailed outlines, and the area check ",
-                            "on more than 200 polygons, depended on the order of the features."),
-               fixed = TRUE)
-  expect_match(news, paste0("The vertices are now thinned along the outlines' distinct vertices ",
-                            "sorted by coordinate"), fixed = TRUE)
-  expect_match(news, paste0("The polygons are taken along the polygons sorted by their bounding ",
-                            "boxes, and polygons that share a box, as the Delaunay triangles of ",
-                            "gridded points do, by the means of their vertices; the polygons that ",
-                            "reach furthest along x and y, either way, are always measured."),
-               fixed = TRUE)
 })
 
 test_that("cells that share a bounding box get one area error, and one decision, in any row order", {

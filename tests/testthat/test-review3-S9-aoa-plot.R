@@ -279,7 +279,9 @@ test_that("plot_cv_metrics draws no pooled line for a count column", {
   for (m in c("n_pred", "n_MAPE")) {
     p <- plot_cv_metrics(cv, m)
     expect_false("GeomHline" %in% r3_layer_geoms(p))
-    expect_match(p$labels$caption, sprintf("No pooled value: `%s` is a count per fold; `overall` holds the total", m))
+    expect_match(p$labels$caption,
+                 sprintf("No pooled value: %s is a count per fold; overall holds the total", m),
+                 fixed = TRUE)
     expect_no_error(ggplot2::ggplot_build(p))
   }
   # RMSE is unchanged.
@@ -299,7 +301,7 @@ test_that("plot_cv_metrics names a model with no per-fold values and keeps the s
                          stringsAsFactors = FALSE))
   p <- plot_cv_metrics(cmp, "bandwidth")
   expect_match(p$labels$caption, "No pooled value")
-  expect_match(p$labels$caption, "Not drawn: RF \\(no finite per-fold `bandwidth`\\)")
+  expect_match(p$labels$caption, "Not drawn: RF (no finite per-fold bandwidth)", fixed = TRUE)
   expect_s3_class(p$facet, "FacetWrap")
   b <- ggplot2::ggplot_build(p)
   expect_identical(as.character(b$layout$layout$model), "GWR")
