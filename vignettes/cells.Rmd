@@ -1,0 +1,660 @@
+---
+title: "Building cells and summarising them"
+description: >
+  Draw the cells, put each observation in one, and report each cell's value with the right standard error.
+author: "Justin Chase"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    fig_width: 6
+    fig_height: 4
+vignette: >
+  %\VignetteIndexEntry{Building cells and summarising them}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+# gstat fits the variograms behind the design effect and the kriging check,
+# and ggplot2 draws the two maps. Both are Suggests, so the chunks that use
+# them are gated and the rest runs on the hard dependencies.
+# `eval` gates chunks only: knitr does not apply it to inline `r ...` code,
+# which runs regardless. An inline reference to something a gated chunk
+# defines has to guard itself, or the article fails to build where the
+# package is missing.
+has_gstat  <- requireNamespace("gstat",   quietly = TRUE)
+has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
+
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  fig.align = "center",
+  out.width = "100%"
+)
+```
+
+This article takes a layer of observations to cells. It chooses a
+tessellation method, places the seeds of Voronoi cells, puts each observation
+in a cell, and reads what `summarize_by_cell()` returns: the standard error
+that fits the question, a check of the cell mean against block kriging, and
+the warnings about pooled values. `vignette("resolution")` explains how to set
+the number of cells, and `vignette("glossary")` defines the terms used here.
+
+*This article needs two optional packages: `gstat` for the variograms behind
+the design effect and the kriging check, and `ggplot2` for the maps. Where one
+is missing, the chunks that use it are skipped with a note.*
+
+## A simulated layer and its cell count
+
+The layer is 350 points on a square 1,000 m on a side. The response `z` is 1.5
+times a predictor `a`, plus a smooth spatial field and some noise; `b` is
+noise alone.
+
+```{r fixture}
+library(sf)
+library(spatialkit)
+
+set.seed(11)
+n  <- 350
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+D  <- as.matrix(dist(xy))
+field <- as.numeric(t(chol(exp(-D / 70) + diag(1e-8, n))) %*% rnorm(n))
+xy$a  <- rnorm(n)
+xy$b  <- rnorm(n)
+xy$z  <- 1.5 * xy$a + field + rnorm(n, sd = 0.3)
+pts   <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+
+prof <- resolution_profile(pts, "z")
+size <- select_resolution(prof)
+size$best
+```
+
+`resolution_profile()` and `select_resolution()`, at their defaults, size the
+cells for pooled values at `r size$obs_per_cell_asked` observations per cell,
+which gives `r size$best` cells for `r nrow(pts)` points.
+`vignette("resolution")` explains the size and the other ways to set the
+count.
+
+## Choosing a tessellation method
+
+`build_tessellation()` draws four kinds of cell.
+
+- `"voronoi"` gives one cell per point it is given, each the part of the area
+  nearer that point than any other. On the observations themselves that is
+  one cell per observation, with no spread inside a cell to give a standard
+  error. On seeds placed by `get_voronoi_seeds()` you set the count, and the
+  cells follow the observations: small where they are dense, large where
+  they are sparse.
+- `"hex"` and `"square"` lay a grid of equal-area cells, clipped at the
+  boundary, so you set the cell size and the data do not. Hexagons put all six neighbours of a cell at the
+  same distance; squares line up with the axes of the CRS. A grid laid over
+  the whole area can leave cells with no observation, more of them the more
+  the points cluster.
+- `"triangles"` returns the Delaunay triangulation of the points. It is for
+  interpolation and work on adjacency, and is not meant as a cell to
+  summarise in.
+
+`"hex"` and `"square"` need a `boundary` to lay the grid over. `clip_target_for()`
+returns one polygon to tessellate within: the bounding box of the points,
+widened by `expand` (a fraction of its longer side below 1, a distance in CRS
+units otherwise). Passing the same polygon to every method makes the
+tessellations cover the same ground.
+
+```{r methods}
+bnd   <- clip_target_for(pts, expand = 0.02, quiet = TRUE)
+seeds <- get_voronoi_seeds(n = size, sample_points = pts)
+
+vor <- build_tessellation(seeds, boundary = bnd, method = "voronoi",
+                          quiet = TRUE)
+hex <- build_tessellation(pts, boundary = bnd, method = "hex",
+                          approx_n_cells = size, quiet = TRUE)
+sq  <- build_tessellation(pts, boundary = bnd, method = "square",
+                          approx_n_cells = size, quiet = TRUE)
+
+c(voronoi = nrow(vor$cells), hex = nrow(hex$cells), square = nrow(sq$cells))
+```
+
+```{r method-counts, include=FALSE}
+# Points per cell under each method, for the figure and the sentence below.
+per_cell <- function(cells, method) {
+  ids <- assign_features_to_polygons(pts, cells, polygon_id_col = "cell_id",
+                                     quiet = TRUE)$cell_id
+  cells$n <- tabulate(match(ids, cells$cell_id), nrow(cells))
+  cells$method <- method
+  cells[, c("method", "n")]
+}
+three <- rbind(per_cell(vor$cells, "Voronoi on seeds"),
+               per_cell(hex$cells, "hex"),
+               per_cell(sq$cells,  "square"))
+three$method <- factor(three$method, c("Voronoi on seeds", "hex", "square"))
+empty <- tapply(three$n == 0, three$method, sum)
+three$n[three$n == 0] <- NA
+methods_alt <- sprintf(paste(
+  "Three maps of the same square area, each cell shaded by the points it",
+  "holds. Of the %d Voronoi cells on seeds, %s empty; the hex grid of",
+  "%d cells has %d empty cells and the square grid of %d cells has %d,",
+  "shown in grey."),
+  nrow(vor$cells), if (empty[[1]] == 0) "none is" else paste(empty[[1]], "are"),
+  nrow(hex$cells), empty[[2]],
+  nrow(sq$cells), empty[[3]])
+```
+
+```{r methods-map, eval=has_ggplot, fig.height=2.6, fig.alt=methods_alt}
+library(ggplot2)
+
+ggplot(three) +
+  geom_sf(aes(fill = n), colour = "white", linewidth = 0.2) +
+  facet_wrap(~ method) +
+  scale_fill_viridis_c(name = "points\nin cell", na.value = "grey85") +
+  theme_void()
+```
+
+```{r methods-no-ggplot, echo=FALSE, eval=!has_ggplot, results='asis'}
+cat("*(The map needs `ggplot2`, which is not installed here.)*\n")
+```
+
+Asked for the same count, the hex grid builds `r nrow(hex$cells)` cells,
+`r empty[["hex"]]` of them with no observation, and the square grid
+`r nrow(sq$cells)`, `r empty[["square"]]` empty, while the
+`r nrow(vor$cells)` Voronoi cells on k-means seeds have
+`r if (empty[[1]] == 0) "none" else empty[[1]]` empty. These points are
+drawn uniformly over the square; on clustered points the grids leave more cells
+empty. `?build_tessellation` gives the rules each method follows.
+
+## Placing Voronoi seeds
+
+`get_voronoi_seeds()` places the seeds three ways. `method = "kmeans"`, the
+default, takes the centres of a k-means partition of `sample_points`;
+`"random"` draws seeds uniformly inside `boundary`; `"provided"` takes the
+seeds you pass.
+
+Given the result of `select_resolution()` as `n`, as above, the k-means
+method returns the centres of the partition the profile scored, so the
+Voronoi cells are the cells the criteria judged and nothing is drawn at
+random. Given a number, it runs a new k-means. Under the default
+`partition = "density"` each point is weighted by its local density, which
+gives many small cells where the points are dense and a few large ones where
+they are sparse. Its draws come from the session's random-number stream: call
+`set.seed()` first, or pass `set_seed`, to get the same seeds again. For
+k-means, `n` is an upper bound, so check `nrow()` on the result.
+
+```{r seeds}
+nrow(seeds)   # the centres the profile scored
+fresh <- get_voronoi_seeds(n = size$best, sample_points = pts, set_seed = 1)
+nrow(fresh)   # a new density-weighted k-means
+```
+
+The seeds carry the hull of `sample_points` as their cover, so
+`build_tessellation(seeds)` without a boundary still makes cells that hold
+every observation. The seeds of `select_resolution()` also carry the record
+of how the count was set, which the cells and the assigned rows keep (see
+"Pooled values and their warnings" below).
+
+## Putting each observation in a cell
+
+`assign_features_to_polygons()` returns the observations, one row each, with
+the ID of the cell that holds them.
+
+```{r assign}
+asg_v <- assign_features_to_polygons(pts, vor$cells, polygon_id_col = "cell_id")
+head(asg_v$cell_id)
+```
+
+```{r assign-counts, include=FALSE}
+n_v <- tabulate(match(asg_v$cell_id, vor$cells$cell_id), nrow(vor$cells))
+```
+
+The `r nrow(vor$cells)` cells hold from `r min(n_v)` to `r max(n_v)` points
+each. A point outside every cell is dropped, with a warning of class
+`spatialkit_unassigned` that gives the count; `keep_unassigned = TRUE` keeps
+it with `NA` as its cell. A point on the edge two cells share goes to one of
+them by `tie_break`. `polygon_id_col = "cell_id"` keeps the name the cells
+carry, so the later calls take `id_col = "cell_id"`.
+
+### Grouping a layer of polygons
+
+`assign_features_to_polygons()` takes polygons as well as points. With
+`largest = TRUE`, the default, each polygon goes to the cell it overlaps
+most, so the result has one row per polygon. The example groups North
+Carolina's counties, which ship with `sf`, into hexagonal cells laid over the
+state outline.
+
+```{r group}
+nc <- st_read(system.file("shape/nc.shp", package = "sf"), quiet = TRUE)
+counties <- ensure_projected(nc[, c("NAME", "BIR74", "SID74")])
+state    <- st_union(counties)
+nc_cells <- build_tessellation(coerce_to_points(counties), boundary = state,
+                               method = "hex", approx_n_cells = 12,
+                               quiet = TRUE)$cells
+
+grouped <- assign_features_to_polygons(counties, nc_cells,
+                                       polygon_id_col = "cell_id")
+joined  <- st_join(counties, nc_cells)
+
+c(counties = nrow(counties), grouped = nrow(grouped), joined = nrow(joined))
+```
+
+```{r group-used, include=FALSE}
+used <- length(unique(stats::na.omit(grouped$cell_id)))
+used <- if (used == nrow(nc_cells)) paste("all", used) else
+  paste(used, "of the", nrow(nc_cells))
+```
+
+The `r nrow(counties)` counties come back as `r nrow(grouped)` rows, spread
+over `r used` cells, from `r min(table(grouped$cell_id))` to
+`r max(table(grouped$cell_id))` counties each. `sf::st_join()` on the same
+layers returns `r nrow(joined)` rows, one for each county and cell that touch
+or overlap, so a count per cell taken from it counts a county once in every
+cell it reaches.
+
+```{r group-alt, include=FALSE}
+grouped$cell <- factor(grouped$cell_id)
+group_alt <- sprintf(paste(
+  "The %d North Carolina counties, each filled with the colour of the",
+  "hexagonal cell it overlaps most, under the outlines of the %d cells",
+  "drawn over the state."), nrow(grouped), nrow(nc_cells))
+```
+
+```{r group-map, eval=has_ggplot, fig.height=2.6, fig.alt=group_alt}
+ggplot() +
+  geom_sf(data = grouped, aes(fill = cell), colour = "grey40",
+          linewidth = 0.1) +
+  geom_sf(data = nc_cells, fill = NA, colour = "black", linewidth = 0.5) +
+  scale_fill_manual(values = grDevices::hcl.colors(nlevels(grouped$cell),
+                                                   "Set 3"),
+                    guide = "none") +
+  theme_void()
+```
+
+```{r group-no-ggplot, echo=FALSE, eval=!has_ggplot, results='asis'}
+cat("*(The map needs `ggplot2`, which is not installed here.)*\n")
+```
+
+## What summarize_by_cell() returns
+
+`summarize_by_cell()` reduces the assigned rows to one row per cell. Passing
+`cells_sf` attaches the cells' geometry, so the result maps, and keeps the
+cells that hold no observation.
+
+```{r summarise}
+vals <- summarize_by_cell(asg_v, "z", id_col = "cell_id", cells_sf = vor$cells)
+names(vals)
+round(st_drop_geometry(vals)[1:4, -1], 3)
+```
+
+The columns, in order:
+
+- `cell_id`, and `n`, the observations in the cell. A cell with none has
+  `n = NA`, and stays in the result, so a map shows where there is no data.
+- `resp_mean_z`, the plain mean of the response. With `predictor_vars`, each
+  predictor gets `pred_mean_<name>` and its own columns of the kinds below.
+- `..sd_resp_z` and `..se_resp_z`, the standard deviation inside the cell and
+  the standard error of its mean. A cell of one observation has a standard
+  error of `NA`.
+- `cell_weight`, the cell's effective sample size: its count of non-missing
+  responses, divided by the design effect when `deff` applies one. Pass it as
+  the weights of a regression on cell values.
+- `..pooled_resp_z`, the pooled value: the cell's mean pulled toward the mean
+  of the observations in the 8 nearest cells (nearest by the centroid of their
+  observations). That mean is the cell's target, `..pooled_target_resp_z`.
+  The cell's own weight, `..pooled_w_resp_z`, is the share of the pooled
+  value that is the cell's own mean, and it grows with the cell's count.
+  `estimate = "mean"` leaves these three columns out.
+
+The plain mean and the pooled value both estimate the cell's true mean: the
+expected value of one further observation located in the cell the way its
+observations were. Neither is the average of a surface over the cell's area.
+Pooled values are for maps and for predicting observations. For a regression
+on cell values use the plain means with `cell_weight`; `..pooled_w_resp_z` is
+not a regression weight.
+
+Other arguments add columns. `deff` other than 1 adds `deff_applied` and
+`deff_method`, `area = TRUE` adds `cell_area` and `n_per_area`, `conf_level`
+adds a confidence interval for each mean (`..ci_lo_*`, `..ci_hi_*`), and
+`obs_level` adds a range for one further observation in the cell around the
+pooled value (`..obs_lo_*`, `..obs_hi_*`). Away from the observations no
+interval here is calibrated. `vignette("reporting")` says which interval
+answers which question, and `?summarize_by_cell` lists the columns under
+"Output columns" and "Value".
+
+## Standard errors and the design effect
+
+The naive standard error of a cell mean, \(s/\sqrt{n}\), treats the points in
+a cell as independent. As an estimate of the population (grand) mean, a cell
+mean on an autocorrelated field varies more than that: the points in a cell
+share the cell's departure from the population mean, so they carry less
+information than their count.
+
+The design effect is how many times larger a cell mean's variance is than
+\(s^2/n\) says, and \(n/\text{deff}\) is the effective sample size. Leave
+`deff = 1` when the cell means describe the cells, as on a map or in a
+regression on cell values, and the points are spread through each cell. Set
+`deff` when the cell means feed a claim about the whole population.
+
+Kish's design effect, \(1 + (n - 1)\rho\) with \(\rho\) the intra-class
+correlation inside a cell, grows with the count in a cell, so this section
+uses bigger cells, from a square grid asked for 24.
+
+```{r se-cells}
+tess <- build_tessellation(pts, boundary = bnd, method = "square",
+                           approx_n_cells = 24, quiet = TRUE)
+asg  <- assign_features_to_polygons(pts, tess$cells)
+
+c(cells = nrow(tess$cells), points = nrow(asg),
+  median_per_cell = median(table(asg$poly_id)))
+```
+
+`summarize_by_cell()` takes the design effect as `deff`. Three settings on the
+same cells:
+
+```{r deff, eval=has_gstat}
+sac  <- estimate_sac_range(pts, "z")
+iid  <- summarize_by_cell(asg, "z", cells_sf = tess$cells, deff = 1)
+kish <- summarize_by_cell(asg, "z", cells_sf = tess$cells, deff = "kish")
+vgm  <- summarize_by_cell(asg, "z", cells_sf = tess$cells, deff = "variogram",
+                          sac = sac)
+
+data.frame(n         = iid$n,
+           iid       = round(iid$..se_resp_z, 3),
+           kish      = round(kish$..se_resp_z, 3),
+           variogram = round(vgm$..se_resp_z, 3))[1:5, ]
+```
+
+```{r deff-inflation, echo=FALSE, results='asis', eval=has_gstat}
+ik <- median(kish$..se_resp_z / iid$..se_resp_z, na.rm = TRUE)
+iv <- median(vgm$..se_resp_z  / iid$..se_resp_z, na.rm = TRUE)
+cat(sprintf(paste(
+  "Across cells the standard error is a median %.2f times the naive one",
+  "under `kish` and %.2f times under `variogram`. As an estimate of the population",
+  "mean, a confidence interval built on the naive standard error is about",
+  "%.0f percent of the width the variogram correction gives it on this",
+  "field. For the cell's own mean the naive standard error is the better of",
+  "the two, and close to right when the points are spread through the cell;",
+  "the next section (`kriging_adequacy()`) measures how close on this",
+  "field.\n"), ik, iv, 100 / iv))
+```
+
+```{r deff-no-gstat, echo=FALSE, eval=!has_gstat, results='asis'}
+cat("*(This comparison needs `gstat`, which is not installed here.)*\n")
+```
+
+`deff = "kish"` estimates an intra-class correlation from the variance within
+and between cells and applies Kish's factor. `deff = "variogram"` takes the
+correlation from the fitted variogram, so it uses the spatial structure and
+not the cell labels. When no usable variogram exists, that request falls back
+to `"kish"` with a warning of class `spatialkit_deff_fallback`, and the
+`deff_method` column names the correction each row carries. The result
+records the correction and the per-cell design effects, and the Kish result
+the intra-class correlation it used:
+
+```{r deff-attrs, eval=has_gstat}
+attr(vgm, "deff_applied")$method
+summary(attr(vgm, "deff_applied")$deff)
+attr(kish, "icc")$resp
+```
+
+A cell whose design effect reaches its count holds one observation's worth of
+information, so its standard deviation says nothing about the spread and its
+standard error is `NA`. Use bigger cells or collect more points.
+
+## Is the cell mean the best estimate of the cell?
+
+The plain mean weights every point in a cell equally and ignores everything
+outside it. Block kriging weights the observations by their correlation with
+the cell under a fitted variogram, borrows from neighbouring cells, and gives
+a variance from the same model. `kriging_adequacy()` computes both for every
+cell, without changing any cell value, and scores the variogram by blocked
+cross-validation.
+
+```{r kriging, eval=has_gstat}
+ka <- kriging_adequacy(asg, "z", tess$cells, k = 4, seed = 1)
+ka
+```
+
+`plain_var` is the error variance of the plain mean under the fitted
+variogram. A naive `se^2` below it says the naive standard error is too small,
+if the variogram is right. `kr_gain` is the share of that variance kriging
+removes in the cell. `kr_ratio` is the kriging variance as a share of the
+variance the cell mean has with no data, so 1 means the data say nothing
+about the cell. `kr_shift` is how far the kriged estimate moved from the plain
+mean, over the standard deviation the variogram gives that difference: about
+a third of cells beyond 1 and one in twenty beyond 2 is what a right
+variogram produces, and more says the means and the model disagree. The
+blocked cross-validation at the end standardises each held-out error by its
+kriging standard deviation: a variance of 1 for those standardised errors
+means the kriging variance is right, and above 1 means it is too small.
+
+```{r kriging-cols, eval=has_gstat}
+round(as.data.frame(st_drop_geometry(ka))[1:4, c("n", "mean", "se",
+                                                 "plain_var", "kr_pred",
+                                                 "kr_var", "kr_ratio",
+                                                 "kr_gain", "kr_shift")], 3)
+```
+
+```{r kriging-reading, echo=FALSE, results='asis', eval=has_gstat}
+ok    <- is.finite(ka$se) & is.finite(ka$plain_var) & ka$plain_var > 0 &
+         ka$n >= 2
+ratio <- median(ka$se[ok]^2 / ka$plain_var[ok])
+shift <- ka$kr_shift[is.finite(ka$kr_shift)]
+naive <- if (ratio < 1) {
+  sprintf("so the naive standard error is about %.0f percent too small",
+          100 * (1 - sqrt(ratio)))
+} else "so the naive standard error is not too small"
+cat(sprintf(paste(
+  "On this field the naive variance \\(s^2/n\\) is %.2f of `plain_var` in",
+  "the median cell, %s for the cell's own mean. Kriging removes a median",
+  "%.0f percent of the plain mean's error variance. `kr_shift` is beyond 1",
+  "in %d of the %d cells and beyond 2 in %d, against about %.0f and %.0f",
+  "for a right variogram, and the variance of the standardised errors is",
+  "%.2f.\n"),
+  ratio, naive, 100 * median(ka$kr_gain, na.rm = TRUE),
+  sum(abs(shift) > 1), length(shift), sum(abs(shift) > 2),
+  2 * pnorm(-1) * length(shift), 2 * pnorm(-2) * length(shift),
+  attr(ka, "cv")$zscore_var))
+```
+
+```{r kriging-no-gstat, echo=FALSE, eval=!has_gstat, results='asis'}
+cat("*(The kriging check needs `gstat`, which is not installed here.)*\n")
+```
+
+```{r se-empty, include=FALSE}
+se_empty <- sum(!tess$cells$poly_id %in% asg$poly_id)
+```
+
+An empty cell still gets a kriged estimate and variance, and the `empty
+cells` line of the report counts them. This grid of `r nrow(tess$cells)`
+cells over `r nrow(asg)` points has
+`r if (se_empty == 0) "none" else se_empty`.
+
+## Pooled values and their warnings
+
+`summarize_by_cell()` reports problems with the pooled values, and with
+whether the cells match the count chosen for them, as R warnings with a
+class. Each is raised once per call and reason and carries its numbers as
+fields, so you can catch one by its class and read it without matching its
+text; a warning about the pooled columns also names the columns it applies
+to. `?"spatialkit-conditions"` lists every
+class the package raises. The helper below runs a call and returns the
+classes it raised:
+
+```{r raised}
+raised <- function(expr) {
+  seen <- character(0)
+  withCallingHandlers(expr, warning = function(w) seen <<- c(seen, class(w)[1]))
+  seen
+}
+```
+
+The Voronoi cells above were sized for pooled values at 4.5 observations
+per cell. `select_resolution()` keeps a record of that
+choice: the count, the rule that set it and the cell value it was chosen for.
+The seeds, the cells and the assigned rows carry the record, and
+`summarize_by_cell()` checks each summary against it. A summary of the value
+the count was chosen for, on the cells and rows that were scored, raises
+nothing:
+
+```{r pooled-clean}
+raised(summarize_by_cell(asg_v, "z", id_col = "cell_id", cells_sf = vor$cells))
+```
+
+Each warning below is a departure from that.
+
+### The count was chosen for the other value (`spatialkit_estimate_mismatch`)
+
+This call asks for plain means from cells whose count was set for pooled
+values. `tryCatch()` catches the warning by its class, and the chunk prints
+its text and its fields:
+
+```{r mismatch}
+w <- tryCatch(
+  summarize_by_cell(asg_v, "z", id_col = "cell_id", cells_sf = vor$cells,
+                    estimate = "mean"),
+  spatialkit_estimate_mismatch = function(w) w)
+writeLines(strwrap(conditionMessage(w), 76))
+unlist(unclass(w)[c("chosen_for", "reported", "rule", "cells")])
+```
+
+The summary is returned as asked. Report the value the count was chosen for,
+or choose the count for the value you report:
+`resolution_profile(estimate = "mean")` with
+`select_resolution(criterion = "loo")`.
+
+### Not the cells and rows that were scored (`spatialkit_cells_differ`)
+
+The summary fits the response again on what it is given and compares the
+rows, the cells that hold one and the leave-one-out error with the record.
+Here twenty rows are dropped after the assignment:
+
+```{r differ}
+w <- tryCatch(
+  summarize_by_cell(asg_v[-(1:20), ], "z", id_col = "cell_id",
+                    cells_sf = vor$cells),
+  spatialkit_cells_differ = function(w) w)
+writeLines(strwrap(conditionMessage(w), 76))
+w$what
+rbind(scored = unlist(w$scored), found = unlist(w$found))
+```
+
+`what` names the first comparison that failed: `"n"` for another number of
+rows with a response, `"cells"` for another number of cells that hold one,
+`"loo"` for the same rows in the same number of cells with another
+leave-one-out error, which means rows sit in other cells, and `"record"` when
+the assigned layer and `cells_sf` carry different records. The usual causes
+are rows filtered after the assignment, a boundary that leaves points in no
+cell, and a layer other than the one profiled. Points on a boundary between
+two cells, as on gridded data, are placed so that a lattice passes the check;
+`?summarize_by_cell` ("Value") lists the cases where they are not. The
+returned values describe the cells as given, `attr(, "count_rule")$check`
+keeps the outcome, and cells you bring yourself carry no record and are not
+checked.
+
+### No better than one mean (`spatialkit_no_structure`)
+
+`b` is noise by construction. This chunk shows the warning as R prints it:
+
+```{r no-structure, warning=TRUE}
+noise <- summarize_by_cell(asg_v, "b", id_col = "cell_id")
+as.data.frame(attr(noise, "pooled")$columns$resp_b[
+  c("loo", "loo_one_cell", "structure_p", "own_weight", "structured")])
+```
+
+`structured` is `TRUE` only when one mean for all rows predicts a left-out
+row more than 2 percent worse than the pooled values do (`loo_one_cell`
+against `loo`) and the F test of the cell means against one mean gives a
+p-value below 0.05 (`structure_p`). Otherwise it is `FALSE`, and the warning
+is raised. The values are still returned, and a map of them looks smooth,
+because each is mostly the mean of its neighbours. On 200 simulated layers
+with white noise as the response, the median own weight was 0.11, and a
+cell's pooled value had a correlation of 0.79 with the mean of the pooled
+values of its 8 nearest cells, where the plain means had one of -0.02
+([`dev/sim-pooled-values.R`](https://github.com/elkronos/gis_modeling_toolkit/blob/main/dev/sim-pooled-values.R)
+in the package's GitHub repository; `?summarize_by_cell` gives the settings
+under "How this was checked"). The warning means one mean describes this
+column; the smooth map comes from the pooling.
+
+### Values with no pooling (`spatialkit_pool_degenerate`)
+
+Its `reason` says which of three cases it is. A column that does not vary
+inside any cell is one of them:
+
+```{r degenerate}
+asg_v$flat <- 1
+w <- tryCatch(summarize_by_cell(asg_v, "flat", id_col = "cell_id"),
+              spatialkit_pool_degenerate = function(w) w)
+writeLines(strwrap(conditionMessage(w), 76))
+w$reason
+```
+
+With `"no spread inside any cell"` and with `"one cell"`, every own weight is
+1 and the pooled value is the plain mean. With `"no signal between cells"`,
+the cell means differ from their targets by no more than the spread inside
+the cells explains: every own weight is 0, and each pooled value is its
+target and holds none of the cell's own observations.
+`spatialkit_no_structure` is the warning that marks a response without
+structure: in the simulation it was raised on all 200 white-noise layers, and
+the reason `"no signal between cells"` on 20 of them.
+
+### Too few cells for neighbours (`spatialkit_pool_few_cells`)
+
+With 2 to 9 cells, the neighbours of a cell are all the other cells, so its
+target is the mean of every observation outside it. A square grid asked for
+very few cells shows it:
+
+```{r few-cells, warning=TRUE}
+few   <- build_tessellation(pts, boundary = bnd, method = "square",
+                            approx_n_cells = 4, quiet = TRUE)$cells
+asg_f <- assign_features_to_polygons(pts, few, quiet = TRUE)
+four  <- summarize_by_cell(asg_f, "z")
+round(as.data.frame(four)[, c("poly_id", "n", "resp_mean_z", "..pooled_resp_z",
+                              "..pooled_w_resp_z", "..pooled_target_resp_z")],
+      3)
+```
+
+The grid has `r nrow(few)` cells, and the cells numbered
+`r paste(setdiff(few$poly_id, four$poly_id), collapse = " and ")`, strips at
+the edge of the box, hold no point, so the summary has a row for each of the
+other `r nrow(four)`. The overall mean lies between a cell's own mean and its
+target. A cell whose own weight is below its share of the observations
+therefore gets a pooled value on the far side of the overall mean from its
+plain mean, and two cells can change order. The `..pooled_w_*` column shows
+how close each cell is to that, and `estimate = "mean"` gives the plain means.
+
+`?summarize_by_cell` lists these classes and the other warnings of the pooled
+values under "Conditions", with the fields each carries.
+
+## Values at other locations
+
+`cell_values_at()` gives a location the value of the cell it lies in, the
+pooled value when the summary holds one, and its distance from the nearest
+observation. `dist_ratio` is that distance over the layer's spacing (the
+median distance from an observation to the nearest other), the number to
+report beside a value read anywhere but at an observation. Passing the seeds
+the cells were built on, each with its cell from `vor$index`, extends each
+Voronoi cell past the clipped edge, so a location outside every cell takes
+the cell of its nearest seed. The third location below lies outside the
+boundary:
+
+```{r values-at}
+seeds$cell_id <- vor$index
+where <- st_as_sf(data.frame(x = 5e5 + c(250, 600, 1300),
+                             y = 5e6 + c(250, 700, 500)),
+                  coords = c("x", "y"), crs = 32632)
+at <- cell_values_at(where, vals, asg_v, "z", id_col = "cell_id", seeds = seeds)
+at[c("value", "dist_ratio")] <- lapply(at[c("value", "dist_ratio")], round, 2)
+at[, c("cell_id", "value", "estimate", "filled", "dist_ratio")]
+```
+
+Without `seeds`, a location outside every cell comes back with
+`filled = TRUE`, and `filled_from` names the cell its value was taken from.
+`vignette("reporting")` shows the same call with intervals, and what to
+report with them.
+
+## Next
+
+`vignette("spatial-cross-validation")` comes next: folds whose score matches
+the map you will make. `vignette("reporting")` writes the cells to a file
+others can join to. The help pages behind this article are
+`?clip_target_for`, `?build_tessellation`, `?get_voronoi_seeds`,
+`?assign_features_to_polygons`, `?summarize_by_cell`, `?estimate_sac_range`,
+`?kriging_adequacy` and `?cell_values_at`.
