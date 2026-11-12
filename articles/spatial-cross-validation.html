@@ -5,14 +5,16 @@
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <title>Spatial cross-validation • spatialkit</title>
-<script src="../deps/jquery-3.6.0/jquery-3.6.0.min.js"></script><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<!-- katex math --><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous" onload="renderMathInElement(document.body);"></script><script src="../katex-auto.js"></script><script src="../deps/jquery-3.6.0/jquery-3.6.0.min.js"></script><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <link href="../deps/bootstrap-5.3.8/bootstrap.min.css" rel="stylesheet">
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
-<script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><meta property="og:title" content="Spatial cross-validation">
-<meta name="description" content="What a fold's score estimates, the six fold schemes, block sizes and the autocorrelation range, and reading a cross-validation result down to the last row.
+<script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><link href="../extra.css" rel="stylesheet">
+<meta property="og:title" content="Spatial cross-validation">
+<meta name="description" content="Choose folds whose score matches the map you will make, size the blocks, and read every part of the result.
 ">
-<meta property="og:description" content="What a fold's score estimates, the six fold schemes, block sizes and the autocorrelation range, and reading a cross-validation result down to the last row.
+<meta property="og:description" content="Choose folds whose score matches the map you will make, size the blocks, and read every part of the result.
 ">
 </head>
 <body>
@@ -37,16 +39,21 @@
 <li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><a class="dropdown-item" href="../articles/getting-started.html">Getting started</a></li>
+<li><a class="dropdown-item" href="../articles/getting-started.html">Get started</a></li>
     <li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>One topic at a time</h6></li>
+    <li><h6 class="dropdown-header" data-toc-skip>Step by step</h6></li>
     <li><a class="dropdown-item" href="../articles/resolution.html">Choosing a resolution</a></li>
+    <li><a class="dropdown-item" href="../articles/cells.html">Building cells and summarising them</a></li>
     <li><a class="dropdown-item" href="../articles/spatial-cross-validation.html">Spatial cross-validation</a></li>
-    <li><a class="dropdown-item" href="../articles/diagnostics.html">Diagnostics</a></li>
+    <li><a class="dropdown-item" href="../articles/models.html">Fitting and checking models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">Exporting and reporting results</a></li>
     <li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
-    <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
-    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
+    <li><h6 class="dropdown-header" data-toc-skip>Example</h6></li>
+    <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">Worked example: North Carolina</a></li>
+    <li><hr class="dropdown-divider"></li>
+    <li><h6 class="dropdown-header" data-toc-skip>Help</h6></li>
+    <li><a class="dropdown-item" href="../articles/troubleshooting.html">Troubleshooting and performance</a></li>
+    <li><a class="dropdown-item" href="../articles/glossary.html">Terms used on these pages</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -73,7 +80,6 @@
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">11 November 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/spatial-cross-validation.Rmd" class="external-link"><code>vignettes/spatial-cross-validation.Rmd</code></a></small>
       <div class="d-none name"><code>spatial-cross-validation.Rmd</code></div>
@@ -81,33 +87,41 @@ Chase</h4>
 
     
     
-<p><em>This article needs two optional packages: <strong>gstat</strong>,
-which fits the variogram behind the autocorrelation range, and
-<strong>ggplot2</strong> for the figures. When either is missing the
-code is shown but not run, and a note at the top says so.</em></p>
+<p>This article shows what a cross-validated error measures, how to
+choose <a href="glossary.html#fold">folds</a> whose score matches the
+map you will make, how to size the <a href="glossary.html#block">blocks</a>, and how to read every part of the
+result.</p>
+<p><em>This article needs two optional packages: <code>gstat</code> for
+the autocorrelation range and <code>ggplot2</code> for the figures.
+Where one is missing, the code that needs it is shown but not
+run.</em></p>
 <div class="section level2">
-<h2 id="what-a-fold-measures">What a fold measures<a class="anchor" aria-label="anchor" href="#what-a-fold-measures"></a>
+<h2 id="what-a-cross-validated-error-measures">What a cross-validated error measures<a class="anchor" aria-label="anchor" href="#what-a-cross-validated-error-measures"></a>
 </h2>
-<p>A random fold puts a test point’s neighbours in the training set.
+<p>A random fold puts a held-out point’s neighbours in the training set.
 When the field is spatially autocorrelated, those neighbours carry the
-test point’s value, and a model that draws on nearby observations uses
-them. The cross-validation score then measures the error of predicting
-among the samples. Blocks hold out whole areas, and their score measures
-the error of predicting into an unsampled gap the size of a block.</p>
+held-out point’s value, and a model that draws on nearby observations
+uses them. The cross-validation score then measures the error of
+predicting among the samples. Blocks hold out whole areas, and their
+score measures the error of predicting into an unsampled gap the size of
+a block (Roberts et al. 2017).</p>
 <p>A cross-validated error is the error at the distance the folds put
 between the held-out points and their training data. It reads low for a
 map whose locations sit farther from the data than that, and high for
-one whose locations sit closer. Everything else in this vignette follows
-from matching the folds to the map.</p>
+one whose locations sit closer.</p>
 </div>
 <div class="section level2">
-<h2 id="a-learner-you-can-read">A learner you can read<a class="anchor" aria-label="anchor" href="#a-learner-you-can-read"></a>
+<h2 id="a-learner-and-a-simulated-field">A learner and a simulated field<a class="anchor" aria-label="anchor" href="#a-learner-and-a-simulated-field"></a>
 </h2>
-<p>The effect is easiest to see with a model whose memorising is
-obvious. <code><a href="../reference/new_spatial_fit.html">new_spatial_fit()</a></code> is the extension point for
-putting your own learner on the package’s folds, and
-five-nearest-neighbour smoothing is about the simplest thing that fits
-through it.</p>
+<p>Each function that scores a model takes the folds from
+<code><a href="../reference/make_folds.html">make_folds()</a></code> through its <code>folds</code> argument:
+<code><a href="../reference/cv_rf.html">cv_rf()</a></code>, <code><a href="../reference/cv_gwr.html">cv_gwr()</a></code> and <code><a href="../reference/cv_bayes.html">cv_bayes()</a></code>
+for the built-in backends, <code><a href="../reference/compare_models_cv.html">compare_models_cv()</a></code> to score
+several on the same folds, and <code><a href="../reference/cv_spatial.html">cv_spatial()</a></code> for a learner
+of your own. This article uses a five-nearest-neighbour smoother written
+for <code><a href="../reference/cv_spatial.html">cv_spatial()</a></code>. It needs no optional package and predicts
+from the five nearest observations alone, so how far the folds hold
+those observations away decides its score.</p>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r-spatial.github.io/sf/" class="external-link">sf</a></span><span class="op">)</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://elkronos.github.io/gis_modeling_toolkit/">spatialkit</a></span><span class="op">)</span></span>
@@ -133,19 +147,17 @@ through it.</p>
 <span>    <span class="fu"><a href="https://rdrr.io/r/base/mean.html" class="external-link">mean</a></span><span class="op">(</span><span class="va">e</span><span class="op">$</span><span class="va">y</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/order.html" class="external-link">order</a></span><span class="op">(</span><span class="va">d</span><span class="op">)</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq_len</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">min</a></span><span class="op">(</span><span class="va">e</span><span class="op">$</span><span class="va">k</span>, <span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">d</span><span class="op">)</span><span class="op">)</span><span class="op">)</span><span class="op">]</span><span class="op">]</span><span class="op">)</span></span>
 <span>  <span class="op">}</span>, <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">numeric</a></span><span class="op">(</span><span class="fl">1</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="op">}</span></span>
-<span><span class="va">residuals.knnsurf_fit</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">object</span>, <span class="va">...</span><span class="op">)</span> <span class="va">object</span><span class="op">$</span><span class="va">engine</span><span class="op">$</span><span class="va">y</span> <span class="op">-</span> <span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span><span class="va">object</span><span class="op">)</span></span>
-<span><span class="va">fitted.knnsurf_fit</span>    <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">object</span>, <span class="va">...</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span><span class="va">object</span><span class="op">)</span></span>
-<span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/ns-internal.html" class="external-link">registerS3method</a></span><span class="op">(</span><span class="st">"predict"</span>,   <span class="st">"knnsurf_fit"</span>, <span class="va">predict.knnsurf_fit</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/ns-internal.html" class="external-link">registerS3method</a></span><span class="op">(</span><span class="st">"residuals"</span>, <span class="st">"knnsurf_fit"</span>, <span class="va">residuals.knnsurf_fit</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/ns-internal.html" class="external-link">registerS3method</a></span><span class="op">(</span><span class="st">"fitted"</span>,    <span class="st">"knnsurf_fit"</span>, <span class="va">fitted.knnsurf_fit</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/ns-internal.html" class="external-link">registerS3method</a></span><span class="op">(</span><span class="st">"predict"</span>, <span class="st">"knnsurf_fit"</span>, <span class="va">predict.knnsurf_fit</span><span class="op">)</span></span>
 <span></span>
 <span><span class="va">knn_fn</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">train_sf</span>, <span class="va">...</span><span class="op">)</span> <span class="fu">knn_fit</span><span class="op">(</span><span class="va">train_sf</span>, <span class="st">"z"</span>, k <span class="op">=</span> <span class="fl">5L</span><span class="op">)</span></span></code></pre></div>
-<p>Three methods and a constructor. <code><a href="../reference/cv_spatial.html">cv_spatial()</a></code> asks
-nothing else of a learner, and <code><a href="../reference/new_spatial_fit.html">?new_spatial_fit</a></code> documents
-what each backend in the package supplies beyond this minimum.</p>
-<p>A simulated exponential field to run it on, with an effective range
-of 180 units over a 1000-unit square:</p>
+<p><code><a href="../reference/cv_spatial.html">cv_spatial()</a></code> needs only the constructor and a
+<code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> method. <code><a href="../reference/new_spatial_fit.html">?new_spatial_fit</a></code> lists what
+<code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> and <code><a href="../reference/model_metrics.html">model_metrics()</a></code> need on top of
+that, and <code><a href="../articles/models.html">vignette("models")</a></code> explains the pattern.</p>
+<p>The data are 400 points in a 1,000 m square (EPSG:32632) over a
+simulated exponential field with range parameter 60 m, so its
+correlation falls to 5 percent at about 180 m, three times the range
+parameter. The <code>sd = 0.3</code> term adds measurement noise.</p>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">7</span><span class="op">)</span></span>
 <span><span class="va">n</span>  <span class="op">&lt;-</span> <span class="fl">400</span></span>
@@ -156,17 +168,18 @@ of 180 units over a 1000-unit square:</p>
 <span><span class="va">pts</span>  <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sf.html" class="external-link">st_as_sf</a></span><span class="op">(</span><span class="va">xy</span>, coords <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>, crs <span class="op">=</span> <span class="fl">32632</span><span class="op">)</span></span></code></pre></div>
 </div>
 <div class="section level2">
-<h2 id="the-size-of-the-effect">The size of the effect<a class="anchor" aria-label="anchor" href="#the-size-of-the-effect"></a>
+<h2 id="random-folds-against-blocks">Random folds against blocks<a class="anchor" aria-label="anchor" href="#random-folds-against-blocks"></a>
 </h2>
-<p>Same data, same learner, two fold schemes.</p>
+<p>The next chunk scores the same learner on the same data with random
+folds and with blocks, and prints the size of the blocks built.</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># The field was simulated with an effective range of 180 units, so 200-unit</span></span>
-<span><span class="co"># blocks hold out whole patches of it.  Sizing blocks from the data, when the</span></span>
-<span><span class="co"># range is not known, is the next section.</span></span>
-<span><span class="va">fr</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"random_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<code class="sourceCode R"><span><span class="va">fr</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"random_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
 <span><span class="va">fb</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, block_size <span class="op">=</span> <span class="fl">200</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
-<span></span>
-<span><span class="va">cv_random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>, folds <span class="op">=</span> <span class="va">fr</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>width <span class="op">=</span> <span class="va">fb</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">block_width</span>, height <span class="op">=</span> <span class="va">fb</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">block_height</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##    width   height </span></span>
+<span><span class="co">## 247.0732 249.3515</span></span></code></pre>
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">cv_random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>, folds <span class="op">=</span> <span class="va">fr</span><span class="op">)</span></span>
 <span><span class="va">cv_blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>, folds <span class="op">=</span> <span class="va">fb</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>random  <span class="op">=</span> <span class="va">cv_random</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span>,</span>
@@ -174,237 +187,458 @@ of 180 units over a 1000-unit square:</p>
 <span>  ratio   <span class="op">=</span> <span class="va">cv_blocked</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span> <span class="op">/</span> <span class="va">cv_random</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">##    random   blocked     ratio </span></span>
 <span><span class="co">## 0.7839092 1.0086341 1.2866722</span></span></code></pre>
-<p>Blocked folds put the error 29% higher on this fixture. Both numbers
-come from the same 400 observations and the same smoother; the
-difference is entirely in which rows were allowed to train on which.</p>
-<p>Neither number is the error of every map. The random one is the error
-of predicting among the samples; the blocked one is the error of
-predicting into a gap a block wide. Which one a map has is a question of
-where it predicts, and <code><a href="../reference/fold_separation.html">fold_separation()</a></code> answers it: given
-the locations the map will predict at, it sets their distances to the
-data beside the held-out distances of each design. For a map of the
-square, the cells of a grid over it:</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">cells</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_make_grid.html" class="external-link">st_make_grid</a></span><span class="op">(</span><span class="va">pts</span>, n <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">30</span>, <span class="fl">30</span><span class="op">)</span>, what <span class="op">=</span> <span class="st">"centers"</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>random  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="fu"><a href="../reference/fold_separation.html">fold_separation</a></span><span class="op">(</span><span class="va">fr</span>, <span class="va">pts</span>, prediction_points <span class="op">=</span> <span class="va">cells</span><span class="op">)</span>, <span class="st">"target"</span><span class="op">)</span><span class="op">$</span><span class="va">reading</span>,</span>
-<span>  blocked <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="fu"><a href="../reference/fold_separation.html">fold_separation</a></span><span class="op">(</span><span class="va">fb</span>, <span class="va">pts</span>, prediction_points <span class="op">=</span> <span class="va">cells</span><span class="op">)</span>, <span class="st">"target"</span><span class="op">)</span><span class="op">$</span><span class="va">reading</span><span class="op">)</span></span></code></pre></div>
+<p><code>block_size</code> is the smallest edge a block may have.
+<code><a href="../reference/make_folds.html">make_folds()</a></code> fits a whole number of blocks across each
+axis, so over this square <code>block_size = 200</code> builds a 4 by 4
+grid of blocks 247 m wide and 249 m tall, wider than the 180 m range.
+“Choosing a block size” below sizes the blocks from the data. Without
+<code>folds</code>, <code><a href="../reference/cv_spatial.html">cv_spatial()</a></code> builds block folds itself;
+build them with <code><a href="../reference/make_folds.html">make_folds()</a></code> when you want to inspect or
+reuse them.</p>
+<p>Blocked folds put the error 29 percent higher on this fixture. Both
+numbers come from the same 400 observations and the same smoother; only
+the fold assignment differs.</p>
+<p>Two choices made outside the folds change what either score measures.
+A model given the coordinates as predictors
+(<code>fit_rf_model(include_coords = TRUE)</code>) can learn the
+training surface by location, so its error grows quickly with the
+distance from the data. Predictors chosen on the whole data set have
+seen every held-out row, and <code><a href="../reference/select_features_forward.html">select_features_forward()</a></code>
+chooses them inside the folds instead. <code><a href="../articles/models.html">vignette("models")</a></code>
+covers both.</p>
+</div>
+<div class="section level2">
+<h2 id="which-score-matches-your-map">Which score matches your map<a class="anchor" aria-label="anchor" href="#which-score-matches-your-map"></a>
+</h2>
+<p>The number that applies depends on where the map predicts.
+<code><a href="../reference/fold_separation.html">fold_separation()</a></code> takes the locations the map will predict
+at and compares two sets of distances: from each of those locations to
+the nearest training point, and from each held-out point to the nearest
+point of its fold’s training data. Here the map is a 30 by 30 grid of
+points over the square, and <code>reading()</code> returns the one-word
+reading of a set of folds against it.</p>
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">map_pts</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_make_grid.html" class="external-link">st_make_grid</a></span><span class="op">(</span><span class="va">pts</span>, n <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">30</span>, <span class="fl">30</span><span class="op">)</span>, what <span class="op">=</span> <span class="st">"centers"</span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">reading</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">folds</span>, <span class="va">data</span> <span class="op">=</span> <span class="va">pts</span><span class="op">)</span> <span class="op">{</span></span>
+<span>  <span class="va">sep</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/fold_separation.html">fold_separation</a></span><span class="op">(</span><span class="va">folds</span>, <span class="va">data</span>, prediction_points <span class="op">=</span> <span class="va">map_pts</span><span class="op">)</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">sep</span>, <span class="st">"target"</span><span class="op">)</span><span class="op">$</span><span class="va">reading</span></span>
+<span><span class="op">}</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>random <span class="op">=</span> <span class="fu">reading</span><span class="op">(</span><span class="va">fr</span><span class="op">)</span>, blocked <span class="op">=</span> <span class="fu">reading</span><span class="op">(</span><span class="va">fb</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">##    random   blocked </span></span>
 <span><span class="co">## "matched" "farther"</span></span></code></pre>
-<p><code>"matched"</code> says the held-out points sit about as far from
-their training data as the map’s cells do, so the score is the error of
-that map; <code>"farther"</code> says they sit farther, and the score
-reads high for it; <code>"closer"</code>, the reading of random folds on
-clustered samples with a map of the whole region, says it reads low.
-<code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> on a <code><a href="../reference/fold_separation.html">fold_separation()</a></code> result gives
-the distances fold by fold, and
-<code>make_folds(method = "knndm", prediction_points = cells)</code>
-builds folds matched to the cells.</p>
+<p>The reading is one of four:</p>
+<ul>
+<li>
+<code>"matched"</code>: the held-out points sit about as far from
+their training data as the map’s points do, so the score estimates the
+error at the map’s distances.</li>
+<li>
+<code>"farther"</code>: they sit farther, and the score tends to
+read high for this map.</li>
+<li>
+<code>"closer"</code>: they sit closer, and the score tends to read
+low for this map. Random folds on clustered samples, with a map of the
+whole region, read this way.</li>
+<li>
+<code>"mixed"</code>: closer at some distances and farther at
+others, so the distances give no single direction.</li>
+</ul>
+<p>The reading compares nearest-neighbour distances only. On clustered
+samples, a learner that averages several neighbours can still score low
+when those distances match.</p>
+<p><code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> gives the distances fold by fold:</p>
+<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">sep_blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/fold_separation.html">fold_separation</a></span><span class="op">(</span><span class="va">fb</span>, <span class="va">pts</span>, prediction_points <span class="op">=</span> <span class="va">map_pts</span><span class="op">)</span></span>
+<span><span class="va">sep_blocked</span></span></code></pre></div>
+<pre><code><span><span class="co">## Fold separation: block_kfold, 5 fold(s), 400 held-out point(s) (EPSG:32632)</span></span>
+<span><span class="co">##   prediction target: 900 point(s), measured to each fold's training data</span></span>
+<span><span class="co">## </span></span>
+<span><span class="co">##  fold n_train n_test n_blocks min_dist median_dist target   gap</span></span>
+<span><span class="co">##     1     322     78        3    27.33       90.32  27.35 61.75</span></span>
+<span><span class="co">##     2     324     76        3    12.77       76.32  27.44 43.02</span></span>
+<span><span class="co">##     3     307     93        4    12.77       83.85  28.87 46.78</span></span>
+<span><span class="co">##     4     323     77        3    14.66      127.40  27.33 91.32</span></span>
+<span><span class="co">##     5     324     76        3    14.66       86.82  27.52 51.98</span></span>
+<span><span class="co">## </span></span>
+<span><span class="co">##   Held-out points sit a median of 89.72 from their nearest training</span></span>
+<span><span class="co">##   point; the closest is 12.77 away.</span></span>
+<span><span class="co">##   The prediction points sit a median of 27.56 from the same training data</span></span>
+<span><span class="co">##   (23.19 from the nearest of all sites). Held-out minus prediction:</span></span>
+<span><span class="co">##   +58.55 in mean distance (W1 58.55). The held-out points sit farther</span></span>
+<span><span class="co">##   from their training data than the prediction points do, so the</span></span>
+<span><span class="co">##   cross-validated error tends to read high for these prediction points.</span></span></code></pre>
+<p><code>min_dist</code> and <code>median_dist</code> run from each
+held-out point to its nearest training point, <code>target</code> is the
+median distance from the map’s points to the same training data, and
+<code>gap</code> is the fold’s mean held-out distance minus its mean
+prediction distance. The lines under the table pool the folds: the
+held-out points sit a median of 89.7 m from their training data, and the
+map’s points 27.6 m.</p>
+<div class="section level3">
+<h3 id="clustered-samples">Clustered samples<a class="anchor" aria-label="anchor" href="#clustered-samples"></a>
+</h3>
+<p>The points of this fixture cover the square evenly, so random folds
+read <code>"matched"</code> for a map of it. The next chunk keeps only
+the points within 120 m of six of them, a clustered sample, and reads
+random folds and kNNDM folds against the same map of the whole
+square.</p>
+<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">2</span><span class="op">)</span></span>
+<span><span class="va">centres</span> <span class="op">&lt;-</span> <span class="va">pts</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/sample.html" class="external-link">sample</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">pts</span><span class="op">)</span>, <span class="fl">6</span><span class="op">)</span>, <span class="op">]</span></span>
+<span><span class="va">cl</span> <span class="op">&lt;-</span> <span class="va">pts</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/lengths.html" class="external-link">lengths</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/geos_binary_pred.html" class="external-link">st_is_within_distance</a></span><span class="op">(</span><span class="va">pts</span>, <span class="va">centres</span>, dist <span class="op">=</span> <span class="fl">120</span><span class="op">)</span><span class="op">)</span> <span class="op">&gt;</span> <span class="fl">0</span>, <span class="op">]</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">cl</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">## [1] 102</span></span></code></pre>
+<div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">fr_cl</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">cl</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"random_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="va">fk_cl</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">cl</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"knndm"</span>, prediction_points <span class="op">=</span> <span class="va">map_pts</span>,</span>
+<span>                    seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>random <span class="op">=</span> <span class="fu">reading</span><span class="op">(</span><span class="va">fr_cl</span>, <span class="va">cl</span><span class="op">)</span>, knndm <span class="op">=</span> <span class="fu">reading</span><span class="op">(</span><span class="va">fk_cl</span>, <span class="va">cl</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##    random     knndm </span></span>
+<span><span class="co">##  "closer" "matched"</span></span></code></pre>
+<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">cv_random_cl</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">cl</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>,</span>
+<span>                           folds <span class="op">=</span> <span class="va">fr_cl</span><span class="op">)</span></span>
+<span><span class="va">cv_knndm_cl</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">cl</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>,</span>
+<span>                           folds <span class="op">=</span> <span class="va">fk_cl</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>random <span class="op">=</span> <span class="va">cv_random_cl</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span>, knndm <span class="op">=</span> <span class="va">cv_knndm_cl</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##    random     knndm </span></span>
+<span><span class="co">## 0.7815208 1.2562404</span></span></code></pre>
+<p>Random folds read <code>"closer"</code>: each held-out point keeps
+training points from its own cluster, a median of 27.8 m away, while the
+map’s points sit a median of 107 m from the same training data.
+<code>method = "knndm"</code> (Linnenbrink et al. 2024) builds
+<code>k</code> folds whose held-out distances come as close as it can to
+the distances from <code>map_pts</code> to the samples, here by grouping
+the samples into 8 clusters, and reads <code>"matched"</code>. Its RMSE
+of 1.26, against 0.78 for random folds, is the score at the distances
+the map has to reach. For this five-neighbour learner it can still read
+low for this map, as the caveat on clustered samples above says.</p>
+</div>
 </div>
 <div class="section level2">
 <h2 id="the-six-fold-schemes">The six fold schemes<a class="anchor" aria-label="anchor" href="#the-six-fold-schemes"></a>
 </h2>
+<p><code>make_folds(method = )</code> builds six fold schemes:</p>
 <table class="table">
 <colgroup>
-<col width="33%">
-<col width="33%">
-<col width="33%">
+<col width="20%">
+<col width="20%">
+<col width="20%">
+<col width="20%">
+<col width="20%">
 </colgroup>
 <thead><tr class="header">
 <th><code>method</code></th>
-<th>holds out</th>
-<th>use it when</th>
+<th>held out in each fold</th>
+<th>also left out of training</th>
+<th>needs</th>
+<th>suits a map that</th>
 </tr></thead>
 <tbody>
 <tr class="odd">
 <td><code>random_kfold</code></td>
-<td>a random 1/k of rows</td>
-<td>the map predicts among the samples (an area they cover evenly), or
-the data are not autocorrelated</td>
+<td>a random 1/k of the rows</td>
+<td>nothing</td>
+<td><code>k</code></td>
+<td>predicts among the samples, over an area they cover evenly</td>
 </tr>
 <tr class="even">
 <td><code>block_kfold</code></td>
-<td>contiguous spatial blocks</td>
-<td>the map predicts into unsampled gaps; size the blocks from the width
-of the gaps, or from the correlation range</td>
+<td>the points in whole blocks of a grid, or of <code>blocks</code>
+</td>
+<td>nothing</td>
+<td>
+<code>k</code>; optionally <code>block_size</code>,
+<code>auto_range</code>, <code>block_nx</code>/<code>block_ny</code> or
+<code>blocks</code> (otherwise about <code>block_multiplier * k</code>
+blocks)</td>
+<td>predicts into unsampled gaps about as wide as the blocks</td>
 </tr>
 <tr class="odd">
 <td><code>buffered_loo</code></td>
-<td>one point, and everything within <code>buffer</code> of it</td>
-<td>n is small and you can afford n fits</td>
+<td>one point</td>
+<td>every point within <code>buffer</code> of it</td>
+<td>
+<code>buffer</code>; <code>max_test</code> limits the number of
+fits</td>
+<td>predicts at a known distance from the data</td>
 </tr>
 <tr class="even">
 <td><code>leave_location_out</code></td>
-<td>every observation from one site, named by
-<code>group_var</code>
-</td>
-<td>you have repeat visits and the site is the unit</td>
+<td>every row of one or more locations</td>
+<td>nothing</td>
+<td><code>group_var</code></td>
+<td>predicts at sites with no measurements, from repeated measurements
+at others</td>
 </tr>
 <tr class="odd">
 <td><code>nndm</code></td>
-<td>one point, and a distance-matched exclusion</td>
-<td>you know where you will predict, and want the fold geometry to match
-it</td>
+<td>one point</td>
+<td>neighbours, chosen to match the prediction distances (Milà et
+al. 2022)</td>
+<td>
+<code>prediction_points</code>; at most 5,000 rows</td>
+<td>predicts at known locations, with a model cheap enough to refit once
+per point</td>
 </tr>
 <tr class="even">
 <td><code>knndm</code></td>
-<td>one of <code>k</code> folds built from clusters of the points,
-matched to the prediction distances</td>
-<td>the same, with more rows than <code>nndm</code> takes (5,000) or too
-many for one fit per point; the match is coarser</td>
+<td>one of <code>k</code> folds, from clusters of the points or a random
+partition, whichever comes closer to the prediction distances</td>
+<td>nothing</td>
+<td><code>prediction_points</code></td>
+<td>predicts at known locations, from a larger layer or with a costly
+model</td>
 </tr>
 </tbody>
 </table>
 <p><code><a href="../reference/plot_folds.html">plot_folds()</a></code> draws the assignment, with the blocks
 behind it when the scheme has any:</p>
-<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">fb</span>, <span class="va">pts</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatial-cross-validation_files/figure-html/plot-folds-1.png" class="r-plt" alt="A square study area divided into a grid of blocks, with the points coloured by fold. Each fold occupies whole blocks rather than being scattered, so held-out points sit away from the points used to train." width="100%" style="display: block; margin: auto;"></p>
-<p>Look at whether any fold is a thin sliver or a single corner. Fold
-geometry that looks wrong on the map produces a score that is wrong in a
-way no summary statistic will tell you about.</p>
+<p><img src="spatial-cross-validation_files/figure-html/plot-folds-1.png" class="r-plt" alt="A square study area divided into a 4 by 4 grid of blocks, with the points coloured by fold and the axes in metres of EPSG:32632. Every block belongs to one fold, and each fold is 3 to 4 blocks spread over the square." width="100%" style="display: block; margin: auto;"></p>
+<p>Check whether any fold is a thin sliver or a single corner. If one
+is, change the block design: a different <code>block_size</code>, or
+polygons of your own through <code>make_folds(blocks = )</code>.</p>
+<p>The next chunk runs three more schemes on the same data: kNNDM
+matched to the map’s points; buffered leave-one-out with a buffer of 180
+m, the field’s effective range, scored on 50 of the points through
+<code>max_test</code>; and blocks taken from Voronoi cells around 16
+k-means seeds in place of the grid. <code>leave_location_out</code>
+needs repeated measurements at the same sites, which this fixture does
+not have.</p>
+<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">fk</span>   <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"knndm"</span>, prediction_points <span class="op">=</span> <span class="va">map_pts</span>,</span>
+<span>                   seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="va">floo</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, method <span class="op">=</span> <span class="st">"buffered_loo"</span>, buffer <span class="op">=</span> <span class="fl">180</span>, max_test <span class="op">=</span> <span class="fl">50</span>,</span>
+<span>                   seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="va">vor</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/build_tessellation.html">build_tessellation</a></span><span class="op">(</span><span class="fu"><a href="../reference/voronoi_seeds_kmeans.html">voronoi_seeds_kmeans</a></span><span class="op">(</span><span class="va">pts</span>, <span class="fl">16</span><span class="op">)</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="va">fv</span>   <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, blocks <span class="op">=</span> <span class="va">vor</span><span class="op">$</span><span class="va">cells</span>,</span>
+<span>                   seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">schemes</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>knndm <span class="op">=</span> <span class="va">fk</span>, buffered_loo <span class="op">=</span> <span class="va">floo</span>, voronoi_blocks <span class="op">=</span> <span class="va">fv</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
+<span>  folds   <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">sapply</a></span><span class="op">(</span><span class="va">schemes</span>, <span class="kw">function</span><span class="op">(</span><span class="va">f</span><span class="op">)</span> <span class="va">f</span><span class="op">$</span><span class="va">k</span><span class="op">)</span>,</span>
+<span>  reading <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">sapply</a></span><span class="op">(</span><span class="va">schemes</span>, <span class="va">reading</span><span class="op">)</span>,</span>
+<span>  RMSE    <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">sapply</a></span><span class="op">(</span><span class="va">schemes</span>, <span class="kw">function</span><span class="op">(</span><span class="va">f</span><span class="op">)</span></span>
+<span>    <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>, folds <span class="op">=</span> <span class="va">f</span><span class="op">)</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span></span>
+<span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##                folds reading      RMSE</span></span>
+<span><span class="co">## knndm              5 matched 0.7839092</span></span>
+<span><span class="co">## buffered_loo      50 farther 1.1377276</span></span>
+<span><span class="co">## voronoi_blocks     5 farther 0.9957734</span></span></code></pre>
+<p>kNNDM keeps the random partition here (<code>fk$params$chosen</code>
+is <code>"random"</code>), as it does for samples spread evenly over the
+map. The 180 m buffer and the Voronoi blocks, about 254 m across, both
+hold the held-out points farther from their training data than the map’s
+points sit. <code>make_folds(blocks = )</code> takes any polygons of
+your own the same way, such as the cells of another tessellation or a
+set of watersheds.</p>
 </div>
 <div class="section level2">
-<h2 id="how-wide-should-a-block-be">How wide should a block be?<a class="anchor" aria-label="anchor" href="#how-wide-should-a-block-be"></a>
+<h2 id="choosing-a-block-size">Choosing a block size<a class="anchor" aria-label="anchor" href="#choosing-a-block-size"></a>
 </h2>
-<p>As wide as the gaps the map has to bridge. The wider the blocks, the
-farther the held-out points sit from their training data, and the score
-is the error at that distance. The autocorrelation range is the distance
-beyond which an observation says little about a location;
-<code>auto_range</code> uses it as the block size, which is one way to
-choose a separation distance, and suits a map that has to reach that far
-from the data.</p>
-<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<p>Make the blocks as wide as the gaps the map has to bridge. The wider
+the blocks, the farther the held-out points sit from their training
+data, and the score is the error at that distance.</p>
+<div class="section level3">
+<h3 id="from-the-autocorrelation-range">From the autocorrelation range<a class="anchor" aria-label="anchor" href="#from-the-autocorrelation-range"></a>
+</h3>
+<p>The <a href="glossary.html#autocorrelation-range">autocorrelation
+range</a> is the distance beyond which two observations are close to
+uncorrelated. Using it as the smallest block edge is one way to choose
+the separation, and suits a map that has to reach that far from the data
+(Roberts et al. 2017; Valavi et al. 2019).</p>
+<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">sac</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/estimate_sac_range.html">estimate_sac_range</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>range <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="va">sac</span><span class="op">)</span>, nugget <span class="op">=</span> <span class="fu"><a href="../reference/sac_nugget.html">sac_nugget</a></span><span class="op">(</span><span class="va">sac</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">##       range      nugget </span></span>
-<span><span class="co">## 190.8824784   0.1404058</span></span></code></pre>
-<p><code><a href="../reference/sac_nugget.html">sac_nugget()</a></code> reads the nugget off the same fitted model.
-A nugget that is most of the sill says the field has little spatial
-structure for nearby observations to carry, and the blocked and random
-scores will be close.</p>
+<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>range  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="va">sac</span><span class="op">)</span>,</span>
+<span>  nugget <span class="op">=</span> <span class="fu"><a href="../reference/sac_nugget.html">sac_nugget</a></span><span class="op">(</span><span class="va">sac</span><span class="op">)</span>,</span>
+<span>  sill   <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/sum.html" class="external-link">sum</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">sac</span>, <span class="st">"variogram_model"</span><span class="op">)</span><span class="op">$</span><span class="va">psill</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##       range      nugget        sill </span></span>
+<span><span class="co">## 190.8824784   0.1404058   0.9942011</span></span></code></pre>
+<p>The estimated range, 190.9 m, is close to the 180 m the field was
+simulated with. <code><a href="../reference/sac_nugget.html">sac_nugget()</a></code> reads the nugget off the same
+fitted model; here it is 14 percent of the sill. A nugget that is most
+of the sill means nearby observations carry little information, and the
+blocked and random scores tend to be close.</p>
+<p><code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> draws the variogram behind the estimate:</p>
+<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">sac</span><span class="op">)</span></span></code></pre></div>
+<p><img src="spatial-cross-validation_files/figure-html/plot-sac-1.png" class="r-plt" alt="Empirical variogram of z: semivariance against distance in metres, with points sized by the number of point pairs, a fitted curve that levels off near 0.99, and a dotted vertical line at the effective range of 190.9 m." width="100%" style="display: block; margin: auto;"></p>
+<p>The points are the empirical semivariances, sized by the number of
+point pairs behind each, the curve is the fitted model, and the dotted
+line marks the effective range given in the subtitle. When no range is
+identified, the subtitle gives the reason and no line is drawn.</p>
 <p><code>make_folds(auto_range = TRUE)</code> runs this estimate and
-uses it as a minimum block size:</p>
-<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
+uses it as the smallest block edge:</p>
+<div class="sourceCode" id="cb23"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">fa</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, response_var <span class="op">=</span> <span class="st">"z"</span>,</span>
 <span>                 auto_range <span class="op">=</span> <span class="cn">TRUE</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>block_size <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="va">fa</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">block_size</span><span class="op">)</span>,</span>
-<span>  sac_range  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="va">fa</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">sac_range</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## block_size  sac_range </span></span>
-<span><span class="co">##   190.8825   190.8825</span></span></code></pre>
-<p><code>params$block_size</code> holds the range object itself, so
-printing it whole also prints the directional summary;
-<code><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric()</a></code> above keeps the output to the two numbers.</p>
+<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>range  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="va">fa</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">sac_range</span><span class="op">)</span>,</span>
+<span>  width  <span class="op">=</span> <span class="va">fa</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">block_width</span>,</span>
+<span>  height <span class="op">=</span> <span class="va">fa</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">block_height</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##    range    width   height </span></span>
+<span><span class="co">## 190.8825 197.6586 199.4812</span></span></code></pre>
+<p>The blocks are a little wider than the range because a whole number
+of them has to fit across the square.</p>
 <p>When the variogram identifies no range,
 <code><a href="../reference/estimate_sac_range.html">estimate_sac_range()</a></code> returns <code>NA</code> with the
-reason attached, <code>auto_range</code> warns that it is falling back
-to geometric blocks, and you are back to choosing a size yourself. An
-<code>NA</code> there is a finding about the data.
-<code><a href="../reference/estimate_sac_range.html">?estimate_sac_range</a></code> lists the reasons and what each one
-means; <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> on the returned object draws the variogram
-that produced it.</p>
+reason attached. <code>auto_range</code> then warns and falls back to
+the default grid, about <code>block_multiplier * k</code> blocks over
+the extent (15 at <code>k = 5</code>), and you are back to choosing a
+size yourself. <code><a href="../reference/estimate_sac_range.html">?estimate_sac_range</a></code> lists each reason and
+what it means, and <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> draws the variogram wherever one
+was computed.</p>
 </div>
-<div class="section level2">
-<h2 id="the-error-at-each-block-size">The error at each block size<a class="anchor" aria-label="anchor" href="#the-error-at-each-block-size"></a>
-</h2>
+<div class="section level3">
+<h3 id="the-error-at-each-block-size">The error at each block size<a class="anchor" aria-label="anchor" href="#the-error-at-each-block-size"></a>
+</h3>
 <p><code><a href="../reference/cv_block_size_sweep.html">cv_block_size_sweep()</a></code> runs the cross-validation at
 several block sizes and reports the curve, with a random-fold run as the
-reference.</p>
-<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
+reference. Each size is a full cross-validation, so five sizes at
+<code>k = 5</code> make 25 fits, plus 5 for the random reference;
+<code>max_fits</code> caps that.</p>
+<div class="sourceCode" id="cb25"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">sw</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_block_size_sweep.html">cv_block_size_sweep</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>,</span>
-<span>                          k <span class="op">=</span> <span class="fl">4</span>, n_sizes <span class="op">=</span> <span class="fl">5</span>, max_fits <span class="op">=</span> <span class="fl">40</span>,</span>
-<span>                          seed <span class="op">=</span> <span class="fl">1</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span>                          k <span class="op">=</span> <span class="fl">5</span>, n_sizes <span class="op">=</span> <span class="fl">5</span>, seed <span class="op">=</span> <span class="fl">1</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="va">sw</span></span></code></pre></div>
-<pre><code><span><span class="co">## Cross-validation RMSE against block size (24 fits, k = 4, sizes in EPSG:32632)</span></span>
+<pre><code><span><span class="co">## Cross-validation RMSE against block size (30 fits, k = 5, sizes in EPSG:32632)</span></span>
 <span><span class="co">##   estimated autocorrelation range: 190.9</span></span>
-<span><span class="co">##  block_size       method blocks_used k n_folds_succeeded  value fold_min</span></span>
-<span><span class="co">##      random random_kfold          NA 4                 4 0.7859   0.7355</span></span>
-<span><span class="co">##       39.53  block_kfold         291 4                 4 0.7990   0.7449</span></span>
-<span><span class="co">##       74.33  block_kfold         150 4                 4 0.9137   0.8597</span></span>
-<span><span class="co">##      139.80  block_kfold          49 4                 4 1.0075   0.8848</span></span>
-<span><span class="co">##      262.80  block_kfold           9 4                 4 1.0849   0.9119</span></span>
-<span><span class="co">##      494.10  block_kfold           4 4                 4 1.1296   0.9719</span></span>
-<span><span class="co">##  fold_max</span></span>
-<span><span class="co">##    0.8257</span></span>
-<span><span class="co">##    0.8696</span></span>
-<span><span class="co">##    0.9891</span></span>
-<span><span class="co">##    1.1008</span></span>
-<span><span class="co">##    1.1618</span></span>
-<span><span class="co">##    1.4184</span></span></code></pre>
-<div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
+<span><span class="co">##  block_size blocks_used k folds_ok  value fold_min fold_max</span></span>
+<span><span class="co">##      random          NA 5        5 0.7839   0.7534   0.8376</span></span>
+<span><span class="co">##       39.53         291 5        5 0.8139   0.6790   0.9040</span></span>
+<span><span class="co">##       67.32         169 5        5 0.8971   0.8740   0.9074</span></span>
+<span><span class="co">##      114.60          64 5        5 0.9734   0.7316   1.1559</span></span>
+<span><span class="co">##      195.20          25 5        5 1.0564   0.8429   1.2352</span></span>
+<span><span class="co">##      332.50           6 5        5 1.0968   1.0011   1.1759</span></span></code></pre>
+<div class="sourceCode" id="cb27"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">sw</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatial-cross-validation_files/figure-html/plot-sweep-1.png" class="r-plt" alt="Cross-validated RMSE against block edge length on a log scale. The error rises steadily as the blocks grow, from about 0.80 at the smallest to about 1.13 at the largest, staying above the dashed random-fold reference throughout. A dotted line marks the estimated autocorrelation range." width="100%" style="display: block; margin: auto;"></p>
-<p>Error climbs away from the random-fold reference as blocks widen, and
-the estimated range is marked. The climb is the error growing with the
-distance from the data: each point of the curve is the error of a map
-whose locations sit as far from the data as that size’s held-out points
-do. The curve does not say which size to report; the size to read is the
-one whose folds match the map, which <code><a href="../reference/fold_separation.html">fold_separation()</a></code>
-checks on the folds of each size (the <code>$folds</code> of each
-element of <code>attr(sw, "results")</code>).</p>
-<p>Watch <code>blocks_used</code> as the blocks grow. Once it approaches
-<code>k</code>, each fold is holding out a large contiguous piece of the
-study area, and the model is being asked to extrapolate across it, which
-is the error of a map only if the map has to do the same.</p>
+<p><img src="spatial-cross-validation_files/figure-html/plot-sweep-1.png" class="r-plt" alt="Cross-validated RMSE against the smallest block edge asked for, in metres on a log scale. The error rises from 0.81 at 40 m to 1.10 at 332 m, above the dashed random-fold reference of 0.78. A shaded band gives the range across folds at each size, and a dotted line marks the estimated autocorrelation range of 191 m." width="100%" style="display: block; margin: auto;"></p>
+<p>The error climbs away from the random-fold reference as the blocks
+widen, and the dotted line marks the estimated range. Each point of the
+curve is the error of a map whose locations sit as far from the data as
+that size’s held-out points do. To choose a size, run
+<code><a href="../reference/fold_separation.html">fold_separation()</a></code> on the folds of each size, the
+<code>$folds</code> of each element of <code>attr(sw, "results")</code>,
+against the map’s points. <code>block_size</code> is the smallest edge
+asked for and <code>block_width</code> the edge built:</p>
+<div class="sourceCode" id="cb28"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">sizes</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span><span class="va">sw</span><span class="op">)</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"block_size"</span>, <span class="st">"block_width"</span>, <span class="st">"value"</span><span class="op">)</span><span class="op">]</span></span>
+<span><span class="va">sizes</span><span class="op">$</span><span class="va">reading</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">sapply</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">sw</span>, <span class="st">"results"</span><span class="op">)</span>, <span class="kw">function</span><span class="op">(</span><span class="va">r</span><span class="op">)</span> <span class="fu">reading</span><span class="op">(</span><span class="va">r</span><span class="op">$</span><span class="va">folds</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="va">sizes</span></span></code></pre></div>
+<pre><code><span><span class="co">##   block_size block_width     value reading</span></span>
+<span><span class="co">## 1         NA          NA 0.7839092 matched</span></span>
+<span><span class="co">## 2   39.53171    39.53171 0.8138507 matched</span></span>
+<span><span class="co">## 3   67.32043    70.59234 0.8970955 farther</span></span>
+<span><span class="co">## 4  114.64316   123.53660 0.9733795 farther</span></span>
+<span><span class="co">## 5  195.23129   197.65855 1.0564147 farther</span></span>
+<span><span class="co">## 6  332.46864   494.14639 1.0968178 farther</span></span></code></pre>
+<p>For a map of this square the random folds read
+<code>"matched"</code>, and so do the blocks asked for at 39.5 m. Their
+scores, 0.78 and 0.81, are the errors at the map’s distances; the larger
+sizes read <code>"farther"</code>.</p>
+<p>Watch <code>blocks_used</code> as the blocks grow. At the largest
+size, 332.5 m asked for and 494.1 m built, 6 blocks hold the points for
+5 folds, so each fold holds out a large piece of the square. That score
+is the error of a map that has to reach across such a piece.</p>
+</div>
 </div>
 <div class="section level2">
-<h2 id="reading-the-result">Reading the result<a class="anchor" aria-label="anchor" href="#reading-the-result"></a>
+<h2 id="reading-a-cross-validation-result">Reading a cross-validation result<a class="anchor" aria-label="anchor" href="#reading-a-cross-validation-result"></a>
 </h2>
 <p><code>overall</code> is the pooled score and
-<code>fold_metrics</code> is one row per fold.
-<code><a href="../reference/plot_cv_metrics.html">plot_cv_metrics()</a></code> shows the spread, which matters because a
-pooled RMSE built from one catastrophic fold and four good ones
-describes neither.</p>
-<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="../reference/plot_cv_metrics.html">plot_cv_metrics</a></span><span class="op">(</span><span class="va">cv_blocked</span>, metric <span class="op">=</span> <span class="st">"RMSE"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatial-cross-validation_files/figure-html/plot-metrics-1.png" class="r-plt" alt="RMSE for each of five folds, with point size showing how many rows each held out. The values run from about 0.94 to 1.12 around a dashed pooled line near 1.01, so the pooled number hides a spread of nearly twenty percent." width="100%" style="display: block; margin: auto;"></p>
+<code>fold_metrics</code> has one row per fold.</p>
 <div class="section level3">
-<h3 id="every-row-and-every-fold-is-accounted-for">Every row and every fold is accounted for<a class="anchor" aria-label="anchor" href="#every-row-and-every-fold-is-accounted-for"></a>
+<h3 id="spread-across-folds">Spread across folds<a class="anchor" aria-label="anchor" href="#spread-across-folds"></a>
 </h3>
-<p>Four fields say what happened to the data on the way through:
-<code>n_folds_attempted</code> against <code>n_folds_succeeded</code>,
-<code>n_dropped</code> (rows the data lost), <code>orphan_rows</code>
-(rows no fold names) and <code>n_unknown_ids</code> (fold rows the data
-does not have). On the clean run above nothing went missing:</p>
-<div class="sourceCode" id="cb16"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>attempted <span class="op">=</span> <span class="va">cv_blocked</span><span class="op">$</span><span class="va">n_folds_attempted</span>, succeeded <span class="op">=</span> <span class="va">cv_blocked</span><span class="op">$</span><span class="va">n_folds_succeeded</span>,</span>
-<span>  dropped <span class="op">=</span> <span class="va">cv_blocked</span><span class="op">$</span><span class="va">n_dropped</span>, orphans <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">cv_blocked</span><span class="op">$</span><span class="va">orphan_rows</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## attempted succeeded   dropped   orphans </span></span>
-<span><span class="co">##         5         5         0         0</span></span></code></pre>
-<p>So here are two runs where something does.</p>
-<p>A learner that fails on one fold:</p>
-<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
+<p><code><a href="../reference/plot_cv_metrics.html">plot_cv_metrics()</a></code> shows the spread across folds. The
+pooled RMSE cannot tell one bad fold from an even spread of error; here
+the five blocked folds run from 0.94 to 1.12.</p>
+<div class="sourceCode" id="cb30"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/plot_cv_metrics.html">plot_cv_metrics</a></span><span class="op">(</span><span class="va">cv_blocked</span>, metric <span class="op">=</span> <span class="st">"RMSE"</span><span class="op">)</span></span></code></pre></div>
+<p><img src="spatial-cross-validation_files/figure-html/plot-metrics-1.png" class="r-plt" alt="RMSE for each of 5 folds, with point size showing how many rows each held out. The values run from 0.94 to 1.12 around a dashed pooled line at 1.01." width="100%" style="display: block; margin: auto;"></p>
+</div>
+<div class="section level3">
+<h3 id="folds-and-rows-accounted-for">Folds and rows accounted for<a class="anchor" aria-label="anchor" href="#folds-and-rows-accounted-for"></a>
+</h3>
+<p>Two counts and four fields say what happened on the way through:
+<code>n_folds_attempted</code> against <code>n_folds_succeeded</code>;
+<code>fold_status</code>, one row per fold; <code>n_dropped</code>, rows
+removed for a missing or non-finite value; <code>orphan_rows</code>,
+rows no fold names; and <code>n_unknown_ids</code>, row IDs the folds
+name that the data do not have. On the clean run above nothing went
+missing:</p>
+<div class="sourceCode" id="cb31"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>attempted <span class="op">=</span> <span class="va">cv_blocked</span><span class="op">$</span><span class="va">n_folds_attempted</span>,</span>
+<span>  succeeded <span class="op">=</span> <span class="va">cv_blocked</span><span class="op">$</span><span class="va">n_folds_succeeded</span>,</span>
+<span>  dropped   <span class="op">=</span> <span class="va">cv_blocked</span><span class="op">$</span><span class="va">n_dropped</span>,</span>
+<span>  orphans   <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">cv_blocked</span><span class="op">$</span><span class="va">orphan_rows</span><span class="op">)</span>,</span>
+<span>  unknown   <span class="op">=</span> <span class="va">cv_blocked</span><span class="op">$</span><span class="va">n_unknown_ids</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">## attempted succeeded   dropped   orphans   unknown </span></span>
+<span><span class="co">##         5         5         0         0         0</span></span></code></pre>
+<p>The next three runs each lose something: a learner that fails on one
+fold, data with three missing values scored on folds built on the first
+300 rows, and the first 300 rows scored on folds built on all 400.</p>
+</div>
+<div class="section level3">
+<h3 id="folds-that-failed">Folds that failed<a class="anchor" aria-label="anchor" href="#folds-that-failed"></a>
+</h3>
+<p>The next chunk scores a learner that fails on one fold.</p>
+<div class="sourceCode" id="cb33"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">flaky</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">train_sf</span>, <span class="va">...</span><span class="op">)</span> <span class="op">{</span></span>
-<span>  <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">train_sf</span><span class="op">)</span> <span class="op">&lt;</span> <span class="fl">320</span><span class="op">)</span> <span class="kw"><a href="https://rdrr.io/r/base/stop.html" class="external-link">stop</a></span><span class="op">(</span><span class="st">"not enough training rows for this toy learner"</span><span class="op">)</span></span>
+<span>  <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">train_sf</span><span class="op">)</span> <span class="op">&lt;</span> <span class="fl">320</span><span class="op">)</span> <span class="kw"><a href="https://rdrr.io/r/base/stop.html" class="external-link">stop</a></span><span class="op">(</span><span class="st">"not enough training rows for this learner"</span><span class="op">)</span></span>
 <span>  <span class="fu">knn_fit</span><span class="op">(</span><span class="va">train_sf</span>, <span class="st">"z"</span>, k <span class="op">=</span> <span class="fl">5L</span><span class="op">)</span></span>
 <span><span class="op">}</span></span>
-<span><span class="va">cv_flaky</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">flaky</span>, folds <span class="op">=</span> <span class="va">fb</span><span class="op">)</span></span>
-<span></span>
-<span><span class="va">cv_flaky</span><span class="op">$</span><span class="va">fold_status</span></span></code></pre></div>
-<pre><code><span><span class="co">##   fold status                                       message</span></span>
-<span><span class="co">## 1    1     ok                                              </span></span>
-<span><span class="co">## 2    2     ok                                              </span></span>
-<span><span class="co">## 3    3  error not enough training rows for this toy learner</span></span>
-<span><span class="co">## 4    4     ok                                              </span></span>
+<span><span class="va">cv_flaky</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">flaky</span>, folds <span class="op">=</span> <span class="va">fb</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">## Warning: cv_spatial(): 1 of 5 fold(s) failed (fold 3: error), so `overall`</span></span>
+<span><span class="co">## pools the other folds only and covers 307 of the 400 rows. A fold that fails is</span></span>
+<span><span class="co">## often the hardest to predict (a region or a factor level no training fold</span></span>
+<span><span class="co">## covers), so `overall` may flatter the model; `fold_status` gives each fold's</span></span>
+<span><span class="co">## cause.</span></span></code></pre>
+<div class="sourceCode" id="cb35"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">cv_flaky</span><span class="op">$</span><span class="va">fold_status</span></span></code></pre></div>
+<pre><code><span><span class="co">##   fold status                                   message</span></span>
+<span><span class="co">## 1    1     ok                                          </span></span>
+<span><span class="co">## 2    2     ok                                          </span></span>
+<span><span class="co">## 3    3  error not enough training rows for this learner</span></span>
+<span><span class="co">## 4    4     ok                                          </span></span>
 <span><span class="co">## 5    5     ok</span></span></code></pre>
-<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>attempted <span class="op">=</span> <span class="va">cv_flaky</span><span class="op">$</span><span class="va">n_folds_attempted</span>, succeeded <span class="op">=</span> <span class="va">cv_flaky</span><span class="op">$</span><span class="va">n_folds_succeeded</span><span class="op">)</span></span></code></pre></div>
+<div class="sourceCode" id="cb37"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>attempted <span class="op">=</span> <span class="va">cv_flaky</span><span class="op">$</span><span class="va">n_folds_attempted</span>,</span>
+<span>  succeeded <span class="op">=</span> <span class="va">cv_flaky</span><span class="op">$</span><span class="va">n_folds_succeeded</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">## attempted succeeded </span></span>
 <span><span class="co">##         5         4</span></span></code></pre>
 <p><code>fold_status</code> names every fold supplied and what became of
 it, with the error text for the ones that failed. <code>status</code> is
 one of <code>ok</code>, <code>error</code>, <code>skipped</code>,
-<code>dropped</code> or <code>worker_error</code>. Before this existed,
-a partial failure left its causes in console scrollback, which a script
-or a knitted document does not keep.</p>
-<p>Rows the data lost, and rows no fold names:</p>
-<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
+<code>dropped</code> or <code>worker_error</code>. <code>overall</code>
+then pools the 4 folds that ran, 307 of the 400 rows, and
+<code><a href="../reference/cv_spatial.html">cv_spatial()</a></code> warns about it, since a fold that fails is
+often the hardest one to predict. <code>fold_status</code> keeps each
+cause with the result, so a script or a knitted report still has it
+after the console output is gone.</p>
+</div>
+<div class="section level3">
+<h3 id="rows-left-out">Rows left out<a class="anchor" aria-label="anchor" href="#rows-left-out"></a>
+</h3>
+<div class="sourceCode" id="cb39"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">holed</span> <span class="op">&lt;-</span> <span class="va">pts</span></span>
 <span><span class="va">holed</span><span class="op">$</span><span class="va">z</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">3</span>, <span class="fl">17</span>, <span class="fl">42</span><span class="op">)</span><span class="op">]</span> <span class="op">&lt;-</span> <span class="cn">NA</span>                       <span class="co"># three rows will be dropped</span></span>
 <span><span class="va">part</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">300</span>, <span class="op">]</span>, k <span class="op">=</span> <span class="fl">4</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">cv_acc</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">holed</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>, folds <span class="op">=</span> <span class="va">part</span><span class="op">)</span></span>
-<span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>n_dropped     <span class="op">=</span> <span class="va">cv_acc</span><span class="op">$</span><span class="va">n_dropped</span>,</span>
+<span><span class="va">cv_acc</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">holed</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>, folds <span class="op">=</span> <span class="va">part</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">## Warning: prep_model_data(): dropped 3 of 400 row(s) (0.8%): 3 with a missing</span></span>
+<span><span class="co">## value, 0 with a non-finite value and 0 without a location (an empty point, or a</span></span>
+<span><span class="co">## coordinate that is not finite or lies beyond 1e150). Rows affected by column: z</span></span>
+<span><span class="co">## 3. The fit uses the 397 row(s) that remain; attr(, "dropped") lists the rows</span></span>
+<span><span class="co">## removed.</span></span></code></pre>
+<pre><code><span><span class="co">## Warning: cross-validation: 100 of 397 rows in the data are named by no fold</span></span>
+<span><span class="co">## (e.g. row ID 301, 302, 303). They enter no training set and are never scored.</span></span>
+<span><span class="co">## If the folds were built on a different or subsetted layer, rebuild them with</span></span>
+<span><span class="co">## make_folds() on this one.</span></span></code></pre>
+<div class="sourceCode" id="cb42"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>n_dropped     <span class="op">=</span> <span class="va">cv_acc</span><span class="op">$</span><span class="va">n_dropped</span>,</span>
 <span>  n_orphans     <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">cv_acc</span><span class="op">$</span><span class="va">orphan_rows</span><span class="op">)</span>,</span>
 <span>  n_unknown_ids <span class="op">=</span> <span class="va">cv_acc</span><span class="op">$</span><span class="va">n_unknown_ids</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">##     n_dropped     n_orphans n_unknown_ids </span></span>
@@ -414,47 +648,79 @@ or a knitted document does not keep.</p>
 before any fold was fitted. <code>orphan_rows</code> holds the row IDs
 no fold names, which here is rows 301 to 400, because the folds were
 built on the first 300. <code>n_unknown_ids</code> counts the distinct
-row IDs the folds name that the data does not have, which here is the
+row IDs the folds name that the data do not have, which here is the
 three rows the <code>NA</code>s removed.</p>
 <p>The two mirror each other, and which one is non-zero tells you which
 way the mismatch runs:</p>
-<div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">cv_rev</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">pts</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">300</span>, <span class="op">]</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>, folds <span class="op">=</span> <span class="va">fb</span><span class="op">)</span></span>
+<div class="sourceCode" id="cb44"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">cv_rev</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">pts</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">300</span>, <span class="op">]</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>,</span>
+<span>                     folds <span class="op">=</span> <span class="va">fb</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>n_orphans <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">cv_rev</span><span class="op">$</span><span class="va">orphan_rows</span><span class="op">)</span>, n_unknown_ids <span class="op">=</span> <span class="va">cv_rev</span><span class="op">$</span><span class="va">n_unknown_ids</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">##     n_orphans n_unknown_ids </span></span>
 <span><span class="co">##             0           100</span></span></code></pre>
 <p>Folds built on more rows than the data has give
 <code>n_unknown_ids</code>; folds built on fewer give
-<code>orphan_rows</code>. Both are zero when the folds and the data
-agree, which is the only case in which the score covers every
-observation.</p>
+<code>orphan_rows</code>. Rows in <code>orphan_rows</code> are never
+scored, so the score covers every observation only when
+<code>orphan_rows</code> is empty, no row was dropped and every fold
+ran. Unknown IDs cost the folds rows but leave every observation scored:
+the run above predicts 300 of its 300 rows.</p>
 </div>
 </div>
 <div class="section level2">
-<h2 id="calibration-for-a-model-with-intervals">Calibration, for a model with intervals<a class="anchor" aria-label="anchor" href="#calibration-for-a-model-with-intervals"></a>
+<h2 id="interval-calibration-bayesian-gp">Interval calibration (Bayesian GP)<a class="anchor" aria-label="anchor" href="#interval-calibration-bayesian-gp"></a>
 </h2>
-<p>A Bayesian fit predicts an interval, and the question becomes whether
-the intervals are the width they claim. <code><a href="../reference/plot_calibration.html">plot_calibration()</a></code>
-draws nominal coverage against realised coverage per fold, from a
-<code><a href="../reference/cv_bayes.html">cv_bayes()</a></code> result.</p>
-<div class="sourceCode" id="cb26"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">cvb</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_bayes.html">cv_bayes</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, folds <span class="op">=</span> <span class="va">fb</span><span class="op">)</span>   <span class="co"># needs brms</span></span>
+<p>A Bayesian GP predicts an interval for each held-out value, and a
+calibration check compares the share of values each interval contains
+with the share it claims. <code><a href="../reference/plot_calibration.html">plot_calibration()</a></code> draws, for
+each nominal level, the share of held-out values the intervals
+contained, pooled and fold by fold, from a <code><a href="../reference/cv_bayes.html">cv_bayes()</a></code>
+result. The chunk below is not run here, because it needs
+<code>brms</code> and a Stan toolchain and takes minutes. Nine coverage
+levels give a curve in place of the default three.</p>
+<div class="sourceCode" id="cb46"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">cvb</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_bayes.html">cv_bayes</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, folds <span class="op">=</span> <span class="va">fb</span>,</span>
+<span>                coverage_levels <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq</a></span><span class="op">(</span><span class="fl">0.1</span>, <span class="fl">0.9</span>, by <span class="op">=</span> <span class="fl">0.1</span><span class="op">)</span>,</span>
+<span>                fit_args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>chains <span class="op">=</span> <span class="fl">2</span>, iter <span class="op">=</span> <span class="fl">1000</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/plot_calibration.html">plot_calibration</a></span><span class="op">(</span><span class="va">cvb</span><span class="op">)</span></span></code></pre></div>
-<p>Points below the diagonal are intervals that are too narrow: a
-nominal 90 percent interval containing 70 percent of the held-out values
-is the model reporting more confidence than it has earned. This chunk is
-not run here, because it needs <code>brms</code> and a Stan
-toolchain.</p>
+<p>Points below the diagonal are intervals that are too narrow: an 80
+percent interval that contains 60 percent of the held-out values claims
+more certainty than the model has.</p>
 </div>
 <div class="section level2">
 <h2 id="next">Next<a class="anchor" aria-label="anchor" href="#next"></a>
 </h2>
-<p><code><a href="../articles/resolution.html">vignette("resolution")</a></code> covers choosing a cell count
-before any of this. <code><a href="../articles/spatialkit_nc_demo.html">vignette("spatialkit_nc_demo")</a></code> runs the
-whole pipeline on real boundaries. <code><a href="../reference/make_folds.html">?make_folds</a></code> documents
-every scheme and its arguments, <code><a href="../reference/cv_spatial.html">?cv_spatial</a></code> the return
-value in full, and <code><a href="../reference/cv_block_size_sweep.html">?cv_block_size_sweep</a></code> the fit budget that
-<code>max_fits</code> caps.</p>
+<p>The next article in reading order is <code><a href="../articles/models.html">vignette("models")</a></code>,
+which fits the backends, compares them on the same folds, checks the
+residuals and maps where the predictions apply.
+<code><a href="../articles/reporting.html">vignette("reporting")</a></code> lists what to report from a
+cross-validation. This article relied on <code><a href="../reference/make_folds.html">?make_folds</a></code>,
+<code><a href="../reference/fold_separation.html">?fold_separation</a></code>, <code><a href="../reference/plot_folds.html">?plot_folds</a></code>,
+<code><a href="../reference/estimate_sac_range.html">?estimate_sac_range</a></code>, <code><a href="../reference/sac_nugget.html">?sac_nugget</a></code>,
+<code><a href="../reference/cv_block_size_sweep.html">?cv_block_size_sweep</a></code>, <code><a href="../reference/cv_spatial.html">?cv_spatial</a></code>,
+<code><a href="../reference/new_spatial_fit.html">?new_spatial_fit</a></code>, <code><a href="../reference/plot_cv_metrics.html">?plot_cv_metrics</a></code> and
+<code><a href="../reference/plot_calibration.html">?plot_calibration</a></code>. <code><a href="../articles/glossary.html">vignette("glossary")</a></code>
+defines the terms it uses.</p>
+</div>
+<div class="section level2">
+<h2 id="references">References<a class="anchor" aria-label="anchor" href="#references"></a>
+</h2>
+<p>Linnenbrink, J., Milà, C., Ludwig, M. and Meyer, H. (2024). kNNDM CV:
+k-fold nearest-neighbour distance matching cross-validation for map
+accuracy estimation. <em>Geoscientific Model Development</em> 17,
+5897–5912. <a href="https://doi.org/10.5194/gmd-17-5897-2024" class="external-link uri">https://doi.org/10.5194/gmd-17-5897-2024</a></p>
+<p>Milà, C., Mateu, J., Pebesma, E. and Meyer, H. (2022). Nearest
+neighbour distance matching leave-one-out cross-validation for map
+validation. <em>Methods in Ecology and Evolution</em> 13(6), 1304–1316.
+<a href="https://doi.org/10.1111/2041-210X.13851" class="external-link uri">https://doi.org/10.1111/2041-210X.13851</a></p>
+<p>Roberts, D. R., Bahn, V., Ciuti, S., et al. (2017). Cross-validation
+strategies for data with temporal, spatial, hierarchical, or
+phylogenetic structure. <em>Ecography</em> 40, 913–929. <a href="https://doi.org/10.1111/ecog.02881" class="external-link uri">https://doi.org/10.1111/ecog.02881</a></p>
+<p>Valavi, R., Elith, J., Lahoz-Monfort, J. J. and Guillera-Arroita, G.
+(2019). blockCV: An R package for generating spatially or
+environmentally separated folds for k-fold cross-validation of species
+distribution models. <em>Methods in Ecology and Evolution</em> 10,
+225–232. <a href="https://doi.org/10.1111/2041-210X.13107" class="external-link uri">https://doi.org/10.1111/2041-210X.13107</a></p>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside>

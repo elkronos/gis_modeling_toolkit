@@ -4,14 +4,16 @@
 <meta charset="UTF-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Spatial Tessellation, Modeling, and Cross-Validation Toolkit • spatialkit</title>
-<script src="deps/jquery-3.6.0/jquery-3.6.0.min.js"></script><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<title>Spatial Tessellation, Modelling, and Cross-Validation Toolkit • spatialkit</title>
+<!-- katex math --><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous" onload="renderMathInElement(document.body);"></script><script src="katex-auto.js"></script><script src="deps/jquery-3.6.0/jquery-3.6.0.min.js"></script><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <link href="deps/bootstrap-5.3.8/bootstrap.min.css" rel="stylesheet">
 <script src="deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
-<script src="deps/headroom-0.11.0/headroom.min.js"></script><script src="deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="deps/search-1.0.0/fuse.min.js"></script><script src="deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="pkgdown.js"></script><meta property="og:title" content="Spatial Tessellation, Modeling, and Cross-Validation Toolkit">
-<meta name="description" content="Constructs analysis regions from the distribution of the data itself, as an alternative to aggregating onto administrative boundaries that were drawn for unrelated purposes. Seeds and builds Voronoi, Delaunay, hexagonal and square tessellations with reproducible identifiers, selects a cell count from the spatial structure of the observations, assigns features to cells, and aggregates to cell level with optional design-effect corrections so that standard errors account for within-cell autocorrelation. Also manages coordinate reference systems. Fits geographically weighted regression (with the kernels, diagnostics and forward selection of GWmodel; Lu et al. (2014) &lt;doi:10.1080/10095020.2014.917453&gt;), Bayesian spatial Gaussian process regression (via brms, using the Hilbert space approximation of Riutort-Mayol et al. (2023) &lt;doi:10.1007/s11222-022-10167-2&gt;) and random forests (via ranger, with the permutation importance of Strobl et al. (2007) &lt;doi:10.1186/1471-2105-8-25&gt;), each behind one S3 class with consistent predict, fitted, residuals and plot methods. Provides spatial cross-validation with random, block, buffered, leave-location-out and nearest-neighbour distance-matched folds (Mila et al. (2022) &lt;doi:10.1111/2041-210X.13851&gt;), forward variable selection, model comparison, prediction onto a regular surface, and the area of applicability of Meyer and Pebesma (2021) &lt;doi:10.1111/2041-210X.13650&gt; to flag where a fitted model extrapolates beyond its training data.">
-<meta property="og:description" content="Constructs analysis regions from the distribution of the data itself, as an alternative to aggregating onto administrative boundaries that were drawn for unrelated purposes. Seeds and builds Voronoi, Delaunay, hexagonal and square tessellations with reproducible identifiers, selects a cell count from the spatial structure of the observations, assigns features to cells, and aggregates to cell level with optional design-effect corrections so that standard errors account for within-cell autocorrelation. Also manages coordinate reference systems. Fits geographically weighted regression (with the kernels, diagnostics and forward selection of GWmodel; Lu et al. (2014) &lt;doi:10.1080/10095020.2014.917453&gt;), Bayesian spatial Gaussian process regression (via brms, using the Hilbert space approximation of Riutort-Mayol et al. (2023) &lt;doi:10.1007/s11222-022-10167-2&gt;) and random forests (via ranger, with the permutation importance of Strobl et al. (2007) &lt;doi:10.1186/1471-2105-8-25&gt;), each behind one S3 class with consistent predict, fitted, residuals and plot methods. Provides spatial cross-validation with random, block, buffered, leave-location-out and nearest-neighbour distance-matched folds (Mila et al. (2022) &lt;doi:10.1111/2041-210X.13851&gt;), forward variable selection, model comparison, prediction onto a regular surface, and the area of applicability of Meyer and Pebesma (2021) &lt;doi:10.1111/2041-210X.13650&gt; to flag where a fitted model extrapolates beyond its training data.">
+<script src="deps/headroom-0.11.0/headroom.min.js"></script><script src="deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="deps/search-1.0.0/fuse.min.js"></script><script src="deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="pkgdown.js"></script><link href="extra.css" rel="stylesheet">
+<meta property="og:title" content="Spatial Tessellation, Modelling, and Cross-Validation Toolkit">
+<meta name="description" content="Constructs analysis regions from the distribution of the data itself, as an alternative to aggregating onto administrative boundaries that were drawn for unrelated purposes. Seeds and builds Voronoi, Delaunay, hexagonal and square tessellations with reproducible identifiers. Chooses a cell count, by default from a target number of observations per cell, or by scoring a ladder of counts against the spatial structure of the observations. Assigns features to cells and reports for each cell a count, a mean with its standard error and a pooled value pulled toward the mean of the observations in the 8 nearest cells. A design effect can correct the standard errors for autocorrelation within the cells. Projects lon/lat input to a projected coordinate reference system chosen for the extent of the data. Fits geographically weighted regression (its kernels, diagnostics and forward selection follow GWmodel; Lu et al. (2014) &lt;doi:10.1080/10095020.2014.917453&gt;), Bayesian Gaussian process regression (via brms, using the Hilbert space approximation of Riutort-Mayol et al. (2023) &lt;doi:10.1007/s11222-022-10167-2&gt;) and random forests (via ranger, with the permutation importance of Strobl et al. (2007) &lt;doi:10.1186/1471-2105-8-25&gt;), each behind one S3 class with consistent predict, fitted, residuals and plot methods. Provides spatial cross-validation with random, block, buffered, leave-location-out and nearest-neighbour distance-matched folds (Milà et al. (2022) &lt;doi:10.1111/2041-210X.13851&gt;; Linnenbrink et al. (2024) &lt;doi:10.5194/gmd-17-5897-2024&gt;), forward variable selection, model comparison, prediction onto a regular surface, and the area of applicability of Meyer and Pebesma (2021) &lt;doi:10.1111/2041-210X.13650&gt; to flag where a fitted model extrapolates beyond its training data.">
+<meta property="og:description" content="Constructs analysis regions from the distribution of the data itself, as an alternative to aggregating onto administrative boundaries that were drawn for unrelated purposes. Seeds and builds Voronoi, Delaunay, hexagonal and square tessellations with reproducible identifiers. Chooses a cell count, by default from a target number of observations per cell, or by scoring a ladder of counts against the spatial structure of the observations. Assigns features to cells and reports for each cell a count, a mean with its standard error and a pooled value pulled toward the mean of the observations in the 8 nearest cells. A design effect can correct the standard errors for autocorrelation within the cells. Projects lon/lat input to a projected coordinate reference system chosen for the extent of the data. Fits geographically weighted regression (its kernels, diagnostics and forward selection follow GWmodel; Lu et al. (2014) &lt;doi:10.1080/10095020.2014.917453&gt;), Bayesian Gaussian process regression (via brms, using the Hilbert space approximation of Riutort-Mayol et al. (2023) &lt;doi:10.1007/s11222-022-10167-2&gt;) and random forests (via ranger, with the permutation importance of Strobl et al. (2007) &lt;doi:10.1186/1471-2105-8-25&gt;), each behind one S3 class with consistent predict, fitted, residuals and plot methods. Provides spatial cross-validation with random, block, buffered, leave-location-out and nearest-neighbour distance-matched folds (Milà et al. (2022) &lt;doi:10.1111/2041-210X.13851&gt;; Linnenbrink et al. (2024) &lt;doi:10.5194/gmd-17-5897-2024&gt;), forward variable selection, model comparison, prediction onto a regular surface, and the area of applicability of Meyer and Pebesma (2021) &lt;doi:10.1111/2041-210X.13650&gt; to flag where a fitted model extrapolates beyond its training data.">
 </head>
 <body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
@@ -35,16 +37,21 @@
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><a class="dropdown-item" href="articles/getting-started.html">Getting started</a></li>
+<li><a class="dropdown-item" href="articles/getting-started.html">Get started</a></li>
     <li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>One topic at a time</h6></li>
+    <li><h6 class="dropdown-header" data-toc-skip>Step by step</h6></li>
     <li><a class="dropdown-item" href="articles/resolution.html">Choosing a resolution</a></li>
+    <li><a class="dropdown-item" href="articles/cells.html">Building cells and summarising them</a></li>
     <li><a class="dropdown-item" href="articles/spatial-cross-validation.html">Spatial cross-validation</a></li>
-    <li><a class="dropdown-item" href="articles/diagnostics.html">Diagnostics</a></li>
+    <li><a class="dropdown-item" href="articles/models.html">Fitting and checking models</a></li>
+    <li><a class="dropdown-item" href="articles/reporting.html">Exporting and reporting results</a></li>
     <li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
-    <li><a class="dropdown-item" href="articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
-    <li><a class="dropdown-item" href="articles/reporting.html">What to save, and what to report</a></li>
+    <li><h6 class="dropdown-header" data-toc-skip>Example</h6></li>
+    <li><a class="dropdown-item" href="articles/spatialkit_nc_demo.html">Worked example: North Carolina</a></li>
+    <li><hr class="dropdown-divider"></li>
+    <li><h6 class="dropdown-header" data-toc-skip>Help</h6></li>
+    <li><a class="dropdown-item" href="articles/troubleshooting.html">Troubleshooting and performance</a></li>
+    <li><a class="dropdown-item" href="articles/glossary.html">Terms used on these pages</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="news/index.html">Changelog</a></li>
@@ -64,138 +71,57 @@
   <main id="main" class="col-md-9"><div class="section level1">
 <div class="page-header"><h1 id="spatialkit">spatialkit<a class="anchor" aria-label="anchor" href="#spatialkit"></a>
 </h1></div>
-<blockquote>
-<p>Spatial tessellation, modeling, and cross-validation toolkit for R</p>
-</blockquote>
-<p><a href="https://github.com/elkronos/gis_modeling_toolkit/actions/workflows/R-CMD-check.yaml" class="external-link"><img src="https://github.com/elkronos/gis_modeling_toolkit/actions/workflows/R-CMD-check.yaml/badge.svg" alt="R-CMD-check"></a> <a href="https://github.com/elkronos/gis_modeling_toolkit/actions/workflows/pkgdown.yaml" class="external-link"><img src="https://github.com/elkronos/gis_modeling_toolkit/actions/workflows/pkgdown.yaml/badge.svg" alt="pkgdown"></a> <a href="https://www.r-project.org/" class="external-link"><img src="https://img.shields.io/badge/R-%3E%3D%204.1-blue" alt="R &gt;= 4.1"></a> <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/LICENSE.md" class="external-link"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License: MIT"></a></p>
-<div class="section level2">
-<h2 id="contents">Contents<a class="anchor" aria-label="anchor" href="#contents"></a>
-</h2>
-<ul>
-<li><a href="#the-problem-this-solves">The problem this solves</a></li>
-<li><a href="#scope">Scope</a></li>
-<li><a href="#installation">Installation</a></li>
-<li><a href="#quick-start">Quick start</a></li>
-<li><a href="#which-function-do-i-want">Which function do I want?</a></li>
-<li><a href="#choosing-a-backend">Choosing a backend</a></li>
-<li><a href="#documentation">Documentation</a></li>
-<li><a href="#troubleshooting">Troubleshooting</a></li>
-<li><a href="#running-it-in-practice">Running it in practice</a></li>
-<li><a href="#development">Development</a></li>
-<li><a href="#project">Project</a></li>
-</ul>
-</div>
+<!-- badges: start -->
+
+<p>spatialkit draws analysis regions, which it calls cells, from where your observations are, instead of borrowing boundaries drawn for other purposes, and summarises point data onto them with a count, a standard error and a pooled value for every cell. It then scores regression models on cross-validation folds that hold out whole blocks of space, and marks where a fitted map extrapolates.</p>
 <div class="section level2">
 <h2 id="the-problem-this-solves">The problem this solves<a class="anchor" aria-label="anchor" href="#the-problem-this-solves"></a>
 </h2>
-<p>You have observations at points and you need values over areas. The path of least resistance is to borrow boundaries that already exist: ZIP codes, census tracts, counties, sales territories. Each was drawn for mail routing, enumeration or politics, and none of them knows anything about the process you are studying. Aggregate onto them and part of your answer is an artefact of the partition. This is the modifiable areal unit problem, and it is not a rounding error: the same observations can support materially different conclusions under different boundaries.</p>
-<p><code>spatialkit</code> lets the data draw the boundaries. <code><a href="reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code> places seeds by density-weighted k-means on the point cloud, so cells are small where observations are dense, and hold about the same number of observations each once there are more cells than dense places. <code><a href="reference/resolution_profile.html">resolution_profile()</a></code> scores the cell count a number of observations per cell gives, 4.5 by default, by the leave-one-out error of the cell values, and <code><a href="reference/select_resolution.html">select_resolution()</a></code> sets it; given a ladder of counts the profile scores every one against the spatial structure of the observations, and <code><a href="reference/determine_optimal_levels.html">determine_optimal_levels()</a></code> reads one off the elbow of their clustering when there is one. <code><a href="reference/build_tessellation.html">build_tessellation()</a></code> produces Voronoi, hex, square or Delaunay cells clipped to your study area, with IDs that stay stable when the input row order changes. <code><a href="reference/summarize_by_cell.html">summarize_by_cell()</a></code> aggregates onto them with a count and a standard error for every cell mean, and beside each mean a pooled value, the mean pulled toward the cells around it. When the cell means stand in for a population mean, it corrects those standard errors for within-cell autocorrelation, which on a correlated field can double them or more.</p>
-<p>Redrawing boundaries is easy. Knowing whether the result means anything is the hard part, so the second half of the package is the evidence layer. Three model backends sit behind one <code>spatial_fit</code> class so they can be scored on identical folds. Cross-validation holds out whole regions, blocks of a grid by default, which can be sized from the data’s own autocorrelation range or matched to the locations a map will predict at. An area-of-applicability estimate marks where the resulting score applies. All of it is built on <a href="https://r-spatial.github.io/sf/" class="external-link"><code>sf</code></a>, with CRS handling that will not hand metres to a function expecting degrees.</p>
-<figure><img src="https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-tessellations.png" alt="Raw spatial field and three tessellation methods aggregating it over North Carolina"><figcaption aria-hidden="true">
-Raw spatial field and three tessellation methods aggregating it over North Carolina
-</figcaption></figure><p>How many cells is a decision with visible consequences. The same field below is cut at three resolutions beside the raw observations: too coarse blurs the hotspot, too fine chases noise with cells of a handful of observations, and the middle count, the one a ladder of counts from <code>resolution_profile(n_levels = )</code> rates most reliable, keeps the trend without tracing the sampling pattern. It is a reading, not a verdict: the reliability of the cell means stays within 2 percent of its best from 2 to 15 cells here, and the sites are spread evenly, so there is no elbow for <code><a href="reference/determine_optimal_levels.html">determine_optimal_levels()</a></code> to find. <code><a href="articles/resolution.html">vignette("resolution")</a></code> covers how that number is chosen and the criteria that disagree about it.</p>
-<figure><img src="https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-resolution.png" alt="Raw observations and the same spatial field tessellated at three resolutions, including the count a ladder of counts from resolution_profile() rates most reliable"><figcaption aria-hidden="true">
-Raw observations and the same spatial field tessellated at three resolutions, including the count a ladder of counts from resolution_profile() rates most reliable
-</figcaption></figure><p>The number a random fold reports on autocorrelated data is the reason the evidence layer exists. Random folds put a test point’s neighbours in the training set, so a model with any capacity to memorise location already has the answer in front of it:</p>
-<figure><img src="https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-spatial-cv.png" alt="Random k-fold versus spatial block k-fold assignments across North Carolina"><figcaption aria-hidden="true">
-Random k-fold versus spatial block k-fold assignments across North Carolina
-</figcaption></figure>
+<p>You have observations at points and need values over areas. The usual move is to borrow boundaries that already exist: ZIP code areas, census tracts, counties, sales territories. They were drawn for mail delivery, enumeration or politics, so part of any answer aggregated onto them comes from the partition. This is the modifiable areal unit problem: the same observations, aggregated under different boundaries, can give different conclusions.</p>
+<p>spatialkit draws the cells from the data, in three steps:</p>
+<ol style="list-style-type: decimal">
+<li>Pick a cell count. <code><a href="reference/resolution_profile.html">resolution_profile()</a></code> and <code><a href="reference/select_resolution.html">select_resolution()</a></code> set it from a size of 4.5 observations per cell by default, and report the leave-one-out error of the cell values. Given a ladder of counts, the profile scores each one against the spatial structure of the observations.</li>
+<li>Place the cells. <code><a href="reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code> places seeds by density-weighted k-means, so cells are small where observations are dense, and <code><a href="reference/build_tessellation.html">build_tessellation()</a></code> grows Voronoi cells from them (or lays hex or square cells, or Delaunay triangles), clipped to your study area. <code><a href="reference/build_tessellation.html">build_tessellation()</a></code> numbers the cells from their geometry, so the same seeds in a different row order give the same cell IDs.</li>
+<li>Summarise. <code><a href="reference/summarize_by_cell.html">summarize_by_cell()</a></code> gives each cell a count, a mean with its standard error, and a pooled value: the cell’s mean pulled toward the mean of the observations in the 8 nearest cells (nearest by the centroid of their observations). When the cell means stand in for a population mean, it can correct the standard errors for autocorrelation within the cells, which on a correlated field can double them or more.</li>
+</ol>
+<p>The first figure shows a simulated field on 280 random sites in North Carolina, aggregated onto three kinds of cells, about 30 of each: Voronoi cells from density-weighted seeds, a hex grid and a square grid.</p>
+<p><img src="https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-tessellations.png" alt="Four maps of North Carolina: a simulated field at 280 sites, and its cell means on 30 Voronoi cells from density-weighted seeds, on a hex grid and on a square grid"> </p>
+<p>The next figure cuts the same field at three cell counts, each cell showing its pooled value. <code><a href="reference/resolution_profile.html">resolution_profile()</a></code> scores each count by the leave-one-out error of the pooled values at that count. The error is 0.33 at 12 cells, 0.18 at 62 cells (the count the default size of 4.5 observations per cell gives) and 0.18 at 140 cells (two per cell). The 12 cells blur the hotspot in the east. At 140 cells the error is within one standard error of the default’s. <code><a href="articles/resolution.html">vignette("resolution")</a></code> covers how the count is chosen.</p>
+<p><img src="https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-resolution.png" alt="Four maps of North Carolina: the simulated field at 280 sites, and its pooled cell values at 12, 62 and 140 Voronoi cells, where 62 is the default count"> </p>
+<p>The second half of the package tests the result. Three model backends (random forest, GWR and a Bayesian GP) sit behind one <code>spatial_fit</code> class, so they can be scored on the same folds. Cross-validation holds out whole blocks, of a grid by default, which can be sized from the data’s own autocorrelation range or matched to the locations a map will predict at. An area-of-applicability estimate marks where the resulting score applies. All of it is built on <a href="https://r-spatial.github.io/sf/" class="external-link"><code>sf</code></a>, and each function that measures a distance moves a lon/lat layer into a projected CRS first.</p>
+<p>Random folds put a test point’s neighbours in the training set, so a model that can memorise location is scored on points it has nearly seen. Block folds hold out whole blocks instead; the quick start below shows the difference in RMSE.</p>
+<p><img src="https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-spatial-cv.png" alt="Two maps of North Carolina: 280 sites coloured by fold, mixed at random on the left and grouped into spatial blocks on the right"> </p>
 </div>
 <div class="section level2">
 <h2 id="scope">Scope<a class="anchor" aria-label="anchor" href="#scope"></a>
 </h2>
-<p>Everything above is what the package is for. Here is where it stops, so you can rule it out before spending time on the quick start:</p>
 <ul>
 <li>
-<strong>Regression only.</strong> A non-numeric response is refused outright, and an integer-coded binary response is refused by <code><a href="reference/fit_gwr_model.html">fit_gwr_model()</a></code> with a pointer to <code><a href="https://rdrr.io/pkg/GWmodel/man/ggwr.basic.html" class="external-link">GWmodel::ggwr.basic()</a></code>. (A two-valued <em>non</em>-integer response, such as a measurement censored at a detection limit, is continuous, so it is fitted with a warning.) There is no classification path.</li>
+<strong>Regression, with one exception.</strong> <code><a href="reference/fit_rf_model.html">fit_rf_model()</a></code> and <code><a href="reference/fit_gwr_model.html">fit_gwr_model()</a></code> fit a numeric response and refuse a logical, factor or character one; <code><a href="reference/fit_gwr_model.html">fit_gwr_model()</a></code> also refuses an integer-coded two-valued response and points to <code><a href="https://rdrr.io/pkg/GWmodel/man/ggwr.basic.html" class="external-link">GWmodel::ggwr.basic()</a></code>. The exception is <code><a href="reference/fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>, which also fits a binary response under <code><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class="external-link">brms::bernoulli()</a></code>, and a factor or character response under <code><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class="external-link">brms::categorical()</a></code> or an ordinal family. <code><a href="reference/cv_bayes.html">cv_bayes()</a></code> refuses the categorical and ordinal families, because it scores one predicted number per row.</li>
 <li>
-<strong>Vector point data only.</strong> No raster support. <code><a href="reference/predict_surface.html">predict_surface()</a></code> returns an <code>sf</code> POINT layer; convert it downstream if you need a <code>SpatRaster</code>.</li>
+<strong>Vector data only.</strong> There is no raster input or output: <code><a href="reference/predict_surface.html">predict_surface()</a></code> returns an <code>sf</code> POINT layer, which you convert yourself if you need a <code>SpatRaster</code>. The models work on points: <code><a href="reference/prep_model_data.html">prep_model_data()</a></code> and <code><a href="reference/coerce_to_points.html">coerce_to_points()</a></code> reduce lines and polygons to points.</li>
 <li>
-<strong>No areal / lattice models.</strong> Moran’s I here is a <em>residual diagnostic on point data</em>. There is no CAR, SAR or spatial-lag fitter.</li>
+<strong>No areal or lattice models.</strong> Moran’s I here tests residuals for spatial structure. There is no CAR, SAR or spatial-lag fitter.</li>
 <li>
-<strong>No spatio-temporal folds.</strong> Every fold scheme is purely spatial.</li>
+<strong>No spatio-temporal folds.</strong> Every fold scheme is spatial; none holds out time.</li>
 </ul>
 </div>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/install.packages.html" class="external-link">install.packages</a></span><span class="op">(</span><span class="st">"spatialkit"</span><span class="op">)</span></span></code></pre></div>
+<p>The development version installs from GitHub:</p>
+<div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># install.packages("remotes")</span></span>
-<span><span class="fu">remotes</span><span class="fu">::</span><span class="fu">install_github</span><span class="op">(</span><span class="st">"elkronos/gis_modeling_toolkit"</span><span class="op">)</span></span>
-<span></span>
-<span><span class="co"># with the vignettes (needs pandoc)</span></span>
-<span><span class="fu">remotes</span><span class="fu">::</span><span class="fu">install_github</span><span class="op">(</span><span class="st">"elkronos/gis_modeling_toolkit"</span>, build_vignettes <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
-<p><code>sf</code>, <code>dplyr</code>, <code>logger</code>, <code>digest</code> and <code>FNN</code> install with it. Everything below is optional and needed only for the feature that uses it. A missing one produces a message naming it.</p>
-<table class="table">
-<colgroup>
-<col width="29%">
-<col width="70%">
-</colgroup>
-<thead><tr>
-<th>install</th>
-<th>for</th>
-</tr></thead>
-<tbody>
-<tr>
-<td><code>gstat</code></td>
-<td>variogram fitting: <code><a href="reference/estimate_sac_range.html">estimate_sac_range()</a></code>, design effects, kriging checks</td>
-</tr>
-<tr>
-<td><code>ranger</code></td>
-<td>
-<code><a href="reference/fit_rf_model.html">fit_rf_model()</a></code>, <code><a href="reference/cv_rf.html">cv_rf()</a></code>
-</td>
-</tr>
-<tr>
-<td><code>sp</code></td>
-<td>
-<code><a href="reference/fit_gwr_model.html">fit_gwr_model()</a></code>, <code><a href="reference/cv_gwr.html">cv_gwr()</a></code>
-</td>
-</tr>
-<tr>
-<td>
-<code>brms</code> (plus a Stan toolchain)</td>
-<td>
-<code><a href="reference/fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>, <code><a href="reference/cv_bayes.html">cv_bayes()</a></code>
-</td>
-</tr>
-<tr>
-<td><code>geometry</code></td>
-<td>Delaunay triangle tessellations</td>
-</tr>
-<tr>
-<td><code>ggplot2</code></td>
-<td>every <code>plot_*()</code> function and <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> method</td>
-</tr>
-<tr>
-<td><code>patchwork</code></td>
-<td>the combined panels in <code><a href="articles/spatialkit_nc_demo.html">vignette("spatialkit_nc_demo")</a></code> and its script</td>
-</tr>
-<tr>
-<td><code>Matrix</code></td>
-<td>sparse k-nearest-neighbour weights for Moran’s I on large layers</td>
-</tr>
-<tr>
-<td><code>loo</code></td>
-<td>PSIS-LOO for the Bayesian backend</td>
-</tr>
-<tr>
-<td><code>nlme</code></td>
-<td>REML detrending in <code><a href="reference/estimate_sac_range.html">estimate_sac_range()</a></code>
-</td>
-</tr>
-<tr>
-<td><code>spdep</code></td>
-<td>cross-checks in the test suite only</td>
-</tr>
-</tbody>
-</table>
+<span><span class="fu">remotes</span><span class="fu">::</span><span class="fu">install_github</span><span class="op">(</span><span class="st">"elkronos/gis_modeling_toolkit"</span><span class="op">)</span></span></code></pre></div>
+<p><code>sf</code>, <code>dplyr</code>, <code>logger</code>, <code>digest</code> and <code>FNN</code> install with it. Optional packages switch on the model backends, variograms and plots; <a href="https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.html">Get started</a> lists which does what. If you are upgrading from 2.0.0, the <a href="https://elkronos.github.io/gis_modeling_toolkit/news/index.html">changelog</a> lists the defaults that change results and the argument that restores each.</p>
 </div>
 <div class="section level2">
 <h2 id="quick-start">Quick start<a class="anchor" aria-label="anchor" href="#quick-start"></a>
 </h2>
-<p>Everything here runs on the hard dependencies alone. The learner is one <code><a href="https://rdrr.io/r/stats/lm.html" class="external-link">lm()</a></code> call wired in through <code><a href="reference/new_spatial_fit.html">new_spatial_fit()</a></code>, so the whole arc executes without any optional backend.</p>
-<div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
+<p>A simulated field of 400 observations in a 1,000 m square, with one weak measured predictor <code>w</code>:</p>
+<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r-spatial.github.io/sf/" class="external-link">sf</a></span><span class="op">)</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://elkronos.github.io/gis_modeling_toolkit/">spatialkit</a></span><span class="op">)</span></span>
 <span></span>
@@ -204,509 +130,232 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 <span><span class="va">xy</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fl">5e5</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span>, y <span class="op">=</span> <span class="fl">5e6</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">D</span>  <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/matrix.html" class="external-link">as.matrix</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/dist.html" class="external-link">dist</a></span><span class="op">(</span><span class="va">xy</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">xy</span><span class="op">$</span><span class="va">w</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span></span>
-<span><span class="co"># Mostly a smooth spatial field, with a weak measured predictor on top.</span></span>
+<span><span class="co"># Mostly a smooth spatial field (exponential, effective range 3 x 80 = 240 m),</span></span>
+<span><span class="co"># with the weak predictor on top.</span></span>
 <span><span class="va">xy</span><span class="op">$</span><span class="va">z</span> <span class="op">&lt;-</span> <span class="fl">0.5</span> <span class="op">*</span> <span class="va">xy</span><span class="op">$</span><span class="va">w</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/t.html" class="external-link">t</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/chol.html" class="external-link">chol</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Log.html" class="external-link">exp</a></span><span class="op">(</span><span class="op">-</span><span class="va">D</span> <span class="op">/</span> <span class="fl">80</span><span class="op">)</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/base/diag.html" class="external-link">diag</a></span><span class="op">(</span><span class="fl">1e-8</span>, <span class="va">n</span><span class="op">)</span><span class="op">)</span><span class="op">)</span> <span class="op"><a href="https://rdrr.io/r/base/matmult.html" class="external-link">%*%</a></span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span>, sd <span class="op">=</span> <span class="fl">0.3</span><span class="op">)</span></span>
 <span><span class="va">site</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sf.html" class="external-link">st_as_sf</a></span><span class="op">(</span><span class="va">xy</span>, coords <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>, crs <span class="op">=</span> <span class="fl">32632</span><span class="op">)</span></span></code></pre></div>
-<p>Draw regions from the data and aggregate onto them:</p>
-<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">tess</span>  <span class="op">&lt;-</span> <span class="fu"><a href="reference/build_tessellation.html">build_tessellation</a></span><span class="op">(</span><span class="va">site</span>, boundary <span class="op">=</span> <span class="fu"><a href="reference/clip_target_for.html">clip_target_for</a></span><span class="op">(</span><span class="va">site</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span>,</span>
-<span>                            method <span class="op">=</span> <span class="st">"hex"</span>, approx_n_cells <span class="op">=</span> <span class="fl">24</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="va">asg</span>   <span class="op">&lt;-</span> <span class="fu"><a href="reference/assign_features_to_polygons.html">assign_features_to_polygons</a></span><span class="op">(</span><span class="va">site</span>, <span class="va">tess</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span></span>
-<span><span class="va">cells</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/summarize_by_cell.html">summarize_by_cell</a></span><span class="op">(</span><span class="va">asg</span>, <span class="st">"z"</span>, cells_sf <span class="op">=</span> <span class="va">tess</span><span class="op">$</span><span class="va">cells</span>, deff <span class="op">=</span> <span class="st">"kish"</span><span class="op">)</span></span>
-<span></span>
-<span><span class="va">populated</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">st_drop_geometry</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span><span class="op">[</span><span class="va">cells</span><span class="op">$</span><span class="va">n</span> <span class="op">&gt;</span> <span class="fl">1</span> <span class="op">&amp;</span> <span class="op">!</span><span class="fu"><a href="https://rdrr.io/r/base/NA.html" class="external-link">is.na</a></span><span class="op">(</span><span class="va">cells</span><span class="op">$</span><span class="va">n</span><span class="op">)</span>, <span class="op">]</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">populated</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"poly_id"</span>, <span class="st">"n"</span>, <span class="st">"resp_mean_z"</span>, <span class="st">"..se_resp_z"</span>,</span>
-<span>                   <span class="st">"..pooled_resp_z"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">4</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   poly_id  n resp_mean_z ..se_resp_z ..pooled_resp_z</span></span>
-<span><span class="co">#&gt; 2       2 12  -0.3553720   0.3840250     -0.32153305</span></span>
-<span><span class="co">#&gt; 3       3  6  -0.7977035   0.6491918     -0.54245922</span></span>
-<span><span class="co">#&gt; 4       4  2  -1.8546732   0.1801251     -0.82499383</span></span>
-<span><span class="co">#&gt; 5       5 14   0.0554452   0.7258217      0.04565301</span></span></code></pre></div>
-<p>Every aggregate arrives with a count and a standard error, and beside each mean a pooled value, <code>..pooled_resp_z</code>: the cell’s mean pulled toward the mean of the 8 cells around it, by a weight that grows with the cell’s count (<code><a href="reference/summarize_by_cell.html">?summarize_by_cell</a></code>, “Pooled values”). <code>deff = "kish"</code> makes that the standard error of each cell mean as an estimate of the population mean, widened by the design effect of the within-cell correlation. For a map of the cells’ own values leave <code>deff</code> at 1: the uncorrected standard error is the right one for a cell’s own mean when its points are spread through it (<code><a href="reference/summarize_by_cell.html">?summarize_by_cell</a></code> says which to use when). A lattice laid over an irregular point cloud leaves some cells with one observation or none, which is why <code>n</code> travels with every row.</p>
-<p>These are the package’s defaults for cell values: pooled values beside the plain means, and, when the data draw the cells, 4.5 observations per cell in density-weighted cells. Each earlier default is one argument away. <code>summarize_by_cell(estimate = "mean")</code> leaves the pooled columns out. <code>resolution_profile(estimate = NULL, obs_per_cell = NULL)</code> gives the ladder of cell counts and its columns, and <code>sac = NULL</code> fits the variogram on a ladder of sizes too. <code>select_resolution(criterion = "cp")</code> reads Mallows’ Cp off a profile that has it. <code>partition = "kmeans"</code> in <code><a href="reference/resolution_profile.html">resolution_profile()</a></code>, <code><a href="reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code> and <code><a href="reference/voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code> gives the k-means cells, from their earlier numbers of starts. <code>NEWS.md</code> says what each of these changes in a result.</p>
-<p>Now score a model. The learner below is a cubic trend surface in the coordinates, which is a realistic thing to fit and also the case this package warns about: given <code>x</code> and <code>y</code>, a flexible model can reproduce the training surface by memorising location, so its error grows quickly with the distance from the data.</p>
+<p>Set the cell count, draw Voronoi cells from the data and summarise onto them:</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">trend_fit</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">train_sf</span>, <span class="va">...</span><span class="op">)</span> <span class="op">{</span></span>
-<span>  <span class="va">d</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">st_drop_geometry</a></span><span class="op">(</span><span class="va">train_sf</span><span class="op">)</span></span>
-<span>  <span class="va">d</span><span class="op">$</span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_coordinates.html" class="external-link">st_coordinates</a></span><span class="op">(</span><span class="va">train_sf</span><span class="op">)</span><span class="op">[</span>, <span class="fl">1</span><span class="op">]</span></span>
-<span>  <span class="va">d</span><span class="op">$</span><span class="va">y</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_coordinates.html" class="external-link">st_coordinates</a></span><span class="op">(</span><span class="va">train_sf</span><span class="op">)</span><span class="op">[</span>, <span class="fl">2</span><span class="op">]</span></span>
-<span>  <span class="fu"><a href="reference/new_spatial_fit.html">new_spatial_fit</a></span><span class="op">(</span><span class="st">"trend_fit"</span>, engine <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/stats/lm.html" class="external-link">lm</a></span><span class="op">(</span><span class="va">z</span> <span class="op">~</span> <span class="va">w</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/poly.html" class="external-link">poly</a></span><span class="op">(</span><span class="va">x</span>, <span class="fl">3</span><span class="op">)</span> <span class="op">*</span> <span class="fu"><a href="https://rdrr.io/r/stats/poly.html" class="external-link">poly</a></span><span class="op">(</span><span class="va">y</span>, <span class="fl">3</span><span class="op">)</span>, data <span class="op">=</span> <span class="va">d</span><span class="op">)</span>,</span>
-<span>                  formula <span class="op">=</span> <span class="va">z</span> <span class="op">~</span> <span class="va">w</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/poly.html" class="external-link">poly</a></span><span class="op">(</span><span class="va">x</span>, <span class="fl">3</span><span class="op">)</span> <span class="op">*</span> <span class="fu"><a href="https://rdrr.io/r/stats/poly.html" class="external-link">poly</a></span><span class="op">(</span><span class="va">y</span>, <span class="fl">3</span><span class="op">)</span>, response_var <span class="op">=</span> <span class="st">"z"</span>,</span>
-<span>                  predictor_vars <span class="op">=</span> <span class="st">"w"</span>, data_sf <span class="op">=</span> <span class="va">train_sf</span><span class="op">)</span></span>
-<span><span class="op">}</span></span>
-<span><span class="va">predict.trend_fit</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">object</span>, <span class="va">newdata</span> <span class="op">=</span> <span class="cn">NULL</span>, <span class="va">...</span><span class="op">)</span> <span class="op">{</span></span>
-<span>  <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/NULL.html" class="external-link">is.null</a></span><span class="op">(</span><span class="va">newdata</span><span class="op">)</span><span class="op">)</span> <span class="kw"><a href="https://rdrr.io/r/base/function.html" class="external-link">return</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted</a></span><span class="op">(</span><span class="va">object</span><span class="op">$</span><span class="va">engine</span><span class="op">)</span><span class="op">)</span></span>
-<span>  <span class="va">d</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">st_drop_geometry</a></span><span class="op">(</span><span class="va">newdata</span><span class="op">)</span></span>
-<span>  <span class="va">d</span><span class="op">$</span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_coordinates.html" class="external-link">st_coordinates</a></span><span class="op">(</span><span class="va">newdata</span><span class="op">)</span><span class="op">[</span>, <span class="fl">1</span><span class="op">]</span></span>
-<span>  <span class="va">d</span><span class="op">$</span><span class="va">y</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_coordinates.html" class="external-link">st_coordinates</a></span><span class="op">(</span><span class="va">newdata</span><span class="op">)</span><span class="op">[</span>, <span class="fl">2</span><span class="op">]</span></span>
-<span>  <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span><span class="va">object</span><span class="op">$</span><span class="va">engine</span>, newdata <span class="op">=</span> <span class="va">d</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="op">}</span></span>
-<span><span class="va">residuals.trend_fit</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">object</span>, <span class="va">...</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/stats/residuals.html" class="external-link">residuals</a></span><span class="op">(</span><span class="va">object</span><span class="op">$</span><span class="va">engine</span><span class="op">)</span></span>
-<span><span class="va">fitted.trend_fit</span>    <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">object</span>, <span class="va">...</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted</a></span><span class="op">(</span><span class="va">object</span><span class="op">$</span><span class="va">engine</span><span class="op">)</span></span>
-<span><span class="kw">for</span> <span class="op">(</span><span class="va">g</span> <span class="kw">in</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"predict"</span>, <span class="st">"residuals"</span>, <span class="st">"fitted"</span><span class="op">)</span><span class="op">)</span></span>
-<span>  <span class="fu"><a href="https://rdrr.io/r/base/ns-internal.html" class="external-link">registerS3method</a></span><span class="op">(</span><span class="va">g</span>, <span class="st">"trend_fit"</span>, <span class="fu"><a href="https://rdrr.io/r/base/get.html" class="external-link">get</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">g</span>, <span class="st">".trend_fit"</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
+<code class="sourceCode R"><span><span class="va">size</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/select_resolution.html">select_resolution</a></span><span class="op">(</span><span class="fu"><a href="reference/resolution_profile.html">resolution_profile</a></span><span class="op">(</span><span class="va">site</span>, <span class="st">"z"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="va">size</span></span>
+<span><span class="co">#&gt; Resolution by size: 89 cells</span></span>
+<span><span class="co">#&gt;   size        : 4.5 rows per cell, the default (obs_per_cell); 400 rows / 89 cells = 4.49</span></span>
+<span><span class="co">#&gt;   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)</span></span>
+<span><span class="co">#&gt;   estimate    : pooled toward the 8 nearest cells</span></span>
+<span><span class="co">#&gt;   at this size: 0.0% of the rows are alone in their cell; median own weight 0.78</span></span>
+<span><span class="co">#&gt;   loo         : 0.912 (one cell for the layer: 1.5)</span></span>
+<span><span class="co">#&gt;   note        : the count is set by obs_per_cell = 4.5, the default; no</span></span>
+<span><span class="co">#&gt;                 criterion chose it.</span></span>
+<span></span>
+<span><span class="va">seeds</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/get_voronoi_seeds.html">get_voronoi_seeds</a></span><span class="op">(</span>n <span class="op">=</span> <span class="va">size</span>, sample_points <span class="op">=</span> <span class="va">site</span><span class="op">)</span></span>
+<span><span class="va">tess</span>  <span class="op">&lt;-</span> <span class="fu"><a href="reference/build_tessellation.html">build_tessellation</a></span><span class="op">(</span><span class="va">seeds</span>,</span>
+<span>                            boundary <span class="op">=</span> <span class="fu"><a href="reference/clip_target_for.html">clip_target_for</a></span><span class="op">(</span><span class="va">site</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span>,</span>
+<span>                            method <span class="op">=</span> <span class="st">"voronoi"</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="va">asg</span>   <span class="op">&lt;-</span> <span class="fu"><a href="reference/assign_features_to_polygons.html">assign_features_to_polygons</a></span><span class="op">(</span><span class="va">site</span>, <span class="va">tess</span><span class="op">$</span><span class="va">cells</span>,</span>
+<span>                                     polygon_id_col <span class="op">=</span> <span class="st">"cell_id"</span><span class="op">)</span></span>
+<span><span class="va">cells</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/summarize_by_cell.html">summarize_by_cell</a></span><span class="op">(</span><span class="va">asg</span>, <span class="st">"z"</span>, id_col <span class="op">=</span> <span class="st">"cell_id"</span>, cells_sf <span class="op">=</span> <span class="va">tess</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span></span>
+<span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">st_drop_geometry</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cell_id"</span>, <span class="st">"n"</span>, <span class="st">"resp_mean_z"</span>, <span class="st">"..se_resp_z"</span>,</span>
+<span>                                 <span class="st">"..pooled_resp_z"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">4</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   cell_id n resp_mean_z ..se_resp_z ..pooled_resp_z</span></span>
+<span><span class="co">#&gt; 1       1 4   1.3680408   0.3289247       1.0626423</span></span>
+<span><span class="co">#&gt; 2       2 3  -0.2762594   0.1258383      -0.1086915</span></span>
+<span><span class="co">#&gt; 3       3 3  -0.9436130   0.5218985      -0.6630103</span></span>
+<span><span class="co">#&gt; 4       4 5  -1.9008715   0.1581262      -1.4425290</span></span></code></pre></div>
+<p>The default size gives 89 cells, each holding between 2 and 10 observations. Each row has a count, the cell mean, its standard error and the pooled value <code>..pooled_resp_z</code>, the cell’s mean pulled toward its neighbours by a weight that grows with the cell’s count (<code><a href="reference/summarize_by_cell.html">?summarize_by_cell</a></code>, “Pooled values”). That standard error is the one for the cell’s own mean when its points are spread through the cell. When the cell means stand in for the population mean, <code>deff = "kish"</code> widens each standard error for the correlation inside the cell; on these cells it multiplies them by 2.2 (median). <code><a href="reference/summarize_by_cell.html">?summarize_by_cell</a></code> says which to use when.</p>
+<p>Then score a model. A random forest given the coordinates (<code>include_coords = TRUE</code>) can fit the training surface by memorising location. Score it on random folds and on blocks of at least 250 m, just above the field’s effective range (this needs <code>ranger</code>):</p>
 <div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># The blocks are sized to the field's own correlation: its effective range is</span></span>
-<span><span class="co"># 3 x 80 = 240 units, so 250-unit blocks hold out whole patches.  On real data</span></span>
-<span><span class="co"># the range is estimated, by estimate_sac_range() or make_folds(auto_range =</span></span>
-<span><span class="co"># TRUE); vignette("spatial-cross-validation") is about that choice.</span></span>
-<span><span class="va">random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">site</span>, <span class="st">"z"</span>, <span class="st">"w"</span>, fit_fn <span class="op">=</span> <span class="va">trend_fit</span>,</span>
-<span>                      folds <span class="op">=</span> <span class="fu"><a href="reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">site</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"random_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="va">blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">site</span>, <span class="st">"z"</span>, <span class="st">"w"</span>, fit_fn <span class="op">=</span> <span class="va">trend_fit</span>,</span>
-<span>                      folds <span class="op">=</span> <span class="fu"><a href="reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">site</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>,</span>
-<span>                                         block_size <span class="op">=</span> <span class="fl">250</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span><span class="op">)</span></span>
+<code class="sourceCode R"><span><span class="va">fr</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">site</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"random_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="va">fb</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">site</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, block_size <span class="op">=</span> <span class="fl">250</span>,</span>
+<span>                 seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
 <span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>random  <span class="op">=</span> <span class="va">random</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span>,</span>
-<span>  blocked <span class="op">=</span> <span class="va">blocked</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span>,</span>
-<span>  ratio   <span class="op">=</span> <span class="va">blocked</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span> <span class="op">/</span> <span class="va">random</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   random  blocked    ratio </span></span>
-<span><span class="co">#&gt; 1.011489 1.584805 1.566804</span></span></code></pre></div>
-<p>Same 400 observations, same model, one number more than half again the other. The difference is entirely in which rows were allowed to train on which: the random figure is the error of predicting among the samples, the blocked one the error of predicting into gaps a block wide. Which one a map has depends on where it predicts, and <code><a href="reference/fold_separation.html">fold_separation()</a></code> compares the folds’ distances from the data with the map’s.</p>
-<p>Is there structure the model missed?</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="reference/residual_morans_i.html">residual_morans_i</a></span><span class="op">(</span><span class="fu">trend_fit</span><span class="op">(</span><span class="va">site</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt; Residual Moran's I = 0.3314   (E[I] = -0.0025, sd = 0.0236)</span></span>
-<span><span class="co">#&gt;   z = 14.136, p = 2.275e-45</span></span>
-<span><span class="co">#&gt;   null: randomisation moments, approximate for these residuals; n = 400, df = 399</span></span>
-<span><span class="co">#&gt;   residual kurtosis 3.502 (3 = Gaussian)</span></span>
-<span><span class="co">#&gt;   weights: 400 x 400 dgCMatrix, 8 neighbour(s) per row; not retained, keep_weights = TRUE to keep it</span></span></code></pre></div>
-<p>A large positive Moran’s I says the residuals of nearby points resemble each other, so something varying smoothly across the map is still missing. Note which null it used: the fit is not ordinary least squares on the declared predictor, so the exact residual moments do not apply and it fell back to the randomisation null, reporting itself as approximate.</p>
+<span><span class="va">random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="reference/cv_rf.html">cv_rf</a></span><span class="op">(</span><span class="va">site</span>, <span class="st">"z"</span>, <span class="st">"w"</span>, folds <span class="op">=</span> <span class="va">fr</span>, include_coords <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="va">blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/cv_rf.html">cv_rf</a></span><span class="op">(</span><span class="va">site</span>, <span class="st">"z"</span>, <span class="st">"w"</span>, folds <span class="op">=</span> <span class="va">fb</span>, include_coords <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>random <span class="op">=</span> <span class="va">random</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span>, blocked <span class="op">=</span> <span class="va">blocked</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span></span>
+<span><span class="co">#&gt;    random   blocked </span></span>
+<span><span class="co">#&gt; 0.9790119 1.1227029</span></span></code></pre></div>
+<p>On the same 400 observations and the same model, random folds give an RMSE of 0.98 and the blocks, built 332 m wide, give 1.12. The data and the model are the same; the random figure is the error of predicting among the samples, and the blocked one the error of predicting into gaps a block wide. A map’s error depends on where it predicts, and <code><a href="reference/fold_separation.html">fold_separation()</a></code> compares the folds’ distances from the training data with the map’s. On real data the range is estimated, by <code><a href="reference/estimate_sac_range.html">estimate_sac_range()</a></code> or <code>make_folds(auto_range = TRUE)</code>; <code><a href="articles/spatial-cross-validation.html">vignette("spatial-cross-validation")</a></code> covers that choice.</p>
 </div>
 <div class="section level2">
-<h2 id="which-function-do-i-want">Which function do I want?<a class="anchor" aria-label="anchor" href="#which-function-do-i-want"></a>
+<h2 id="the-pipeline">The pipeline<a class="anchor" aria-label="anchor" href="#the-pipeline"></a>
 </h2>
+<p>Steps 1 to 10 link to their section of the <a href="https://elkronos.github.io/gis_modeling_toolkit/reference/index.html">reference index</a>, and every step to the article that shows it. <code><a href="reference/spatialkit-package.html">?spatialkit</a></code> lists the same steps inside R.</p>
 <table class="table">
 <colgroup>
-<col width="40%">
-<col width="59%">
+<col width="33%">
+<col width="33%">
+<col width="33%">
 </colgroup>
 <thead><tr>
-<th>I want to…</th>
-<th>Use</th>
+<th>Step</th>
+<th>Main functions</th>
+<th>Article</th>
 </tr></thead>
 <tbody>
 <tr>
-<td>get my data into a projected CRS</td>
-<td>
-<code><a href="reference/ensure_projected.html">ensure_projected()</a></code>, <code><a href="reference/coerce_to_points.html">coerce_to_points()</a></code>, <code><a href="reference/harmonize_crs.html">harmonize_crs()</a></code>
+<td>1. <a href="https://elkronos.github.io/gis_modeling_toolkit/reference/index.html#prepare-the-data">Prepare the data</a>
 </td>
-</tr>
-<tr>
-<td>cut my study area into cells</td>
 <td>
-<code><a href="reference/build_tessellation.html">build_tessellation()</a></code> (<code>"voronoi"</code>, <code>"hex"</code>, <code>"square"</code>, <code>"triangles"</code>)</td>
-</tr>
-<tr>
-<td>place the seeds a Voronoi grows from</td>
-<td><code><a href="reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code></td>
-</tr>
-<tr>
-<td>read a cell count off the elbow of the clustering of my points (coordinates only; <code>NA</code> when there is none)</td>
-<td><code><a href="reference/determine_optimal_levels.html">determine_optimal_levels()</a></code></td>
-</tr>
-<tr>
-<td>set the cell count from a number of observations per cell</td>
-<td>
-<code><a href="reference/resolution_profile.html">resolution_profile()</a></code>, then <code><a href="reference/select_resolution.html">select_resolution()</a></code> (by default 4.5 per cell, for pooled values)</td>
-</tr>
-<tr>
-<td>see what every cell count costs</td>
-<td>
-<code>resolution_profile(n_levels = )</code>, then <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> on it for every criterion’s pick, or <code>select_resolution(criterion = )</code> for one criterion’s pick</td>
-</tr>
-<tr>
-<td>read a cell’s value and interval at other locations</td>
-<td><code><a href="reference/cell_values_at.html">cell_values_at()</a></code></td>
-</tr>
-<tr>
-<td>put points into cells and aggregate</td>
-<td>
-<code><a href="reference/assign_features_to_polygons.html">assign_features_to_polygons()</a></code> → <code><a href="reference/summarize_by_cell.html">summarize_by_cell()</a></code>
+<code><a href="reference/ensure_projected.html">ensure_projected()</a></code>, <code><a href="reference/coerce_to_points.html">coerce_to_points()</a></code>, <code><a href="reference/prep_model_data.html">prep_model_data()</a></code>
 </td>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.html">Get started</a></td>
 </tr>
 <tr>
-<td>check whether a cell mean is the best estimate of that cell</td>
-<td><code><a href="reference/kriging_adequacy.html">kriging_adequacy()</a></code></td>
-</tr>
-<tr>
-<td>draw the result</td>
-<td><code><a href="reference/plot_tessellation_map.html">plot_tessellation_map()</a></code></td>
-</tr>
-<tr>
-<td>know how far spatial correlation reaches</td>
-<td>
-<code><a href="reference/estimate_sac_range.html">estimate_sac_range()</a></code>, and <code><a href="reference/sac_nugget.html">sac_nugget()</a></code> for its nugget</td>
-</tr>
-<tr>
-<td>build CV folds</td>
-<td>
-<code><a href="reference/make_folds.html">make_folds()</a></code> (<code>random_kfold</code>, <code>block_kfold</code>, <code>buffered_loo</code>, <code>leave_location_out</code>, <code>nndm</code>, <code>knndm</code>)</td>
-</tr>
-<tr>
-<td>see whether my folds actually separate</td>
-<td><code><a href="reference/plot_folds.html">plot_folds()</a></code></td>
-</tr>
-<tr>
-<td>check which way a CV score errs for my map</td>
-<td><code>fold_separation(prediction_points = )</code></td>
-</tr>
-<tr>
-<td>see the CV error at each block size</td>
-<td>
-<code><a href="reference/cv_block_size_sweep.html">cv_block_size_sweep()</a></code>, and <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> on the result</td>
-</tr>
-<tr>
-<td>fit a model</td>
-<td>
-<code><a href="reference/fit_gwr_model.html">fit_gwr_model()</a></code>, <code><a href="reference/fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>, <code><a href="reference/fit_rf_model.html">fit_rf_model()</a></code>
+<td>2. <a href="https://elkronos.github.io/gis_modeling_toolkit/reference/index.html#measure-spatial-autocorrelation">Measure spatial autocorrelation</a>
 </td>
+<td><code><a href="reference/estimate_sac_range.html">estimate_sac_range()</a></code></td>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.html">Spatial cross-validation</a></td>
 </tr>
 <tr>
-<td>score it out of sample</td>
-<td>
-<code><a href="reference/cv_gwr.html">cv_gwr()</a></code>, <code><a href="reference/cv_bayes.html">cv_bayes()</a></code>, <code><a href="reference/cv_rf.html">cv_rf()</a></code>
+<td>3. <a href="https://elkronos.github.io/gis_modeling_toolkit/reference/index.html#choose-a-resolution">Choose a resolution</a>
 </td>
-</tr>
-<tr>
-<td>score <em>my own</em> learner on the same folds</td>
 <td>
-<code><a href="reference/cv_spatial.html">cv_spatial()</a></code> + <code><a href="reference/new_spatial_fit.html">new_spatial_fit()</a></code>
+<code><a href="reference/resolution_profile.html">resolution_profile()</a></code>, <code><a href="reference/select_resolution.html">select_resolution()</a></code>
 </td>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.html">Choosing a resolution</a></td>
 </tr>
 <tr>
-<td>score it in sample</td>
-<td>
-<code><a href="reference/model_metrics.html">model_metrics()</a></code>, <code><a href="reference/evaluate_insample.html">evaluate_insample()</a></code>, <code><a href="reference/compare_models.html">compare_models()</a></code>
+<td>4. <a href="https://elkronos.github.io/gis_modeling_toolkit/reference/index.html#build-the-cells">Build the cells</a>
 </td>
-</tr>
-<tr>
-<td>see the fold-to-fold spread of a CV score</td>
-<td><code><a href="reference/plot_cv_metrics.html">plot_cv_metrics()</a></code></td>
-</tr>
-<tr>
-<td>check whether predicted intervals are the width they claim</td>
-<td><code><a href="reference/plot_calibration.html">plot_calibration()</a></code></td>
-</tr>
-<tr>
-<td>pick predictors inside the cross-validation</td>
 <td>
-<code><a href="reference/select_features_forward.html">select_features_forward()</a></code> (<code><a href="reference/gwr_model_selection.html">gwr_model_selection()</a></code> for the AICc counterpart)</td>
-</tr>
-<tr>
-<td>compare backends head to head</td>
-<td><code><a href="reference/compare_models_cv.html">compare_models_cv()</a></code></td>
-</tr>
-<tr>
-<td>check for leftover spatial structure</td>
-<td>
-<code><a href="reference/residual_morans_i.html">residual_morans_i()</a></code>, <code>plot(fit, type = "variogram")</code>
+<code><a href="reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code>, <code><a href="reference/build_tessellation.html">build_tessellation()</a></code>
 </td>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/cells.html">Building cells and summarising them</a></td>
 </tr>
 <tr>
-<td>turn a fit into a map</td>
-<td><code><a href="reference/predict_surface.html">predict_surface()</a></code></td>
-</tr>
-<tr>
-<td>know where that map is extrapolation</td>
-<td><code><a href="reference/area_of_applicability.html">area_of_applicability()</a></code></td>
-</tr>
-<tr>
-<td>free memory held by the caches</td>
-<td>
-<code><a href="reference/clear_grid_cache.html">clear_grid_cache()</a></code>, <code><a href="reference/clear_fitted_cache.html">clear_fitted_cache()</a></code>
+<td>5. <a href="https://elkronos.github.io/gis_modeling_toolkit/reference/index.html#assign-and-summarise">Assign and summarise</a>
 </td>
+<td>
+<code><a href="reference/assign_features_to_polygons.html">assign_features_to_polygons()</a></code>, <code><a href="reference/summarize_by_cell.html">summarize_by_cell()</a></code>
+</td>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/cells.html">Building cells and summarising them</a></td>
+</tr>
+<tr>
+<td>6. <a href="https://elkronos.github.io/gis_modeling_toolkit/reference/index.html#make-folds">Make folds</a>
+</td>
+<td>
+<code><a href="reference/make_folds.html">make_folds()</a></code>, <code><a href="reference/fold_separation.html">fold_separation()</a></code>
+</td>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.html">Spatial cross-validation</a></td>
+</tr>
+<tr>
+<td>7. <a href="https://elkronos.github.io/gis_modeling_toolkit/reference/index.html#fit-a-model">Fit a model</a>
+</td>
+<td>
+<code><a href="reference/fit_rf_model.html">fit_rf_model()</a></code>, <code><a href="reference/fit_gwr_model.html">fit_gwr_model()</a></code>, <code><a href="reference/fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>
+</td>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/models.html">Fitting and checking models</a></td>
+</tr>
+<tr>
+<td>8. <a href="https://elkronos.github.io/gis_modeling_toolkit/reference/index.html#cross-validate-and-compare">Cross-validate and compare</a>
+</td>
+<td>
+<code><a href="reference/cv_rf.html">cv_rf()</a></code>, <code><a href="reference/cv_gwr.html">cv_gwr()</a></code>, <code><a href="reference/cv_bayes.html">cv_bayes()</a></code>, <code><a href="reference/compare_models_cv.html">compare_models_cv()</a></code>
+</td>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.html">Spatial cross-validation</a></td>
+</tr>
+<tr>
+<td>9. <a href="https://elkronos.github.io/gis_modeling_toolkit/reference/index.html#choose-predictors">Choose predictors</a>
+</td>
+<td><code><a href="reference/select_features_forward.html">select_features_forward()</a></code></td>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/models.html">Fitting and checking models</a></td>
+</tr>
+<tr>
+<td>10. <a href="https://elkronos.github.io/gis_modeling_toolkit/reference/index.html#predict-a-surface">Predict a surface</a> and check where it applies</td>
+<td>
+<code><a href="reference/predict_surface.html">predict_surface()</a></code>, <code><a href="reference/area_of_applicability.html">area_of_applicability()</a></code>
+</td>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/models.html">Fitting and checking models</a></td>
+</tr>
+<tr>
+<td>11. Report</td>
+<td>
+<code><a href="reference/ensure_stable_poly_id.html">ensure_stable_poly_id()</a></code>, <code><a href="https://r-spatial.github.io/sf/reference/st_write.html" class="external-link">sf::st_write()</a></code>
+</td>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.html">Exporting and reporting results</a></td>
 </tr>
 </tbody>
 </table>
-<p>Lower-level exports sit behind these and have pages of their own: <code><a href="reference/create_voronoi_polygons.html">create_voronoi_polygons()</a></code>, <code><a href="reference/create_grid_polygons.html">create_grid_polygons()</a></code>, <code><a href="reference/create_grid_polygons_cached.html">create_grid_polygons_cached()</a></code>, <code><a href="reference/clip_target_for.html">clip_target_for()</a></code>, <code><a href="reference/ensure_stable_poly_id.html">ensure_stable_poly_id()</a></code>, <code><a href="reference/voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code>, <code><a href="reference/voronoi_seeds_random.html">voronoi_seeds_random()</a></code>, <code><a href="reference/prep_model_data.html">prep_model_data()</a></code> and <code><a href="reference/gp_lengthscale_bounds.html">gp_lengthscale_bounds()</a></code>. The reference index lists everything, grouped by pipeline step.</p>
 </div>
 <div class="section level2">
-<h2 id="choosing-a-backend">Choosing a backend<a class="anchor" aria-label="anchor" href="#choosing-a-backend"></a>
+<h2 id="where-to-go-next">Where to go next<a class="anchor" aria-label="anchor" href="#where-to-go-next"></a>
 </h2>
-<p><code><a href="reference/compare_models_cv.html">compare_models_cv()</a></code> scores all three on identical folds and is the right answer when you can afford it. It is not always cheap. On one recorded run (one machine, 4-fold CV, 2 chains × 1,000 iterations, while the default <code>adapt_delta</code> was 0.9; the present 0.99 samples more slowly) the Bayesian GP took <strong>1,186 s</strong> at n = 2,000 against <strong>109 s</strong> for <code><a href="reference/cv_gwr.html">cv_gwr()</a></code> on the same data. At n = 300 it was 142 s against 0.8 s, so the ratio is not fixed either. A <code><a href="reference/cv_rf.html">cv_rf()</a></code> of the same shape is seconds. So it is worth knowing what each backend is <em>for</em> before you spend an afternoon comparing them:</p>
+<p>The <a href="https://elkronos.github.io/gis_modeling_toolkit/articles/index.html">articles</a>, in reading order:</p>
 <table class="table">
 <colgroup>
-<col width="17%">
-<col width="69%">
-<col width="13%">
+<col width="33%">
+<col width="33%">
+<col width="33%">
 </colgroup>
 <thead><tr>
-<th>Backend</th>
-<th>Reach for it when you want</th>
-<th>Cost</th>
+<th>Article</th>
+<th>What it covers</th>
+<th>In R</th>
 </tr></thead>
 <tbody>
 <tr>
-<td>
-<strong>GWR</strong> (<code><a href="reference/fit_gwr_model.html">fit_gwr_model()</a></code>, <code>sp</code>)</td>
-<td>spatially varying <strong>coefficients</strong> you can interpret and map. Only this backend answers “the elevation effect is strong in the west and absent in the east”</td>
-<td>moderate; grows quickly with n</td>
-</tr>
-<tr>
-<td>
-<strong>Bayesian spatial GP</strong> (<code><a href="reference/fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>, <code>brms</code>)</td>
-<td>
-<strong>uncertainty</strong>: posterior predictive intervals (check their coverage with <code><a href="reference/cv_bayes.html">cv_bayes()</a></code>), <code>se = TRUE</code> surfaces (the SD of the mean surface; add <code>type = "predict"</code> for the predictive SD), CRPS. Also the natural spatial null: <code>predictor_vars = character(0)</code> fits an intercept-only GP, which asks how much of the surface is spatial structure and how much is covariate effect</td>
-<td>far the highest; every CV fold is a full MCMC run</td>
-</tr>
-<tr>
-<td>
-<strong>Random forest</strong> (<code><a href="reference/fit_rf_model.html">fit_rf_model()</a></code>, <code>ranger</code>)</td>
-<td>
-<strong>nonlinearity and interactions</strong> without specifying them, and no inference: you get permutation importance in place of coefficients</td>
-<td>far the lowest; the one to prototype with</td>
-</tr>
-</tbody>
-</table>
-<p>Two things that are not backend choices. First, none of them fixes bad folds. All three can interpolate location directly, which is where the gap the quick start showed is widest, so the fold scheme has to be right before the backend comparison means anything. Second, if the question is only “is there spatial structure my predictors miss”, <code><a href="reference/residual_morans_i.html">residual_morans_i()</a></code> on the cheapest fit you can make answers it before you pick anything.</p>
-</div>
-<div class="section level2">
-<h2 id="documentation">Documentation<a class="anchor" aria-label="anchor" href="#documentation"></a>
-</h2>
-<p>Six vignettes, each executed when the package is built, so every number in them is computed on the spot.</p>
-<table class="table">
-<colgroup>
-<col width="24%">
-<col width="75%">
-</colgroup>
-<thead><tr>
-<th>vignette</th>
-<th>covers</th>
-</tr></thead>
-<tbody>
-<tr>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.html">Get started</a></td>
+<td>Take a layer of points to cells with standard errors, a score from spatial cross-validation and a map that marks where its predictions apply.</td>
 <td><code><a href="articles/getting-started.html">vignette("getting-started")</a></code></td>
-<td>installing, getting your data in, what the coordinates are in, and the pipeline from points to a scored model and a map</td>
 </tr>
 <tr>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.html">Choosing a resolution</a></td>
+<td>Decide how many cells the data support, and pass that count to the tessellation.</td>
 <td><code><a href="articles/resolution.html">vignette("resolution")</a></code></td>
-<td>choosing a cell count, the criteria, and why they disagree</td>
 </tr>
 <tr>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/cells.html">Building cells and summarising them</a></td>
+<td>Draw the cells, put each observation in one, and report each cell’s value with the right standard error.</td>
+<td><code><a href="articles/cells.html">vignette("cells")</a></code></td>
+</tr>
+<tr>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.html">Spatial cross-validation</a></td>
+<td>Choose folds whose score matches the map you will make, size the blocks, and read every part of the result.</td>
 <td><code><a href="articles/spatial-cross-validation.html">vignette("spatial-cross-validation")</a></code></td>
-<td>the six fold schemes, block sizing, and reading a CV result down to the last row</td>
 </tr>
 <tr>
-<td><code><a href="articles/diagnostics.html">vignette("diagnostics")</a></code></td>
-<td>residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability, coordinates as predictors, and selection inside the folds</td>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/models.html">Fitting and checking models</a></td>
+<td>Pick a backend or write your own, compare backends on the same folds, check the residuals, and map where the predictions apply.</td>
+<td><code><a href="articles/models.html">vignette("models")</a></code></td>
 </tr>
 <tr>
-<td><code><a href="articles/spatialkit_nc_demo.html">vignette("spatialkit_nc_demo")</a></code></td>
-<td>the whole pipeline end to end on real boundaries, with maps</td>
-</tr>
-<tr>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.html">Exporting and reporting results</a></td>
+<td>Write the cells to a file others can join to, and report the numbers that say how far a cell value or a map can be trusted.</td>
 <td><code><a href="articles/reporting.html">vignette("reporting")</a></code></td>
-<td>grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report</td>
+</tr>
+<tr>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.html">Worked example: North Carolina</a></td>
+<td>The pipeline on a simulated field over North Carolina, comparing four tessellations, two fold schemes and two backends at cell counts set by hand.</td>
+<td><code><a href="articles/spatialkit_nc_demo.html">vignette("spatialkit_nc_demo")</a></code></td>
+</tr>
+<tr>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/troubleshooting.html">Troubleshooting and performance</a></td>
+<td>The errors and warnings you are most likely to meet, what each means, and how to handle large layers, parallel folds, caches and the log.</td>
+<td><code><a href="articles/troubleshooting.html">vignette("troubleshooting")</a></code></td>
+</tr>
+<tr>
+<td><a href="https://elkronos.github.io/gis_modeling_toolkit/articles/glossary.html">Terms used on these pages</a></td>
+<td>Short definitions of the terms the articles and help pages use.</td>
+<td><code><a href="articles/glossary.html">vignette("glossary")</a></code></td>
 </tr>
 </tbody>
 </table>
-<p><code><a href="reference/spatialkit-package.html">?spatialkit</a></code> walks the pipeline in order and names the function for each step. Every exported function has its own page.</p>
-<p>All of it is also online at <a href="https://elkronos.github.io/gis_modeling_toolkit/" class="uri">https://elkronos.github.io/gis_modeling_toolkit/</a>, built from <code>main</code>, so the site describes the development version.</p>
-<div class="section level3">
-<h3 id="scripts-you-can-run">Scripts you can run<a class="anchor" aria-label="anchor" href="#scripts-you-can-run"></a>
-</h3>
-<p>Ten numbered scripts ship with the package. Each prints what it is doing and states what to look for in a figure before drawing it, so a plot is something you can disagree with rather than nod at. They run on a simulated field with known structure, so every diagnostic has something true to find, and none of them asserts a number it did not compute.</p>
-<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">dir</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"scripts"</span>, package <span class="op">=</span> <span class="st">"spatialkit"</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/list.files.html" class="external-link">list.files</a></span><span class="op">(</span><span class="va">dir</span><span class="op">)</span></span>
-<span></span>
-<span><span class="kw"><a href="https://rdrr.io/r/base/source.html" class="external-link">source</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">dir</span>, <span class="st">"03-folds.R"</span><span class="op">)</span><span class="op">)</span>    <span class="co"># one topic</span></span>
-<span><span class="kw"><a href="https://rdrr.io/r/base/source.html" class="external-link">source</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">dir</span>, <span class="st">"00-run-all.R"</span><span class="op">)</span><span class="op">)</span>  <span class="co"># all ten, seven minutes or so</span></span></code></pre></div>
-<table class="table">
-<colgroup>
-<col width="15%">
-<col width="45%">
-<col width="38%">
-</colgroup>
-<thead><tr>
-<th>script</th>
-<th>topic</th>
-<th>needs, beyond ggplot2</th>
-</tr></thead>
-<tbody>
-<tr>
-<td><code>01-tessellations.R</code></td>
-<td>Voronoi, hex, square and Delaunay cells, and what seeding changes</td>
-<td>geometry for the Delaunay part</td>
-</tr>
-<tr>
-<td><code>02-resolution.R</code></td>
-<td>the range, the ladder, the criteria that disagree, the leak, and the default size</td>
-<td>gstat</td>
-</tr>
-<tr>
-<td><code>03-folds.R</code></td>
-<td>random against blocked folds, plus buffered leave-one-out and NNDM</td>
-<td></td>
-</tr>
-<tr>
-<td><code>04-block-size.R</code></td>
-<td>sweeping the block size, and the two shapes the curve takes</td>
-<td>gstat, for the range marker</td>
-</tr>
-<tr>
-<td><code>05-fit-diagnose.R</code></td>
-<td>wrapping your own model, residual autocorrelation, cell means</td>
-<td>gstat, for the residual variogram and the kriging check</td>
-</tr>
-<tr>
-<td><code>06-cv-compare.R</code></td>
-<td>comparing models fold by fold on one set of folds</td>
-<td>ranger and sp, for the backend comparison</td>
-</tr>
-<tr>
-<td><code>07-surface-aoa.R</code></td>
-<td>predicting onto a grid, and where the map stops meaning anything</td>
-<td>stars for the raster part</td>
-</tr>
-<tr>
-<td><code>08-feature-select.R</code></td>
-<td>forward selection, and measuring the selection effect</td>
-<td></td>
-</tr>
-<tr>
-<td><code>09-gwr.R</code></td>
-<td>coefficients that vary over space</td>
-<td>sp</td>
-</tr>
-<tr>
-<td><code>10-bayes.R</code></td>
-<td>a Bayesian GP, and whether its intervals are calibrated</td>
-<td>brms and a Stan toolchain; slow</td>
-</tr>
-</tbody>
-</table>
-<p>Every script draws with ggplot2. When a package a script needs is absent it skips the part that needs it, or the whole script for 02, 09 and 10, with a message naming the package. In an interactive session each script pauses at <code>[enter]</code> between figures; set <code>Sys.setenv(SPATIALKIT_TOUR_PAUSE = "no")</code> first to run one straight through, which is what <code>00-run-all.R</code> expects. Most of <code>00-run-all.R</code>’s running time is script 10, which compiles a Stan model once per fit. Set <code>SPATIALKIT_TOUR_OUTPUT</code> to a folder to write the figures there instead of drawing them. <code>example_nc_demo.R</code> in the same folder is the runnable version of the nc demo vignette.</p>
-</div>
+<p>The numbered scripts in <code>system.file("scripts", package = "spatialkit")</code> run each step on a simulated field; Get started lists them. Report a bug or ask a question on the <a href="https://github.com/elkronos/gis_modeling_toolkit/issues" class="external-link">issue tracker</a>; the <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/.github/CONTRIBUTING.md" class="external-link">contributing guide</a> says what to include.</p>
 </div>
 <div class="section level2">
-<h2 id="troubleshooting">Troubleshooting<a class="anchor" aria-label="anchor" href="#troubleshooting"></a>
+<h2 id="citation">Citation<a class="anchor" aria-label="anchor" href="#citation"></a>
 </h2>
-<p>The handful you are most likely to meet, and what each is actually telling you.</p>
-<p><strong><code>build_tessellation(): boundary is required for hex/square grids.</code></strong> A lattice has no extent of its own. Pass <code>boundary =</code> a polygon; dissolving your source polygons with <code><a href="https://r-spatial.github.io/sf/reference/geos_combine.html" class="external-link">st_union()</a></code> is the usual way to get one. Voronoi and <code>"triangles"</code> do not need it; Voronoi falls back to the convex hull of the points, or of their cover for seeds.</p>
-<p><strong><code>prep_model_data(): missing required column(s): X</code></strong> A <code>response_var</code> or <code>predictor_vars</code> name that is not in the data. Usually a typo, a case difference, or a column renamed by <code><a href="https://rdrr.io/r/utils/read.table.html" class="external-link">read.csv()</a></code>’s <code>check.names = TRUE</code> (<code>pop density</code> becomes <code>pop.density</code>). Check <code>names(data_sf)</code>. The geometry column is not a predictor.</p>
-<p><strong><code>fit_rf_model(): response 'y' is not numeric.</code></strong> (And its <code><a href="reference/fit_gwr_model.html">fit_gwr_model()</a></code> / <code><a href="reference/fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code> equivalents.) Everything here is regression, with one exception: <code><a href="reference/fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code> takes a factor or character response under <code><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class="external-link">brms::categorical()</a></code> or an ordinal family (see “Non-Gaussian responses” in <code><a href="reference/fit_bayesian_spatial_model.html">?fit_bayesian_spatial_model</a></code>). Anywhere else a factor or character response is refused outright; a response that came back as character from a CSV needs <code><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric()</a></code> first. Check for a stray thousands separator or an <code>"NA"</code> string if that produces <code>NA</code>s. <code><a href="reference/fit_gwr_model.html">fit_gwr_model()</a></code> additionally refuses an integer-coded two-valued response and points at <code><a href="https://rdrr.io/pkg/GWmodel/man/ggwr.basic.html" class="external-link">GWmodel::ggwr.basic()</a></code>.</p>
-<p><strong><code>prep_model_data(): column name(s) 'B5-B4' are not syntactically valid R names</code></strong> Every backend builds a formula from the column names, and <code><a href="https://rdrr.io/r/base/make.names.html" class="external-link">make.names()</a></code> would silently rewrite them so the formula and the data disagree. Rename before fitting: <code>names(x) &lt;- make.names(names(x))</code>.</p>
-<p><strong><code>prep_model_data(): response 'y' is also listed in 'predictor_vars'.</code></strong> A model cannot use its own response as a predictor. Nothing downstream catches this: it is leakage in the forest (OOB R² near 1, the response at the top of the importance table), a silently reduced model in GWR, and duplicated rows in the GWR selection table. Drop the response from <code>predictor_vars</code>.</p>
-<p><strong><code>fit_rf_model(): 'num.trees' is already set by this function and cannot be passed through</code>…<code>as well.</code></strong> ranger’s own spelling of an argument this wrapper fixes would reach <code><a href="http://imbs-hl.github.io/ranger/reference/ranger.html" class="external-link">ranger::ranger()</a></code> twice. Use the wrapper’s spelling (<code>num_trees</code>, <code>min_node_size</code>, <code>num_threads</code>, <code>mtry</code>, <code>importance</code>, <code>seed</code>) and let it pass the value through.</p>
-<p><strong><code>make_folds(block_kfold): the requested grid is ... cells, above the 1,000,000 this function will build.</code></strong> <code>block_size</code> is in the units of the working CRS, and a value in the wrong unit (metres over a CRS in US survey feet, or a lon/lat degree figure) asks for a grid far finer than intended. The message prints the extent and the CRS units to compare against. <code><a href="reference/predict_surface.html">predict_surface()</a></code> refuses above 5,000,000 grid cells for the same reason.</p>
-<p><strong><code>n = 6000 requires FNN for k-NN weights, and Matrix to hold them sparsely</code></strong> <code><a href="reference/residual_morans_i.html">residual_morans_i()</a></code> above n = 5,000. The fallback allocates a dense n x n matrix, which is why it stops here. FNN installs with spatialkit, so the missing one is Matrix: <code>install.packages("Matrix")</code>.</p>
-<p><strong><code>compare_models_cv(): no recognised model requested.</code></strong> None of the names in <code>models</code> is <code>"GWR"</code>, <code>"Bayesian"</code> or <code>"RF"</code>, which are matched exactly, case included. The <code>ignoring unknown model(s)</code> warning printed with the error names the ones it ignored.</p>
-<p><strong><code>compare_models_cv(): no viable models.</code></strong> At least one requested name was recognised, but every recognised backend is uninstalled: each prints <code>dropping &lt;name&gt; (package/function unavailable)</code> above the error, and any unrecognised names are named in a warning printed with it. Install the backend, or request one you have.</p>
-<p><strong><code>cv_*(): all folds failed (all N folds failed to produce predictions); ...</code></strong> This is a warning: <code>$overall</code> comes back all-<code>NA</code> with <code>n_pred = 0</code>. The per-fold <code>WARN</code> lines name the cause, most often a missing backend, sometimes a degenerate training slice or a predictor constant within a fold. Compare <code>cv$n_folds_succeeded</code> against <code>cv$n_folds_attempted</code> on every run, including the ones that look fine: a <em>partial</em> failure produces a plausible-looking score computed from fewer folds than you asked for.</p>
-<p><strong><code><a href="reference/estimate_sac_range.html">estimate_sac_range()</a></code> returned <code>NA</code>.</strong> The range was not identified, so nothing is reported. <code>attr(x, "rejected_reason")</code> names which of the seven refusals it was, <code><a href="reference/estimate_sac_range.html">?estimate_sac_range</a></code> says what each one means, and <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> on the returned object draws the variogram behind it. <code><a href="articles/spatial-cross-validation.html">vignette("spatial-cross-validation")</a></code> covers what an <code>NA</code> there leaves you to decide about the block size.</p>
-<p><strong><code>determine_optimal_levels(): the model-aware criteria score only the elbow's neighbourhood, k = ... to ..., and carry no information at nine cells or fewer</code></strong> (or, before the sweep, <code>max_levels leaves k_max = ...</code>). Every candidate around the elbow sat at nine cells or fewer, where Moran’s I is arithmetically degenerate, so the call fell back to the geometric ranking. On points with no cluster structure that is the usual outcome below about <code>max_levels = 40</code> under <code>on_no_elbow = "warn"</code> (at the default such points return <code>NA</code> before any window is placed); <code><a href="reference/resolution_profile.html">resolution_profile()</a></code> scores Moran’s z at every level of its ladder. See <code><a href="articles/resolution.html">vignette("resolution")</a></code>.</p>
-<p><strong><code>determine_optimal_levels(): Moran's I could not be computed at any k from ... to ... in the elbow's neighbourhood</code></strong> The candidates did pass nine cells, but too few of the cells hold a row with a response and every predictor, or the regression of the cell means on the predictors is singular (a predictor constant or collinear across cells). Check for missing values first. Under <code>criterion = "morans_i"</code> the call then falls back to the geometric ranking; under <code>"combined"</code> it ranks the counts as usual, with <code>moran_i</code> and <code>moran_z</code> <code>NA</code> in the diagnostics.</p>
-<p><strong>Distances, bandwidths or block sizes look absurd.</strong> Check the working CRS first: <code>st_crs(x)$units_gdal</code>. A block size that made sense in metres is meaningless in US survey feet, and lon/lat input gets projected to a CRS the package chose. <code><a href="articles/getting-started.html">vignette("getting-started")</a></code> covers what the coordinates are in and how that choice is made.</p>
-</div>
-<div class="section level2">
-<h2 id="running-it-in-practice">Running it in practice<a class="anchor" aria-label="anchor" href="#running-it-in-practice"></a>
-</h2>
-<p>Three concerns that show up once the pipeline works: making cross-validation finish sooner, avoiding recomputation of what has not changed, and seeing what the package is doing.</p>
-<div class="section level3">
-<h3 id="parallel-cross-validation">Parallel cross-validation<a class="anchor" aria-label="anchor" href="#parallel-cross-validation"></a>
-</h3>
-<p><code><a href="reference/cv_bayes.html">cv_bayes()</a></code>, <code><a href="reference/cv_rf.html">cv_rf()</a></code> and <code><a href="reference/cv_spatial.html">cv_spatial()</a></code> accept a <code>parallel</code> argument for fold-level parallelism via <code><a href="https://rdrr.io/r/parallel/mclapply.html" class="external-link">parallel::mclapply()</a></code> (macOS/Linux; falls back to sequential on Windows with a message). <code><a href="reference/cv_gwr.html">cv_gwr()</a></code> accepts it too but always runs its folds one after another, with a warning if you ask for more. Parallel folds matter most for <code><a href="reference/cv_bayes.html">cv_bayes()</a></code>, where every fold is a full MCMC run:</p>
-<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># cv_bayes() needs `brms`. Without it every fold fails and you get an empty</span></span>
-<span><span class="co"># result, not an error -- a per-fold WARN naming the cause, one summarising</span></span>
-<span><span class="co"># R warning(), and $overall all-NA with n_pred = 0:</span></span>
-<span><span class="va">cv</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/cv_bayes.html">cv_bayes</a></span><span class="op">(</span><span class="va">site</span>, <span class="st">"price"</span>, <span class="st">"elev"</span>, k <span class="op">=</span> <span class="fl">5</span>, parallel <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span>  <span class="co"># auto-detect cores</span></span>
-<span><span class="co">#&gt; cv_bayes(): no folds supplied -- using spatial block k-fold CV (k=5).</span></span>
-<span><span class="co">#&gt; WARN  cross-validation: fold 1 fit failed; skipping.</span></span>
-<span><span class="co">#&gt;       Cause: fit_bayesian_spatial_model(): package 'brms' is required.</span></span>
-<span><span class="co">#&gt; ... (once per fold)</span></span>
-<span><span class="co">#&gt; WARN  cv_bayes(): all folds failed (all 5 folds failed to produce</span></span>
-<span><span class="co">#&gt; predictions); cross-validation results contain no predictions. First error:</span></span>
-<span><span class="co">#&gt; fit_bayesian_spatial_model(): package 'brms' is required.</span></span>
-<span><span class="co">#&gt; Warning message:</span></span>
-<span><span class="co">#&gt; cv_bayes(): all folds failed (all 5 folds failed to produce predictions);</span></span>
-<span><span class="co">#&gt; cross-validation results contain no predictions. First error:</span></span>
-<span><span class="co">#&gt; fit_bayesian_spatial_model(): package 'brms' is required.</span></span>
-<span></span>
-<span><span class="va">cv</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/cv_rf.html">cv_rf</a></span><span class="op">(</span><span class="va">site</span>, <span class="st">"price"</span>, <span class="st">"elev"</span>, k <span class="op">=</span> <span class="fl">5</span>, parallel <span class="op">=</span> <span class="fl">4L</span><span class="op">)</span>       <span class="co"># explicit count</span></span></code></pre></div>
-<p><strong>Check <code>cv$n_folds_succeeded</code> against <code>cv$n_folds_attempted</code> before you read <code>cv$overall</code>.</strong> Every CV function records both, precisely because a partial or total fold failure degrades instead of erroring. A missing backend is only the loudest cause; a fold whose training slice is degenerate fails the same way and leaves the remaining folds looking fine.</p>
-<p>Results are reproducible from <code>seed</code> and identical to <code>parallel = FALSE</code>: one RNG stream per fold is drawn in the parent process, so each fold’s stream is a function of <code>(seed, fold index)</code> alone.</p>
-</div>
-<div class="section level3">
-<h3 id="caching">Caching<a class="anchor" aria-label="anchor" href="#caching"></a>
-</h3>
-<p>Grid construction and posterior expectations are both expensive enough to memoise, so both are cached:</p>
-<ul>
-<li>
-<code><a href="reference/create_grid_polygons_cached.html">create_grid_polygons_cached()</a></code> memoises grids keyed on boundary geometry, CRS, target cell count and arguments. <code><a href="reference/clear_grid_cache.html">clear_grid_cache()</a></code> empties it. It is not a drop-in swap for <code><a href="reference/create_grid_polygons.html">create_grid_polygons()</a></code>: the cached version also runs <code><a href="reference/ensure_stable_poly_id.html">ensure_stable_poly_id()</a></code>, so its cells come back re-ordered and re-numbered by a projection-independent spatial sort. Use one or the other throughout an analysis. Mixing them means two grids over the same boundary whose <code>poly_id</code> values do not line up.</li>
-<li>
-<code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code> on a <code>bayesian_fit</code> memoises <code>posterior_epred()</code> column means in an environment carried on the object, because <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code>, <code><a href="https://rdrr.io/r/stats/residuals.html" class="external-link">residuals()</a></code>, <code><a href="reference/model_metrics.html">model_metrics()</a></code> and <code><a href="reference/compare_models.html">compare_models()</a></code> each call <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code> independently. <code>clear_fitted_cache(fit)</code> drops it, which is needed only if you mutate the engine or the training data by hand after fitting.</li>
-</ul>
-</div>
-<div class="section level3">
-<h3 id="logging">Logging<a class="anchor" aria-label="anchor" href="#logging"></a>
-</h3>
-<p>Detailed diagnostics are logged to a session temp file, and warnings are echoed to the console. Logging is scoped to the <code>"spatialkit"</code> namespace: it never touches your global logger configuration, and a global configuration set up before the package loads does not carry over into it.</p>
-<p>The two are separate <code>logger</code> appenders: <strong>index 1</strong> is the temp file (INFO+), <strong>index 2</strong> is the console echo (WARN+). Both <code><a href="https://daroczig.github.io/logger/reference/log_appender.html" class="external-link">logger::log_appender()</a></code> and <code><a href="https://daroczig.github.io/logger/reference/log_threshold.html" class="external-link">logger::log_threshold()</a></code> default to <code>index = 1</code>, so you have to name index 2 to change what is printed:</p>
-<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="reference/spatialkit_quiet.html">spatialkit_quiet</a></span><span class="op">(</span><span class="op">)</span>          <span class="co"># silence the console echo</span></span>
-<span><span class="fu"><a href="reference/spatialkit_quiet.html">spatialkit_quiet</a></span><span class="op">(</span><span class="cn">FALSE</span><span class="op">)</span>     <span class="co"># restore it</span></span>
-<span></span>
-<span><span class="co"># or, by hand:</span></span>
-<span><span class="fu">logger</span><span class="fu">::</span><span class="fu"><a href="https://daroczig.github.io/logger/reference/log_appender.html" class="external-link">log_appender</a></span><span class="op">(</span><span class="fu">logger</span><span class="fu">::</span><span class="fu"><a href="https://daroczig.github.io/logger/reference/appender_file.html" class="external-link">appender_file</a></span><span class="op">(</span><span class="st">"my_analysis.log"</span><span class="op">)</span>,</span>
-<span>                     namespace <span class="op">=</span> <span class="st">"spatialkit"</span>, index <span class="op">=</span> <span class="fl">2</span><span class="op">)</span></span>
-<span><span class="fu">logger</span><span class="fu">::</span><span class="fu"><a href="https://daroczig.github.io/logger/reference/log_threshold.html" class="external-link">log_threshold</a></span><span class="op">(</span><span class="fu">logger</span><span class="fu">::</span><span class="va"><a href="https://daroczig.github.io/logger/reference/log_levels.html" class="external-link">FATAL</a></span>, namespace <span class="op">=</span> <span class="st">"spatialkit"</span>, index <span class="op">=</span> <span class="fl">2</span><span class="op">)</span></span></code></pre></div>
-<p>Note that these are <code>logger</code> messages, not R conditions: <code>tryCatch(warning = )</code> will not catch them and <code><a href="https://rdrr.io/r/base/warning.html" class="external-link">suppressWarnings()</a></code> will not suppress them. Where the documentation says a function <em>raises</em> a warning, it means a genuine R <code><a href="https://rdrr.io/r/base/warning.html" class="external-link">warning()</a></code>; where it says a function <em>logs</em> one, it means this.</p>
-<p>knitr does not capture the console’s error stream, so while a document is being knitted (R Markdown, Quarto, pkgdown) the console echo is also sent as an R message. The logged cautions then appear in the output next to the warnings, and the chunk option <code>message = FALSE</code> keeps them out of it.</p>
-</div>
-</div>
-<div class="section level2">
-<h2 id="development">Development<a class="anchor" aria-label="anchor" href="#development"></a>
-</h2>
-<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu">devtools</span><span class="fu">::</span><span class="fu">load_all</span><span class="op">(</span><span class="op">)</span>   <span class="co"># interactive development</span></span>
-<span><span class="fu">devtools</span><span class="fu">::</span><span class="fu">test</span><span class="op">(</span><span class="op">)</span>       <span class="co"># run the test suite</span></span>
-<span><span class="fu">devtools</span><span class="fu">::</span><span class="fu">document</span><span class="op">(</span><span class="op">)</span>   <span class="co"># regenerate NAMESPACE + man/ with roxygen2</span></span>
-<span><span class="fu">devtools</span><span class="fu">::</span><span class="fu">check</span><span class="op">(</span><span class="op">)</span>      <span class="co"># full R CMD check (vignette build requires pandoc)</span></span></code></pre></div>
-<p>The checked-in <code>NAMESPACE</code> and <code>man/</code> are generated by roxygen2 (the version used is recorded in <code>DESCRIPTION</code>); <code>devtools::document()</code> reproduces them.</p>
-<p>The README figures are generated from actual package output; regenerate them with <code>Rscript dev/make_readme_figures.R</code>. <code>readme-resolution.png</code> labels the cell count a ladder of counts from <code><a href="reference/resolution_profile.html">resolution_profile()</a></code> rates most reliable on that data, so it goes stale whenever that criterion’s answer changes and must be rebuilt alongside it.</p>
-<p>The test suite covers the geometry/tessellation pipeline, every exported function, and targeted regression tests for the statistical internals (Moran’s I variance and its sparse-weights path, CV fold/row-ID alignment, CRPS, hex-grid sizing, CRS selection at wide extents, prediction CRS and NA alignment, and more). Tests that need an optional backend skip automatically when it is absent, and the <code>backends</code> job in <code>R-CMD-check.yaml</code> installs every optional backend except <code>brms</code>, so a green matrix means those guarded paths actually ran. <code>brms</code> is the thin spot: its Stan smoke tests are <em>additionally</em> gated behind the <code>SPATIALKIT_TEST_BRMS</code> environment variable, which only the weekly <code>check-brms</code> workflow sets, so they do not run in the matrix even where <code>brms</code> is installed.</p>
-<p>Contributions are welcome. Please <a href="https://github.com/elkronos/gis_modeling_toolkit/issues" class="external-link">open an issue</a> describing the bug or proposed change, and include a regression test with any fix.</p>
-</div>
-<div class="section level2">
-<h2 id="project">Project<a class="anchor" aria-label="anchor" href="#project"></a>
-</h2>
-<div class="section level3">
-<h3 id="documentation-1">Documentation<a class="anchor" aria-label="anchor" href="#documentation-1"></a>
-</h3>
-<ul>
-<li>
-<code><a href="reference/spatialkit-package.html">?spatialkit</a></code> is the package-level page: it walks the pipeline in order and names the function that performs each step.</li>
-<li>Every exported function is documented: see <code><a href="reference/fit_gwr_model.html">?fit_gwr_model</a></code>, <code><a href="reference/make_folds.html">?make_folds</a></code>, <code><a href="reference/area_of_applicability.html">?area_of_applicability</a></code>, etc.</li>
-<li>A worked end-to-end demo on the North Carolina boundary shipped with <code>sf</code> runs as a vignette: <code><a href="articles/spatialkit_nc_demo.html">vignette("spatialkit_nc_demo")</a></code> after installing with <code>build_vignettes = TRUE</code>.</li>
-<li>A runnable script version is installed with the package: <code>system.file("scripts", "example_nc_demo.R", package = "spatialkit")</code>.</li>
-</ul>
-</div>
-<div class="section level3">
-<h3 id="citation">Citation<a class="anchor" aria-label="anchor" href="#citation"></a>
-</h3>
-<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/citation.html" class="external-link">citation</a></span><span class="op">(</span><span class="st">"spatialkit"</span><span class="op">)</span></span></code></pre></div>
-<p>The package entry cites <code>spatialkit</code> itself. <code><a href="https://rdrr.io/r/utils/citation.html" class="external-link">citation()</a></code> also prints the method references you should cite alongside it if you rely on <code><a href="reference/area_of_applicability.html">area_of_applicability()</a></code> (Meyer &amp; Pebesma 2021), <code>make_folds(method = "nndm")</code> (Milà et al. 2022), the Bayesian GP basis (Riutort-Mayol et al. 2023), permutation importance in <code><a href="reference/fit_rf_model.html">fit_rf_model()</a></code> (Strobl et al. 2007), coordinate predictors and blocked validation (Meyer et al. 2019), or GWR, whose kernels and diagnostics follow <code>GWmodel</code> (Lu et al. 2014).</p>
+<p>This prints the package entry and the papers behind the methods spatialkit implements. Cite the paper as well as the package if you rely on <code><a href="reference/area_of_applicability.html">area_of_applicability()</a></code> (Meyer and Pebesma 2021), <code>make_folds(method = "nndm")</code> (Milà et al. 2022) or <code>make_folds(method = "knndm")</code> (Linnenbrink et al. 2024). Do the same for the model backends you use: the Hilbert space approximation in <code><a href="reference/fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code> (Riutort-Mayol et al. 2023), permutation importance in <code><a href="reference/fit_rf_model.html">fit_rf_model()</a></code> (Strobl et al. 2007), coordinates as predictors and blocked validation in <code><a href="reference/fit_rf_model.html">fit_rf_model()</a></code> and <code><a href="reference/cv_rf.html">cv_rf()</a></code> (Meyer et al. 2019), and GWR, whose kernels and diagnostics follow <code>GWmodel</code> (Lu et al. 2014).</p>
 </div>
-<div class="section level3">
-<h3 id="maintainer">Maintainer<a class="anchor" aria-label="anchor" href="#maintainer"></a>
-</h3>
-<p>Justin Chase <a href="mailto:jchase.msu@gmail.com" class="email">jchase.msu@gmail.com</a> — <a href="https://github.com/elkronos/gis_modeling_toolkit/issues" class="external-link">issue tracker</a></p>
-</div>
-<div class="section level3">
-<h3 id="license">License<a class="anchor" aria-label="anchor" href="#license"></a>
-</h3>
-<p>MIT © Justin Chase. See <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/LICENSE.md" class="external-link">LICENSE.md</a>.</p>
-</div>
-<div class="section level3">
-<h3 id="disclaimer">Disclaimer<a class="anchor" aria-label="anchor" href="#disclaimer"></a>
-</h3>
-<p>This is a personal project. It is not affiliated with, endorsed by, or connected to any organization. It uses public data sources only and was developed independently on personal time. No confidential, proprietary, or non-public information is included.</p>
-</div>
+<div class="section level2">
+<h2 id="licence">Licence<a class="anchor" aria-label="anchor" href="#licence"></a>
+</h2>
+<p>MIT, © Justin Chase; see <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/LICENSE.md" class="external-link">LICENSE.md</a>. spatialkit is a personal project, developed independently and not affiliated with or endorsed by any organisation. It contains no confidential, proprietary or non-public information.</p>
 </div>
 </div>
   </main><aside class="col-md-3"><div class="links">
@@ -726,6 +375,12 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 </ul>
 </div>
 
+<div class="community">
+<h2 data-toc-skip>Community</h2>
+<ul class="list-unstyled">
+<li><a href="CONTRIBUTING.html">Contributing guide</a></li>
+</ul>
+</div>
 
 <div class="citation">
 <h2 data-toc-skip>Citation</h2>
@@ -741,7 +396,13 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 </ul>
 </div>
 
-
+<div class="dev-status">
+<h2 data-toc-skip>Dev status</h2>
+<ul class="list-unstyled">
+<li><a href="https://CRAN.R-project.org/package=spatialkit" class="external-link"><img src="https://www.r-pkg.org/badges/version/spatialkit" alt="CRAN status"></a></li>
+<li><a href="https://github.com/elkronos/gis_modeling_toolkit/actions/workflows/R-CMD-check.yaml" class="external-link"><img src="https://github.com/elkronos/gis_modeling_toolkit/actions/workflows/R-CMD-check.yaml/badge.svg" alt="R-CMD-check"></a></li>
+</ul>
+</div>
 
   </aside>
 </div>

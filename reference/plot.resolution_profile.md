@@ -4,7 +4,7 @@ The criteria of a
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
 against the number of cells, one panel per criterion on a shared x axis,
 with the level each criterion selects marked and the region over which
-it is within `tol` of its optimum shaded. That shaded band is the flat
+it is within `tol` of its optimum shaded. The shading marks the flat
 region
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
 reports. A criterion whose optimum sits at an end of the levels it was
@@ -50,7 +50,7 @@ plot(x, criteria = NULL, tol = 0.02, ...)
 
 - ...:
 
-  Ignored.
+  Not used.
 
 ## Value
 
@@ -65,35 +65,31 @@ level and no band, and the caption says that the size set the count.
 
 ## See also
 
-Other plotting:
-[`plot.aoa()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.aoa.md),
-[`plot.block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.block_size_sweep.md),
-[`plot.feature_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.feature_selection.md),
-[`plot.gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.gwr_model_selection.md),
-[`plot.sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.sac_range.md),
-[`plot.spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.spatial_fit.md),
-[`plot_calibration()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_calibration.md),
-[`plot_cv_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_cv_metrics.md),
-[`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
+[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
+which makes the object, and
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md).
+
+Other resolution:
+[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md),
+[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
+[`summary.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.resolution_profile.md)
 
 ## Examples
 
 ``` r
-if (requireNamespace("gstat", quietly = TRUE) &&
-    requireNamespace("ggplot2", quietly = TRUE)) {
-  library(sf)
-  # The same field as ?resolution_profile: an exponential covariance with
-  # range parameter 200 and a nugget of 0.6 on a unit sill.
-  set.seed(4)
-  n <- 400
-  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-  D  <- as.matrix(dist(xy))
-  xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
-  pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-  prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
-  print(plot(prof))                     # one panel per criterion it scored: no
-                                        # elbow on these uniform points
-  plot(prof, criteria = c("cp", "wss")) # Cp beside the raw WSS curve
-}
+library(sf)
+# The same field as ?resolution_profile: an exponential covariance with
+# range parameter 200 and a nugget of 0.6 on a unit sill.
+set.seed(4)
+n <- 400
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+D  <- as.matrix(dist(xy))
+xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
+pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
+# Two of the criteria it scored (plot(prof) draws every one, a panel each)
+plot(prof, criteria = c("cp", "reliability"))
 
+plot(prof, criteria = c("cp", "wss")) # Cp beside the raw WSS curve
 ```

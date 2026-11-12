@@ -1,10 +1,9 @@
-# Cross-validated comparison of spatial models
+# Compare models on the same cross-validation folds
 
-Fits and cross-validates one or more model types, returning a unified
+Cross-validates one or more backends on one set of folds and returns a
 comparison table. Unlike
 [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md),
-this function does perform fitting (inside CV folds), because CV
-inherently requires repeated fitting.
+this fits the models, once per fold.
 
 ## Usage
 
@@ -35,8 +34,8 @@ compare_models_cv(
 - data_sf:
 
   An sf object. When the folds are built here, a feature that is not a
-  point is reduced to one, and a layer whose geometries mix XY with XYZ
-  or XYM, or carry M (XYM or XYZM), is read in x and y.
+  point is reduced to one, and the layer is read in x and y (see
+  [spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)).
 
 - response_var:
 
@@ -51,11 +50,10 @@ compare_models_cv(
   Character vector: any subset of `c("GWR", "Bayesian", "RF")`, in any
   order. Each is cross-validated on the same `folds`. Names outside that
   set raise a warning and are dropped; if nothing recognised remains,
-  this is an error. There is no silent fallback. A recognised model
-  whose backend package is not installed is dropped with a message so
-  the call still returns the models that could run. But if *none* of the
-  requested backends is installed, nothing is left to compare and the
-  call errors with `"no viable models."`. Guard with
+  this is an error. A recognised model whose backend package is not
+  installed is dropped with a message, so the call still returns the
+  models that could run. If none of the requested backends is installed,
+  the call stops with `"no viable models."`. Guard with
   [`requireNamespace()`](https://rdrr.io/r/base/ns-load.html) when the
   model set is not known in advance.
 
@@ -70,17 +68,19 @@ compare_models_cv(
 
 - folds:
 
-  Optional fold definitions: a
+  Optional fold definitions, in any of three shapes: a
   [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-  return value, or a bare list of `list(train =, test =)` pairs of
-  `..row_id` values. Train and test must be disjoint (a fold that trains
-  on its own test rows is not a cross-validation split and is refused
-  with an error), and IDs naming no row in the prepared data are dropped
-  with a logged count (expected when rows were removed for missing
-  values; a sign the folds came from other data when they were not).
-  When it is `NULL`, one set of `block_kfold` folds is built and every
-  model is scored on it. With `folds = NULL` the score estimates the
-  error at the distance the block grid built here puts between the
+  return value; a bare list of `list(train =, test =)` pairs of
+  `..row_id` values; or a vector of fold labels, one per row, which
+  becomes leave-that-label-out splits (`blockCV::cv_spatial()` returns
+  one as `$folds_ids`). Train and test must be disjoint (a fold that
+  trains on its own test rows is not a cross-validation split and is
+  refused with an error), and IDs naming no row in the prepared data are
+  dropped with a logged count (expected when rows were removed for
+  missing values; a sign the folds came from other data when they were
+  not). When it is `NULL`, one set of `block_kfold` folds is built and
+  every model is scored on it. With `folds = NULL` the score estimates
+  the error at the distance the block grid built here puts between the
   held-out points and their training data, which overstates the error of
   a map where the samples cover the area it predicts over. The excess is
   how much the model's error grows from the map's distances to the data
@@ -94,13 +94,19 @@ compare_models_cv(
 
 - boundary:
 
-  Optional polygon sf/sfc.
+  Optional polygon sf/sfc. When the folds are built here, the block grid
+  is clipped to it, as in
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md).
+  It is also passed to each backend's `cv_*()` function, which projects
+  the data to its CRS before fitting, with supplied `folds` too.
 
 - pointize:
 
-  Geometry coercion strategy. It also decides where a polygon or line
-  row falls in the shared blocks, so each row is placed by the point
-  every model is fitted at.
+  How a feature that is not a point is reduced to one (see
+  [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md));
+  default `"auto"`. It also decides where a polygon or line row falls in
+  the shared blocks, so each row is placed by the point every model is
+  fitted at.
 
 - gwr_args:
 
@@ -136,7 +142,7 @@ compare_models_cv(
 
 - summary:
 
-  "mean" or "median" for Bayesian predictions.
+  `"mean"` or `"median"` for the Bayesian GP's predictions.
 
 - quiet:
 
@@ -161,12 +167,11 @@ compare_models_cv(
   the response (detrended on `predictor_vars`) is estimated and used as
   the minimum block size of the shared folds, as in
   [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md).
-  Default `FALSE`: geometric blocks, as before this argument existed.
-  Either way the fold set is built once and every backend is scored on
-  it. When it cannot be built (a `block_size` or estimated range that
-  leaves a single block, say) the call is an error, as it is for each
-  backend on its own; no model is scored on a design other than the one
-  asked for.
+  Default `FALSE`: geometric blocks. Either way the fold set is built
+  once and every backend is scored on it. When it cannot be built (a
+  `block_size` or estimated range that leaves a single block, say) the
+  call is an error, as it is for each backend on its own; no model is
+  scored on a design other than the one asked for.
 
 - metrics:
 
@@ -174,7 +179,7 @@ compare_models_cv(
   `cv_*()`: a `function(y, yhat)` returning a named numeric vector,
   applied per fold and to each backend's pooled predictions, whose names
   become columns of `by_fold` and `overall` beside the built-in ones.
-  See **Your own metrics** on
+  See "Your own metrics" on
   [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
   for the contract. Because the backends are scored on the same folds
   and, in `overall`, on the same rows (see Value), the columns are
@@ -182,32 +187,34 @@ compare_models_cv(
 
 ## Value
 
-A list with overall, by_fold, and per-model cv_results (`gwr_cv`,
-`bayes_cv`, `rf_cv` for the models that ran). `overall` has one row per
-model with the pooled metrics, `n_pred` (the rows they are computed on),
-the coverage and CRPS columns described above when a Bayesian model ran,
-and `model` as its last column. Shared folds do not guarantee shared
-rows: a model that fails on a fold (GWR with a fixed bandwidth across a
-gap in the data, say) or predicts `NA` for some rows pools fewer rows,
-usually without the hardest ones. When the models predicted different
-rows, the function warns and recomputes every model's pooled metrics,
-your own `metrics` included, on the rows all of them predicted, so
-`n_pred` is the same on every row that has predictions; a model that
-predicted nothing stays an `NA` row. Each model's metrics over all the
-rows it predicted stay in its `*_cv` element and in
-`attr(overall, "all_rows")`, a table of the same shape. `by_fold` and
-the Bayesian coverage and CRPS columns are per fold and are not
-recomputed. Every model is cross-validated on the layer as passed, so
-the warnings
-[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
-raises about that layer (class `spatialkit_rows_dropped`, counting the
-incomplete rows dropped, and `spatialkit_constant_predictor`) are raised
-once for the comparison, not once per model. Only the models that
-actually ran appear, so check which names are present; there is not
-always one entry per requested model, because a backend whose package is
-missing is dropped with a message. When **no** requested backend is
-available there is nothing to return and the function errors with
-`"no viable models."` instead of returning an empty comparison.
+A list with these elements:
+
+- `overall`:
+
+  One row per model with the pooled metrics, `n_pred` (the rows they are
+  computed on, see "Rows the overall table is computed on"), the
+  coverage and CRPS columns described in "Coverage and CRPS in the
+  overall table" when a Bayesian GP ran, and `model` as its last column.
+  `MAPE` and `SMAPE` skip rows whose denominator is zero; `n_MAPE` and
+  `n_SMAPE` count the rows they used, and for a count or other
+  non-Gaussian response RMSE, MAE and the Bayesian GP's CRPS are the
+  numbers to compare (see "Percentage errors on responses with zeros"
+  and "Which metrics survive a non-Gaussian response" in
+  [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)).
+
+- `by_fold`:
+
+  The `fold_metrics` of every model that ran, stacked, with a `model`
+  column.
+
+- `gwr_cv`, `bayes_cv`, `rf_cv`:
+
+  The full
+  [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md),
+  [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+  and
+  [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+  result of each model that ran.
 
 ## Coverage and CRPS in the overall table
 
@@ -221,67 +228,35 @@ that ran, `overall` therefore also carries the columns of
 predictive interval at each level, averaged across folds weighted by
 each fold's `n_pred`) and `mean_CRPS` (the continuous ranked probability
 score, lower is better). They are `NA` on the GWR and RF rows, which
-produce point predictions and no draws, and absent when no Bayesian
-model ran. Read coverage against its nominal level: 0.95 at
-`coverage_95` is calibrated, well below it is overconfident, well above
-it is wider than it needs to be.
+produce point predictions and no draws, and absent when no Bayesian GP
+ran. Read coverage against its nominal level: 0.95 at `coverage_95` is
+calibrated, well below it is overconfident, well above it is wider than
+it needs to be.
 
-## Percentage errors on responses with zeros
+## Rows the overall table is computed on
 
-`MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
-\|\hat{y}\|\\, so neither is defined where its denominator is zero.
-Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
-denominator is non-zero, and are `NA` when no row qualifies. Non-zero is
-judged at the scale of the data: a denominator no larger than 100
-machine epsilons times the largest one counts as zero, so the rule does
-not depend on the units of the response. The `n_MAPE` and `n_SMAPE`
-columns record how many rows that was; the `n` column counts finite
-observation/prediction pairs. Read a percentage error next to its count:
-when `n_MAPE < n`, `MAPE` is an average over a subset of the data,
-whatever its value.
+Shared folds do not guarantee shared rows: a model that fails on a fold
+(GWR with a fixed bandwidth across a gap in the data, say) or predicts
+`NA` for some rows pools fewer rows, usually without the hardest ones.
+When the models predicted different rows, the function warns and
+recomputes every model's pooled metrics, your own `metrics` included, on
+the rows all of them predicted, so `n_pred` is the same on every row
+that has predictions; a model that predicted nothing stays an `NA` row.
+Each model's metrics over all the rows it predicted stay in its `*_cv`
+element and in `attr(overall, "all_rows")`, a table of the same shape.
+`by_fold` and the Bayesian coverage and CRPS columns are per fold and
+are not recomputed.
 
-This bites on any response taking exact zeros: counts, rainfall,
-abundance, claim amounts. On a zero-inflated response with 62 zeros out
-of 120, `MAPE` is an average over the 58 non-zero rows, which
-`n_MAPE = 58` now says. `SMAPE` fails differently and more subtly: it
-drops the rows where observation and prediction are both near zero
-(which on a well-fitted zero-inflated model are the rows it got
-*right*), so it averages the harder rows only and reads worse than the
-fit deserves; `n_SMAPE` shows how many rows it kept, and the count is
-only a label, not a repair.
+Every model is cross-validated on the layer as passed, so the warnings
+[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+raises about that layer (class `spatialkit_rows_dropped`, counting the
+incomplete rows dropped, and `spatialkit_constant_predictor`) are raised
+once for the comparison, not once per model.
 
-`RMSE`, `MAE` and \\R^2\\ use every finite row and are unaffected;
-prefer them whenever the response can be zero. For a Bayesian fit,
-[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
-additionally reports CRPS and interval coverage, which are proper
-scoring rules and have no such failure mode.
-
-## Which metrics survive a non-Gaussian response
-
-RMSE and MAE are defined for any numeric response and are what to read
-for a count, a rate or a bounded outcome. MAPE and SMAPE assume a
-response that is rarely zero (see the previous section), and R-squared
-and adjusted R-squared compare residual variance to total variance,
-which is the right comparison for a Gaussian response and a loose one
-for anything whose variance tracks its mean. None of the four is wrong
-to compute; each is Gaussian-shaped thinking, and on a Poisson or
-zero-inflated response should be read as a rough summary rather than a
-score.
-
-For the Bayesian backend,
-[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
-additionally reports CRPS and interval coverage at 50, 80 and 95
-percent. Both are proper scoring rules computed from posterior draws, so
-they are meaningful for any `family` that predicts one number per row (a
-count, a rate, a binary or bounded outcome), and they are the numbers to
-compare when the response is not Gaussian. A categorical or ordinal
-family predicts a probability per response category instead, so
-[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
-refuses one before fitting anything. When every fold fails, the
-`fold_metrics` frame
-[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
-returns carries the CRPS column but not the `coverage_*` columns, so
-code that reads those columns must tolerate their absence.
+Only the models that ran appear, so check which names are present: a
+backend whose package is missing is dropped with a message. When no
+requested backend is available the function stops with
+`"no viable models."` rather than returning an empty comparison.
 
 ## References
 
@@ -295,41 +270,43 @@ A case study competition among methods for analyzing large spatial data.
 
 ## See also
 
-Other model evaluation:
-[`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md),
-[`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md),
-[`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md),
-[`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
+[`plot_cv_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_cv_metrics.md)
+to draw the per-fold scores of every model, and
+[`plot_calibration()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_calibration.md)
+for the Bayesian GP's intervals.
+
+Other cross-validation:
+[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md),
+[`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md),
+[`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md),
+[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md),
+[`plot_calibration()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_calibration.md),
+[`plot_cv_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_cv_metrics.md)
 
 ## Examples
 
 ``` r
-if (requireNamespace("ranger", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  n <- 120
-  dat <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               elev = rnorm(n)),
-    coords = c("x", "y"), crs = 32632
-  )
-  dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
-    2 * dat$elev + rnorm(n)
-  # The random forest, and GWR beside it when sp is installed, on the
-  # same folds.  "Bayesian" is left out here because a Stan fit per fold
-  # takes minutes; add it to `models` for a run to report.
-  models <- c("RF", if (requireNamespace("sp", quietly = TRUE)) "GWR")
-  cmp <- compare_models_cv(dat, "price", "elev", models = models, k = 3,
-                           rf_args = list(num_trees = 100),
-                           gwr_args = list(bandwidth = 30))
-  cmp$overall
-}
+library(sf)
+set.seed(1)
+n <- 120
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             elev = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
+  2 * dat$elev + rnorm(n)
+# The random forest, and GWR beside it when sp is installed, on the same
+# folds.  "Bayesian" is left out here because a Stan fit per fold takes
+# minutes; add it to `models` for a run to report.
+models <- c("RF", if (requireNamespace("sp", quietly = TRUE)) "GWR")
+cmp <- compare_models_cv(dat, "price", "elev", models = models, k = 3,
+                         rf_args = list(num_trees = 100),
+                         gwr_args = list(bandwidth = 30))
 #> compare_models_cv(): running CV for GWR ...
 #> compare_models_cv(): running CV for RF ...
-#>       RMSE      MAE     MAPE    SMAPE        R2 Adj_R2 n_pred n_MAPE n_SMAPE
-#> 1 2.281133 1.853980 12.79336 12.53050 0.6738657     NA    120    120     120
-#> 2 3.711068 3.128498 21.71902 20.99972 0.1368361     NA    120    120     120
-#>   model
-#> 1   GWR
-#> 2    RF
+cmp$overall[, c("model", "RMSE", "R2", "n_pred")]
+#>   model     RMSE        R2 n_pred
+#> 1   GWR 2.281133 0.6738657    120
+#> 2    RF 3.711068 0.1368361    120
 ```

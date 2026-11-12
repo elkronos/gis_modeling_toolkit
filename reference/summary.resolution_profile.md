@@ -1,4 +1,4 @@
-# Every criterion's pick, side by side
+# Compare every criterion's pick on a resolution profile
 
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
 reads one criterion at a time. This puts the count criteria in one
@@ -62,44 +62,40 @@ region can have holes in it), `common` (the levels in every flat region
 of the count criteria, `moran_z` left out; an integer vector that is
 empty when the regions do not overlap), `scored` (the levels each
 criterion returned a finite value at, which is what decides whether a
-gap in a band is a rejection or a level nothing was computed at),
+gap in a flat region is a rejection or a level nothing was computed at),
 `ladder` (every level on the profile), `n_levels`, `tol` and `variable`
 (what the criteria were scored on), and, only when some row has
 `structured` `FALSE` although its cells beat one cell by more than
 `tol`, `not_identified` (a character vector named by criterion that says
 why: the F test, or for `cp` the profile's variogram). The print method
 recomputes the closing comparison from `bands`, so a row subset of the
-result reads honestly.
+result prints its own comparison.
 
 ## Details
 
-The criteria are not peers, and the table should be read with what each
-returns in practice in mind (see
+Read the table with what each criterion returns in mind (see
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)):
-`reliability` is read at or above the range floor and usually returns
-it, `elbow` is absent unless the points cluster, and `cp`'s optimum is
-often the support ceiling. `moran_z` is a diagnostic of the cell means
-and not a count rule, so it is not in the default set; named in
-`criteria` it gets a row, and it is left out of the closing comparison.
+`reliability` is read at or above the range floor and often returns it,
+`elbow` is absent unless the points cluster, and `cp`'s optimum is often
+the support ceiling. `moran_z` is a diagnostic of the cell means and not
+a count rule, so it is not in the default set; named in `criteria` it
+gets a row, and it is left out of the closing comparison.
 
-A flat region is a set, not an interval. The criterion curves are not
-monotone, so a region can skip a rung of the ladder, and the table
-prints what the criterion actually accepts (`"26, 31"`, not
-`"26 to 31"`) rather than a range that would quietly include the levels
-it rejected.
+The criterion curves are not monotone, so a flat region can skip rungs
+of the ladder, and the table lists the levels it accepts (`"26, 31"`)
+rather than a range (`"26 to 31"`) that would include the levels it
+rejected.
 
-That set is often empty, and an empty one is a result rather than a
-failure. The criteria answer different questions: how well the cells
-represent the field (\\C_p\\), whether the cell values are
-distinguishable from noise (`reliability`), and where the within-cluster
-sum of squares bends (`elbow`). A field with no single right resolution
-shows up here as disjoint bands, and the spread between the picks is
-printed for the same reason.
+The levels common to every flat region are often none. The criteria
+answer different questions: how well the cells represent the field
+(\\C_p\\), whether the cell values are distinguishable from noise
+(`reliability`), and where the within-cluster sum of squares bends
+(`elbow`). An empty set means the criteria favour different counts, and
+the print gives the spread between the picks.
 
-Nothing in the table is a decision procedure. Each flat region is
-routinely wide, the choice within it belongs to the analyst, and
+A flat region can be wide, and the choice within it is the analyst's;
 [`plot.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.resolution_profile.md)
-draws the curves the bands were read from.
+draws the curves the regions were read from.
 
 A profile whose ladder is one size (`obs_per_cell` set to one number, or
 the default profile) has one level, and the size set it. The table then
@@ -113,46 +109,38 @@ chooses among levels. The result carries the size as
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
 for one criterion, with the per-level values attached;
 [`plot.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.resolution_profile.md)
-for the curves behind these bands.
+for the curves behind these flat regions.
 
-Other aggregation:
-[`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md),
-[`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md),
+Other resolution:
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md),
-[`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md),
+[`plot.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.resolution_profile.md),
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
 
 ## Examples
 
 ``` r
-if (requireNamespace("gstat", quietly = TRUE)) {
-  library(sf)
-  # An exponential field with range parameter 200 (true effective range
-  # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill.
-  set.seed(4)
-  n <- 400
-  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-  D  <- as.matrix(dist(xy))
-  xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
-  pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-  prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
+library(sf)
+# An exponential field with range parameter 200 (true effective range
+# 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill.
+set.seed(4)
+n <- 400
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+D  <- as.matrix(dist(xy))
+xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
+pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+prof <- resolution_profile(pts, response_var = "z", n_levels = 12,
+                           estimate = NULL)
 
-  # print() is explicit because only the last value of a braced block is
-  # shown, and the table is the thing worth seeing here.
-  print(summary(prof))
-  print(attr(summary(prof), "common")) # the levels all of them accept, if any
-  attr(summary(prof), "bands")         # each criterion's region in full
-}
-#> Resolution picks: 3 criteria over 12 levels (2 to 44 cells)
+s <- summary(prof)
+s
+#> Resolution picks: 2 criteria over 12 levels (2 to 44 cells)
 #> 
 #>   cells: density-weighted k-means++ starts (power 1, 8 neighbours)
 #> 
-#>    criterion best  flat region levels in band
-#>           cp   19 19 to 25, 44              3
-#>  reliability    4       4 to 6              3
-#>          loo   19 19 to 25, 44              3
+#>    criterion best  flat region levels in flat region
+#>           cp   19 19 to 25, 44                     3
+#>  reliability    4       4 to 6                     3
 #> 
 #>   reliability: the optimum is the range floor (area / range^2).
 #>   There the bound is choosing, not the criterion.
@@ -160,14 +148,13 @@ if (requireNamespace("gstat", quietly = TRUE)) {
 #>   picks span 4 to 19 cells (4.8x)
 #>   no level is in every flat region: the criteria disagree over the
 #>   whole ladder. plot() draws the curves they were read from.
+attr(s, "common")   # the levels every flat region accepts, if any
 #> integer(0)
+attr(s, "bands")    # each criterion's flat region in full
 #> $cp
 #> [1] 19 25 44
 #> 
 #> $reliability
 #> [1] 4 5 6
-#> 
-#> $loo
-#> [1] 19 25 44
 #> 
 ```

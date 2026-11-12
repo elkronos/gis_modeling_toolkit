@@ -1,18 +1,14 @@
-# Read a level, and the region over which it is not distinguishable, off a profile
+# Choose a cell count from a resolution profile
 
 Picks the level a criterion prefers, together with the *flat region*:
-every level whose criterion value is within `tol` of the optimum. On the
-default profile, one size scored for pooled values, the default
-criterion is that size: it returns the count the size gives, with no
-optimum and no flat region (see "A profile built with an estimate");
-what follows is about the criteria read on a ladder of counts. On the
-criteria this package computes the flat region is routinely wide: the
-reliability curve is flat to within 2 percent over a factor of 3–6 in
-the number of cells, and \\C_p\\ on a smooth field descends to the
-support ceiling. The region is the answer, and the argmin only a point
-in it. When the optimum sits at an end of the levels the criterion was
-scored at, the result says so and names the bound, because a bound is
-then doing the choosing rather than the criterion (see
+every level whose criterion value is within `tol` of the optimum. Report
+the flat region with the count. On the default profile, one size scored
+for pooled values, the default criterion is that size: it returns the
+count the size gives, with no optimum and no flat region (see "A profile
+built with an estimate"); what follows is about the criteria read on a
+ladder of counts. When the optimum sits at an end of the levels the
+criterion was scored at, the result says so and names the bound, because
+a bound is then doing the choosing rather than the criterion (see
 [`resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
 for what each criterion measures and what it returns in practice). The
 functions that take the result as a cell count raise that as a warning
@@ -46,8 +42,7 @@ select_resolution(
   (`"size"` for a profile of pooled values, `"loo"` for one of plain
   means, `"cp"` for a profile without an estimate) or, with
   `diagnostic = TRUE`, `"moran_z"` (\\\|z\|\\ minimised). Default
-  `"auto"`. `"cp"` was the default of earlier versions; name it to read
-  \\C_p\\ on a profile that has it.
+  `"auto"`.
 
 - tol:
 
@@ -62,12 +57,10 @@ select_resolution(
 
   For `criterion = "reliability"` only. `TRUE` (default) reads the
   criterion at the levels at or above the range floor in
-  `attr(profile, "bounds")`, which is where
-  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-  started the ladder by default up to version 2.0.0. It applies when the
-  layer supports the floor, some scored level reaches it, and the
-  profile built its own ladder (a ladder set with `levels` is read as
-  given). `FALSE` reads every level.
+  `attr(profile, "bounds")`. It applies when the layer supports the
+  floor, some scored level reaches it, and the profile built its own
+  ladder (a ladder set with `levels` is read as given). `FALSE` reads
+  every level.
 
 - diagnostic:
 
@@ -87,52 +80,174 @@ select_resolution(
 
 ## Value
 
-A list of class `resolution_selection` with `best` (the level), `flat`
-(the levels in the flat region, ascending; a set, which can skip a
-rung), `criterion`, `value` (the optimum), `at_ceiling` and `at_floor`
-(logical: the optimum is the last or first of the levels this criterion
-was read at, which for `moran_z` starts above nine cells and for
-`reliability` at the range floor; both `NA` under `"size"`, which
-searches for no optimum), `edge` (which bound that is, in words: the
-support ceiling, the subsample's ceiling, the range floor, the ladder's
-own end, the finest or the coarsest size offered on a ladder
-`obs_per_cell` set, the only level scored, or the first or last level
-the criterion is computable at; `NA` for an interior optimum and under
-`"size"`), `n_levels`, `values` (the criterion at every level, `NA`
-where it could not be computed), `structured` (for `cp`: `FALSE` when
-`cp` at one cell is not above the optimum by more than `tol` (below it
-included), when the cell means at the optimum differ from one mean by no
-more than chance allows, or when the variogram found no spatial
-structure; `TRUE` when the optimum beats one cell on both counts; see
-"What each criterion returns". For `loo` and `size` on a profile built
-with `estimate`: `FALSE` when the leave-one-out error of one mean for
-all scored rows is within `tol` of the error at `best`, or below it, or
-when the cell means at `best` differ from one mean by no more than
-chance allows; `TRUE` when the cells beat one mean on both counts.
-`TRUE` for an `elbow`; `NA` for `reliability` and `moran_z`, and for a
-profile that carries no one-cell value), `one_cell` (`cp` at one cell
-under `cp`; the leave-one-out error of one mean for all scored rows
-under `loo` and `size`; `NA` otherwise), `structure_p` (the p-value of
-the F test of the cells at `best` against one mean, multiplied by the
-number of levels searched and capped at 1; a size searches one level;
-`NA` where `structured` is not read off `cp` or the leave-one-out
-error), `range_floor` (the floor `reliability` was held to, or `NA`),
-`note` (what the flags mean, in words: a character vector, one note an
-element; `NULL` when there is nothing to say. The notes written under
-`"loo"` and `"size"`, and for a profile built with `estimate` or with
-one size, carry names: `size` (the size that set the count), `held` (a
-size the profile held to the most cells k-means can place), `structure`
-(why the count is not identified), `finest` (the lowest error of pooled
-values is at the finest level scored), `estimate` (`cp` scores plain
-means, on a profile of pooled values) and `ladder` (the ladder is one
-size). A note of `cp` or `moran_z` about the criterion itself has no
-name. The warning of class `spatialkit_no_structure` that the functions
-taking the selection as a count raise carries every note but those named
-`size`, `held`, `finest`, `estimate` and `ladder`) and `seeds` (an sf
-POINT layer, with `seed_id`, of the centres of the partition the profile
-scored at `best`, in the CRS it was computed in; `NULL` for a profile
-that does not carry them). Their Voronoi cells are the cells that were
-scored;
+A list of class `resolution_selection` with these elements:
+
+- `best`:
+
+  The level.
+
+- `flat`:
+
+  The levels in the flat region, ascending: a set, which can skip a
+  rung.
+
+- `criterion`:
+
+  The criterion applied, never `"auto"`.
+
+- `value`:
+
+  The optimum.
+
+- `at_ceiling`, `at_floor`:
+
+  Whether the optimum is the last or first of the levels this criterion
+  was read at, which for `moran_z` starts above nine cells and for
+  `reliability` at the range floor; both `NA` under `"size"`, which
+  searches for no optimum.
+
+- `edge`:
+
+  Which bound that is, in words: the support ceiling, the subsample's
+  ceiling, the range floor, the ladder's own end, the finest or the
+  coarsest size offered on a ladder `obs_per_cell` set, the only level
+  scored, or the first or last level the criterion is computable at;
+  `NA` for an interior optimum and under `"size"`.
+
+- `n_levels`:
+
+  The levels on the profile.
+
+- `values`:
+
+  The criterion at every level, `NA` where it could not be computed.
+
+- `structured`:
+
+  For `cp`: `FALSE` when `cp` at one cell is not above the optimum by
+  more than `tol` (below it included), when the cell means at the
+  optimum differ from one mean by no more than chance allows, or when
+  the variogram found no spatial structure; `TRUE` when the optimum
+  beats one cell on both counts (see "What each criterion returns"). For
+  `loo` and `size` on a profile built with `estimate`: `FALSE` when the
+  leave-one-out error of one mean for all scored rows is within `tol` of
+  the error at `best`, or below it, or when the cell means at `best`
+  differ from one mean by no more than chance allows; `TRUE` when the
+  cells beat one mean on both counts. `TRUE` for an `elbow`; `NA` for
+  `reliability` and `moran_z`, and for a profile that carries no
+  one-cell value.
+
+- `one_cell`:
+
+  `cp` at one cell under `cp`; the leave-one-out error of one mean for
+  all scored rows under `loo` and `size`; `NA` otherwise.
+
+- `structure_p`:
+
+  The p-value of the F test of the cells at `best` against one mean,
+  multiplied by the number of levels searched and capped at 1 (a size
+  searches one level); `NA` where `structured` is not read off `cp` or
+  the leave-one-out error.
+
+- `range_floor`:
+
+  The floor `reliability` was held to, or `NA`.
+
+- `note`:
+
+  What the flags mean, in words: a character vector, one note an
+  element; `NULL` when there is nothing to say. The notes written under
+  `"loo"` and `"size"`, and for a profile built with `estimate` or with
+  one size, carry names: `size` (the size that set the count), `held` (a
+  size the profile held to the most cells k-means can place),
+  `structure` (why the count is not identified), `finest` (the lowest
+  error of pooled values is at the finest level scored), `estimate`
+  (`cp` scores plain means, on a profile of pooled values) and `ladder`
+  (the ladder is one size). A note of `cp` or `moran_z` about the
+  criterion itself has no name. The warning of class
+  `spatialkit_no_structure` that the functions taking the selection as a
+  count raise carries every note but those named `size`, `held`,
+  `finest`, `estimate` and `ladder`.
+
+- `seeds`:
+
+  An sf POINT layer, with `seed_id`, of the centres of the partition the
+  profile scored at `best`, in the CRS it was computed in; `NULL` for a
+  profile that does not carry them. See "Seeds" below.
+
+- `partition`:
+
+  For a profile built with `partition = "density"` or `init = "random"`:
+  `kind`, `init`, `density_power` and `density_k`. The seeds carry it as
+  `attr(, "partition")`; the cells are those the profile built, whatever
+  kind built them. It stays the last element.
+
+For `"loo"` and `"size"`, and for any criterion on a profile built with
+`estimate`, the list has these elements after `seeds`:
+
+- `estimate`:
+
+  The profile's, `"mean"` or `"pooled"`; `NA` for a profile without one.
+
+- `obs_per_cell`:
+
+  Rows per cell at `best`: the rows a size divides over `best`; `NA` for
+  an object that keeps no row count.
+
+- `obs_per_cell_asked`:
+
+  The size asked for; `NA` unless the criterion is `"size"`.
+
+- `scored_per_cell`:
+
+  The profile's column at `best`: the rows the leave-one-out error read
+  over the cells that hold one. It is not `obs_per_cell`: it leaves out
+  rows the error did not read and cells that hold none of them, as under
+  `select_on = "split"`.
+
+- `loo`, `loo_one_cell`:
+
+  The leave-one-out error at `best` and that of one mean for all scored
+  rows.
+
+- `share_alone`, `own_weight`:
+
+  The profile's columns at `best`.
+
+- `count_rule`:
+
+  A list of class `spatialkit_count_rule` that records how the count was
+  set: `rule` (the criterion applied), `estimate` (the estimate the rule
+  was computed for: the profile's for `"size"` and `"loo"`, `"mean"` for
+  `"cp"`, `NA` otherwise), `cells`, `obs_per_cell`,
+  `obs_per_cell_asked`, `response`, `n` (the rows the size divides),
+  `n_points`, `n_fit` (the rows the centres were fitted to; fewer than
+  `n_points` for a subsample), `seed`, `features`, `scored` (what the
+  profile scored at `best` for its estimate: `estimate`, `n`, `cells`,
+  `loo`, `loo_se`, `loo_one_cell`, `share_alone`, `own_weight`,
+  `structured`, `rows` and `centres`, the matrix of the centres the rows
+  were scored in, in `crs` and in the profile's order; `NULL` without an
+  estimate), `partition`, `crs` and `scored_cells` (`NA`: the record
+  stands for a count).
+
+A `"cp"` selection off a profile without an estimate has `count_rule` as
+well, after `seeds`, and nothing else of this list: its `estimate` is
+`"mean"`, since \\C_p\\ scores plain means, and `scored` is `NULL`.
+Under `"loo"` and `"size"` `one_cell` holds the leave-one-out error of
+one mean and `range_floor` is `NA`.
+
+`seeds` carries the same record as `attr(, "count_rule")` with
+`scored_cells = TRUE`, since they are the centres that were scored, or
+`FALSE` when they were refitted to every point, since they are then
+other cells built from the count. The record travels on with the seeds,
+the cells and the assigned layer to
+[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
+which warns when it reports another cell value than the count was chosen
+for (class `spatialkit_estimate_mismatch`) and when the cells or rows it
+is given are not the ones the count was scored on
+(`spatialkit_cells_differ`).
+
+Seeds: the Voronoi cells of the seeds are the cells that were scored;
 [`get_voronoi_seeds`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)`(method = "kmeans", n = <this>)`
 and
 [`voronoi_seeds_kmeans`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)`(k = <this>)`
@@ -143,71 +258,26 @@ iteration (Hartigan and Wong's for `"kmeans"`, Lloyd's on every point's
 density weights for `"density"`) run from the centres scored, with the
 profile's iteration limit and no random draw. Where Hartigan and Wong's
 algorithm refuses the centres, Lloyd's iteration with every weight one
-runs in its place, and a log line says so. They carry `attr(, "refit")`:
-`rows` (the points), `subsample` (the points the profile fitted to),
-`kind`, `iter`, `iter_max`, `converged`, `wss_scored` (the within-cell
-sum of squares of every point in the cells of the centres scored, each
-cell about its own mean) and `wss` (the same of the refitted cells).
-Their cells are then not the cells scored, and the count is still the
-one the subsample gave; the centres scored are
+runs in its place, and a log line says so. Such seeds carry
+`attr(, "refit")`: `rows` (the points), `subsample` (the points the
+profile fitted to), `kind`, `iter`, `iter_max`, `converged`,
+`wss_scored` (the within-cell sum of squares of every point in the cells
+of the centres scored, each cell about its own mean) and `wss` (the same
+of the refitted cells). Their cells are then not the cells scored, and
+the count is still the one the subsample gave; the centres scored are
 `attr(profile, "centres")[[as.character(best)]]`. The refit reads every
-point's coordinates from `attr(profile, "refit_rows")`, which every such
-profile this version builds carries; on one built before it the centres
-scored are the seeds, and a log line says so. The refit is not run
-either, and the centres scored are the seeds, when it would pass the
-work limits of a profile's own fits (see "Conditions" in
+point's coordinates from `attr(profile, "refit_rows")`; on a profile
+without that attribute the centres scored are the seeds, and a log line
+says so. The refit is not run either, and the centres scored are the
+seeds, when it would pass the work limits of a profile's own fits (see
+"Conditions" in
 [`resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md));
 a log line says so. A profile with an estimate scores it on every row of
 the layer in the cells of the centres fitted to the subsample, so its
 seeds are those centres, whose cells are the cells scored.
 [`summary()`](https://rdrr.io/r/base/summary.html) and
 [`plot()`](https://rdrr.io/r/graphics/plot.default.html) of a profile
-read no seeds and refit nothing. For a profile built with
-`partition = "density"` or `init = "random"` the list also has
-`partition` (`kind`, `init`, `density_power`, `density_k`), and the
-seeds carry it as `attr(, "partition")`; the regions are those the
-profile built, whatever kind built them.
-
-For `"loo"` and `"size"`, and for any criterion on a profile built with
-`estimate`, the list has these elements after `seeds` (`partition`, when
-there is one, stays last): `estimate` (the profile's, `"mean"` or
-`"pooled"`; `NA` for a profile without one); `obs_per_cell` (rows per
-cell at `best`: the rows a size divides over `best`; `NA` for an object
-that keeps no row count); `obs_per_cell_asked` (the size asked for; `NA`
-unless the criterion is `"size"`); `scored_per_cell` (the profile's
-column at `best`: the rows the leave-one-out error read over the cells
-that hold one. It is not `obs_per_cell`: it leaves out rows the error
-did not read and cells that hold none of them, as under
-`select_on = "split"`); `loo` and `loo_one_cell` (the leave-one-out
-error at `best` and that of one mean for all scored rows); `share_alone`
-and `own_weight` (the profile's columns at `best`); and `count_rule`, a
-list of class `spatialkit_count_rule` that records how the count was
-set: `rule` (the criterion applied), `estimate` (the estimate the rule
-was computed for: the profile's for `"size"` and `"loo"`, `"mean"` for
-`"cp"`, `NA` otherwise), `cells`, `obs_per_cell`, `obs_per_cell_asked`,
-`response`, `n` (the rows the size divides), `n_points`, `n_fit` (the
-rows the centres were fitted to; fewer than `n_points` for a subsample),
-`seed`, `features`, `scored` (what the profile scored at `best` for its
-estimate: `estimate`, `n`, `cells`, `loo`, `loo_se`, `loo_one_cell`,
-`share_alone`, `own_weight`, `structured`, `rows` and `centres`, the
-matrix of the centres the rows were scored in, in `crs` and in the
-profile's order; `NULL` without an estimate), `partition`, `crs` and
-`scored_cells` (`NA`: the record stands for a count). `seeds` carries
-the same record as `attr(, "count_rule")` with `scored_cells = TRUE`,
-since they are the centres that were scored, or `FALSE` when they were
-refitted to every point, since they are then other cells built from the
-count. A `"cp"` selection off a profile without an estimate has
-`count_rule` as well, after `seeds`, and nothing else of this list: its
-`estimate` is `"mean"`, since \\C_p\\ scores plain means, and `scored`
-is `NULL`. The record travels on with the seeds, the cells and the
-assigned layer to
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
-which warns when it reports another cell value than the count was chosen
-for (class `spatialkit_estimate_mismatch`) and when the cells or rows it
-is given are not the ones the count was scored on
-(`spatialkit_cells_differ`). Under `"loo"` and `"size"` `one_cell` holds
-the leave-one-out error of one mean and `range_floor` is `NA`.
-`criterion` is the criterion applied, never `"auto"`.
+read no seeds and refit nothing.
 
 ## What each criterion returns
 
@@ -236,33 +306,20 @@ the leave-one-out error of one mean and `range_floor` is `NA`.
   the response shows no spatial structure the cells can use and the
   count is not identified. `structured` is also `FALSE` when the
   profile's variogram was refused for showing no spatial structure.
-  `best` is still the argmin. **Measured on white noise** (uniform
-  points, the automatic ladder of `obs_per_cell = NULL`), `structured`
-  was `TRUE` on 3 of 200 layers of 60 points, 7 of 200 of 120, 5 of 150
-  of 300 and none of 80 of 600 or of 40 of 1,500 with the noise variance
-  taken from the finest level; and with the package's own variogram,
-  whose nugget was 0 on 27 of the 180 layers, on none of 120 layers of
-  120 points and 3 of 60 of 300. The first comparison alone gave 27, 20,
-  8, 0 and 0, and then 38 and 11. The F distribution is exact for a
-  Gaussian response, and the test held its level on others: with no
-  structure in a lognormal response, a 0/1 response with mean 0.1 and a
-  \\t_3\\ response, `structured` was `TRUE` on 2 to 10 of 200 layers at
-  each of 60, 120 and 300 points. A `FALSE` on a small layer is weak
-  evidence that there is no structure: on exponential fields (range
-  parameter 100 on a 1000-unit extent, nugget 0.3 on a unit sill)
-  `structured` was `TRUE` on 12 of 40 layers of 60 points, 36 of 40 of
-  120 and 40 of 40 of 300.
+  `best` is still the argmin. The F distribution is exact for a Gaussian
+  response. The test has little power on a small layer, so a `FALSE`
+  there is weak evidence that there is no structure.
 
 - `reliability`:
 
-  The coarsest count the range allows. The reliability curve peaks below
-  the range floor, so it is read at the levels at or above the floor the
+  The level of highest reliability at or above the range floor the
   profile reports (when the layer supports the floor and the profile
-  built its own ladder). The floor is a level of every such ladder, so
-  the result is the floor, with `edge` naming it (on a profile whose
-  k-means failed at that level, the first level above it).
-  `range_floor = FALSE` reads every level and returns the curve's own
-  maximum, which is usually a count below the floor.
+  built its own ladder). The reliability curve often peaks below the
+  floor, and the floor is a level of every such ladder, so the result is
+  often the floor, the coarsest count the range allows, with `edge`
+  naming it (on a profile whose k-means failed at that level, the first
+  level above it). `range_floor = FALSE` reads every level and returns
+  the curve's own maximum, which can be a count below the floor.
 
 - `elbow`:
 
@@ -296,12 +353,10 @@ the leave-one-out error of one mean and `range_floor` is `NA`.
   the values of the response. When the profile's estimate is the pooled
   value and the lowest error is at the finest level scored, a note says
   that the end of the ladder chose the count. For pooled values the
-  error tends to keep falling to the finest level: in the simulation
-  described under "Observations per cell" in
-  [`resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
-  the lowest error of the pooled value was at the finest of seven sizes
-  on 176 of 200 layers, and that of the plain mean on none. On a ladder
-  `obs_per_cell` set, an optimum at an end has the `edge`
+  error tends to keep falling to the finest level (see "How this was
+  checked" in
+  [`resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)).
+  On a ladder `obs_per_cell` set, an optimum at an end has the `edge`
   `"the finest size offered (obs_per_cell)"` or
   `"the coarsest size offered (obs_per_cell)"`; a finest level the
   profile held to the most cells k-means can place keeps the label of
@@ -360,31 +415,28 @@ the profile itself give the same count. A profile of pooled values built
 with a ladder argument (`n_levels` and the others) is read by the size
 as well: the default returns the level nearest the count the size gives,
 on the automatic ladder its top level, with
-`spatialkit_size_not_reached`. The default was `"cp"` in earlier
-versions, whatever the profile; `criterion = "cp"` reads it as before on
-a profile that has it. `cp` is computed on such a profile as on any
-other and scores plain means; when the profile's estimate is the pooled
-value the result's note says so.
+`spatialkit_size_not_reached`. `criterion = "cp"` reads \\C_p\\ on a
+profile that has it. `cp` is computed on such a profile as on any other
+and scores plain means; when the profile's estimate is the pooled value
+the result's note says so.
 
 `"cp"` and `"reliability"` cannot be read off a profile whose ladder
 `obs_per_cell` set under `sac = "auto"`. Such a profile fits no
 variogram, both columns are `NA` at every level, and the call is an
 error that names the ways to get them: build the profile with
 `sac = NULL`, with a `sac` of your own, or with `obs_per_cell = NULL`.
-The default profile is such a profile. For the count `"cp"` gave in
-earlier versions, build the profile with
-`estimate = NULL, obs_per_cell = NULL`, and with `partition = "kmeans"`
-for the same regions. On a ladder of one size that has a variogram
-either criterion returns the one level, with `edge`
+The default profile is such a profile. On a ladder of one size that has
+a variogram either criterion returns the one level, with `edge`
 `"the only level scored"`.
 
 For a ladder of one size,
 [`summary()`](https://rdrr.io/r/base/summary.html) of the profile lists
 each criterion that is finite at the level and says that the size set
 the count, and [`plot()`](https://rdrr.io/r/graphics/plot.default.html)
-draws each as one point, with no selected level and no band. When none
-is finite, as on a constant response, where `loo` is `NA` too, or when
-no row of the selection half has a response (`select_on = "split"`),
+draws each as one point, with no selected level and no flat region. When
+none is finite, as on a constant response, where `loo` is `NA` too, or
+when no row of the selection half has a response
+(`select_on = "split"`),
 [`summary()`](https://rdrr.io/r/base/summary.html) stops with an error
 that says so. In that last case `"cp"` and `"moran_z"`, and `"loo"` with
 an `estimate`, are errors that give the same reason, except `"cp"` on a
@@ -393,63 +445,28 @@ reason, as above.
 
 ## See also
 
-Other aggregation:
-[`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md),
-[`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md),
+Other resolution:
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md),
-[`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md),
+[`plot.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.resolution_profile.md),
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
 [`summary.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.resolution_profile.md)
 
 ## Examples
 
 ``` r
-if (requireNamespace("gstat", quietly = TRUE)) {
-  library(sf)
-  # An exponential field with range parameter 200 (true effective range
-  # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill.
-  set.seed(4)
-  n <- 400
-  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-  D  <- as.matrix(dist(xy))
-  xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
-  pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-  prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
+library(sf)
+# An exponential field with range parameter 200 (true effective range
+# 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill.
+set.seed(4)
+n <- 400
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+D  <- as.matrix(dist(xy))
+xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
+pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 
-  sel <- select_resolution(prof, criterion = "cp")
-  print(sel)               # the level, and the flat region around it
-  print(sel$flat)          # every level within `tol` of the optimum
-  print(sel$edge)          # the bound the optimum sits on; NA when interior
-  print(sel$structured)    # FALSE when one cell for the layer does as well
-
-  # Reliability prefers coarse cells: it is read at or above the floor the
-  # autocorrelation range sets, and the result says in words that the
-  # floor is choosing.
-  rel <- select_resolution(prof, criterion = "reliability")
-  print(rel)
-  print(c(at_floor = rel$at_floor, edge = rel$edge))
-
-  # The default profile is one size scored for pooled values, and the
-  # default criterion, "auto", reads it by that size.
-  select_resolution(resolution_profile(pts, response_var = "z"))
-}
-#> Resolution by cp: 19 cells
-#>   flat region : 19 to 25, 44 (3 of 12 levels)
-#>   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
-#>   note        : cp scores plain means, and this profile's estimate is the
-#>                 pooled value; criterion = "size" is the rule for it.
-#> [1] 19 25 44
-#> [1] NA
-#> [1] TRUE
-#> Resolution by reliability: 4 cells
-#>   flat region : 4 to 6 (3 of 12 levels)
-#>   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
-#>   note        : the optimum is the range floor (area / range^2); the bound is
-#>                 choosing, not the criterion. Fewer cells would be wider than
-#>                 the range and average over more than one patch of the field.
-#>                           at_floor                               edge 
-#>                             "TRUE" "the range floor (area / range^2)" 
+# The default profile is one size scored for pooled values, and the
+# default criterion, "auto", reads it by that size.
+select_resolution(resolution_profile(pts, response_var = "z"))
 #> Resolution by size: 89 cells
 #>   size        : 4.5 rows per cell, the default (obs_per_cell); 400 rows / 89 cells = 4.49
 #>   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
@@ -458,4 +475,35 @@ if (requireNamespace("gstat", quietly = TRUE)) {
 #>   loo         : 0.903 (one cell for the layer: 1.23)
 #>   note        : the count is set by obs_per_cell = 4.5, the default; no
 #>                 criterion chose it.
+
+# A ladder of counts for plain means, read by Mallows' Cp.
+prof <- resolution_profile(pts, response_var = "z", n_levels = 12,
+                           estimate = NULL)
+sel <- select_resolution(prof, criterion = "cp")
+sel               # the level, and the flat region around it
+#> Resolution by cp: 19 cells
+#>   flat region : 19 to 25, 44 (3 of 12 levels)
+#>   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
+sel$flat          # every level within `tol` of the optimum
+#> [1] 19 25 44
+sel$edge          # the bound the optimum sits on; NA when interior
+#> [1] NA
+sel$structured    # FALSE when one cell for the layer does as well
+#> [1] TRUE
+
+# Reliability prefers coarse cells: it is read at or above the floor the
+# autocorrelation range sets, and the result says in words when the
+# floor is choosing.
+rel <- select_resolution(prof, criterion = "reliability")
+rel
+#> Resolution by reliability: 4 cells
+#>   flat region : 4 to 6 (3 of 12 levels)
+#>   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
+#>   note        : the optimum is the range floor (area / range^2); the bound is
+#>                 choosing, not the criterion. Fewer cells would be wider than
+#>                 the range and average over more than one patch of the field.
+rel$at_floor
+#> [1] TRUE
+rel$edge
+#> [1] "the range floor (area / range^2)"
 ```

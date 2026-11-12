@@ -1,4 +1,4 @@
-# Random seed generation within a polygonal boundary
+# Place seeds at random inside a boundary
 
 Draws `k` seed points uniformly at random inside `boundary`, ignoring
 where the observations are. Reach for this when the cells should cover
@@ -6,9 +6,9 @@ the study area evenly (so that sparsely sampled ground still gets its
 own cells and is visibly under-sampled in the results) instead of
 concentrating resolution where the data already are, which is what
 [`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)
-does. It is also the honest choice for a null or sensitivity comparison:
-re-running an analysis over several random seedings shows how much of a
-result depends on one particular tessellation.
+does. It also suits a null or sensitivity comparison: rerunning an
+analysis over several random seedings shows how much of a result depends
+on one tessellation.
 
 ## Usage
 
@@ -20,51 +20,15 @@ voronoi_seeds_random(boundary, k, set_seed = NULL)
 
 - boundary:
 
-  An sf or sfc polygonal object. One that mixes XY and XYZ (or XYM)
-  geometries is read without Z and M, since sf reads a layer in the
-  dimension of its first geometry. So is one whose geometries carry M
-  (XYM or XYZM), which GEOS refuses. Rows that GEOS (in a projected CRS)
-  or s2 (in longitude and latitude) refuses are repaired before the rows
-  are unioned, as in
-  [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md);
-  valid rows are used as they are. A row that is empty, or has a
-  coordinate that is not finite or lies beyond 1e150 (read as given, and
-  again after any move into another CRS), covers no ground and is left
-  out; a boundary with no such row left is refused with an error that
-  says so. A boundary in a geographic CRS with a vertex at a latitude
-  beyond 90 degrees, which is no place on the Earth, is refused with an
-  error of class `"spatialkit_cells_degenerate"` that names its rows and
-  says to check its CRS. A row the repair leaves without a polygon (a
-  ring with no height: every vertex on one line, or in degrees on one
-  parallel) is left out as well, and a boundary with no polygon left is
-  refused. In longitude and latitude, a boundary whose bounding box is
-  over 10,000 times its area (small pieces far apart), which sf does not
-  sample whole, is sampled piece by piece, the points shared among the
-  pieces in proportion to their areas; a piece whose own box is over
-  10,000 times its area stops the call with an error that says to
-  transform `boundary` to a projected CRS. A boundary whose bounding box
-  has no height or no width (three vertices on one parallel) is refused.
-  In longitude and latitude s2 reads the edges as great circles, which
-  leave the bounding box read from the coordinates, and sf (without the
-  lwgeom package) draws in that box: a boundary whose box has less than
-  half its area on the sphere (three vertices on or near one parallel)
-  is refused too. That error, and the error for a box with no height
-  whose vertices lie on one parallel other than the equator, say to
-  transform `boundary` to a projected CRS in which a parallel is a
-  curve, such as the one
-  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
-  picks for it (a polar one, such as EPSG:3413 or 3031, for a ring
-  around a pole), where the region has an area and lies in its box. sf
-  draws the points in the bounding box and keeps those inside, so it
-  draws `k` times the ratio of the box to the area. In any CRS, a
-  boundary that would take more than 10^6 points drawn in its box, or 10
-  `k` if more (small pieces far apart, a thin strip at a slant), is
-  sampled piece by piece in the same way (or whole, in draws of at most
-  10^6 points in its box, where that takes less time), and a piece that
-  would still take more is drawn in such draws. Where the points drawn
-  in all would exceed 2e7 (or 10 `k`, if more), the call stops before
-  any draw with an error that gives the ratio and says to ask for fewer
-  seeds.
+  An sf or sfc polygonal object, the area the seeds are drawn in. Rows
+  without a location, rows the repair leaves without a polygon, vertices
+  at a latitude beyond 90 and mixed dimensions are handled as
+  "Boundaries" in
+  [spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)
+  says. The seeds are drawn as "Sampling inside the boundary" in
+  [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
+  describes, with `k` as the number of points asked for; the error for a
+  boundary that would take too many draws says to ask for fewer seeds.
 
 - k:
 
@@ -77,10 +41,7 @@ voronoi_seeds_random(boundary, k, set_seed = NULL)
   different seedings and
   [`set.seed()`](https://rdrr.io/r/base/Random.html) before a call makes
   it reproducible. Pass a number to get the same seeds whatever that
-  stream holds; the caller's stream is then left as it was. The default
-  used to be 456, which made every call return the same "random"
-  seeding, even inside a loop over
-  [`set.seed()`](https://rdrr.io/r/base/Random.html).
+  stream holds; the caller's stream is then left as it was.
 
 ## Value
 
@@ -102,8 +63,9 @@ few after ten top-ups returns fewer, and that shortfall is logged.
 
 ## See also
 
-Other tessellation:
+Other cell building:
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md),
+[`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md),
 [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md),
 [`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md),
 [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md),

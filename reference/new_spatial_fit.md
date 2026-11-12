@@ -1,17 +1,15 @@
-# Build a spatial_fit S3 object
+# Build a spatial_fit object for a backend of your own
 
-The constructor for the `spatial_fit` class, and the public entry point
-for plugging your own model backend into this package. The three
-built-in fitters
-([`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md),
-[`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+The constructor for the `spatial_fit` class, and the way to plug a model
+backend of your own into this package. The three built-in fitters
+([`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md),
+[`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
 and
-[`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md))
+[`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md))
 all end by calling it, and so should a custom `fit_fn` written for
-[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md):
-wrapping your model in a `spatial_fit` is what lets it use the package's
-folds, metrics, comparison and area-of-applicability machinery
-unchanged.
+[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md).
+A model wrapped in a `spatial_fit` works with the package's folds,
+metrics, comparisons and area of applicability unchanged.
 
 ## Usage
 
@@ -38,9 +36,10 @@ new_spatial_fit(
   [`fitted()`](https://rdrr.io/r/stats/fitted.values.html),
   [`residuals()`](https://rdrr.io/r/stats/residuals.html) and
   [`coef()`](https://rdrr.io/r/stats/coef.html) on the result all
-  dispatch on it, so a custom `subclass` **requires** a matching
-  `predict.<subclass>()` method to be usable with
-  [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md).
+  dispatch on it, so a custom `subclass` needs a matching
+  `predict.<subclass>()` method before
+  [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
+  can use it.
 
 - engine:
 
@@ -97,23 +96,31 @@ new_spatial_fit(
 
 ## Value
 
-An object of class `c(subclass, "spatial_fit")`.
+An object of class `c(subclass, "spatial_fit")`: a list with `engine`,
+`formula`, `response_var`, `predictor_vars` and `data_sf` as given, `n`
+(the number of rows of `data_sf`) and `info` (the list given, with a
+private cache environment added as `info$.cache`, which methods should
+not modify).
 
 ## Details
 
-There are two obligations. Return an object built here from your
-`fit_fn`, and define a
-[`predict()`](https://rdrr.io/r/stats/predict.html) method for the
-`subclass` you chose.
-[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
-scores folds by calling the
-[`predict()`](https://rdrr.io/r/stats/predict.html) generic on the fit,
-so without a matching `predict.<subclass>()` every fold fails. A
-`fitted.<subclass>()` method returning one value per row of the fit's
-`data_sf`, in the same order, is **required** by
-[`summary()`](https://rdrr.io/r/base/summary.html) and
-[`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md):
-both error, naming the method to define, without one.
+A custom backend needs three things:
+
+1.  a `fit_fn` that returns an object built by `new_spatial_fit()`;
+
+2.  a `predict.<subclass>()` method for the `subclass` you chose.
+    [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
+    scores each fold by calling the
+    [`predict()`](https://rdrr.io/r/stats/predict.html) generic on the
+    fit, so without one every fold fails;
+
+3.  a `fitted.<subclass>()` method that returns one value per row of the
+    fit's `data_sf`, in the same order.
+    [`summary()`](https://rdrr.io/r/base/summary.html) and
+    [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
+    need it, and without one they stop with an error that names the
+    method to define.
+
 [`residuals()`](https://rdrr.io/r/stats/residuals.html) and
 [`coef()`](https://rdrr.io/r/stats/coef.html) methods are optional.
 
@@ -137,34 +144,32 @@ built-in backends either returns the coefficients or signals an error.
 It never returns `NULL`. A custom subclass inherits
 [`stats::coef.default()`](https://rdrr.io/r/stats/coef.html), which
 returns `NULL`, so define a `coef.<subclass>()` that errors when your
-backend has no coefficients; otherwise the hazard described below
-applies to your own fits.
-[`coef.rf_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.rf_fit.md)
+backend has no coefficients.
+[`coef.rf_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-coef.md)
 always errors, because a forest has no coefficients;
-[`coef.gwr_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.gwr_fit.md)
+[`coef.gwr_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-coef.md)
 and
-[`coef.bayesian_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.bayesian_fit.md)
+[`coef.bayesian_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-coef.md)
 error when the backend cannot supply them (a missing package, an engine
-without the expected component). A `NULL` return would be
-indistinguishable from "this model has no fixed effects", so
-`lapply(fits, coef)` would quietly produce a shorter answer than the
-caller expected. Wrap in [`try()`](https://rdrr.io/r/base/try.html) or
+without the expected component). A `NULL` return could not be told from
+"this model has no fixed effects", and `lapply(fits, coef)` would return
+a shorter answer than the caller expected. Wrap the call in
+[`try()`](https://rdrr.io/r/base/try.html) or
 [`tryCatch()`](https://rdrr.io/r/base/conditions.html) when sweeping
-over a heterogeneous list of fits.
+over a list of fits from different backends.
 
 ## See also
 
 [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md),
-which consumes a custom `fit_fn`;
+which takes a custom `fit_fn`;
 [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
-for a worked built-in fitter.
+for a built-in fitter.
 
 Other model fitting:
 [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md),
 [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md),
 [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md),
-[`gp_lengthscale_bounds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gp_lengthscale_bounds.md),
-[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+[`gp_lengthscale_bounds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gp_lengthscale_bounds.md)
 
 ## Examples
 
@@ -200,12 +205,26 @@ predict.lm_fit <- function(object, newdata = NULL, ...) {
 }
 registerS3method("predict", "lm_fit", predict.lm_fit)
 
+# Required by summary() and model_metrics(): one value per training row.
+fitted.lm_fit <- function(object, ...) as.numeric(stats::fitted(object$engine))
+registerS3method("fitted", "lm_fit", fitted.lm_fit)
+
+summary(lm_fit(site))
+#> Summary of <lm_fit> fit (n = 80)
+#> 
+#>   Formula: price ~ elev
+#> 
+#>   In-sample metrics:
+#>     RMSE    = 2.8624
+#>     MAE     = 2.4374
+#>     R^2     = 0.2622
+#>     SMAPE   = 16.40%
 cv <- cv_spatial(site, "price", "elev", fit_fn = lm_fit, k = 3, seed = 1)
 #> cv_spatial(): no folds supplied -- using spatial block k-fold CV (k=3).
 cv$overall
 #>       RMSE      MAE     MAPE    SMAPE        R2 Adj_R2 n_pred n_MAPE n_SMAPE
 #> 1 3.472328 3.009688 21.29953 20.27029 0.2341257     NA     80     80      80
-# Always check these two agree before trusting the metrics above.
+# Check that these two agree before reading the metrics above.
 c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
 #> attempted succeeded 
 #>         3         3 

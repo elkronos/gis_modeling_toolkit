@@ -1,16 +1,11 @@
 # Map a cross-validation fold scheme
 
-Shows which fold each observation belongs to. This is the fastest way to
-see whether spatial blocks are actually separating the data, and how
-wide they are beside the autocorrelation range. For `"block_kfold"`
-folds the block outlines are drawn too, from `folds$params$blocks`, so a
-fold can be seen to be one region or several and an empty block can be
-seen to be empty. The subtitle states the parameter that sets how far
-the held-out points sit from their training data, read from
-`folds$params`: the block size (and the estimated range when
-`auto_range` found one), the buffer, the number of location groups, the
-median NNDM exclusion, or, for kNNDM folds, that they are matched to the
-prediction distances.
+Maps the fold each observation belongs to, as a ggplot2 object. Use it
+to check that the blocks separate the data, and how wide they are beside
+the autocorrelation range when `make_folds(auto_range = TRUE)` estimated
+one. For `"block_kfold"` folds the block outlines are drawn too, from
+`folds$params$blocks`, so a fold can be seen to be one area or several
+and an empty block can be seen to be empty.
 
 ## Usage
 
@@ -27,12 +22,10 @@ plot_folds(folds, points_sf, boundary = NULL, blocks = TRUE)
 
 - points_sf:
 
-  The `sf` layer the folds were built from. Drawn in x and y: a layer
-  whose geometries mix XY with XYZ or XYM (as
-  [`rbind()`](https://rdrr.io/r/base/cbind.html) of an XY and an XYZ
-  layer gives) is drawn without its Z and M, and so are `boundary` and
-  the blocks. A row without a location (a coordinate that is not finite
-  or lies beyond 1e150, or a point that
+  The sf layer the folds were built from. It is drawn in x and y
+  ([spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)),
+  and so are `boundary` and the blocks. A row without a location (a
+  coordinate that is not finite or lies beyond 1e150, or a point that
   [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
   left out of every fold because it is empty or the CRS the folds were
   built in cannot place it) is not drawn, and neither is a row of
@@ -40,7 +33,7 @@ plot_folds(folds, points_sf, boundary = NULL, blocks = TRUE)
 
 - boundary:
 
-  Optional polygonal `sf`/`sfc` to draw underneath.
+  Optional polygon layer (sf or sfc) to draw underneath.
 
 - blocks:
 
@@ -51,31 +44,38 @@ plot_folds(folds, points_sf, boundary = NULL, blocks = TRUE)
 
 A `ggplot` object.
 
+## Details
+
+The subtitle states the setting that decides how far the held-out points
+sit from their training data, read from `folds$params`: the size of the
+blocks built and the `block_size` asked for (with the estimated range
+when there is one), the buffer, the number of location groups, the
+median NNDM exclusion, or, for kNNDM folds, that they are matched to the
+prediction distances. Lengths are in the units of the CRS the folds were
+built in.
+
 ## See also
 
-Other plotting:
-[`plot.aoa()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.aoa.md),
-[`plot.block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.block_size_sweep.md),
-[`plot.feature_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.feature_selection.md),
-[`plot.gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.gwr_model_selection.md),
-[`plot.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.resolution_profile.md),
-[`plot.sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.sac_range.md),
-[`plot.spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.spatial_fit.md),
-[`plot_calibration()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_calibration.md),
-[`plot_cv_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_cv_metrics.md)
+[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md),
+which builds the folds, and
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+to measure how far the held-out points sit from their training data.
+
+Other folds:
+[`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md),
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md),
+[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
 
 ## Examples
 
 ``` r
-if (requireNamespace("ggplot2", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  n <- 80
-  pts <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000)),
-    coords = c("x", "y"), crs = 32632
-  )
-  f <- make_folds(pts, k = 5, method = "block_kfold", block_size = 300)
-  plot_folds(f, pts)
-}
+library(sf)
+set.seed(1)
+n <- 80
+pts <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000)),
+  coords = c("x", "y"), crs = 32632
+)
+f <- make_folds(pts, k = 5, method = "block_kfold", block_size = 300)
+plot_folds(f, pts)
 ```

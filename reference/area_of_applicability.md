@@ -1,6 +1,6 @@
-# Area of applicability of a spatial prediction model
+# Mark where a model's predictions apply
 
-Computes the dissimilarity index (DI) of Meyer & Pebesma (2021) for a
+Computes the dissimilarity index (DI) of Meyer and Pebesma (2021) for a
 set of prediction locations and flags those that fall inside the model's
 area of applicability (AOA), the region of predictor space where the
 model's cross-validated performance estimate can be expected to hold.
@@ -100,8 +100,8 @@ area_of_applicability(
   `cv_*()`, they are dropped from the folds, and a label vector with one
   entry per row of that layer loses theirs. Also as in `cv_*()`, a
   [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-  result built on other data – another layer, or these rows in another
-  order – is refused. That check is skipped when the folds were built on
+  result built on other data (another layer, or these rows in another
+  order) is refused. That check is skipped when the folds were built on
   polygons and the training data are the points a fit reduced them to.
 
 - threshold:
@@ -207,7 +207,7 @@ An object of class `aoa`: a list with
 
 - `location`: `NULL`, or for a location index a list with `threshold`,
   `train_DI`, `normalizer` (the mean distance between training points,
-  in map units, so `threshold * normalizer` is the cut-off as a
+  in CRS units, so `threshold * normalizer` is the cut-off as a
   distance), `n_duplicates` (training rows at an earlier row's location;
   `NA` when folds were supplied) and `n_outside` (prediction rows beyond
   the location threshold).
@@ -243,15 +243,14 @@ An object of class `aoa`: a list with
   `random_kfold` folds is logged as a caution and does not belong next
   to a blocked `cv_*()` result.
 
-## Why a map alone is not enough
+## What the index is for
 
-A fitted model will return a number for any location you hand it,
-including locations whose predictor values look nothing like anything it
-was trained on. Those predictions are extrapolations dressed as
-interpolations, and a cross-validation score says nothing about them,
-because the held-out folds were drawn from the same predictor
-distribution as the training data. The AOA marks where the score
-applies.
+A fitted model returns a number for any location you hand it, including
+locations whose predictor values look nothing like anything it was
+trained on. Those predictions are extrapolations, and a cross-validation
+score says nothing about them, because the held-out folds were drawn
+from the same predictor distribution as the training data. The AOA marks
+where the score applies.
 
 ## How it is computed
 
@@ -263,14 +262,13 @@ the mean pairwise distance among training points. The same quantity is
 computed for the training data itself, using each point's nearest
 neighbour *among the training rows of the fold that holds it out*. That
 means everything outside its own fold for random and block folds, and
-the smaller training set that buffered and NNDM folds actually leave
-(see *The fold scheme changes the answer*); without folds it is the
-nearest training row with different predictor values. The threshold is
-then the largest training DI that is not an upper outlier, i.e. not
-above the fence `Q3 + 1.5 * IQR` of the training DI, with the quartiles
-of [`stats::quantile()`](https://rdrr.io/r/stats/quantile.html)'s
-default type 7. Prediction points at or below that threshold are inside
-the AOA.
+the smaller training set that buffered and NNDM folds leave (see "The
+fold scheme"); without folds it is the nearest training row with
+different predictor values. The threshold is then the largest training
+DI that is not an upper outlier, i.e. not above the fence
+`Q3 + 1.5 * IQR` of the training DI, with the quartiles of
+[`stats::quantile()`](https://rdrr.io/r/stats/quantile.html)'s default
+type 7. Prediction points at or below that threshold are inside the AOA.
 
 That is the paper's "outlier-removed maximum". CAST, the reference
 implementation, computes the same fence with the same quartiles but uses
@@ -296,17 +294,14 @@ raster coarser than the sampling, give training rows that are exact
 copies of each other in predictor space. A copy is the same point of
 that space, not a neighbour. Counted as a neighbour it gives a training
 DI of 0, and once about three quarters of the rows have one the
-threshold is 0 and only exact copies of a training row count as inside
-(60 sites visited 4 times put 30 of 200 new points inside; the same
-sites counted once put 188).
+threshold is 0 and only exact copies of a training row count as inside.
 
 With `folds = NULL` each training row's reference is therefore its
 nearest row with *different* values: the search runs on the distinct
 rows and every row takes its point's distance. `n_duplicates` counts the
-rows that repeat an earlier one, and a layer with none is computed
-exactly as before. The normaliser stays the mean pairwise distance over
-all the training rows, so a prediction point's DI is the same with and
-without folds.
+rows that repeat an earlier one, and a layer with none is unaffected.
+The normaliser stays the mean pairwise distance over all the training
+rows, so a prediction point's DI is the same with and without folds.
 
 With `folds` supplied the definition is applied as it stands: a held-out
 row whose copy is on the training side of its fold has a DI of 0,
@@ -320,20 +315,20 @@ copies together
 threshold its meaning back. The same applies to the location index when
 training rows share a location.
 
-## The fold scheme changes the answer, and should
+## The fold scheme
 
 With `folds = NULL` the training reference is each point's nearest
 neighbour anywhere in the training data, which for clustered data is
 very close, giving a small threshold and a conservative AOA. Passing the
-folds you actually validated with makes the reference distances larger
-and the AOA correspondingly wider. That is not a loophole. The AOA is
-defined relative to a performance estimate, and a spatially blocked
-estimate is a claim about predicting further away. Pass the same
+folds you validated with makes the reference distances larger and the
+AOA wider. The AOA is defined relative to a performance estimate, and a
+spatially blocked estimate is a claim about predicting further away.
+Pass the same
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
 result you passed to
 [`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md).
-Buffered and NNDM folds use the training set they actually left
-available, not merely "everything outside the fold".
+Buffered and NNDM folds use the training set they left available, not
+everything outside the fold.
 
 ## Weights
 
@@ -351,14 +346,15 @@ missing or at most 0), whose positive importances are noise.
 [`print()`](https://rdrr.io/r/base/print.html) says which it was.
 `weights = NULL` asks for equal weights whatever the model carries.
 
-What the weights buy: with 2 predictors the forest uses and 8 it does
-not, equal weights put about 70\\ (4 times the in-sample RMSE) inside
-the AOA and importance weights about 26\\ 43\\ so its square enters the
-distance, and a weak but real predictor is down-weighted by the square
-of its relative importance. A shift along one can then go unseen (94\\
-test, against 19\\ `weights = sqrt(pmax(importance, 0))` is the gentler
-alternative: it kept most of the gain on used predictors and put 46\\
-shift inside, at the cost of 77\\ shifts.
+Importance weights make the index react to shifts along the predictors
+the model uses and much less to shifts along those it does not, which
+leave its error unchanged. The cost is on the weak predictors. A weight
+multiplies the scaled column, so its square enters the distance, and a
+weak but real predictor is down-weighted by the square of its relative
+importance. A shift along such a predictor can then go unseen although
+it raises the error. `weights = sqrt(pmax(importance, 0))` sits between
+equal weights and importance weights: a weak predictor loses less of its
+weight.
 
 ## Limitations
 
@@ -370,12 +366,12 @@ one scale, `sqrt(1 - sum(p^2))` with `p` the levels' shares of the
 training rows, so two rows on different levels are the same distance
 apart whichever levels they are, two on the same level are 0 apart, and
 the predictor adds as much to the mean squared distance between training
-rows as one standardised numeric predictor. That scaling is a choice,
-not a result, which is why it is not the default. A prediction row on a
-level no training row has gets `DI = Inf`, is outside the AOA, and a
-warning gives the count. `categorical = "drop"` leaves the categorical
-predictors out and computes the index on the others; a level the
-training data never has then goes unseen.
+rows as one standardised numeric predictor. That scaling is a choice, so
+it is not the default. A prediction row on a level no training row has
+gets `DI = Inf`, is outside the AOA, and a warning gives the count.
+`categorical = "drop"` leaves the categorical predictors out and
+computes the index on the others; a level the training data never has
+then goes unseen.
 
 Predictors whose training values do not vary beyond their rounding are
 dropped from the distance. A predictor is kept when
@@ -403,23 +399,19 @@ catch. `coords = "auto"` (the default) measures location for all three;
 `coords = "no"` turns it off, with a logged caution; `coords = "yes"`
 measures it for any model, or for none.
 
-**A geographically weighted regression** (`gwr_fit`) has coefficients
-that vary over the map, **a Bayesian spatial model** (`bayesian_fit`)
-has a Gaussian-process term in the coordinates, and **a forest fitted
-with `include_coords = TRUE`** splits on the coordinates. For these, and
-under `coords = "yes"`, location gets an index of its own, built like
-the predictor index but in map space: `DI_location` is the distance to
-the nearest training point over the mean distance between training
-points; the training points' own values use the same folds; and the
-threshold is the same outlier-removed maximum. A prediction point is
-inside the AOA only if it is inside on both indices, and both DI columns
-are returned so the cause can be read off. Location is kept apart from
-the covariates because, as two more equally weighted columns, it is
-diluted as covariates are added: with 12 of them, 89\\ beyond a
-1000-unit training extent still read as inside, against none with the
-separate index. In a test with a GWR whose slope rises eastward, points
-one half to one and a half extents beyond the data had 13 times the
-in-extent RMSE; 84\\ with location measured.
+A GWR (`gwr_fit`) has coefficients that vary over the map, a Bayesian GP
+fit (`bayesian_fit`) has a Gaussian-process term in the coordinates, and
+a forest fitted with `include_coords = TRUE` splits on the coordinates.
+For these, and under `coords = "yes"`, location gets an index of its
+own, built like the predictor index but in the coordinates:
+`DI_location` is the distance to the nearest training point over the
+mean distance between training points; the training points' own values
+use the same folds; and the threshold is the same outlier-removed
+maximum. A prediction point is inside the AOA only if it is inside on
+both indices, and both DI columns are returned so the cause can be read
+off. Location is kept apart from the covariates because, as two more
+equally weighted columns, it would be diluted as covariates are added,
+and points well beyond the training extent would still read as inside.
 
 Inside the extent the index marks an unsampled gap only where the gap is
 wider than the distance its threshold allows, and that distance depends
@@ -428,29 +420,20 @@ on `folds`. With `folds = NULL` it is the spacing of the training points
 folds it is the largest distance from a held-out point to the nearest
 row its fold trained on, outliers removed, which grows with the block
 size; a gap narrower than about twice that distance has no cell beyond
-it and reads as inside. In a test with 400 training points in two strips
-400 units apart, the cut-off without folds was 46 to 54 units and no
-grid cell in the middle half of the gap, 100 units or more from either
-strip, was inside. That held although the prediction grid took its
-covariates from the nearest observation, so that every cell's covariate
-DI was 0. With five block folds the cut-off was 199 to 251 units and 76
-to 100\\ three draws). This follows from the definition and is not a
-fault of the index: the cross-validated error it is paired with was
-earned on hold-outs that far from their training rows. It does mean that
-with blocked folds the location index says nothing about a gap narrower
-than about twice the cut-off; `location$threshold * location$normalizer`
-is the cut-off in map units, and
-[`print()`](https://rdrr.io/r/base/print.html) shows it.
+it and reads as inside. This follows from the definition: the
+cross-validated error the index is paired with was earned on hold-outs
+that far from their training rows. With blocked folds the location index
+therefore says nothing about a gap narrower than about twice the
+cut-off; `location$threshold * location$normalizer` is the cut-off in
+CRS units, and [`print()`](https://rdrr.io/r/base/print.html) shows it.
 
 A forest splits on the coordinates like on any other column, so for a
 forest they also stay in the predictor index as `"..x"` and `"..y"`,
 centred, scaled and weighted with the rest. Under `weights = "auto"`
 that weight is the forest's importance, which is small for a forest that
-barely splits on its coordinates: in a test where half of 50 prediction
-points lay one half to one and a half extents beyond the data, 41 read
-as inside on the predictor index, 16 of them beyond the extent. The
-location index counts location whatever weight the coordinates get, and
-put none of the 25 inside.
+barely splits on its coordinates, so points beyond the extent can read
+as inside on the predictor index. The location index counts location
+whatever weight the coordinates get.
 
 Geometry is needed on both sides, so `train_sf` and `newdata` must both
 be `sf` objects; a data.frame is refused rather than quietly measured
@@ -461,11 +444,12 @@ would. If exactly one side carries a CRS the other is brought into it:
 reprojected when its coordinates look like longitude/latitude, stamped
 otherwise, with a warning either way; a CRS in longitude and latitude is
 not stamped on coordinates outside longitude -180 to 360 and latitude
--90 to 90, which is refused. This is done because degrees fed into a
-metre-space index silently understate the distances. The location index
-is a map distance and refuses training data in a geographic CRS. Both
-layers are read in x and y for the location: a layer whose geometries
-mix XY with XYZ or XYM (as
+-90 to 90, which is refused (see
+[spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)).
+Degrees fed into an index in metres would silently understate the
+distances. The location index measures distances in the coordinates and
+refuses training data in a geographic CRS. Both layers are read in x and
+y for the location: a layer whose geometries mix XY with XYZ or XYM (as
 [`rbind()`](https://rdrr.io/r/base/cbind.html) of an XY and an XYZ layer
 gives), or carry M (XYM or XYZM), is read without its Z and M. Only one
 change reaches the result: for a forest fitted with
@@ -495,32 +479,22 @@ Estimating the area of applicability of spatial prediction models.
 
 ## See also
 
-[`predict_surface`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+[`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
 to build the grid,
-[`make_folds`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-for the fold scheme.
-
-Other cross-validation:
-[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md),
-[`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md),
-[`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md),
-[`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md),
-[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md),
-[`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md),
-[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md),
-[`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md),
-[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md),
-[`sac_nugget()`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md),
-[`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
+[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+for the fold scheme, and
+[`plot.aoa()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.aoa.md)
+to draw the dissimilarity distribution.
 
 Other prediction:
-[`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+[`plot.aoa()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.aoa.md),
+[`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md),
+[`print.aoa()`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.aoa.md)
 
 ## Examples
 
 ``` r
-library(sf)
-#> Linking to GEOS 3.14.1, GDAL 3.12.2, PROJ 9.7.1; sf_use_s2() is TRUE
+suppressPackageStartupMessages(library(sf))
 set.seed(1)
 n <- 120
 train <- st_as_sf(

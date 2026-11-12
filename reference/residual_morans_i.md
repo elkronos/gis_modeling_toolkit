@@ -1,11 +1,11 @@
-# Compute Moran's I on the residuals of a fitted spatial model
+# Test the residuals of a fitted model for spatial autocorrelation
 
-Given a `spatial_fit` object, extracts the residuals and the observation
-coordinates, builds a spatial weight matrix, and computes Moran's I
-together with its analytical expectation and variance under a stated
-null. A z-score and two-sided p-value are provided so the caller can
-assess whether statistically significant spatial autocorrelation remains
-after fitting.
+Takes the residuals and the observation coordinates of a `spatial_fit`,
+builds a spatial weight matrix, and computes Moran's I with its
+expectation and variance under a stated null. A z-score and a p-value
+say whether spatial autocorrelation remains after fitting. The default
+weights are the row-standardised k-nearest-neighbour matrix described
+under `weights`.
 
 ## Usage
 
@@ -30,7 +30,8 @@ residual_morans_i(
   as
   [`coerce_to_points`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)`(, "auto")`
   does. A layer whose geometries mix XY with XYZ or XYM, or carry M (XYM
-  or XYZM), is read in x and y, with no warning.
+  or XYZM), is read in x and y, with no warning (see
+  [spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)).
 
 - alternative:
 
@@ -56,7 +57,7 @@ residual_morans_i(
   rounding, the call warns, with class `"spatialkit_xy_imprecise"`,
   naming the rounding and the distance; the matrix is the one the
   coordinates as stored give. On distinct, untied coordinates it equals
-  `spdep`'s `knearneigh()` + `nb2listw(style = "W")` exactly. If a
+  spdep's `knearneigh()` + `nb2listw(style = "W")` exactly. If a
   non-row-standardised matrix is supplied (i.e. rows do not all sum to
   1), the Cliff & Ord variance formula is still valid for general W and
   the computation proceeds; a note is logged (not raised as an R
@@ -99,17 +100,16 @@ residual_morans_i(
   residual variance divides by \\(n-p)(n-p+2)\\ and the normal
   approximation means nothing there); `"residual"` logs a warning when
   it does, `"auto"` does not, and `df` in the result is then \\n - 1\\.
-  Read `null` in the result to see which it was. See **Which null, and
-  when it is approximate** above.
+  Read `null` in the result to see which it was. See the section "Which
+  null, and when it is approximate".
 
 - keep_weights:
 
   Logical. Return the \\n \times n\\ weight matrix in the result?
-  Defaults to `FALSE`: the matrix dominates the object's size (50.3 KB
-  of a 53.5 KB result at \\n = 500\\ in its sparse form, and 191 MB at
-  the \\n = 5000\\ the dense fallback is capped at) while most uses read
-  only the statistic and its moments, and `weights_summary` says what it
-  was. Set `TRUE` when you need the matrix itself.
+  Defaults to `FALSE`: the matrix makes up most of the object's size,
+  while most uses read only the statistic and its moments, and
+  `weights_summary` says what it was. Set `TRUE` when you need the
+  matrix itself.
 
 ## Value
 
@@ -213,50 +213,37 @@ of an exact fit of the response on the predictors (a root mean square of
 residuals against the response, so residuals in any unit are scored or
 refused alike, and I, z and the p-value do not depend on the unit.
 
-## Details
-
-By default, weights are constructed as a k-nearest-neighbour (k = 8)
-binary matrix, row-standardised. Users may supply their own weight
-matrix via the `weights` argument.
-
 ## Which null, and when it is approximate
 
-Two nulls are available, and the one actually used is reported back in
-the `null` element of the return value.
+Two nulls are available, and the one used is reported in the `null`
+element of the return value.
 
 `"randomisation"` is the classical exchangeable null: \\E\[I\] =
--1/(n-1)\\ with the Cliff & Ord randomisation variance, conditioning on
-the observed kurtosis. These are the moments of I for a vector whose
+-1/(n-1)\\ with the Cliff and Ord randomisation variance, conditioning
+on the observed kurtosis. These are the moments of I for a vector whose
 elements are equally likely in any order.
 
-**Model residuals are not exchangeable.** They are orthogonal to the
-design matrix, which pushes \\E\[I\]\\ materially below \\-1/(n-1)\\
-whenever the covariates are spatially smooth, and pushes it further the
-more covariates there are. In a simulation with \\n = 120\\, six smooth
-covariates and *independent* errors (so the truth is "no residual
-autocorrelation"), OLS residuals had mean \\I = -0.031\\ against the
-exchangeable \\E\[I\] = -0.008\\; the z-score averaged \\-0.54\\ with
-\\sd = 0.90\\ instead of 0 and 1. The cost is power, which is the point
-of the test: at a moderate residual autocorrelation the exchangeable
-null rejected 13% of the time where the correct one rejected 31%.
+Model residuals are not exchangeable. They are orthogonal to the design
+matrix, which pushes \\E\[I\]\\ below \\-1/(n-1)\\ whenever the
+covariates are spatially smooth, and further the more covariates there
+are. Under the exchangeable null the z-score of OLS residuals is then
+shifted below 0, and the test loses power.
 
-`"residual"` therefore uses the Cliff & Ord (1981) sec. 8.3 moments for
-regression residuals, with \\M = I - X(X'X)^{-1}X'\\ rebuilt from
-`predictor_vars` and `data_sf`: \$\$E\[I\] =
+`"residual"` therefore uses the Cliff and Ord (1981, section 8.3)
+moments for regression residuals, with \\M = I - X(X'X)^{-1}X'\\ rebuilt
+from `predictor_vars` and `data_sf`: \$\$E\[I\] =
 (n/S_0)\\\mathrm{tr}(MW)/(n-p)\$\$ \$\$Var\[I\] =
 (n/S_0)^2\[\mathrm{tr}(MWMW') + \mathrm{tr}((MW)^2) +
 (\mathrm{tr}MW)^2\]/\[(n-p)(n-p+2)\] - E\[I\]^2\$\$ These assume normal
-errors and do not condition on the observed kurtosis. On the simulation
-above they restored the z-score to mean \\-0.09\\, \\sd = 1.03\\, and
-the rejection rate to 4.3% against a nominal 5%. They agree with
+errors and do not condition on the observed kurtosis. They agree with
 [`spdep::lm.morantest()`](https://r-spatial.github.io/spdep/reference/lm.morantest.html)
 to machine precision.
 
-**These moments are exact for \\e = My\\ and for nothing else**, so
+The residual moments are exact for \\e = My\\ and for nothing else, so
 `null = "auto"` does not guess from the fit's class: it rebuilds `X`,
 regresses the response on it, and uses the residual moments only when
-the supplied residuals *are* those OLS residuals to numerical tolerance.
-A GWR wide enough to have collapsed to global OLS passes that test; the
+the supplied residuals are those OLS residuals to numerical tolerance. A
+GWR wide enough to have collapsed to global OLS passes that test; the
 same GWR at a working bandwidth does not. The response, and each
 predictor whose centre is more than 1000 times its spread, are taken
 about their centres before the regression, which leaves its residuals as
@@ -274,37 +261,38 @@ of the response's standard deviation from the residuals
 where the raw design keeps the rank of the centred one: that rounding
 grows with the number of rows.
 
-**For the flexible backends neither null is exact**, and `"auto"` leaves
-them on `"randomisation"` because forcing the OLS moments on them
-measurably makes matters worse, not better. Measured on null data (\\n =
-120\\, three smooth covariates, independent errors; nominal 5%,
-one-sided):
-
-|               |                   |              |
-|---------------|-------------------|--------------|
-| **backend**   | **randomisation** | **residual** |
-| OLS           | 0.035             | 0.060        |
-| random forest | 0.128             | 0.200        |
-| GWR           | 0.000             | 0.000        |
-
-The random forest is anticonservative under both. Its residuals here are
-the **out-of-bag** ones
-([`residuals.rf_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residuals.rf_fit.md)),
-not in-sample fits. They are inflated instead of shrunk (measured sd
-1.08 against a true 1.00), but they are not a linear projection of the
-response and they are spatially heteroscedastic, so neither set of
-moments describes their null distribution and the variance is
-understated whichever is used (\\sd(z) \approx 1.3\\). GWR is
+For the flexible backends neither null is exact, and `"auto"` leaves
+them on `"randomisation"`: forcing the OLS moments on them does not
+correct them, and for a forest it raises the false-positive rate. A
+random forest's residuals here are the out-of-bag ones
+([spatial_fit-residuals](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-residuals.md)).
+The random forest is anticonservative under both: its residuals are not
+a linear projection of the response and they are spatially
+heteroscedastic, so neither set of moments describes their null
+distribution and the variance is understated whichever is used. GWR is
 conservative under both, because it removes far more structure than a
-rank-p projection does. Treat the p-value from those backends as a rough
-indicator, and prefer spatially-blocked cross-validated residuals or an
-explicit spatial covariance model when the answer has to carry weight.
+rank-\\p\\ projection does. Treat the p-value from those backends as a
+rough indicator, and prefer spatially blocked cross-validated residuals
+or an explicit spatial covariance model when the answer has to carry
+weight.
 
-A permutation null was considered and rejected: permuting the residual
-vector destroys exactly the orthogonality that causes the bias, so its
-mean is the exchangeable \\-1/(n-1)\\ by construction (measured:
-\\-0.00840\\ against \\-1/(n-1) = -0.00840\\) and it reproduces the
-randomisation null without correcting it.
+A permutation null does not help: permuting the residual vector destroys
+the orthogonality that causes the bias, so its mean is the exchangeable
+\\-1/(n-1)\\ by construction and it reproduces the randomisation null.
+
+## Reading a large I
+
+A large positive I with a small p-value means the residuals keep spatial
+structure the model did not capture (for a forest, read the p-value as
+rough; see above): a covariate it lacks, or a scale it cannot represent.
+Add the missing covariate if there is one, compare a backend that models
+space
+([`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+or
+[`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)),
+and score the model with blocked folds
+([`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)).
+A z near 0 with a large p-value means the test found no structure left.
 
 ## References
 
@@ -313,36 +301,36 @@ Applications*. Pion, London. Section 8.3.
 
 ## See also
 
-Other model evaluation:
 [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md),
-[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md),
+which adds the statistic to a comparison of fits.
+
+Other in-sample checks:
+[`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md),
 [`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md),
-[`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
+[`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md),
+[`print.morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.morans_i.md)
 
 ## Examples
 
 ``` r
-# Works on any spatial_fit; a forest keeps the example free of the optional
-# GWR/Stan backends.
-if (requireNamespace("ranger", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  n <- 120
-  dat <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               elev = rnorm(n)),
-    coords = c("x", "y"), crs = 32632
-  )
-  # A strong east-west trend the predictor cannot explain: the residuals
-  # should still carry spatial structure, and this is what detects it.
-  dat$price <- 10 + 0.02 * (st_coordinates(dat)[, 1] - 5e5) +
-    2 * dat$elev + rnorm(n)
-  fit <- fit_rf_model(dat, "price", "elev", num_trees = 100, seed = 1)
-  # I = 0.64, z = 15.5: strong positive residual autocorrelation, exactly
-  # as constructed.  A z near 0 with a large p-value would be the opposite
-  # verdict -- no structure the model failed to capture.
-  residual_morans_i(fit)
-}
+# Works on any spatial_fit; a forest keeps the example free of the
+# optional GWR and Stan backends.
+library(sf)
+set.seed(1)
+n <- 120
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             elev = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+# An east-west trend the predictor cannot explain.
+dat$price <- 10 + 0.02 * (st_coordinates(dat)[, 1] - 5e5) +
+  2 * dat$elev + rnorm(n)
+fit <- fit_rf_model(dat, "price", "elev", num_trees = 100, seed = 1)
+# A large positive I and z: the residuals carry the east-west trend the
+# forest could not see.  A z near 0 with a large p-value would mean no
+# structure was left.
+residual_morans_i(fit)
 #> Residual Moran's I = 0.6437   (E[I] = -0.0084, sd = 0.0419)
 #>   z = 15.548, p = 1.653e-54
 #>   null: randomisation moments, approximate for these residuals; n = 120, df = 119

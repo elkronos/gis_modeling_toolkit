@@ -1,6 +1,8 @@
 # Clear the in-session grid cache
 
-Removes all memoized grid results from the internal cache environment.
+Empties the cache that
+[`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md)
+fills, and returns the number of grids removed.
 
 ## Usage
 
@@ -12,7 +14,9 @@ clear_grid_cache(cache_env = .gmt_cache)
 
 - cache_env:
 
-  Environment to clear. Default .gmt_cache.
+  The cache to clear. The default is the package's own; pass an
+  environment only if you passed the same one to
+  `create_grid_polygons_cached(cache_env = )`.
 
 ## Value
 
@@ -20,9 +24,13 @@ Invisibly, the number of entries removed.
 
 ## See also
 
-Other package options and caches:
-[`clear_fitted_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md),
 [`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md),
+which fills the cache.
+
+Other options and caches:
+[`clear_fitted_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md),
+[`spatialkit-conditions`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-conditions.md),
+[`spatialkit-options`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-options.md),
 [`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md)
 
 ## Examples
@@ -32,9 +40,11 @@ library(sf)
 bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
+invisible(clear_grid_cache())   # start from an empty cache
 g1 <- create_grid_polygons_cached(bnd, target_cells = 9)
 g2 <- create_grid_polygons_cached(bnd, target_cells = 9)   # cache hit
-clear_grid_cache()   # returns the number of entries removed, invisibly
-print(clear_grid_cache())                                   # 0: already empty
+print(clear_grid_cache())   # 1: the grid cached above
+#> [1] 1
+print(clear_grid_cache())   # 0: already empty
 #> [1] 0
 ```

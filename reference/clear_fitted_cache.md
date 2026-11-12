@@ -1,13 +1,13 @@
-# Clear cached fitted values for a Bayesian spatial model
+# Clear the cached fitted values of a Bayesian GP fit
 
-Removes the lazily-cached
-[`fitted()`](https://rdrr.io/r/stats/fitted.values.html) result so that
-the next call recomputes from the posterior. This is only necessary if
-the underlying `brmsfit` engine has been manually mutated after fitting.
-A change to `data_sf` invalidates the entry on its own, because the
-cached value carries a digest of the data it was computed from (see
-[`fitted.bayesian_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/fitted.bayesian_fit.md)).
-Normal usage never requires it.
+Removes the cached
+[`fitted()`](https://rdrr.io/r/stats/fitted.values.html) values of a
+`bayesian_fit`, so the next call recomputes them from the posterior. You
+need it only after editing the `brmsfit` engine in place. A change to
+`data_sf`, or a refit, invalidates the entry on its own (see "The
+Bayesian GP cache" in
+[spatial_fit-fitted](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-fitted.md)).
+On any other fit it does nothing.
 
 ## Usage
 
@@ -23,35 +23,40 @@ clear_fitted_cache(object)
 
 ## Value
 
-`object`, invisibly (called for side effect).
+`object`, invisibly.
 
 ## Details
 
-The cache environment is shared by every copy of a fit, so clearing it
-through one copy clears it for all of them. That is harmless: the others
-recompute.
+Every copy of a fit shares the cache, so clearing it through one copy
+clears it for all of them; the others recompute.
 
 ## See also
 
-Other package options and caches:
+Other options and caches:
 [`clear_grid_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_grid_cache.md),
-[`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md),
+[`spatialkit-conditions`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-conditions.md),
+[`spatialkit-options`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-options.md),
 [`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md)
 
 ## Examples
 
 ``` r
-# Only a bayesian_fit carries the cache; on any other fit this is a no-op.
-if (requireNamespace("ranger", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  pts <- st_as_sf(
-    data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
-               a = rnorm(60)),
-    coords = c("x", "y"), crs = 32632
-  )
-  pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
-  fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
-  clear_fitted_cache(fit)
-}
+if (FALSE) { # \dontrun{
+# Needs brms and a Stan toolchain, and takes minutes.
+library(sf)
+set.seed(1)
+n <- 60
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             elev = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+dat$price <- 10 + 2 * dat$elev + rnorm(n)
+fit <- fit_bayesian_spatial_model(dat, "price", "elev", chains = 2,
+                                  iter = 1000, compute_loo = FALSE)
+f1 <- fitted(fit)          # computed from the posterior and cached
+clear_fitted_cache(fit)
+f2 <- fitted(fit)          # computed again
+all.equal(f1, f2)
+} # }
 ```

@@ -1,6 +1,8 @@
-# Harmonize CRS between two spatial objects
+# Bring two spatial objects to one CRS
 
-Aligns two sf objects to a common CRS.
+Brings two sf or sfc objects to one CRS: the CRS of `a` or `b`, as
+`prefer` says, or `target_crs` when it is given. Without `target_crs`,
+two objects that both lack a CRS are returned unchanged.
 
 ## Usage
 
@@ -22,7 +24,8 @@ harmonize_crs(
 
 - prefer:
 
-  Which object's CRS to keep ("a" or "b").
+  Which object's CRS both are brought to when they differ: `"a"`
+  (default) or `"b"`. Ignored when `target_crs` is given.
 
 - target_crs:
 
@@ -32,59 +35,61 @@ harmonize_crs(
 
 - on_transform_error:
 
-  What to do when st_transform() fails: `"stop"` (default) raises an
-  error immediately; `"set_crs"` falls back to st_set_crs() (UNSAFE:
-  coordinates are NOT reprojected, only the CRS label is overwritten).
-  The `"set_crs"` option exists only for rare edge cases where you are
-  certain the coordinates already match the target CRS definition.
+  What to do when
+  [`sf::st_transform()`](https://r-spatial.github.io/sf/reference/st_transform.html)
+  fails: `"stop"` (default) raises an error; `"set_crs"` relabels the
+  CRS with
+  [`sf::st_set_crs()`](https://r-spatial.github.io/sf/reference/st_crs.html)
+  without moving the coordinates. Use `"set_crs"` only when the
+  coordinates are already in the target CRS.
 
 ## Value
 
-A named list with components a and b. A layer that is transformed and
-mixes XY and XYZ (or XYM) geometries is returned in XY, with a warning
-of class `"spatialkit_zm_dropped"`:
-[`sf::st_transform()`](https://r-spatial.github.io/sf/reference/st_transform.html)
-reads a layer in the dimension of its first geometry and misplaces the
-others. A layer in one dimension is transformed with its Z and M, and so
-is a layer whose only geometries of another dimension than the first are
-empty and not points. A row of a transformed layer with a coordinate
-that is not finite or lies beyond 1e150 comes back empty, in its own
-geometry type: it has no location to move, and
-[`sf::st_transform()`](https://r-spatial.github.io/sf/reference/st_transform.html)
-would drop that vertex and return the rest of the feature, or put the
-coordinate at a finite place. So does a row of a projected layer moved
-to a CRS in degrees with a coordinate beyond 1e10 in its CRS's own unit,
-further out than any projected CRS places a point of the Earth. A row
-that has a location and that the target CRS cannot place in full, such
-as a point far outside a UTM zone or a ring with a vertex at a latitude
-beyond 90, comes back empty, or without the vertices the CRS cannot
-place, and a warning of class `"spatialkit_rows_unplaced"` names such
-rows of `a` or `b` (`rows` on the condition). A layer that is not
-transformed is returned as it came.
+A named list with components `a` and `b`, each of the class it came in.
+A layer that is not transformed is returned as it came.
 
 ## Details
 
-When one input carries no CRS, the same lon/lat heuristic
+When one input has no CRS, the lon/lat test that
 [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
-uses decides what happens, so both entry points place identical data in
-the same place: coordinates that look like degrees are taken as
-EPSG:4326 and **reprojected** to the other object's CRS (or
-`target_crs`); coordinates that do not are *stamped* with
+uses decides what happens (see
+[spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md),
+"Layers without a CRS"), so both functions place the same data in the
+same place: coordinates the test takes for degrees are read as EPSG:4326
+and reprojected to the other object's CRS (or `target_crs`); other
+coordinates are stamped with that CRS by
 [`sf::st_set_crs()`](https://r-spatial.github.io/sf/reference/st_crs.html),
-which relabels without moving them. Either way the assumption is
-announced with a warning. A CRS in longitude and latitude is not stamped
-on coordinates that cannot be in it: a layer with an x outside -180 to
-360 or a y beyond 90 north or south, read on the coordinates that have a
-location, stops the call with an error that names `a` or `b`, its box
-and the target CRS.
+which relabels them without moving them. Either way a warning says so. A
+CRS in longitude and latitude is not stamped on coordinates that cannot
+be in it: a layer with an x outside -180 to 360 or a y beyond 90 north
+or south, read on the coordinates that have a location, stops the call
+with an error that names `a` or `b`, its box and the target CRS.
+
+A layer that is transformed is read as
+[spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)
+describes: a layer that mixes XY and XYZ (or XYM) geometries comes back
+in XY, with a warning of class `spatialkit_zm_dropped`, and a row
+without a location comes back empty, in its own geometry type. So does a
+row of a projected layer moved to a CRS in degrees with a coordinate
+beyond 1e10 in its CRS's own unit, further out than any projected CRS
+places a point of the Earth. A row that has a location and that the
+target CRS cannot place in full, such as a point far outside a UTM zone
+or a ring with a vertex at a latitude beyond 90, comes back empty, or
+without the vertices the CRS cannot place, and a warning of class
+`spatialkit_rows_unplaced` names such rows of `a` or `b` (`rows` on the
+condition).
 
 ## See also
 
-Other spatial data preparation:
-[`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md),
+[spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)
+for how input geometry and CRSs are read.
+
+Other data preparation:
+[`[.spatialkit_rows()`](https://elkronos.github.io/gis_modeling_toolkit/reference/sub-.spatialkit_rows.md),
 [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md),
 [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md),
-[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md),
+[`spatialkit-geometry`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)
 
 ## Examples
 

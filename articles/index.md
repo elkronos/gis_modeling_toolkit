@@ -2,45 +2,67 @@
 
 ### Get started
 
-- [Getting
+- [Get
   started](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md):
 
-  Installing, getting an sf layer of points in, what the coordinates are
-  in, and the pipeline from points to a scored model and a map.
+  Take a layer of points to cells with standard errors, a score from
+  spatial cross-validation and a map that marks where its predictions
+  apply.
 
-### One topic at a time
+### Step by step
+
+One step of the pipeline per article, in the order you take them.
 
 - [Choosing a
   resolution](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md):
 
-  How many cells the data support: the ladder, the criteria that
-  disagree, and how to read the flat region.
+  Decide how many cells the data support, and pass that count to the
+  tessellation.
+
+- [Building cells and summarising
+  them](https://elkronos.github.io/gis_modeling_toolkit/articles/cells.md):
+
+  Draw the cells, put each observation in one, and report each cell’s
+  value with the right standard error.
 
 - [Spatial
   cross-validation](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md):
 
-  What a fold’s score estimates, the six fold schemes, block sizes and
-  the autocorrelation range, and reading a cross-validation result down
-  to the last row.
+  Choose folds whose score matches the map you will make, size the
+  blocks, and read every part of the result.
 
-- [Diagnostics](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md):
+- [Fitting and checking
+  models](https://elkronos.github.io/gis_modeling_toolkit/articles/models.md):
 
-  Residual autocorrelation, aggregation standard errors, kriging
-  adequacy, the area of applicability, coordinates as predictors and
-  selection inside the folds, and the warnings about pooled cell values.
+  Pick a backend or write your own, compare backends on the same folds,
+  check the residuals, and map where the predictions apply.
 
-### End to end
+- [Exporting and reporting
+  results](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.md):
 
-- [spatialkit: Tessellations, Spatial Cross-Validation and
-  Models](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md):
+  Write the cells to a file others can join to, and report the numbers
+  that say how far a cell value or a map can be trusted.
 
-  The whole pipeline end to end on North Carolina: four tessellations,
-  aggregation, folds, models, and a surface with its area of
-  applicability.
+### Worked example
 
-- [What to save, and what to
-  report](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.md):
+- [Worked example: North
+  Carolina](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md):
 
-  What leaves the session: grouping an existing layer, membership
-  lookups, exporting the regions, which six numbers to report, and how
-  to report a cell value.
+  The pipeline on a simulated field over North Carolina, comparing four
+  tessellations, two fold schemes and two backends at cell counts set by
+  hand.
+
+### Help
+
+Pages to consult when a step fails or a term is unclear.
+
+- [Troubleshooting and
+  performance](https://elkronos.github.io/gis_modeling_toolkit/articles/troubleshooting.md):
+
+  The errors and warnings you are most likely to meet, what each means,
+  and how to handle large layers, parallel folds, caches and the log.
+
+- [Terms used on these
+  pages](https://elkronos.github.io/gis_modeling_toolkit/articles/glossary.md):
+
+  Short definitions of the terms the articles and help pages use.

@@ -1,9 +1,11 @@
 # Create and cache grid polygons over a boundary
 
-Builds a grid via
-[`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
-and memoizes the result so repeated calls with the same inputs return
-instantly.
+Builds a grid with
+[`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md),
+gives it stable IDs with
+[`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md),
+and keeps it, so a repeat call with the same arguments returns the kept
+grid.
 
 ## Usage
 
@@ -35,7 +37,10 @@ create_grid_polygons_cached(
 
 - target_cells:
 
-  Approximate desired number of cells. Default `NULL`, as in
+  Approximate desired number of cells, or what `target_cells` of
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  accepts besides a number (a selection, a profile or ranked levels,
+  read as a count first). Default `NULL`, as in
   [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md),
   so the grid can be sized by `cellsize` or `n` passed through `...`
   instead.
@@ -47,11 +52,16 @@ create_grid_polygons_cached(
 
 - ...:
 
-  Additional arguments forwarded to create_grid_polygons().
+  Further arguments to
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md),
+  such as `cellsize`, `n` or `crs`.
 
 - cache_env:
 
-  Environment for memoized grids. Default .gmt_cache.
+  Environment the grids are kept in. The default is the package's own
+  cache, which
+  [`clear_grid_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_grid_cache.md)
+  empties; pass a new environment to keep a separate cache.
 
 - max_entries:
 
@@ -64,11 +74,11 @@ create_grid_polygons_cached(
 
 ## Value
 
-An sf data frame with a stable poly_id column. The rows are re-ordered
+An sf data frame with a stable `poly_id` column. The rows are re-ordered
 and re-numbered by
-[`ensure_stable_poly_id`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md),
+[`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md),
 which
-[`create_grid_polygons`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+[`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
 does not do: the same cell therefore carries a different `poly_id`
 depending on which of the two builders produced it. Use one builder
 throughout an analysis; joining a summary keyed on IDs from one onto
@@ -90,8 +100,12 @@ clipped and repaired by GEOS under either setting and is cached once.
 
 ## See also
 
-Other tessellation:
+[`clear_grid_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_grid_cache.md)
+to empty the cache.
+
+Other cell building:
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md),
+[`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md),
 [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md),
 [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md),
 [`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md),
@@ -99,11 +113,6 @@ Other tessellation:
 [`plot_tessellation_map()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_tessellation_map.md),
 [`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md),
 [`voronoi_seeds_random()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_random.md)
-
-Other package options and caches:
-[`clear_fitted_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md),
-[`clear_grid_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_grid_cache.md),
-[`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md)
 
 ## Examples
 
@@ -113,6 +122,8 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
 g <- create_grid_polygons_cached(bnd, target_cells = 16, type = "hex")
+# 27, not 16: clipping keeps every hexagon that overhangs the boundary,
+# which adds more at a small target (see ?create_grid_polygons)
 nrow(g)
 #> [1] 27
 # The IDs come from ensure_stable_poly_id(), so they follow the geometry:

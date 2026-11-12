@@ -1,6 +1,9 @@
-# Assign features to polygons and attach a polygon ID
+# Assign features to cells and attach a cell ID
 
-Joins an sf layer of input features to a polygon layer via spatial join.
+Gives every feature the ID of the polygon it falls in and returns the
+features, one row each, with that ID column added. Features in several
+polygons are settled by `tie_break`, and features in none are dropped or
+kept by `keep_unassigned`.
 
 ## Usage
 
@@ -23,7 +26,7 @@ assign_features_to_polygons(
 
   An sf object containing features to assign. A layer whose geometries
   mix dimensions or carry M (XYM or XYZM) is joined in x and y, and the
-  rows returned keep their Z and M (see Details).
+  rows returned keep their Z and M (see "Z and M coordinates").
 
 - polygons_sf:
 
@@ -97,8 +100,8 @@ assign_features_to_polygons(
   latitude with s2 on (sf's default), where s2 refuses a polygon of
   either layer as it arrived, the join by `predicate` meets that refusal
   too, and the error names the polygons and the transform instead (see
-  Details). In longitude and latitude the validity check, the repair and
-  the overlaps run on s2 whatever
+  "Joins in longitude and latitude"). In longitude and latitude the
+  validity check, the repair and the overlaps run on s2 whatever
   [`sf::sf_use_s2()`](https://r-spatial.github.io/sf/reference/s2.html)
   says; with s2 off the join by `predicate` runs with GEOS, and the
   error that names the polygons also offers `largest = FALSE`.
@@ -134,11 +137,12 @@ assign_features_to_polygons(
   [`sf::st_make_valid()`](https://r-spatial.github.io/sf/reference/valid.html),
   with a warning, and returned as it arrived; in degrees, one s2 refuses
   even repaired (a bowtie) stops the call with the error of class
-  `"spatialkit_cells_degenerate"` (see Details). `"first"` keeps the
-  first match, the polygon that comes first in the rows of `polygons_sf`
-  (original order-dependent behavior). On cells built from the centres a
-  profile scored, a point on the edge between two of them is placed by
-  the profile's rule whichever is given (see Value).
+  `"spatialkit_cells_degenerate"` (see "Joins in longitude and
+  latitude"). `"first"` keeps the polygon that comes first in the rows
+  of `polygons_sf`, so the result depends on their order. On cells built
+  from the centres a profile scored, a point on the edge between two of
+  them is placed by the profile's rule whichever is given (see "Cells
+  from a resolution profile").
 
 - quiet:
 
@@ -167,6 +171,21 @@ does; beside a layer in longitude and latitude, one with an x outside
 the call stops with an error that names `features_sf` or `polygons_sf`
 and gives its box.
 
+## Details
+
+This is the step before
+[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
+which aggregates over the IDs. Unlike
+[`sf::st_join()`](https://r-spatial.github.io/sf/reference/st_join.html),
+it settles a feature that matches several polygons by an explicit
+`tie_break` rule instead of duplicating the row, so the assigned layer
+keeps one row per input feature and each feature is counted in one cell.
+How the input layers are read in general (CRS, dimensions, rows without
+a location) is in
+[spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md).
+
+## Ties and unassigned features
+
 Features that fall inside no polygon are counted on the attribute
 `"unassigned"`: a list with `n`, `which` (their row positions in
 `features_sf`) and `n_rows`. With `keep_unassigned = FALSE` they are not
@@ -190,16 +209,14 @@ features inside the rest of its ring are unassigned.
 
 The attribute `"ties"` records how many features matched more than one
 polygon (with `largest`, overlapped several by exactly the same area)
-and had the `tie_break` rule decide for them (on cells built from the
-centres a profile scored, the profile's rule then places the points
-among them, as the last paragraph says): a list with `n`, `which` (their
-row positions in `features_sf`), `rule`, `n_rows` (the number of rows
-returned, which the record was made for) and, when the rule gave some of
-them no polygon (see `tie_break`), `unresolved`, the row positions of
-those among `which`. A large `n` means the polygon layer overlaps, and
-per-cell counts built from the result depend on the rule. The record
-describes the rows this call returned and does not survive subsetting:
-`joined[i, ]`, like
+and had the `tie_break` rule decide for them: a list with `n`, `which`
+(their row positions in `features_sf`), `rule`, `n_rows` (the number of
+rows returned, which the record was made for) and, when the rule gave
+some of them no polygon (see `tie_break`), `unresolved`, the row
+positions of those among `which`. A large `n` means the polygon layer
+overlaps, and per-cell counts built from the result depend on the rule.
+The record describes the rows this call returned and does not survive
+subsetting: `joined[i, ]`, like
 [`dplyr::filter()`](https://dplyr.tidyverse.org/reference/filter.html),
 `slice()` or `arrange()` of it, is a plain layer with no `"ties"`
 attribute, so nothing reports the parent's count for a different set of
@@ -209,6 +226,8 @@ keeps the record, since the rows are the same; see
 [`[.spatialkit_rows`](https://elkronos.github.io/gis_modeling_toolkit/reference/sub-.spatialkit_rows.md)
 for what binding such data frames does. The `"unassigned"` record is
 stamped and removed the same way.
+
+## Cells from a resolution profile
 
 When `polygons_sf` carries `attr(, "count_rule")`, the record of how its
 cell count was set (cells from
@@ -271,35 +290,26 @@ record holds them, whatever CRS the seeds came back in (unless its `crs`
 names another projected CRS), so their corners carry only the rounding
 of that computation, far less than the margin. Cells it returns in a
 geographic `crs` are moved back into the record's CRS for the join (see
-Details). In a UTM zone the round trip through degrees moves a corner by
-about 2e-9 m; in the equal-area CRS the profile works in for a layer
-wider than a zone it can move one by more than the margin (how far
-depends on the PROJ build), so a point on such an edge can keep the
-polygon that holds it, and the summary's check then reads `"differ"`. A
-point farther from its nearest centre's cell keeps the polygon that
-holds it, and so do features that are not points, points without a CRS
-beside a record with one or with a CRS beside a record without one, and
-a join in longitude and latitude (polygons in degrees beside a record in
-degrees). A centre's cell is the one cell that holds it and no other
-centre; a centre outside a boundary that clipped its cell away from it
-has the cell, among those that hold no centre, whose inside is nearest
-it. Cells built from other seeds leave most centres without a cell, and
-their points to the polygons. Polygons without the record, such as
-polygons the caller brings, and cells whose record says `scored_cells`
-is `FALSE` or `NA` (other cells built from the count, such as a lattice
-sized by it) are placed by the polygons alone.
+"Joins in longitude and latitude"). In a UTM zone the round trip through
+degrees moves a corner by about 2e-9 m; in the equal-area CRS the
+profile works in for a layer wider than a zone it can move one by more
+than the margin (how far depends on the PROJ build), so a point on such
+an edge can keep the polygon that holds it, and the summary's check then
+reads `"differ"`. A point farther from its nearest centre's cell keeps
+the polygon that holds it, and so do features that are not points,
+points without a CRS beside a record with one or with a CRS beside a
+record without one, and a join in longitude and latitude (polygons in
+degrees beside a record in degrees). A centre's cell is the one cell
+that holds it and no other centre; a centre outside a boundary that
+clipped its cell away from it has the cell, among those that hold no
+centre, whose inside is nearest it. Cells built from other seeds leave
+most centres without a cell, and their points to the polygons. Polygons
+without the record, such as polygons the caller brings, and cells whose
+record says `scored_cells` is `FALSE` or `NA` (other cells built from
+the count, such as a lattice sized by it) are placed by the polygons
+alone.
 
-## Details
-
-This is the second step of the package's pipeline: it labels every
-observation with the cell it falls in, which is what
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-then aggregates over. Prefer it to
-[`sf::st_join()`](https://r-spatial.github.io/sf/reference/st_join.html)
-when the join has to be *unambiguous*. It resolves features matching
-several polygons by an explicit `tie_break` rule instead of silently
-duplicating rows, so the assigned layer keeps one row per input feature
-and cell-level counts mean what they say.
+## Joins in longitude and latitude
 
 The join runs in the CRS of `polygons_sf` whenever that CRS is
 projected, so cell edges are the straight lines the cells were drawn
@@ -308,20 +318,20 @@ their count says they are the cells a profile scored, and holds its
 centres in a projected CRS (the Voronoi cells
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
 builds on the centres a profile scored and returns in a geographic
-`crs`; see Value), were drawn in the record's CRS, and the join runs
-there. A copy of `features_sf` is transformed for it, and the features
-come back with the coordinates they arrived with. Otherwise (other
-polygons in lon/lat, such as a hex or square lattice sized by a
-selection or the cells of centres refitted to every point, or polygons
-without a CRS) the join runs in the CRS of `features_sf`. In longitude
-and latitude, with s2 on
+`crs`; see "Cells from a resolution profile"), were drawn in the
+record's CRS, and the join runs there. A copy of `features_sf` is
+transformed for it, and the features come back with the coordinates they
+arrived with. Otherwise (other polygons in lon/lat, such as a hex or
+square lattice sized by a selection or the cells of centres refitted to
+every point, or polygons without a CRS) the join runs in the CRS of
+`features_sf`. In longitude and latitude, with s2 on
 ([`sf::sf_use_s2()`](https://r-spatial.github.io/sf/reference/s2.html),
 sf's default), sf joins on the sphere with s2, which refuses a polygon
 that is not valid there, such as one with two corners it reads as one
 point or with edges that cross; cells returned in lon/lat can hold two
 corners that differ only by rounding and fall on one point in degrees
-(see `crs` in
-[`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)).
+(see "Polygons in degrees" in
+[spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)).
 A join by `predicate` then stops with an error of class
 `"spatialkit_cells_degenerate"` that gives the rows of the polygons s2
 refuses (the condition carries them as `rows`), names the cause and says
@@ -341,20 +351,19 @@ twice), the join stops with the error for the layer whose polygons s2
 refused as they arrived; with s2 on (sf's default), the join by
 `predicate` meets those polygons too. When s2 refused no polygon of
 either layer as it arrived, the error says to pass `largest = FALSE` or
-to project both layers. Whether s2 refuses such a piece follows the last
-bits of the vertices s2 computes for it, which differ between platforms
-and s2 versions: a figure eight pinched on the edge of a polygon of the
-other layer can give a piece that s2 refuses on macOS on arm64 and
-accepts on Linux on x86-64. Where s2 accepts the piece, the join runs
-and gives each feature the polygon of its largest overlap. In longitude
-and latitude the largest-overlap join runs on s2, and the areas
-`tie_break` compares are measured on the sphere with s2, whatever
+to project both layers. Whether s2 refuses such a piece can differ
+between platforms and s2 versions. Where s2 accepts the piece, the join
+runs and gives each feature the polygon of its largest overlap. In
+longitude and latitude the largest-overlap join runs on s2, and the
+areas `tie_break` compares are measured on the sphere with s2, whatever
 [`sf::sf_use_s2()`](https://r-spatial.github.io/sf/reference/s2.html)
 says, as the package's other areas in degrees are; the join by
 `predicate` runs with the engine the session names. With s2 off that
 engine is GEOS, which reads these polygons in degrees, so the
 largest-overlap join's error for a polygon s2 refuses also offers
 `largest = FALSE`.
+
+## Z and M coordinates
 
 sf reads a layer in the dimension of its first geometry, so s2, GEOS and
 [`sf::st_transform()`](https://r-spatial.github.io/sf/reference/st_transform.html)
@@ -374,6 +383,8 @@ moved from lon/lat with
 [`sf::st_transform()`](https://r-spatial.github.io/sf/reference/st_transform.html),
 which keeps their M.
 
+## Coordinates far from the origin
+
 Layers so far from the origin of their coordinates that doubles there
 are spaced more than a millionth of the extent of the two layers apart
 (0.125 at 1e15, beside a layer a few kilometres across) are joined with
@@ -390,14 +401,10 @@ to build the polygon layer;
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
 for the aggregation step that consumes the result.
 
-Other aggregation:
+Other assign and summarise:
 [`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md),
-[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md),
 [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md),
-[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
-[`summary.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.resolution_profile.md)
+[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
 
 ## Examples
 

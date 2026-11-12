@@ -1,13 +1,13 @@
-# How far the held-out points sit from the training data
+# Measure how far the held-out points sit from their training data
 
-Blocked cross-validation exists to put distance between a test point and
-the training points that could tell you its value. Whether it succeeded
-is a measurement, and
+Returns, for each fold, how far the held-out points sit from their
+nearest training point.
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-only offers a proxy for it: the block size compared against the
-estimated autocorrelation range, reported as a warning. That comparison
-is about the *design*. This is about the *result*: for every held-out
-point, the distance to its nearest training point, summarised per fold.
+only compares the block size with the estimated autocorrelation range;
+this measures the folds that were built. Nothing is estimated: the
+distances come from the geometry, and the range, when one is shown, is
+the one the folds carry (`make_folds(auto_range = TRUE)` records it) or
+the one you pass as `sac`.
 
 ## Usage
 
@@ -27,24 +27,20 @@ fold_separation(folds, data_sf, sac = NULL, prediction_points = NULL)
 
   The layer the folds were built on. Row identifiers are matched through
   `..row_id` when the layer carries one, and by row position otherwise,
-  which is what
+  as in
   [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-  and every `cv_*()` do. As in `cv_*()`, a
+  and every `cv_*()` function. As in `cv_*()`, a
   [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
   result whose recorded rows sit at other locations here (folds built on
   another layer, such as the points before
   [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
   dropped some) is refused; the location check is skipped when one of
-  the two layers is POINT and the other is not. A layer that mixes XY
-  and XYZ (or XYM) geometries is read in x and y, for the distances and
-  for that check, since sf reads a layer in the dimension of its first
-  geometry. So is a layer whose geometries carry M (XYM or XYZM), which
-  GEOS refuses. The points a layer is reduced to are read in x and y
-  when they mix dimensions, as those of a layer XYZ throughout that
-  holds points and polygons do. A row without a location (an empty
-  point, or a coordinate that is not finite or lies beyond 1e150, read
-  as given and again in the CRS the distances are measured in) is left
-  out of the distances.
+  the two layers is POINT and the other is not. A layer that mixes
+  dimensions or carries M is read in x and y, for the distances and for
+  that check
+  ([spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)).
+  A row without a location, as given or in the CRS the distances are
+  measured in, is left out of the distances.
 
 - sac:
 
@@ -58,37 +54,35 @@ fold_separation(folds, data_sf, sac = NULL, prediction_points = NULL)
   result) is compared with distances measured in that CRS, whatever CRS
   `data_sf` is in. A bare number is taken to be in the units the
   distances are otherwise measured in: those of `data_sf` if it is
-  projected, and for geographic (lon/lat) input metres, in the CRS
+  projected, and for lon/lat input metres, in the CRS
   [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
-  chooses (as for
-  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)'s
-  `block_size`), not degrees. A `units` object is refused.
+  chooses (as for the `block_size` of
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)),
+  not degrees. A `units` object is refused.
 
 - prediction_points:
 
-  Optional `sf` or `sfc` layer of the locations the model will predict
-  at: the grid from
+  Optional sf or sfc layer of the locations the model will predict at:
+  the grid from
   [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md),
   or a grid over the region of interest
-  (`sf::st_make_grid(region, what = "centers")`). A non-POINT layer is
-  reduced to one representative point per feature, as in
+  (`sf::st_make_grid(region, what = "centers")`). A layer of other
+  geometry is reduced to one representative point per feature, as in
   `make_folds(method = "nndm")`, so pass grid cells or points, not one
   polygon of the region. It is brought into the CRS the distances are
-  measured in; one that mixes XY and XYZ (or XYM) geometries is read in
-  x and y first. So is one whose geometries carry M (XYM or XYZM), and
-  so are the points it is reduced to when they mix dimensions. Default
-  `NULL`: no target and no reading, except for NNDM and kNNDM folds
-  (`method = "nndm"` and `"knndm"`), which carry the distances from the
-  prediction points they were built for and are compared against those,
-  measured to all sites. The carried distances are lengths in the CRS
-  the folds were built in (`folds$params$crs`). When the distances here
-  are measured in another CRS (`data_sf` is in another projected CRS, or
-  `sac` records another), the two are not compared,
-  [`print()`](https://rdrr.io/r/base/print.html) says so, and passing
-  `prediction_points` has the target measured here. A prediction point
-  without a location (an empty point, or a coordinate that is not finite
-  or lies beyond 1e150) as given or in the CRS the distances are
-  measured in takes no part in the target and is not counted.
+  measured in, and read in x and y when it mixes dimensions or carries M
+  ([spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)).
+  Default `NULL`: no target and no reading, except for NNDM and kNNDM
+  folds (`method = "nndm"` and `"knndm"`), which carry the distances
+  from the prediction points they were built for and are compared
+  against those, measured to all sites. The carried distances are
+  lengths in the CRS the folds were built in (`folds$params$crs`). When
+  the distances here are measured in another CRS (`data_sf` is in
+  another projected CRS, or `sac` records another), the two are not
+  compared, [`print()`](https://rdrr.io/r/base/print.html) says so, and
+  passing `prediction_points` has the target measured here. A prediction
+  point without a location, as given or in the CRS the distances are
+  measured in, takes no part in the target and is not counted.
 
 ## Value
 
@@ -114,10 +108,7 @@ one at nine tenths of it. \\\rho(d)\\ is \\\exp(-3 d / range)\\, the
 exponential model whose effective range is the range given (0.05 at the
 range), or the spherical model when the range comes from an
 [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-fit that was spherical; the `range_model` attribute says which. Earlier
-development versions had a column `within_range` in its place: the share
-of held-out points closer than the range, which counted every such point
-the same.
+fit that was spherical; the `range_model` attribute says which.
 
 Attributes: `method`, `sac_range`, `range_model`, `crs` (the CRS the
 distances were measured in), `n_unknown_ids` (the number of distinct
@@ -131,8 +122,9 @@ or `"all sites"`), `held_out_mean`, `held_out_median`, `target_mean`,
 `target_median`, `target_all_mean`, `target_all_median` (the prediction
 distances to all sites), `mean_diff`, `w1`, `cor_gap`, `cor_w1` (`NA`
 without a range), `scale` (`"correlation"` or `"distance"`),
-`tolerance`, `reading` (see **Reading the gap**) and `nndm_out_of_reach`
-(for NNDM and kNNDM folds, the `params$target_out_of_reach` that
+`tolerance`, `reading` (see the section "Reading the gap") and
+`nndm_out_of_reach` (for NNDM and kNNDM folds, the
+`params$target_out_of_reach` that
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
 recorded; `NA` for other schemes). `not_compared` is `NULL`, or, for
 NNDM or kNNDM folds whose carried target was not compared because the
@@ -157,10 +149,11 @@ conclusion. Give it `prediction_points` and it sets the held-out
 distances beside the distances from those points to the same training
 data, and words its reading by the signed gap between the two.
 
-Nothing is estimated: the distances come from the geometry, and the
-range, when one is shown, is the one the folds already carry
-(`make_folds( auto_range = TRUE)` records it) or the one you pass as
-`sac`.
+[`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md)
+gives the cross-validated error at each block size, but not which size
+matches a map. This function does, read on the folds of each size (the
+`$folds` of each element of `attr(sweep, "results")`) with the map's
+locations as `prediction_points`.
 
 ## Reading the gap
 
@@ -168,10 +161,10 @@ With a target, the held-out distances and the prediction distances are
 compared as two distributions. Each fold's prediction distances are
 measured to that fold's own training rows, so that a five-fold design is
 not read as too far only because each fold trains on four fifths of the
-sites; the distances to all sites are reported beside them. (With more
-than 50 folds, the leave-one-out schemes, every training set is nearly
-the whole sample and the prediction points are measured against all
-sites once.) Folds count by their share of the held-out points.
+sites; the distances to all sites are reported beside them. With more
+than 50 folds, as in the leave-one-out schemes, every training set is
+nearly the whole sample, and the prediction points are measured against
+all sites once. Folds count by their share of the held-out points.
 
 Two numbers summarise the comparison: the signed difference of the
 means, held-out minus prediction (the signed area between the two
@@ -185,7 +178,7 @@ beyond it.
 
 The reading is taken on the correlation scale when there is a range,
 with a tolerance of 0.1, and otherwise on the mean distance, with a
-tolerance of a quarter of the prediction mean. (When the prediction
+tolerance of a quarter of the prediction mean. When the prediction
 points are measured to all sites and every one lies on a site, as when
 the sites themselves are passed as `prediction_points` to a
 leave-one-out design, the prediction mean and with it that tolerance are
@@ -193,7 +186,7 @@ leave-one-out design, the prediction mean and with it that tolerance are
 distances that are all 0 as well read `"matched"`. With 50 folds or
 fewer the points are measured to each fold's own training rows, which
 leave out that fold's held-out sites, so the mean is above 0 and the
-quarter rule gives the reading.)
+quarter rule gives the reading.
 
 - `"closer"`:
 
@@ -227,24 +220,16 @@ score low on clustered samples whose nearest-neighbour distances match.
 ## See also
 
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-for the fold schemes and the block sizing this measures the outcome of;
+for the fold schemes and the block sizing this measures the outcome of,
+[`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
+to map the folds, and
 [`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md)
-for the cross-validated error at each block size. The sweep does not say
-which size matches a map; this function does, read on the folds of each
-size with the map's locations as `prediction_points`.
+for the cross-validated error at each block size.
 
-Other cross-validation:
-[`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md),
-[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md),
+Other folds:
 [`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md),
-[`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md),
-[`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md),
-[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md),
-[`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md),
-[`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md),
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md),
-[`sac_nugget()`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md),
-[`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
+[`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
 
 ## Examples
 
@@ -257,52 +242,16 @@ pts <- st_as_sf(
   coords = c("x", "y"), crs = 32632
 )
 
-# Random folds put a training point close to every held-out one.
+# Random folds put a training point close to every held-out one; blocked
+# folds hold out whole neighbourhoods, so the distances grow.  The median
+# distance from a held-out point to its nearest training point, per fold:
 random  <- make_folds(pts, k = 4, method = "random_kfold", seed = 1)
-print(fold_separation(random, pts, sac = 200))
-#> Fold separation: random_kfold, 4 fold(s), 200 held-out point(s) (EPSG:32632)
-#>   autocorrelation range: 200 (in metres, like the distances)
-#> 
-#>  fold n_train n_test min_dist median_dist mean_cor
-#>     1     150     50    4.696       36.95     0.57
-#>     2     150     50    3.835       42.14     0.55
-#>     3     150     50    3.835       38.52     0.58
-#>     4     150     50    4.696       45.79     0.53
-#> 
-#>   Held-out points sit a median of 41.61 from their nearest training
-#>   point; the closest is 3.835 away. Under the range of 200 that leaves a
-#>   mean correlation of 0.56 between a held-out point and its nearest
-#>   training point (exp(-3 d / range) averaged over the hold-out: 1 at
-#>   distance 0, 0.05 at the range).
-#>   No prediction target is given, so these are distances and no conclusion
-#>   about the score: a cross-validated error reads low when the hold-out
-#>   sits closer to its training data than the locations to be predicted do,
-#>   and high when it sits farther. Pass `prediction_points` to compare the
-#>   two.
-
-# Blocked folds hold out whole neighbourhoods, so the distances grow.
 blocked <- make_folds(pts, k = 4, method = "block_kfold",
                       block_size = 250, seed = 1)
-print(fold_separation(blocked, pts, sac = 200))
-#> Fold separation: block_kfold, 4 fold(s), 200 held-out point(s) (EPSG:32632)
-#>   autocorrelation range: 200 (in metres, like the distances)
-#> 
-#>  fold n_train n_test n_blocks min_dist median_dist mean_cor
-#>     1     152     48        2    23.02       111.9     0.23
-#>     2     143     57        3    29.04       169.5     0.14
-#>     3     152     48        2    21.03       118.3     0.22
-#>     4     153     47        2    21.03       115.9     0.23
-#> 
-#>   Held-out points sit a median of 123.5 from their nearest training
-#>   point; the closest is 21.03 away. Under the range of 200 that leaves a
-#>   mean correlation of 0.20 between a held-out point and its nearest
-#>   training point (exp(-3 d / range) averaged over the hold-out: 1 at
-#>   distance 0, 0.05 at the range).
-#>   No prediction target is given, so these are distances and no conclusion
-#>   about the score: a cross-validated error reads low when the hold-out
-#>   sits closer to its training data than the locations to be predicted do,
-#>   and high when it sits farther. Pass `prediction_points` to compare the
-#>   two.
+round(fold_separation(random, pts, sac = 200)$median_dist)
+#> [1] 37 42 39 46
+round(fold_separation(blocked, pts, sac = 200)$median_dist)
+#> [1] 112 169 118 116
 
 # Which of the two suits a map of the sampled square?  Compare each with
 # the distances from the cells of that map to the training data.

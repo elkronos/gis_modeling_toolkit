@@ -1,18 +1,22 @@
-# spatialkit: Spatial Tessellation, Modeling, and Cross-Validation Toolkit
+# spatialkit: Spatial Tessellation, Modelling, and Cross-Validation Toolkit
 
 Constructs analysis regions from the distribution of the data itself, as
 an alternative to aggregating onto administrative boundaries that were
 drawn for unrelated purposes. Seeds and builds Voronoi, Delaunay,
-hexagonal and square tessellations with reproducible identifiers,
-selects a cell count from the spatial structure of the observations,
-assigns features to cells, and aggregates to cell level with optional
-design-effect corrections so that standard errors account for
-within-cell autocorrelation. Also manages coordinate reference systems.
-Fits geographically weighted regression (with the kernels, diagnostics
-and forward selection of 'GWmodel'; Lu et al. (2014)
+hexagonal and square tessellations with reproducible identifiers.
+Chooses a cell count, by default from a target number of observations
+per cell, or by scoring a ladder of counts against the spatial structure
+of the observations. Assigns features to cells and reports for each cell
+a count, a mean with its standard error and a pooled value pulled toward
+the mean of the observations in the 8 nearest cells. A design effect can
+correct the standard errors for autocorrelation within the cells.
+Projects lon/lat input to a projected coordinate reference system chosen
+for the extent of the data. Fits geographically weighted regression (its
+kernels, diagnostics and forward selection follow 'GWmodel'; Lu et al.
+(2014)
 [doi:10.1080/10095020.2014.917453](https://doi.org/10.1080/10095020.2014.917453)
-), Bayesian spatial Gaussian process regression (via 'brms', using the
-Hilbert space approximation of Riutort-Mayol et al. (2023)
+), Bayesian Gaussian process regression (via 'brms', using the Hilbert
+space approximation of Riutort-Mayol et al. (2023)
 [doi:10.1007/s11222-022-10167-2](https://doi.org/10.1007/s11222-022-10167-2)
 ) and random forests (via 'ranger', with the permutation importance of
 Strobl et al. (2007)
@@ -20,56 +24,115 @@ Strobl et al. (2007)
 each behind one S3 class with consistent predict, fitted, residuals and
 plot methods. Provides spatial cross-validation with random, block,
 buffered, leave-location-out and nearest-neighbour distance-matched
-folds (Mila et al. (2022)
-[doi:10.1111/2041-210X.13851](https://doi.org/10.1111/2041-210X.13851)
+folds (Milà et al. (2022)
+[doi:10.1111/2041-210X.13851](https://doi.org/10.1111/2041-210X.13851) ;
+Linnenbrink et al. (2024)
+[doi:10.5194/gmd-17-5897-2024](https://doi.org/10.5194/gmd-17-5897-2024)
 ), forward variable selection, model comparison, prediction onto a
 regular surface, and the area of applicability of Meyer and Pebesma
 (2021)
 [doi:10.1111/2041-210X.13650](https://doi.org/10.1111/2041-210X.13650)
 to flag where a fitted model extrapolates beyond its training data.
 
+## Where to start
+
+[`vignette("getting-started", package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md)
+takes a layer of points through the pipeline below, from a cell count to
+a cross-validated model and a map that marks where its predictions
+apply. Each step of the pipeline names the article that covers it.
+
+Ten scripts, 01 to 10, each on one topic, are installed with the
+package; `00-run-all.R` runs them in order. Each prints what it is doing
+and says what to look for in a figure before drawing it:
+
+
+    dir <- system.file("scripts", package = "spatialkit")
+    list.files(dir)
+    source(file.path(dir, "03-folds.R"))    # one topic
+    source(file.path(dir, "00-run-all.R"))  # 01 to 10 in order
+
+Set `SPATIALKIT_TOUR_OUTPUT` to a folder to write the figures there
+instead of drawing them, and `SPATIALKIT_TOUR_PAUSE` to `"no"` to skip
+the pause between figures that an interactive session gets.
+
+Three help topics hold what many functions share:
+[spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)
+(how input geometry and CRSs are read),
+[spatialkit-conditions](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-conditions.md)
+(every warning and error class the package raises, and how to catch one)
+and
+[spatialkit-options](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-options.md)
+(the two work limits).
+
 ## The pipeline, in order
 
-The package is built around one workflow. Each step names the function
-that performs it; every step is optional except the ones your question
-needs.
+Steps 1 to 5 build cells from the spatial structure of the observations
+and summarise the observations onto them. Steps 6 to 10 fit a model to
+the points and check it: spatial cross-validation scores the model on
+blocks held away from its training data, and the area of applicability
+marks where its predictions leave the range of that data. Use the steps
+your question needs, in this order.
 
-Read the order as an argument, not a menu. Steps 1 to 4 are the claim:
-that regions drawn from the data's own spatial structure are a better
-basis for aggregation and modelling than boundaries drawn for other
-purposes. Step 6 is what you do with the regions. Steps 5, 7 and 9 are
-the evidence layer: a claim that data-drawn regions beat borrowed ones
-is only meaningful if it can be checked, and random folds over
-autocorrelated data cannot check it. Spatial cross-validation and the
-area of applicability are here because they are what stop the central
-claim from being unfalsifiable, not because the package is a
-cross-validation package.
+1.  **Prepare the data.**
+    [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md),
+    [`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md),
+    [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
+    and
+    [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+    put the observations in a projected CRS as points with complete
+    values. Article:
+    [`vignette("getting-started")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md).
 
-1.  **Choose a resolution.**
+2.  **Measure spatial autocorrelation.**
+    [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+    estimates the distance over which observations stay correlated, and
+    [`sac_nugget()`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md)
+    returns the nugget of its variogram. The range sets a floor on the
+    number of cells, which
+    [`select_resolution`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)`(criterion = "reliability")`
+    and
+    [`resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)`(range_floor = TRUE)`
+    apply. Sizing blocks from it is one way to set how far the held-out
+    points sit from their training data, and suits a map that has to
+    reach that far from the data. Article:
+    [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md).
+
+3.  **Choose a resolution.**
+    [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+    scores candidate cell counts and
+    [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+    reads the count off the profile; by default the count gives 4.5
+    observations per cell.
     [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-    reads a cell count out of the spatial structure of the observations,
-    so you do not have to guess one, and returns `NA` when the WSS curve
-    of their k-means clustering has no elbow to read one from.
+    reads a count off the elbow of the k-means WSS curve of the
+    coordinates alone, and returns `NA` when the curve has no elbow.
+    Article:
+    [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md).
 
-2.  **Tessellate.**
+4.  **Build the cells.**
     [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-    turns the point pattern into analysis regions (Voronoi, Delaunay
-    triangles, or a hex/square grid) with reproducible cell identifiers.
+    draws Voronoi, hex, square or Delaunay cells with reproducible
+    identifiers;
     [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
-    controls where Voronoi seeds go.
+    places the Voronoi seeds and
+    [`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md)
+    builds the polygon that hex and square cells are clipped to.
+    Article:
+    [`vignette("cells")`](https://elkronos.github.io/gis_modeling_toolkit/articles/cells.md).
 
-3.  **Assign.**
+5.  **Assign and summarise.**
     [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
-    labels every observation with the cell it falls in, resolving
-    multi-match ties explicitly instead of duplicating rows.
-
-4.  **Aggregate.**
+    puts each observation in one cell, and
     [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-    reduces to one row per cell, carrying a standard error and
-    observation count with every aggregate, and can correct those errors
-    for within-cell autocorrelation.
+    reduces to one row per cell with a count, a standard error and a
+    pooled value.
+    [`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md)
+    reads cell values at other locations, and
+    [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md)
+    checks the cell mean against block kriging. Article:
+    [`vignette("cells")`](https://elkronos.github.io/gis_modeling_toolkit/articles/cells.md).
 
-5.  **Fold.**
+6.  **Make folds.**
     [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
     builds spatial cross-validation folds: blocked, buffered,
     leave-location-out or nearest-neighbour distance-matched. A
@@ -80,120 +143,95 @@ cross-validation package.
     model will predict.
     [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
     with `prediction_points` compares the two distances.
+    [`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md)
+    scores a range of block sizes. Article:
+    [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md).
 
-6.  **Fit.**
-    [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
-    for coefficients that vary across the map,
-    [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
-    for an explicit spatial Gaussian process with calibrated
-    uncertainty, or
+7.  **Fit a model.**
     [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
-    for predictive accuracy. All three return a `spatial_fit` with
-    common [`predict()`](https://rdrr.io/r/stats/predict.html),
+    (random forest),
+    [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+    (GWR, coefficients that vary across the map) and
+    [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+    (Bayesian GP) return a `spatial_fit` with
+    [`predict()`](https://rdrr.io/r/stats/predict.html),
     [`fitted()`](https://rdrr.io/r/stats/fitted.values.html),
     [`residuals()`](https://rdrr.io/r/stats/residuals.html),
     [`summary()`](https://rdrr.io/r/base/summary.html) and
     [`plot()`](https://rdrr.io/r/graphics/plot.default.html) methods,
-    and [`coef()`](https://rdrr.io/r/stats/coef.html) on the two that
-    have coefficients (a forest has none, so
-    [`coef()`](https://rdrr.io/r/stats/coef.html) on an `rf_fit` errors
-    by design; use `$info$importance`); write your own backend with
-    [`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md).
-
-7.  **Validate.**
-    [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md),
-    [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md),
-    [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
-    or the model-agnostic
-    [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
-    score a model on held-out blocks;
-    [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
-    scores several backends on one set of folds.
-    [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
-    tests whether spatial structure survives in the residuals, and
-    [`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
-    chooses predictors inside the cross-validation.
-
-8.  **Predict.**
-    [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
-    projects a fit onto a regular grid;
-    [`plot_tessellation_map()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_tessellation_map.md)
+    and [`coef()`](https://rdrr.io/r/stats/coef.html) for GWR and the
+    Bayesian GP.
+    [`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md)
+    builds a backend of your own.
+    [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md),
+    [`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md),
+    [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
     and
-    [`plot.spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.spatial_fit.md)
-    draw the results.
+    [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
+    check a fit in sample. Article:
+    [`vignette("models")`](https://elkronos.github.io/gis_modeling_toolkit/articles/models.md).
 
-9.  **Check applicability.**
+8.  **Cross-validate and compare.**
+    [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md),
+    [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md),
+    [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+    and
+    [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md),
+    which takes any learner, score a model on held-out blocks;
+    [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
+    scores several backends on one set of folds. Articles:
+    [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md)
+    and
+    [`vignette("models")`](https://elkronos.github.io/gis_modeling_toolkit/articles/models.md).
+
+9.  **Choose predictors.**
+    [`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
+    chooses predictors inside the cross-validation, and
+    [`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+    chooses GWR predictors by forward selection. Article:
+    [`vignette("models")`](https://elkronos.github.io/gis_modeling_toolkit/articles/models.md).
+
+10. **Predict a surface and check where it applies.**
+    [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+    predicts onto a regular grid, and
     [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
-    flags where that surface extrapolates beyond the training data. A
-    cross-validation score says nothing about ground the model has never
-    seen; this is what tells you where the map should not be believed.
+    marks where the predictors leave the range the model was trained and
+    scored on. Article:
+    [`vignette("models")`](https://elkronos.github.io/gis_modeling_toolkit/articles/models.md).
 
-Two choices are the user's, one in choosing a resolution (step 1) and
-one in aggregating (step 4), and each has an argument. They are
-arguments of
-[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-and
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
-which choose a count for a cell value, and of
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md);
-[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-takes neither. The first is the cell value to report, `estimate`: the
-plain mean of a cell's observations, or the pooled value, which is that
-mean pulled toward the mean of the cells around it.
+11. **Report.**
+    [`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md)
+    gives the cells identifiers that do not depend on the order of the
+    rows. Article:
+    [`vignette("reporting")`](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.md).
+
+[`vignette("spatialkit_nc_demo")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md)
+runs the pipeline on one simulated layer.
+
+Two choices are the user's, and each has an argument with a default.
+`estimate` is the cell value to report: the plain mean of a cell's
+observations (`"mean"`), or the pooled value (`"pooled"`, the default),
+which is that mean pulled toward the mean of the observations in the 8
+nearest cells (nearest by the centroid of their observations).
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
 scores a count for the value it is given, and
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
 reports the value it is given and warns when the count was chosen for
-the other one. The second is the size, `obs_per_cell`: how many
-observations a cell is to hold on average. For pooled values the size
-sets the count
+the other one. `obs_per_cell` is the size: how many observations a cell
+is to hold on average, 4.5 by default. For pooled values the size sets
+the count
 ([`select_resolution`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)`(criterion = "size")`);
 for plain means the lowest leave-one-out error can set it
-(`criterion = "loo"`). Each has a default: the pooled value, and a size
-of 4.5, from which
+(`criterion = "loo"`).
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)'s
-default criterion, `"auto"`, sets the count. `estimate = "mean"` in the
-summary gives the frame it returned before the argument existed.
-`estimate = NULL, obs_per_cell = NULL` in the profile gives the earlier
-ladder and its columns, and with `partition = "kmeans"` the earlier
-regions as well: the profile it returned before, with three exceptions.
-\\C_p\\'s noise variance is no longer a nugget at the variogram fit's
-lower bound, and it is held to the semivariance of nearest-neighbour
-pairs, so `cp` and the count it chooses differ wherever either applies,
-and nothing gives the earlier noise variance back. And on a layer of
-more than `sample_n` points the level
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-chooses off such a profile is refitted to every point before its seeds
-are handed on; the centres the profile scored are
-`attr(profile, "centres")[[as.character(sel$best)]]`. And
-[`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) is handed the
-coordinates centred, divided by their extent and rounded to about a
-billionth of it (see "The partition" in
-[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)),
-so on gridded locations the regions can differ, and elsewhere the
-centres, and the cells numbered by them, can come in another order.
-Given a number of cells, the seeding functions take
-`partition = "kmeans"` for their earlier seeds, with that last
-exception.
-
-Supporting these throughout,
-[`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
-and
-[`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
-handle coordinate reference systems and geometry coercion, and
-[`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-estimates the distance over which observations remain correlated. Sizing
-blocks from it is one way to set how far the held-out points sit from
-their training data, and suits a map that has to reach that far from the
-data.
+default criterion, `"auto"`, takes the rule that goes with the profile's
+estimate. The defaults that change results from 2.0.0, and the argument
+that restores each, are listed under Breaking changes in
+`news(package = "spatialkit")`.
 
 ## Defaults and their sources
 
-A stated design principle of this package is that defaults follow
-current research rather than convention. That is a claim with a
-maintenance cost, so this is the list it applies to, in two parts.
-
-Defaults that cite a reference, each traceable to the help page of the
+Defaults that follow a reference, each cited on the help page of the
 function named:
 
 - `fit_rf_model(include_coords = FALSE)`, and
@@ -210,7 +248,7 @@ function named:
   Riutort-Mayol et al. (2023).
 
 - The nearest-neighbour distance-matching folds of
-  `make_folds(method = "nndm")` and their `min_train = 0.5`: Mila et al.
+  `make_folds(method = "nndm")` and their `min_train = 0.5`: Milà et al.
   (2022).
 
 - The area-of-applicability threshold as the outlier-removed maximum of
@@ -220,25 +258,22 @@ function named:
   applied directly, without taking their square root, as CAST does:
   Meyer and Pebesma (2021).
 
+- Cliff and Ord moments for the residual Moran's I in
+  [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md),
+  with `null = "auto"`: Cliff and Ord (1981).
+
+Defaults chosen without a citation:
+
 - The effective range of an exponential variogram as three times its
   range parameter, and the identifiability guard against ranges beyond
   half the maximum separation, in
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md).
 
-- Cliff and Ord moments for the residual Moran's I in
-  [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md),
-  with `null = "auto"`.
-
-Defaults that were chosen, and are defensible, but do not rest on a
-citation. They are listed so that they are not mistaken for the first
-kind:
-
 - The 25 k-means++ restarts per candidate level in the sweep of
   [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md):
   k-means++ seeding follows Arthur and Vassilvitskii (2007) and a fixed
-  budget follows Franti and Sieranoja (2019), but 25 is the budget at
-  which the measured WSS curve stopped rising between levels, not a
-  published figure.
+  budget follows Fränti and Sieranoja (2019); 25 is the package's
+  choice, not a published figure.
 
 - `max_levels = 12` and the unit-step ladder of candidate levels in
   [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md).
@@ -248,9 +283,7 @@ kind:
 
 - The 1 percent area-distortion tolerance below which a CRS is taken as
   equal-area by `ensure_projected(purpose = "area")` and
-  `summarize_by_cell(area = TRUE)`: measured, a UTM zone edge to edge is
-  0.25 percent and a continent forced into one zone 14 percent, and the
-  figure sits in the gap.
+  `summarize_by_cell(area = TRUE)`.
 
 - `deff_max_n = 500`, `sample_n = 1500` and `top_n = 3`, the subsampling
   and shortlist sizes.
@@ -272,14 +305,11 @@ kind:
   effect in
   [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md):
   the package's own derivation from Kish's exchangeable-correlation
-  model, not taken from a reference. The derivation and its measured
-  coverage are in the section "Spatial autocorrelation and
-  standard-error bias" of that help page.
+  model, given on that help page.
 
 - The size of 4.5 observations per cell that
   `select_resolution(criterion = "size")` and
-  `resolution_profile(obs_per_cell = "auto")` take when none is given: a
-  convention, a size at which most cells hold several observations.
+  `resolution_profile(obs_per_cell = "auto")` take when none is given.
 
 - The density kind of partition, kept from the best of 3 k-means++
   starts, in
@@ -323,54 +353,22 @@ kind:
   [`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md)
   stop with an error, and
   [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-  returns `NA` pooled columns with a warning.
-
-## Where to start
-
-If you are reading a single page, read
-[`vignette("getting-started", package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md):
-it takes an `sf` layer of points through every step above, from a cell
-count to a cross-validated model and a map with its area of
-applicability, on North Carolina data, needing only ranger for the model
-and ggplot2 for the maps beyond the hard dependencies.
-[`vignette("spatialkit_nc_demo", package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md)
-is the longer worked example, with four tessellations, both fold schemes
-side by side and a GWR fit; it takes its cell counts as given, and
-[`vignette("resolution", package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md)
-is where those are argued for.
-
-If you would rather run something, ten numbered scripts are installed
-with the package. Each prints what it is doing and says what to look for
-in a figure before drawing it:
-
-
-    dir <- system.file("scripts", package = "spatialkit")
-    list.files(dir)
-    source(file.path(dir, "03-folds.R"))    # one topic
-    source(file.path(dir, "00-run-all.R"))  # all ten
-
-Set `SPATIALKIT_TOUR_OUTPUT` to a folder to write the figures there
-instead of drawing them, and `SPATIALKIT_TOUR_PAUSE` to `"no"` to skip
-the pause between figures that an interactive session gets.
+  returns `NA` pooled columns with a warning (see
+  [spatialkit-options](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-options.md)).
 
 ## See also
 
-[`vignette("getting-started", package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md)
-for the pipeline on one page, and
-[`vignette("spatialkit_nc_demo", package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md)
-for the longer worked example.
-
-Useful entry points by task:
+Entry points by task:
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-(build regions),
+(build cells),
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-(aggregate to them),
+(summarise observations onto them),
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
 (split the data into cross-validation folds),
 [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
-(score several models at once),
+(score several models on the same folds),
 [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
-(find where not to trust the result).
+(find where predictions leave the range of the training data).
 
 ## Author
 

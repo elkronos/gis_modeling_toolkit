@@ -1,13 +1,13 @@
-# Quieten (or restore) spatialkit's console log
+# Turn the console log off or on
 
-The package writes an INFO+ trace to a session temp file (logger
-appender index 1) and echoes WARN+ to the console (index 2). Both
-[`logger::log_appender()`](https://daroczig.github.io/logger/reference/log_appender.html)
-and
+Turns the package's console log off (`quiet = TRUE`) or back on. The
+package writes a trace of INFO lines and above to
+`file.path(tempdir(), "spatialkit_model_log.log")`, a file that lasts as
+long as the R session, and echoes WARN lines and above to the console;
+this function changes only the console echo.
 [`logger::log_threshold()`](https://daroczig.github.io/logger/reference/log_threshold.html)
-default to `index = 1`, so the obvious two-line recipe silences the file
-and leaves the console untouched, which is the opposite of what anyone
-wants. This helper names the right index.
+changes the log file's threshold by default (`index = 1`), not the
+console echo's, so use this function for the echo.
 
 ## Usage
 
@@ -36,7 +36,9 @@ level that can be passed back as `quiet`.
 These are log records, not R conditions:
 [`suppressWarnings()`](https://rdrr.io/r/base/warning.html) and
 `tryCatch(warning = )` do not see them. Conditions the package raises as
-real R warnings are unaffected by this function.
+R warnings are unaffected by this function (see "Warnings and log lines"
+in
+[spatialkit-conditions](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-conditions.md)).
 
 While a document is being knitted (R Markdown, Quarto, a pkgdown
 article) the console echo is also sent as an R message, because knitr
@@ -50,10 +52,11 @@ nothing changes.
 
 ## See also
 
-Other package options and caches:
+Other options and caches:
 [`clear_fitted_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md),
 [`clear_grid_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_grid_cache.md),
-[`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md)
+[`spatialkit-conditions`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-conditions.md),
+[`spatialkit-options`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-options.md)
 
 ## Examples
 

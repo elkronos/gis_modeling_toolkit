@@ -1,244 +1,279 @@
 # Package index
 
-## Overview
+## Start here
+
+The pipeline in order, the function for each step, and where each
+default comes from.
 
 - [`spatialkit`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-package.md)
   [`spatialkit-package`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-package.md)
-  : spatialkit: Spatial Tessellation, Modeling, and Cross-Validation
+  : spatialkit: Spatial Tessellation, Modelling, and Cross-Validation
   Toolkit
 
 ## Prepare the data
 
-Coordinate reference systems, geometry coercion, and the clip target.
+Put the observations in a projected CRS as points, and see how the
+package reads input geometry.
 
 - [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
-  : Ensure an object has a projected CRS (with sensible defaults)
+  : Project an sf object to a CRS suited to its extent
 - [`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md)
-  : Harmonize CRS between two spatial objects
+  : Bring two spatial objects to one CRS
 - [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
-  : Coerce arbitrary geometries to representative points
-- [`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md)
-  : Build a polygonal clip target from points and/or a boundary
+  : Reduce each geometry to one representative point
 - [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
-  : Prepare and sanitize an sf dataset for spatial modeling
+  : Prepare an sf layer for model fitting
+- [`` `[`( ``*`<spatialkit_rows>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/sub-.spatialkit_rows.md)
+  : Subset a layer that carries a row record
+- [`spatialkit-geometry`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)
+  : How input geometry is read
 
-## Measure the spatial structure
+## Measure spatial autocorrelation
 
-The distance over which observations stay correlated. It sizes both the
-cells and the cross-validation blocks.
+The distance over which observations stay correlated. It can size the
+cross-validation blocks (`make_folds(auto_range = TRUE)`) and sets a
+floor on the number of cells, which
+`select_resolution(criterion = "reliability")` and
+`resolution_profile(range_floor = TRUE)` apply.
 
 - [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  [`print(`*`<sac_range>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
   : Estimate the spatial autocorrelation range from data
 - [`sac_nugget()`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md)
-  : The nugget of an estimated autocorrelation range
-- [`print(`*`<sac_range>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.sac_range.md)
-  : Print a spatial autocorrelation range
+  : Extract the nugget of an estimated autocorrelation range
 - [`plot(`*`<sac_range>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.sac_range.md)
   : Plot an estimated spatial autocorrelation range
 
 ## Choose a resolution
 
-How many cells, and how sure that number is.
+How many cells the data support, and the counts the chosen criterion
+scores within `tol` of its best (the flat region).
 
-- [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-  : Determine an optimal number of spatial levels via an elbow heuristic
 - [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-  : Score every candidate number of cells on several criteria at once
+  [`print(`*`<resolution_profile>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+  : Score candidate cell counts on several criteria
 - [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-  : Read a level, and the region over which it is not distinguishable,
-  off a profile
+  : Choose a cell count from a resolution profile
 - [`summary(`*`<resolution_profile>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.resolution_profile.md)
-  : Every criterion's pick, side by side
-- [`print(`*`<resolution_profile>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.resolution_profile.md)
-  : Print a resolution profile
+  : Compare every criterion's pick on a resolution profile
 - [`plot(`*`<resolution_profile>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.resolution_profile.md)
   : Plot a resolution profile
+- [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+  : Choose a cell count from the elbow of the k-means WSS curve
 
-## Tessellate
+## Build the cells
 
-Build the regions, with reproducible cell identifiers.
+Voronoi, hex, square and Delaunay cells. Start with
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md).
+Hex and square cells need a boundary;
+[`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md)
+builds one from the points. The seed functions place the points Voronoi
+cells are drawn around, and the lower-level builders draw cells of one
+kind or number them.
 
 - [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-  : Build a tessellation (Voronoi, Delaunay triangles, hex grid, or
-  square grid)
+  : Build Voronoi, triangle, hex or square cells from points
+- [`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md)
+  : Build the area to tessellate within, from points or a boundary
+- [`plot_tessellation_map()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_tessellation_map.md)
+  : Plot a tessellation map with optional boundary, seeds, and features
+
+### Place Voronoi seeds
+
 - [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
-  : Generate seed points for Voronoi tessellation
+  : Place seeds for a Voronoi tessellation
 - [`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)
-  : K-means seed generation from point coordinates
+  : Place seeds at k-means cluster centres
 - [`voronoi_seeds_random()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_random.md)
-  : Random seed generation within a polygonal boundary
+  : Place seeds at random inside a boundary
+
+### Lower-level builders and IDs
+
 - [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
-  : Create Voronoi polygons from points with CRS handling and optional
-  clipping
+  : Build Voronoi cells around points
 - [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
   : Create square or hexagonal grid polygons over a boundary
 - [`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md)
   : Create and cache grid polygons over a boundary
 - [`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md)
-  : Create deterministic, stable polygon IDs based on spatial sort keys
-- [`plot_tessellation_map()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_tessellation_map.md)
-  : Plot a tessellation map with optional boundary, seeds, and features
+  : Give cells IDs that follow their position
 
-## Assign and aggregate
+## Assign and summarise
 
-One row per cell, with a count and a standard error for every aggregate,
-the record of which rows were dropped or tied on the way, the value of a
-cell at other locations, and whether a block-kriging estimate would have
-beaten the plain cell mean.
+Put each observation in a cell, reduce to one row per cell with a count,
+a standard error and a pooled value, and read cell values at other
+locations.
+[`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md)
+checks the cell mean against block kriging.
 
 - [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
-  : Assign features to polygons and attach a polygon ID
+  : Assign features to cells and attach a cell ID
 - [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-  : Summarize features by polygon/cell ID
+  : Summarise assigned points by cell, with standard errors and pooled
+  values
 - [`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md)
-  : Cell values at other locations
+  : Read cell values at new locations
 - [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md)
-  : Block-kriging adequacy diagnostics for a set of cells
-- [`` `[`( ``*`<spatialkit_rows>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/sub-.spatialkit_rows.md)
-  : Subset a layer that carries a row record
+  : Check whether block kriging would improve cell means
 
-## Fold
+## Make folds
 
-Spatial cross-validation folds, how large the blocks should be, and how
-far the held-out points ended up from the training data.
+Spatial cross-validation folds, the block size, and how far the held-out
+points sit from the training data, beside the map’s locations when you
+pass them.
 
 - [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
   : Create spatial cross-validation folds
 - [`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
   : Map a cross-validation fold scheme
 - [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
-  : How far the held-out points sit from the training data
+  : Measure how far the held-out points sit from their training data
 - [`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md)
+  [`plot(`*`<block_size_sweep>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md)
   : Cross-validate at a ladder of block sizes
-- [`plot(`*`<block_size_sweep>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.block_size_sweep.md)
-  : Plot cross-validation error against block size
 
-## Fit
+## Fit a model
 
-Three backends behind one `spatial_fit` class, and the constructor for a
+Random forest, GWR and Bayesian GP backends behind one `spatial_fit`
+class, the length-scale bounds the GP uses, and the constructor for a
 backend of your own.
 
-- [`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md)
-  : Build a spatial_fit S3 object
 - [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
-  : Fit a random forest via ranger
+  : Fit a random forest with ranger
 - [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
-  : Fit a Geographically Weighted Regression (GWR)
+  : Fit a geographically weighted regression (GWR)
 - [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
-  : Fit a Bayesian spatial regression with a 2D Gaussian Process (via
-  brms)
+  : Fit a Bayesian Gaussian-process regression with brms
 - [`gp_lengthscale_bounds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gp_lengthscale_bounds.md)
-  : Heuristic length-scale bounds for a squared-exponential GP
+  : Compute length-scale bounds for a squared-exponential GP
+- [`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md)
+  : Build a spatial_fit object for a backend of your own
 
-## Choose the predictors
+## Use a fitted model
 
-Forward selection scored on spatial folds for any backend, and an AICc
-search over predictor sets for GWR.
-
-- [`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
-  : Greedy forward feature selection with spatially blocked inner folds
-- [`plot(`*`<feature_selection>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.feature_selection.md)
-  : Plot the path of a forward feature selection
-- [`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
-  : Forward model selection for geographically weighted regression
-- [`print(`*`<gwr_model_selection>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.gwr_model_selection.md)
-  : Print a GWR model selection result
-- [`plot(`*`<gwr_model_selection>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.gwr_model_selection.md)
-  : Plot a GWR model selection
-
-## Methods on a fit
+[`print()`](https://rdrr.io/r/base/print.html),
+[`summary()`](https://rdrr.io/r/base/summary.html) and
+[`plot()`](https://rdrr.io/r/graphics/plot.default.html) for any fit;
+[`predict()`](https://rdrr.io/r/stats/predict.html),
+[`fitted()`](https://rdrr.io/r/stats/fitted.values.html) and
+[`residuals()`](https://rdrr.io/r/stats/residuals.html) for each
+backend; and [`coef()`](https://rdrr.io/r/stats/coef.html) for GWR and
+the Bayesian GP, since a forest has no coefficients. A forest’s fitted
+values and residuals are out-of-bag.
 
 - [`print(`*`<spatial_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.spatial_fit.md)
-  : Print a fitted spatial model
+  [`print(`*`<rf_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.spatial_fit.md)
+  : Print a fitted model
 - [`summary(`*`<spatial_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.spatial_fit.md)
-  : Summarise a fitted spatial model
+  : Summarise a fitted model
 - [`plot(`*`<spatial_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.spatial_fit.md)
   : Plot a fitted spatial model
-- [`predict(`*`<rf_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.rf_fit.md)
-  : Predict from a random forest fit
-- [`predict(`*`<gwr_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.gwr_fit.md)
-  : Predict from a GWR spatial model
-- [`predict(`*`<bayesian_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.bayesian_fit.md)
-  : Predict from a Bayesian spatial GP model
-- [`fitted(`*`<rf_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/fitted.rf_fit.md)
-  : Out-of-bag predictions from a random forest fit
-- [`fitted(`*`<gwr_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/fitted.gwr_fit.md)
-  : In-sample fitted values from a GWR fit
-- [`fitted(`*`<bayesian_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/fitted.bayesian_fit.md)
-  : In-sample fitted values from a Bayesian spatial GP fit
-- [`residuals(`*`<rf_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/residuals.rf_fit.md)
-  : Out-of-bag residuals from a random forest fit
-- [`residuals(`*`<gwr_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/residuals.gwr_fit.md)
-  : In-sample residuals from a GWR fit
-- [`residuals(`*`<bayesian_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/residuals.bayesian_fit.md)
-  : In-sample residuals from a Bayesian spatial GP fit
-- [`coef(`*`<rf_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.rf_fit.md)
-  : Coefficients are undefined for a random forest
-- [`coef(`*`<gwr_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.gwr_fit.md)
-  : Extract GWR local coefficients
-- [`coef(`*`<bayesian_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.bayesian_fit.md)
-  : Extract Bayesian model fixed-effect summaries
-- [`print(`*`<rf_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.rf_fit.md)
-  : Print a random forest fit
+- [`predict(`*`<gwr_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-predict.md)
+  [`predict(`*`<bayesian_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-predict.md)
+  [`predict(`*`<rf_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-predict.md)
+  : Predict from a fitted model
+- [`fitted(`*`<gwr_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-fitted.md)
+  [`fitted(`*`<bayesian_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-fitted.md)
+  [`fitted(`*`<rf_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-fitted.md)
+  : Extract the fitted values of a fitted model
+- [`residuals(`*`<gwr_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-residuals.md)
+  [`residuals(`*`<bayesian_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-residuals.md)
+  [`residuals(`*`<rf_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-residuals.md)
+  : Extract the residuals of a fitted model
+- [`coef(`*`<gwr_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-coef.md)
+  [`coef(`*`<bayesian_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-coef.md)
+  [`coef(`*`<rf_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-coef.md)
+  : Extract the coefficients of a fitted model
 
-## Read a fit in sample
+## Check a fit in sample
 
-Metrics on the training data (out-of-bag for a forest), and the residual
-checks that say whether structure was left behind. In-sample numbers are
-not comparable across backends;
-[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
-is.
+Metrics on the training data (out-of-bag for a forest), and residual
+Moran’s I, which tests for spatial structure the model left behind.
+In-sample metrics do not compare across backends; compare backends with
+[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md).
+[`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md),
+[`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md)
+and
+[`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+also score rows you held out, passed as `newdata`.
 
 - [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
-  : Compute goodness-of-fit metrics for a spatial model
+  : Compute goodness-of-fit metrics for a fitted model
 - [`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md)
-  : Compute in-sample (or out-of-sample) metrics for fitted spatial
-  models
+  : Compute the metrics of several fitted models
 - [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
-  : Side-by-side comparison of fitted spatial models
+  : Compare fitted models in sample
 - [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
-  : Compute Moran's I on the residuals of a fitted spatial model
+  : Test the residuals of a fitted model for spatial autocorrelation
 - [`print(`*`<morans_i>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.morans_i.md)
   : Print a residual Moran's I result
 
-## Validate
+## Cross-validate and compare
 
-Score on held-out blocks, and compare backends on the same folds.
+Score a model on held-out blocks, compare backends on the same folds,
+and plot the per-fold spread and interval calibration.
 
 - [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
-  : Model-agnostic spatial cross-validation
+  : Cross-validate any learner with spatial folds
 - [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
   : Cross-validate a random forest with spatial folds
 - [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
-  : K-fold cross-validation for GWR
+  : Cross-validate a GWR with spatial folds
 - [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
-  : K-fold cross-validation for the Bayesian spatial model
+  : Cross-validate a Bayesian GP with spatial folds
 - [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
-  : Cross-validated comparison of spatial models
+  : Compare models on the same cross-validation folds
 - [`plot_cv_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_cv_metrics.md)
   : Plot one cross-validation metric fold by fold
 - [`plot_calibration()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_calibration.md)
   : Plot the interval calibration of a Bayesian cross-validation
 
-## Predict, and check where the prediction applies
+## Choose predictors
+
+Forward selection scored on spatial folds for any backend, and an AICc
+search over predictor sets for GWR.
+
+- [`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
+  : Select predictors by forward selection on spatial folds
+- [`plot(`*`<feature_selection>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.feature_selection.md)
+  : Plot the path of a forward feature selection
+- [`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+  [`print(`*`<gwr_model_selection>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+  : Select GWR predictors by forward selection on AICc
+- [`plot(`*`<gwr_model_selection>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.gwr_model_selection.md)
+  : Plot a GWR model selection
+
+## Predict a surface
+
+Predict onto a regular grid, and mark the locations whose predictor
+values are too unlike the training data for the cross-validated score to
+hold there.
 
 - [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
-  : Predict a fitted spatial model onto a regular grid
+  : Predict a fitted model onto a regular grid
 - [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
-  : Area of applicability of a spatial prediction model
+  : Mark where a model's predictions apply
 - [`print(`*`<aoa>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.aoa.md)
   : Print an area-of-applicability result
 - [`plot(`*`<aoa>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.aoa.md)
   : Plot the dissimilarity distribution behind an area of applicability
 
-## Package options and caches
+## Set options, catch conditions and clear caches
 
-The console log, and the two in-session caches. Both caches are keyed on
-the inputs, so they only need clearing when memory is the constraint.
+The console log, the two work limits, every warning and error class the
+package raises, and two in-session caches. To free memory, clear the
+grid cache that
+[`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md)
+fills; clear a Bayesian fit’s fitted-value cache after editing its
+`brmsfit` by hand.
 
 - [`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md)
-  : Quieten (or restore) spatialkit's console log
+  : Turn the console log off or on
+- [`spatialkit-options`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-options.md)
+  : Options that bound the work of a search or a fit
+- [`spatialkit-conditions`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-conditions.md)
+  : Warnings and errors the package raises
 - [`clear_grid_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_grid_cache.md)
   : Clear the in-session grid cache
 - [`clear_fitted_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md)
-  : Clear cached fitted values for a Bayesian spatial model
+  : Clear the cached fitted values of a Bayesian GP fit

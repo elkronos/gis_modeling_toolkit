@@ -1,11 +1,13 @@
 # Cross-validate a random forest with spatial folds
 
-Thin wrapper over
-[`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
-that refits a `ranger` forest on each training fold. Unlike the
-out-of-bag error, this holds out whole spatial blocks by default, so
-most neighbours of a held-out point are not in the training set; `folds`
-says what that score estimates.
+A wrapper over
+[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
+that refits a ranger forest on each training fold. By default it holds
+out whole spatial blocks, so most neighbours of a held-out point are not
+in the training set; the forest's out-of-bag error holds out single
+rows. The folds you pass decide what the score measures (see "Fold
+methods" in
+[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)).
 
 ## Usage
 
@@ -75,7 +77,7 @@ cv_rf(
 
 - seed:
 
-  RNG seed. Default 123. It seeds fold construction **and**, through a
+  RNG seed. Default 123. It seeds fold construction and, through a
   per-fold draw, each fold's forest, so two different seeds give
   different results even on identical `folds`. To grow every fold's
   forest from one fixed ranger seed instead, call
@@ -127,13 +129,16 @@ cv_rf(
 ## Value
 
 The
-[`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
-result.
+[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
+result. `MAPE` and `SMAPE` skip rows whose denominator is zero; `n_MAPE`
+and `n_SMAPE` count the rows they used (see "Percentage errors on
+responses with zeros" in
+[`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)).
 
 ## Comparing the forest with and without coordinates
 
 Whether `include_coords = TRUE` lowers the error depends on how far from
-the training data the predictions are (see *Coordinates as predictors*
+the training data the predictions are (see "Coordinates as predictors"
 in
 [`fit_rf_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)),
 so it is a comparison to make on your own data, at the block size the
@@ -146,82 +151,55 @@ same rows in both, so the two `overall` rows compare like with like and
 the two `fold_metrics` tables pair up fold by fold. A difference in
 `overall` that is small beside the spread of the per-fold differences is
 not evidence for either forest. The example below runs the comparison.
-[`compare_models_cv`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
-takes one set of forest arguments (`rf_args`) per call, so it scores one
-of the two forests, not both.
-
-## Percentage errors on responses with zeros
-
-`MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
-\|\hat{y}\|\\, so neither is defined where its denominator is zero.
-Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
-denominator is non-zero, and are `NA` when no row qualifies. Non-zero is
-judged at the scale of the data: a denominator no larger than 100
-machine epsilons times the largest one counts as zero, so the rule does
-not depend on the units of the response. The `n_MAPE` and `n_SMAPE`
-columns record how many rows that was; the `n` column counts finite
-observation/prediction pairs. Read a percentage error next to its count:
-when `n_MAPE < n`, `MAPE` is an average over a subset of the data,
-whatever its value.
-
-This bites on any response taking exact zeros: counts, rainfall,
-abundance, claim amounts. On a zero-inflated response with 62 zeros out
-of 120, `MAPE` is an average over the 58 non-zero rows, which
-`n_MAPE = 58` now says. `SMAPE` fails differently and more subtly: it
-drops the rows where observation and prediction are both near zero
-(which on a well-fitted zero-inflated model are the rows it got
-*right*), so it averages the harder rows only and reads worse than the
-fit deserves; `n_SMAPE` shows how many rows it kept, and the count is
-only a label, not a repair.
-
-`RMSE`, `MAE` and \\R^2\\ use every finite row and are unaffected;
-prefer them whenever the response can be zero. For a Bayesian fit,
-[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
-additionally reports CRPS and interval coverage, which are proper
-scoring rules and have no such failure mode.
+[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
+takes one set of forest arguments (`rf_args`) per call, so it scores
+only one of the two forests.
 
 ## See also
 
+[`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
+for the forest's arguments, and
+[`plot_cv_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_cv_metrics.md)
+to draw the per-fold scores.
+
 Other cross-validation:
-[`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md),
+[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md),
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md),
-[`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md),
 [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md),
 [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md),
-[`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md),
-[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md),
-[`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md),
-[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md),
-[`sac_nugget()`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md),
-[`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
+[`plot_calibration()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_calibration.md),
+[`plot_cv_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_cv_metrics.md)
 
 ## Examples
 
 ``` r
-if (requireNamespace("ranger", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  n <- 200
-  dat <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               a = rnorm(n)),
-    coords = c("x", "y"), crs = 32632
-  )
-  dat$z <- 2 * dat$a + rnorm(n, 0, 0.3)
-  cv_rf(dat, "z", "a", k = 4)$overall
-
-  # The forest with and without the coordinates, on the same blocked
-  # folds.  (The second call logs the include_coords caution, once per
-  # session; this comparison is what it asks for.)  This response has no
-  # spatial structure, so here the coordinates can only cost accuracy.
-  folds   <- make_folds(dat, k = 4, method = "block_kfold", seed = 1)
-  plain   <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200)
-  with_xy <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200,
-                   include_coords = TRUE)
-  c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
-  # Fold by fold: positive where the coordinates lowered the error.
-  plain$fold_metrics$RMSE - with_xy$fold_metrics$RMSE
-}
+library(sf)
+set.seed(1)
+n <- 200
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             a = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+# An offset keeps the response away from zero, where MAPE is undefined.
+dat$z <- 10 + 2 * dat$a + rnorm(n, 0, 0.3)
+cv_rf(dat, "z", "a", k = 4)$overall
 #> cv_rf(): no folds supplied -- using spatial block k-fold CV (k=4).
+#>       RMSE       MAE     MAPE    SMAPE        R2 Adj_R2 n_pred n_MAPE n_SMAPE
+#> 1 0.417048 0.3264843 3.424117 3.405887 0.9587525     NA    200    200     200
+
+# The forest with and without the coordinates, on the same blocked
+# folds.  The second call logs the include_coords caution once per
+# session.  This response has no spatial structure, so here the
+# coordinates can only cost accuracy.
+folds   <- make_folds(dat, k = 4, method = "block_kfold", seed = 1)
+plain   <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200)
+with_xy <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200,
+                 include_coords = TRUE)
+c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
+#>     plain   with_xy 
+#> 0.4208380 0.7656067 
+# Fold by fold: positive where the coordinates lowered the error.
+plain$fold_metrics$RMSE - with_xy$fold_metrics$RMSE
 #> [1] -0.5017832 -0.2412238 -0.3906285 -0.1638759
 ```

@@ -1,12 +1,14 @@
-# Fit a random forest via ranger
+# Fit a random forest with ranger
 
-Fits a regression random forest on an `sf` dataset and returns it as a
+Fits a regression random forest on an `sf` layer and returns it as a
 `spatial_fit`, so it works with
-[`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md),
-[`predict_surface`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md),
-[`area_of_applicability`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md),
+[`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md),
+[`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
 and the [`plot()`](https://rdrr.io/r/graphics/plot.default.html) method
-like any other backend.
+like any other backend. A forest suits a response that is non-linear in
+its predictors when predictive accuracy matters more than an
+interpretable model.
 
 ## Usage
 
@@ -58,9 +60,9 @@ fit_rf_model(
 - importance:
 
   `"permutation"` (default), `"impurity"` or `"none"`. Impurity
-  importance is biased toward continuous and high-cardinality predictors
-  (Strobl et al. 2007), which is why permutation is the default despite
-  costing more.
+  importance is biased towards continuous and high-cardinality
+  predictors (Strobl et al. 2007), so permutation importance is the
+  default although it costs more.
 
 - include_coords:
 
@@ -75,9 +77,8 @@ fit_rf_model(
   bootstrap sampling with replacement is itself a source of bias in
   variable importance toward predictors with many distinct values or
   categories, and recommend subsampling without replacement. The
-  forest's predictions change slightly with the choice; the default is
-  kept at ranger's so that an existing script fits the same forest, and
-  the setting is recorded in `$info` and printed with the fit.
+  forest's predictions change slightly with the choice. The setting is
+  recorded in `$info` and printed with the fit.
 
 - sample_fraction:
 
@@ -86,7 +87,7 @@ fit_rf_model(
   distinct rows in a bootstrap sample) when `replace = FALSE`. A single
   number in (0, 1\] overrides it. `replace = FALSE` with
   `sample_fraction = 1` grows every tree on every row, so nothing is out
-  of bag: the fit warns, and see **What fitted() returns**.
+  of bag: the fit warns (see "Fitted values are out-of-bag").
 
 - seed:
 
@@ -95,20 +96,14 @@ fit_rf_model(
 - num_threads:
 
   Threads for ranger. Default `NULL` means `getOption("mc.cores", 1L)`:
-  one thread unless the session has opted in to more, the convention
-  brms and parallel use. ranger's own default is every core on the
-  machine, which is the wrong default for a package function (a check
-  farm limits jobs to two cores, and `cv_rf(parallel = )` would multiply
-  it by the worker count). Predictions do not depend on the thread
-  count, only speed does; pass
+  one thread unless the session has set more, the convention brms and
+  parallel use. Predictions do not depend on the thread count; pass
   [`parallel::detectCores()`](https://rdrr.io/r/parallel/detectCores.html)
-  to use them all.
+  to use every core.
 
 - .already_prepped:
 
-  Internal; skip
-  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
-  because the caller has already projected and cleaned the data.
+  Internal; leave at the default.
 
 - ...:
 
@@ -117,8 +112,7 @@ fit_rf_model(
   ranger's own spellings of the arguments this function already sets
   (`num.trees`, `min.node.size`, `num.threads`, `mtry`, `importance`,
   `seed`, `replace`, `sample.fraction`, `x`, `y`) are rejected with a
-  message naming the wrapper argument to use instead. Passing them here
-  would reach `ranger()` twice and fail the call.
+  message naming the wrapper argument to use instead.
   `respect.unordered.factors` passed here overrides the `"order"` this
   function sets when a predictor is categorical; see *Categorical
   predictors*.
@@ -174,35 +168,24 @@ them it sees the covariates alone, and
 [`print()`](https://rdrr.io/r/base/print.html) says "no spatial
 information used". The default is `FALSE`.
 
-What the coordinates buy depends on where the predictions are wanted. A
-forest splits on location as on any column, so it follows the training
-surface closely between sampled points, and has nothing but the nearest
-edge of the data to go on beyond them. Between sampled points the
-coordinates can lower the error, most where the covariates carry little
-of the spatial structure themselves, and the gain fades with distance
-from the training data. Beyond the autocorrelation range, or in a region
-the data never visited, it can reverse: in a simulated hold-out of an
-unvisited strip the forest with coordinates was 5.2\\ run. Meyer et al.
-(2019) report larger failures of the same kind. With covariates that
-carry the spatial structure themselves, expect less from the
-coordinates.
+The gain from the coordinates depends on where the predictions are
+wanted. A forest splits on location as on any column, so it follows the
+training surface closely between sampled points, and has only the
+nearest edge of the data to go on beyond them. Between sampled points
+the coordinates can lower the error, most where the covariates carry
+little of the spatial structure themselves, and the gain fades with
+distance from the training data. Beyond the autocorrelation range, or in
+an area the data never visited, the coordinates can make predictions
+worse (Meyer et al. 2019). With covariates that carry the spatial
+structure themselves, expect less from the coordinates.
 
-What does not change is how such a forest has to be scored. It fits
-location closely, so its error grows quickly with the distance from the
-data, and a cross-validated score is the error at the distance its folds
-put between the held-out points and their training data. Random folds,
-and the out-of-bag error, a random hold-out too, measure it among the
-samples: the error of a map over an area the samples cover evenly, which
-reads low for predictions made farther from the data. Score it with
-[`cv_rf`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
-on folds at the distances the map will be used at (folds matched to the
-prediction distance, `make_folds(method = "nndm")` or `"knndm"`, or
-blocks, `method = "block_kfold"`, for predictions into unsampled gaps),
-not with the out-of-bag error, and compare the two forests on the same
-folds. That comparison is two calls: build the folds once and hand them
-to
+Score the forests with and without coordinates on the same folds, at the
+distances the map will be used at (see "Fold methods" in
+[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md);
+"Out-of-bag error" below says why the out-of-bag error does not serve).
+Build the folds once and pass them to
 [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
-with and without the coordinates.
+with and without the coordinates:
 
 
     folds   <- make_folds(dat, k = 5, method = "block_kfold")
@@ -211,57 +194,54 @@ with and without the coordinates.
                      include_coords = TRUE)
     c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
 
-[`cv_rf`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
-runs the same comparison in its example and reads it fold by fold.
-Setting `include_coords = TRUE` logs that advice, once per session (it
-is a deliberate choice, so it is not raised as an R warning, and it is
-not repeated for every fold of a cross-validation).
+The example on
+[`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+runs this comparison and reads it fold by fold. Setting
+`include_coords = TRUE` logs this advice once per session, as a log line
+rather than an R warning, and not once for every fold of a
+cross-validation.
 
 ## Categorical predictors
 
 A predictor that is an unordered factor or a character column is split
 with `respect.unordered.factors = "order"`: ranger orders its levels by
-mean response once, before growing, and splits on that order. That is
-the handling ranger's own help recommends. ranger's default for a
-regression forest, `"ignore"`, splits on the order the levels happen to
-be stored in (alphabetical, for most data), which for a nominal variable
-is arbitrary: with a 40-level factor carrying random level effects, the
-test RMSE was 1.05 by level order against 0.57 by response order, lower
-in 10 draws of 10. Pass `respect.unordered.factors` through `...` to
-choose otherwise (`"ignore"`, or `"partition"` for every two-way split
-of the levels, which is slow beyond a few levels). Ordered factors are
-left alone and split on their own order, and with
-`splitrule = "extratrees"` ranger's own default for that rule,
-`"partition"`, is kept. The setting is recorded in
-`$info$respect_unordered_factors` and printed with the fit.
+mean response once, before growing, and splits on that order, the
+handling ranger's own help recommends. ranger's default for a regression
+forest, `"ignore"`, splits on the order the levels are stored in
+(alphabetical, for most data), which for a nominal variable is
+arbitrary. Pass `respect.unordered.factors` through `...` to choose
+otherwise (`"ignore"`, or `"partition"` for every two-way split of the
+levels, which is slow beyond a few levels). Ordered factors are left
+alone and split on their own order, and with `splitrule = "extratrees"`
+ranger's own default for that rule, `"partition"`, is kept. The setting
+is recorded in `$info$respect_unordered_factors` and printed with the
+fit.
 
-## The out-of-bag error is a random hold-out
+## Out-of-bag error
 
-`ranger`'s OOB error holds each observation out of the trees that did
-not sample it. That is a random hold-out: the trees that "did not see" a
-point almost certainly saw its neighbours, so under spatial
+ranger's out-of-bag (OOB) error holds each observation out of the trees
+that did not sample it. That is a random hold-out: the trees that did
+not see a point almost always saw its neighbours, so under spatial
 autocorrelation it is the error of predicting among the samples, as
 random k-fold is, and reads low for predictions made farther from the
 data than the samples sit from each other (see
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)).
 It is reported as `$info$oob_rmse` and `$info$oob_r_squared` and
-labelled as OOB everywhere it appears. Use
-[`cv_rf`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+labelled as OOB wherever it appears. Use
+[`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
 for a spatial estimate.
 
-## What fitted() returns
+## Fitted values are out-of-bag
 
 [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) on an `rf_fit`
-returns **out-of-bag** predictions, not in-sample ones, following the
-convention of the random forest packages themselves. In-sample
-predictions from a forest are close to memorisation and would make
-[`summary()`](https://rdrr.io/r/base/summary.html) report a fictitious
-R-squared. The consequence is that
-[`summary()`](https://rdrr.io/r/base/summary.html) means something
-different here than for a `gwr_fit` or `bayesian_fit`, whose fitted
-values are in-sample: do not compare the two directly.
-[`compare_models_cv`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
-exists for that.
+returns out-of-bag predictions, as the random forest packages themselves
+do. In-sample predictions from a forest come close to reproducing the
+training data, and their \\R^2\\ says little about new data.
+[`summary()`](https://rdrr.io/r/base/summary.html) therefore reports
+out-of-bag metrics for a forest and in-sample metrics for a GWR or a
+Bayesian GP fit, and the two do not compare;
+[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
+scores every backend on the same folds.
 
 A row that every tree sampled has no out-of-bag prediction, and ranger
 reports `NaN` for it. That is every row under `replace = FALSE` with
@@ -293,41 +273,37 @@ and a solution. *BMC Bioinformatics* 8, 25.
 
 ## See also
 
-[`cv_rf`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
-for a spatially blocked performance estimate,
-[`area_of_applicability`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md),
-which weights the predictors by `pmax(fit$info$importance, 0)` by
-default when that importance is finite and the forest has out-of-bag
-skill (it is `NaN` when no row is out of bag; see "What fitted()
-returns"), and which needs `categorical = "indicator"` or `"drop"` for a
-forest with a factor predictor. For a forest fitted with
-`include_coords = TRUE` it also measures location on an index of its
-own.
+[`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+to score the forest on spatial folds;
+[`predict()`](https://rdrr.io/r/stats/predict.html)
+([spatial_fit-predict](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-predict.md))
+and
+[`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+to predict;
+[`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+to mark where the predictions apply (it weights the predictors by this
+forest's importance).
 
 Other model fitting:
 [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md),
 [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md),
 [`gp_lengthscale_bounds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gp_lengthscale_bounds.md),
-[`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md),
-[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+[`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md)
 
 ## Examples
 
 ``` r
-if (requireNamespace("ranger", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  n <- 150
-  dat <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               a = rnorm(n), b = rnorm(n)),
-    coords = c("x", "y"), crs = 32632
-  )
-  dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.3)
-  fit <- fit_rf_model(dat, "z", c("a", "b"))
-  print(fit)              # print(): only a block's last value shows on its own
-  fit$info$importance     # permutation importance, a and b
-}
+library(sf)
+set.seed(1)
+n <- 150
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             a = rnorm(n), b = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.3)
+fit <- fit_rf_model(dat, "z", c("a", "b"))
+fit
 #> <Random Forest (ranger)> spatial model fit
 #>   Formula : z ~ a + b
 #>   n       : 150
@@ -343,6 +319,7 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 #>   farther from the data than the samples sit from each other. Score a map
 #>   that predicts farther with cv_rf() on folds at its distances
 #>   (?fold_separation).
+fit$info$importance     # permutation importance of a and b
 #>        a        b 
 #> 6.886377 1.583079 
 ```

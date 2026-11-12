@@ -1,11 +1,11 @@
-# Fit a Geographically Weighted Regression (GWR)
+# Fit a geographically weighted regression (GWR)
 
-Fits a Gaussian GWR on an sf dataset with an adaptive or a fixed
-bandwidth. The kernels, the bandwidth conventions and the diagnostics
-are those of the GWmodel package. The local regressions are solved by
-this package, each as a weighted least squares by pivoted QR, so a
-window whose design is rank deficient neither stops the fit nor returns
-coefficients made of rounding error.
+Fits a Gaussian GWR on an sf layer with an adaptive or a fixed
+bandwidth. Each location gets its own regression, weighted towards
+nearby observations, so the coefficients can vary across the map. Use it
+when that variation is the question;
+[`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+fits one global relationship plus a spatial random field.
 
 ## Usage
 
@@ -51,7 +51,7 @@ fit_gwr_model(
 
   Optional numeric bandwidth value. For adaptive mode this is an integer
   (number of neighbours); for fixed mode a distance in the units of the
-  **projected** CRS the fit runs in.
+  projected CRS the fit runs in.
   [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
   projects geographic input before the bandwidth is used, so 0.2
   supplied for lon/lat data is 0.2 metres, not 0.2 degrees. Read the CRS
@@ -76,28 +76,15 @@ fit_gwr_model(
 
 - kernel:
 
-  Kernel function type. One of "bisquare" (default), "gaussian",
-  "tricube", "boxcar", "exponential". The boxcar gives weight 1 to every
-  observation within the bandwidth's distance (with an adaptive
-  bandwidth, the distance to the `bandwidth`-th nearest neighbour) and 0
-  to the others; an observation whose squared distance is within one
-  part in ten million of the edge counts as at the edge, and inside, so
-  on a regular grid every neighbour tied with the last one is in the
-  window in any unit and at any origin where the doubles hold the
-  coordinates to better than about one part in 1e8 of the distances
-  between neighbours. Farther from the origin the doubles round the
-  coordinates more coarsely, and where a neighbour lies past the edge by
-  less than that rounding the call warns, with class
-  `"spatialkit_xy_imprecise"`; the windows are those the coordinates as
-  stored give.
+  Weighting kernel: one of `"bisquare"` (default), `"gaussian"`,
+  `"tricube"`, `"boxcar"` or `"exponential"`. The boxcar gives weight 1
+  within the bandwidth (with an adaptive bandwidth, the distance to the
+  `bandwidth`-th nearest neighbour) and 0 beyond it; see "The local
+  solve" for how a neighbour at the edge is counted.
 
 - .already_prepped:
 
-  Logical (internal). If `TRUE`, skip the
-  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
-  call because the caller has already projected, coerced, and filtered
-  the data. Used by the CV internals to avoid a redundant second pass on
-  every fold. End users should leave this at the default `FALSE`.
+  Internal; leave at the default.
 
 ## Value
 
@@ -154,9 +141,9 @@ local coefficients, `y`, `yhat`, `residual`, `CV_Score`,
 `Stud_residual`, the standard errors `<term>_SE`, the t values
 `<term>_TV` and `Local_R2`), `GW.diagnostic`, `GW.arguments` and `lm`
 (the global least-squares fit). It is a plain list, not a `gwrm` object.
-Where a predictor or the response was taken less its centre (see **The
-local solve**), `lm` is solved on the centred columns and returned as
-the fit at the data's origin: its coefficients, fitted values, `qr` and
+Where a predictor or the response was taken less its centre (see "The
+local solve"), `lm` is solved on the centred columns and returned as the
+fit at the data's origin: its coefficients, fitted values, `qr` and
 `effects` are those of the raw columns, so
 [`summary()`](https://rdrr.io/r/base/summary.html),
 [`vcov()`](https://rdrr.io/r/stats/vcov.html),
@@ -172,6 +159,14 @@ has no such limit. `centres` holds what was taken off: `predictors`, the
 centre of each column of the design (`Intercept` first, 0 for a column
 used as it is), `NULL` where none was, and `response`, 0 where none was.
 
+## Details
+
+The kernels, the bandwidth conventions and the diagnostics are those of
+GWmodel. This package solves the local regressions itself, each as a
+weighted least squares by pivoted QR, so a window whose design is rank
+deficient neither stops the fit nor returns coefficients made of
+rounding error.
+
 ## The local solve
 
 At every observation the model is a weighted least squares on the
@@ -183,6 +178,18 @@ weight, and each predictor is divided by its standard deviation over the
 whole data and centred in the window, so nothing below depends on a
 predictor's origin or units: an indicator coded 0/1 and one coded
 288.7/289.3 give the same fit.
+
+Under the boxcar kernel an observation whose squared distance is within
+one part in ten million of the window's edge counts as at the edge, and
+inside, so on a regular grid every neighbour tied with the last one is
+in the window in any unit and at any origin where the doubles hold the
+coordinates to better than about one part in 1e8 of the distances
+between neighbours. Farther from the origin the doubles round the
+coordinates more coarsely, and where a neighbour lies past the edge by
+less than that rounding the call warns, with class
+`"spatialkit_xy_imprecise"` (see "Coordinates far from the origin" in
+[spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md));
+the windows are those the coordinates as stored give.
 
 A predictor whose centre is more than 1000 times its spread (a timestamp
 in seconds, a northing, 1e8 plus a spread of 1) is taken less its centre
@@ -224,8 +231,8 @@ residual standard deviation, which it can hold.
 
 One tolerance, `1e-7`, decides what a window can estimate:
 
-- **Rank.** A predictor is aliased in a window when the part of it that
-  the terms entered before it do not explain varies there by less than
+- Rank. A predictor is aliased in a window when the part of it that the
+  terms entered before it do not explain varies there by less than
   `1e-7` of its standard deviation over the study area (the length of
   that part over the weighted rows). A predictor that is constant among
   the weighted observations, two predictors that are exactly collinear
@@ -234,16 +241,16 @@ One tolerance, `1e-7`, decides what a window can estimate:
   kernel every observation enters, and distant ones stop counting only
   through this rule.
 
-- **Coefficients.** A coefficient is returned when it has one value over
-  all least-squares solutions of the window, and is `NA` otherwise. The
+- Coefficients. A coefficient is returned when it has one value over all
+  least-squares solutions of the window, and is `NA` otherwise. The
   slope of an aliased predictor is `NA`. So is the intercept when a
   predictor is constant in the window at a value other than 0, because
   it would absorb that value times the slope; when the constant is 0 the
   intercept is identified and returned. The slopes of the other
   predictors are returned.
 
-- **Fitted values.** The fitted value at an observation is always
-  estimable (its own row is in its window) and is returned, also where a
+- Fitted values. The fitted value at an observation is always estimable
+  (its own row is in its window) and is returned, also where a
   coefficient is `NA`.
 
 A window of deficient rank does not stop the fit. A warning of class
@@ -298,15 +305,9 @@ every location, the fitted value and leverage of a window that is far
 from rank deficient are computed from its centred cross-products, many
 windows to one matrix product, and the windows that are not are left to
 the QR; the two routes agree to rounding error (`1e-9` relative in the
-package's tests) and take the same rank decisions. A default-bandwidth
-fit with one of those kernels and two predictors then takes 1.1 to 1.6
-times as long as
-[`GWmodel::bw.gwr()`](https://rdrr.io/pkg/GWmodel/man/bw.gwr.html)
-followed by `gwr.basic()` (2.0 s against 1.6 s at 1,000 observations and
-7.4 s against 5.7 s at 2,000, fixed Gaussian, on one machine), and 3 to
-5 times as long by the QR alone. With several strongly correlated
-predictors more windows are left to the QR and the fit is slower than
-that. The fit at the selected bandwidth is always the QR's.
+package's tests) and take the same rank decisions. With several strongly
+correlated predictors more windows are left to the QR and the search is
+slower. The fit at the selected bandwidth is always the QR's.
 
 Everything scored is kept in `info$bandwidth_search`: `approach` (the
 criterion minimised, `"AICc"` or `"CV"`), `by_location` and
@@ -339,36 +340,32 @@ Rows with the same coordinates (several years at one station, replicate
 samples of one plot, records geocoded to one address) get one kernel
 weight at every regression point. `info$n_locations` is the number of
 distinct locations, and when it is below `n` a warning of class
-`"spatialkit_gwr_repeated_locations"` gives the counts. Three things
-follow.
+`"spatialkit_gwr_repeated_locations"` gives the counts.
 
-**The bandwidth is not selected by AICc.** AICc counts the rows at one
+The bandwidth is then not selected by AICc. AICc counts the rows at one
 location as independent observations. When a location has an effect of
-its own, which is the usual case, a window that holds little but the
-location reproduces its mean, the residual sum of squares falls to the
-spread within locations, and AICc is lowest where the windows
-interpolate: on 100 simulated sites with 3 observations each it is 58 at
-5 to 10 neighbours, 90 at 13 and 221 at 58, while the error of
-prediction at new sites is 46 at 10 neighbours, 1.35 at 13 and 0.15 at
-150. A floor on the bandwidth does not repair that, because the
-criterion keeps falling towards the floor. With `bandwidth = NULL` the
-search therefore minimises the **leave-one-location-out** sum of
-squares: each location's observations are predicted by the local
-regression there without any of them, the kernel keeping its width, and
-the squared errors are summed. It is computed from the hat matrix of the
-fit at each bandwidth, without refitting. A bandwidth at which some
-location cannot be predicted from the others cannot be selected.
-`info$bandwidth_search$approach` is then `"CV"` and `by_location` is
-`TRUE`. On a layer without repeat locations nothing changes: the
-criterion is AICc.
+its own, a window that holds little but the location reproduces its
+mean, the residual sum of squares falls to the spread within locations,
+and AICc is lowest where the windows interpolate, which is where the
+error of predicting new sites is largest. A floor on the bandwidth does
+not repair that, because the criterion keeps falling towards the floor.
+With `bandwidth = NULL` the search therefore minimises the
+leave-one-location-out sum of squares: each location's observations are
+predicted by the local regression there without any of them, the kernel
+keeping its width, and the squared errors are summed. It is computed
+from the hat matrix of the fit at each bandwidth, without refitting. A
+bandwidth at which some location cannot be predicted from the others
+cannot be selected. `info$bandwidth_search$approach` is then `"CV"` and
+`by_location` is `TRUE`. On a layer without repeat locations nothing
+changes: the criterion is AICc.
 
-**The range of an adaptive search counts locations.** It starts at the
-smallest count that gives every window one location more than the model
-has parameters, and for a fixed bandwidth at the distance at which half
-the windows hold that many locations.
+The range of the search counts locations. For an adaptive bandwidth it
+starts at the smallest count that gives every window one location more
+than the model has parameters, and for a fixed bandwidth at the distance
+at which half the windows hold that many locations.
 
-**AICc and the standard errors still assume independence.** `info$AICc`,
-the comparison with the global regression in
+AICc and the standard errors still assume independence. `info$AICc`, the
+comparison with the global regression in
 [`summary()`](https://rdrr.io/r/base/summary.html) and the standard
 errors of `coef(se = TRUE)` and `predict(se.fit = TRUE)` treat every row
 as an independent observation. With an effect shared by the rows of a
@@ -383,8 +380,8 @@ per location.
 
 ## Collinearity diagnostics
 
-The function computes **scaled condition indices** of the design and
-warns when one exceeds 30, the conventional threshold, which Wheeler &
+The function computes scaled condition indices of the design and warns
+when one exceeds 30, the conventional threshold, which Wheeler &
 Tiefelsdorf (2005) carry over to the local designs of GWR. An index is
 the ratio of the largest to the smallest singular value (from an SVD)
 after each column is scaled (Belsley, Kuh & Welsch 1980); an exactly
@@ -393,17 +390,17 @@ exempt one. Scaling makes the index independent of the predictors'
 units; [`kappa()`](https://rdrr.io/r/base/kappa.html) on the raw matrix
 is not, and a threshold on it is a threshold on nothing in particular.
 
-A **global** index is computed on the predictors centred at their means
+A global index is computed on the predictors centred at their means
 (with the intercept, which centring makes orthogonal to them), and kept
 as `info$condition_index`. It measures how nearly the predictors are
 collinear with one another over the whole study area; it is 1 for a
 single predictor, and a change of origin (degrees C or kelvin, a year or
 years since 2000) does not move it.
 
-**Local** indices are then computed at **every** location, on the
-weighted design of the local regression there: each row weighted by the
-square root of its kernel weight at the bandwidth the model is fitted
-with (supplied or selected), with rows of negligible weight (below 1e-8)
+Local indices are then computed at every location, on the weighted
+design of the local regression there: each row weighted by the square
+root of its kernel weight at the bandwidth the model is fitted with
+(supplied or selected), with rows of negligible weight (below 1e-8)
 dropped. A window left with fewer rows than columns counts as singular.
 Two indices are kept for each window, as columns of
 `info$local_collinearity`:
@@ -438,14 +435,14 @@ other origin, and is not flagged, however large `cn` is. The one
 exception is a `cn` that is singular to machine precision, where the
 predictor's spread is lost in the rounding of its own values.
 
-A warning is issued whenever **any** location has collinear slopes; the
+A warning is issued whenever any location has collinear slopes; the
 wording reports a percentage when more than 25% of locations are
 affected and a count otherwise. Both are real R warnings, not log lines.
 Coefficients at a near-singular window are least-squares estimates with
-little to rest on, and can be implausibly large. An **exactly** singular
+little to rest on, and can be implausibly large. An exactly singular
 window (an indicator that is constant inside it, or fewer observations
 than parameters) is of deficient rank: the coefficients it cannot
-estimate are `NA` and the fit is returned (see **The local solve**). A
+estimate are `NA` and the fit is returned (see "The local solve"). A
 window with only `cn` above 30 raises no warning:
 `plot(fit, type = "coefficients", term = "Intercept")` masks it, and
 slope maps do not. Centre such a predictor if you want an interpretable
@@ -467,50 +464,67 @@ only the part of the study area that fitted.
 
 ## See also
 
+[`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
+to score the fit on spatial folds;
+[`predict()`](https://rdrr.io/r/stats/predict.html)
+([spatial_fit-predict](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-predict.md))
+and [`coef()`](https://rdrr.io/r/stats/coef.html)
+([spatial_fit-coef](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-coef.md))
+for predictions and local coefficients;
+[`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+and
+[`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
+to choose the predictors;
+[`plot.spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.spatial_fit.md)
+to map the coefficients.
+
 Other model fitting:
 [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md),
 [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md),
 [`gp_lengthscale_bounds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gp_lengthscale_bounds.md),
-[`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md),
-[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+[`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md)
 
 ## Examples
 
 ``` r
-if (requireNamespace("sp", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  n <- 60
-  dat <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               elev = rnorm(n)),
-    coords = c("x", "y"), crs = 32632
-  )
-  dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
-    2 * dat$elev + rnorm(n)
-  fit <- fit_gwr_model(dat, "price", "elev", bandwidth = 30)
-  print(summary(fit))     # print(): only a block's last value shows on its own
-  head(predict(fit, newdata = dat))   # newdata is re-projected if needed
-  head(coef(fit, se = TRUE)$se)       # local standard errors
-}
-#> Summary of <gwr_fit> fit (n = 60)
+library(sf)
+set.seed(1)
+n <- 80
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             elev = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+# The slope on elev rises from 1 in the west to 3 in the east.
+east <- (st_coordinates(dat)[, 1] - 5e5) / 1000
+dat$price <- 10 + (1 + 2 * east) * dat$elev + rnorm(n, 0, 0.3)
+fit <- fit_gwr_model(dat, "price", "elev", bandwidth = 30)
+summary(fit)
+#> Summary of <gwr_fit> fit (n = 80)
 #> 
 #>   Formula: price ~ elev
 #> 
 #>   In-sample metrics:
-#>     RMSE    = 1.1889
-#>     MAE     = 0.9995
-#>     R^2     = 0.8583
-#>     SMAPE   = 6.87%
+#>     RMSE    = 0.2906
+#>     MAE     = 0.2224
+#>     R^2     = 0.9798
+#>     SMAPE   = 2.45%
 #> 
-#>   Effective parameters: 13.2 (residual degrees of freedom 46.8)
-#>   Global least squares on the same rows: AICc 300.24, RMSE 2.7997
-#>   This fit: AICc 218.78 (below the global fit's by 81.46)
-#>   Intercept      elev
-#> 1 0.3261779 0.3387700
-#> 2 0.3248259 0.4382539
-#> 3 0.3286578 0.3423202
-#> 4 0.3203002 0.3282897
-#> 5 0.3141750 0.3071722
-#> 6 0.3241959 0.3390836
+#>   Effective parameters: 18.1 (residual degrees of freedom 61.9)
+#>   Global least squares on the same rows: AICc 155.84, RMSE 0.6161
+#>   This fit: AICc 65.80 (below the global fit's by 90.04)
+# The local slopes follow the west-east change.
+summary(coef(fit)$elev)
+#>    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#>   1.325   1.596   1.967   2.075   2.603   2.780 
+head(coef(fit, se = TRUE)$se)          # their standard errors
+#>    Intercept       elev
+#> 1 0.07569645 0.07924018
+#> 2 0.07355111 0.08520330
+#> 3 0.07902655 0.08016434
+#> 4 0.07856923 0.08452376
+#> 5 0.07336864 0.08750536
+#> 6 0.07956501 0.08663857
+head(predict(fit, newdata = dat))
+#> [1]  9.221713  9.677920 12.614503  6.046987 10.849371 11.063047
 ```

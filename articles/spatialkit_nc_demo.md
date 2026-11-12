@@ -1,67 +1,36 @@
-# spatialkit: Tessellations, Spatial Cross-Validation and Models
+# Worked example: North Carolina
 
-## Overview
+This article runs the pipeline on a simulated field over North Carolina,
+where the structure the cells and models should find is known, and
+compares four tessellations, two fold schemes and two backends on it.
+[`vignette("getting-started")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md)
+takes the short path through the same steps. The state outline comes
+from the `nc.shp` file bundled with `sf`, so the article needs no other
+files.
 
-This vignette generates **synthetic spatial data** over North Carolina
-and walks through the `spatialkit` workflow end to end:
+*This article needs six optional packages: `ggplot2` for the figures,
+`patchwork` for the stacked panels, `geometry` for the Delaunay
+triangles, `ranger` for the random forest, `sp` for GWR and `gstat` for
+the variogram. Where one is missing, the code that needs it is shown but
+not run.*
 
-1.  Load the boundary and check which optional packages are present
-2.  Simulate observations with known structure over it
-3.  Build four tessellation types (Voronoi, hex, square, Delaunay)
-4.  Assign points to cells, aggregate with
-    [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
-    and map the cell means
-5.  Estimate the autocorrelation range, build spatial CV folds, and
-    score a model under **blocked** versus **random** folds
-6.  Fit the models to keep: a random forest, GWR when `sp` is installed,
-    and the two compared on identical folds
-7.  Predict onto a surface and mark where that surface is extrapolation
-
-Everything is self-contained — the boundary comes from the `nc.shp` demo
-shapefile bundled with `sf`, so no external files are needed.
-
-The cell functions run at their defaults: density-weighted seeds
-(`partition = "density"`, from 3 starts) and a pooled value beside each
-cell mean (`estimate = "pooled"`). `partition = "kmeans"` in
-[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
-and `estimate = "mean"` in
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-give the k-means seeds and the plain frame of earlier versions.
-
-Optional backends are checked at the top and every section that needs
-one is guarded, so this document renders with whatever you happen to
-have installed. This table always runs, even when the gate below it is
-shut – it is what says which backend is missing when the code stops
-producing output:
-
-    ##     package available                          used_for
-    ## 1   ggplot2      TRUE                         all plots
-    ## 2 patchwork      TRUE     the stacked comparison panels
-    ## 3  geometry      TRUE       true Delaunay triangulation
-    ## 4    ranger      TRUE             random forest backend
-    ## 5     gstat      TRUE variogram / autocorrelation range
-    ## 6        sp      TRUE                       GWR backend
-
-------------------------------------------------------------------------
-
-## 1. Packages and boundary
+## The state outline, in feet
 
 ``` r
 
 library(spatialkit)
 library(sf)
-library(dplyr)
 library(ggplot2)
 
 set.seed(42)
 ```
 
-We load the North Carolina county boundaries shipped with `sf`, dissolve
-them into a single state outline, and project to **NAD83 / North
-Carolina (ftUS)** (EPSG:2264) so distances are planar rather than
-angular. Every distance, bandwidth and block size below is therefore in
-**US survey feet**, not metres — projected does not mean metric, and the
-unit is whatever the CRS says it is:
+The chunk below dissolves the county boundaries shipped with `sf` into
+one state outline and projects it to NAD83 / North Carolina (ftUS),
+EPSG:2264, so that distances are planar. Every distance and block size
+below is therefore in US survey feet, not metres (the GWR bandwidth is a
+count of neighbours). Projected does not mean metric: the unit is the
+one the CRS names.
 
 ``` r
 
@@ -72,20 +41,17 @@ nc_boundary <- nc_counties |>
   st_as_sf()
 ```
 
-------------------------------------------------------------------------
+## A simulated field with known structure
 
-## 2. Synthetic observations
+Three hundred points inside the outline carry two predictors and a
+response:
 
-300 points inside the state boundary with two predictors and a spatially
-varying response:
-
-- `elevation` — gradient increasing west to east, plus noise
-- `pop_density` — decays with distance from two fake “cities”
-- `y` — driven by the two predictors **plus a spatial field neither of
-  them explains**. That last term is deliberate: it is the unmodelled
-  spatial structure that nearby observations carry, so a model’s error
-  depends on how far from the data it predicts, and it is what section 5
-  measures.
+- `elevation` rises from west to east, plus noise.
+- `pop_density` decays with the distance from two invented cities.
+- `y` is the sum of the two predictors’ effects, a spatial field that
+  neither predictor carries, and noise. The field is structure that
+  nearby observations share, so a model’s error depends on how far from
+  the data it predicts.
 
 ``` r
 
@@ -98,8 +64,8 @@ y_coords   <- pts_coords[, 2]
 
 elevation <- scale(x_coords)[, 1] * 500 + rnorm(n_points, 3000, 400)
 
-city1 <- c(1530000, 550000)   # Charlotte-ish in EPSG:2264
-city2 <- c(2150000, 750000)   # Raleigh-ish
+city1 <- c(1530000, 550000)   # near Charlotte in EPSG:2264
+city2 <- c(2150000, 750000)   # near Raleigh
 dist_to_city <- pmin(
   sqrt((x_coords - city1[1])^2 + (y_coords - city1[2])^2),
   sqrt((x_coords - city2[1])^2 + (y_coords - city2[2])^2)
@@ -129,25 +95,32 @@ ggplot() +
   geom_sf(data = points_sf, aes(colour = y), size = 1.1) +
   scale_colour_viridis_c(name = "Response (y)") +
   theme_void() +
-  ggtitle("Raw observation points, North Carolina")
+  ggtitle("Simulated observations")
 ```
 
 ![Three hundred simulated observation points scattered across North
-Carolina, coloured by response value. Lower values cluster in the west
-and higher values along the eastern
-coast.](spatialkit_nc_demo_files/figure-html/quick-peek-1.png)
+Carolina, coloured by response value. The lowest values are in the far
+west and the highest in the north-east, with lower values again through
+the north of the
+centre.](spatialkit_nc_demo_files/figure-html/quick-peek-1.png)
 
-------------------------------------------------------------------------
+## Four tessellations
 
-## 3. Four tessellations
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+builds four kinds of cell from the same points and outline;
+[`vignette("cells")`](https://elkronos.github.io/gis_modeling_toolkit/articles/cells.md)
+says which kind suits which purpose. The counts are set by hand, 40
+seeds for the Voronoi cells and about 50 cells for each grid, so that
+the methods are compared at similar numbers of cells.
+[`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md)
+shows how to choose the count from the data.
 
-### 3a. Voronoi from ~40 density-weighted k-means seeds
+### Voronoi cells from 40 density-weighted k-means seeds
 
-Voronoi cells are built around *seed* points, not the observations
-themselves. Seeding one cell per observation would give 300 cells each
-containing a single point — a nearest-neighbour interpolation rather
-than an aggregation, with no within-cell variation to compute a standard
-error from.
+Voronoi cells grow around seed points, not around the observations. One
+cell per observation would give 300 cells of one point each: a
+nearest-neighbour interpolation rather than an aggregation, with no
+spread inside a cell to compute a standard error from.
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
 clusters the observations first, each weighted by its local density, so
 cells are small where the observations are dense.
@@ -178,17 +151,14 @@ tess_voronoi$index[outside]    # the cell each of them generates
 
     ## [1] 38
 
-A k-means centre is a mean of observations, and it can lie outside a
-boundary that is not convex. Here one density-weighted centre lies just
-outside the state outline, over a sound that coastal observations
-surround. Its cell, the part of the state nearer it than any other seed,
-is built inside the outline, and `tess_voronoi$index` gives the seed
-that cell, as it gives every seed the cell it generates.
-`seeds$cell_id <- tess_voronoi$index` is then what
-[`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md)
-reads to place other locations.
+A k-means centre is a mean of observations, so it can lie outside an
+outline that is not convex. Here 1 of the 40 centres lies just outside
+the state outline, over a sound that coastal observations surround. Its
+cell, the part of the state nearer to it than to any other seed, is
+still built inside the outline. For seeds, `tess_voronoi$index` holds
+the `cell_id` each seed generates, including this one.
 
-### 3b and 3c. Hex and square grids (~50 cells)
+### Hex and square grids of about 50 cells
 
 ``` r
 
@@ -203,8 +173,8 @@ tess_square <- build_tessellation(
 )
 ```
 
-All four methods return cells carrying a `cell_id` column; the grid
-methods keep `poly_id` alongside it, holding the same values.
+All four methods return cells with a `cell_id` column; the grid methods
+keep `poly_id` beside it, holding the same values.
 
 ``` r
 
@@ -213,17 +183,15 @@ names(tess_hex$cells)
 
     ## [1] "poly_id"  "geometry" "cell_id"
 
-### 3d. Delaunay triangles
+### Delaunay triangles
 
 `method = "triangles"` uses
 [`geometry::delaunayn()`](https://rdrr.io/pkg/geometry/man/delaunayn.html)
-when `geometry` is installed. Without it, it does **not** error — it
-falls back to
+when `geometry` is installed, and otherwise falls back to
 [`sf::st_triangulate()`](https://r-spatial.github.io/sf/reference/geos_unary.html)
-(GEOS) on the point set and logs a warning. That is still the Delaunay
-triangulation of the input points; only the resolution of degenerate
-configurations can differ. Because the two paths are not identical, this
-section is guarded on `geometry` rather than on the call succeeding:
+with a logged warning. Both give the Delaunay triangulation of the
+points; they can split degenerate (co-circular) configurations
+differently.
 
 ``` r
 
@@ -231,43 +199,46 @@ tess_tri <- build_tessellation(
   points_sf, boundary = nc_boundary,
   method = "triangles", clip = TRUE, quiet = TRUE
 )
-nrow(tess_tri$cells)
+tri_assigned <- assign_features_to_polygons(points_sf, tess_tri$cells,
+                                            polygon_id_col = "cell_id")
+c(triangles   = nrow(tess_tri$cells),
+  with_points = length(unique(na.omit(tri_assigned$cell_id))))
 ```
 
-    ## [1] 586
+    ##   triangles with_points 
+    ##         586         189
+
+The corners of the triangles are the observations themselves, so each
+observation falls in one of the triangles that meet at it, and most
+triangles hold none: 189 of 586 hold a point here.
+[`?build_tessellation`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+describes triangles as useful for interpolation and adjacency work, not
+as an aggregation unit.
+
+The number of cells each method built:
 
 ``` r
 
-cat(sprintf(
-  "Voronoi: %d | Hex: %d | Square: %d | Triangles: %s\n",
-  nrow(tess_voronoi$cells),
-  nrow(tess_hex$cells),
-  nrow(tess_square$cells),
-  if (has_geom) nrow(tess_tri$cells) else "skipped (install 'geometry')"
-))
+sapply(list(Voronoi = tess_voronoi, Hex = tess_hex, Square = tess_square,
+            Triangles = tess_tri),
+       function(tess) nrow(tess$cells))
 ```
 
-    ## Voronoi: 40 | Hex: 49 | Square: 45 | Triangles: 586
+    ##   Voronoi       Hex    Square Triangles 
+    ##        40        49        45       586
 
-``` r
-
-# has_geom is requireNamespace("geometry", quietly = TRUE), set in the
-# hidden setup chunk with the other availability flags the table above shows.
-```
-
-------------------------------------------------------------------------
-
-## 4. Cell-level aggregation with `summarize_by_cell()`
+## Cell means and their standard errors
 
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
-joins points to cells;
+puts each point in a cell, and
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-does the aggregation — means, standard deviations and standard errors
-for the response and every predictor, plus `n` and `cell_weight`, and
-beside each mean a pooled value, the mean pulled toward the cells around
-it. There is no need to write the
-[`group_by()`](https://dplyr.tidyverse.org/reference/group_by.html)/[`summarise()`](https://dplyr.tidyverse.org/reference/summarise.html)
-by hand, and doing so loses the design-effect machinery below.
+reduces the points to one row per cell. Each row holds the count `n`;
+the mean, standard deviation and standard error of the response and of
+every predictor; a `cell_weight`; and beside each mean a pooled value,
+the cell’s mean pulled toward the mean of the observations in the 8
+nearest cells (nearest by the centroid of their observations).
+[`vignette("cells")`](https://elkronos.github.io/gis_modeling_toolkit/articles/cells.md)
+explains pooled values and when to report one.
 
 ``` r
 
@@ -281,26 +252,27 @@ cell_stats <- summarize_by_cell(
   id_col         = "cell_id"
 )
 
-head(as.data.frame(cell_stats)[, c("cell_id", "n", "resp_mean_y",
-                                   "..sd_resp_y", "..se_resp_y")])
+head(as.data.frame(cell_stats)[, c("cell_id", "n", "resp_mean_y", "..se_resp_y",
+                                   "..pooled_resp_y")])
 ```
 
-    ##   cell_id n resp_mean_y ..sd_resp_y ..se_resp_y
-    ## 1       1 6    62.89141    7.074136    2.888004
-    ## 2       2 7    63.36230    7.516155    2.840840
-    ## 3       3 5    67.11282    8.521317    3.810849
-    ## 4       4 5    70.34951   12.427812    5.557886
-    ## 5       5 5    79.61205    5.327447    2.382507
-    ## 6       6 4    84.14516    7.886035    3.943018
+    ##   cell_id n resp_mean_y ..se_resp_y ..pooled_resp_y
+    ## 1       1 6    62.89141    2.888004        65.90426
+    ## 2       2 7    63.36230    2.840840        66.32647
+    ## 3       3 5    67.11282    3.810849        69.71523
+    ## 4       4 5    70.34951    5.557886        72.31561
+    ## 5       5 5    79.61205    2.382507        80.23328
+    ## 6       6 4    84.14516    3.943018        84.77772
 
-The `..se_*` columns are **IID** standard errors at the default
-`deff = 1`. That is the right standard error for each cell’s own mean,
-the value a choropleth shows, when the points are spread through the
-cell. As a standard error for the population (grand) mean it is
-anticonservative when points inside a cell are spatially correlated. For
-that population-level use, `deff = "kish"` applies Kish’s design-effect
-correction from an estimated intra-class correlation, and
-`attr(., "deff_applied")` records what was used:
+The `..se_*` columns are standard errors at the default `deff = 1`,
+which treats the points in a cell as independent. That is the standard
+error of each cell’s own mean, the value a map of the cells shows, when
+the points are spread through the cell. As a standard error for the
+population mean it is anticonservative when points inside a cell are
+spatially correlated, and `deff = "kish"` widens it by a design effect
+estimated from that correlation;
+[`vignette("cells")`](https://elkronos.github.io/gis_modeling_toolkit/articles/cells.md)
+explains the design effect.
 
 ``` r
 
@@ -321,296 +293,107 @@ cat(sprintf("method = %s | ICC(response) = %.3f | median design effect = %.2f\n"
 
 ``` r
 
-# Inflation of the response standard error, cell by cell.
-summary(cell_kish$`..se_resp_y` / cell_stats$`..se_resp_y`)
+# How much the Kish standard error of the response exceeds the default one.
+inflation <- cell_kish$`..se_resp_y` / cell_stats$`..se_resp_y`
+summary(inflation)
 ```
 
     ##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
     ##   3.067   4.220   4.540   4.624   5.120   6.973
 
-### Choropleths
+The Kish standard error is a median 4.54 times the default one, more
+than the 2.33 that the square root of the median design effect gives,
+because an estimated design effect also corrects the within-cell
+standard deviation
+([`vignette("cells")`](https://elkronos.github.io/gis_modeling_toolkit/articles/cells.md),
+“Standard errors and the design effect”).
+
+### Maps of the cell means
+
+`summarize_by_cell(cells_sf = )` returns the summary on the cells
+themselves, ready for
+[`plot_tessellation_map()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_tessellation_map.md).
+The two helpers below summarise a tessellation onto its cells and map
+the mean of `y`:
 
 ``` r
 
-#' Assign points to cells, summarise, and draw a choropleth.
-make_choropleth <- function(tess, boundary, points, title = NULL) {
-  cells    <- tess$cells
-  assigned <- assign_features_to_polygons(points, cells, polygon_id_col = "cell_id")
+# The cell summary of y on the cells of one tessellation.
+on_cells <- function(tess) {
+  assigned <- assign_features_to_polygons(points_sf, tess$cells,
+                                          polygon_id_col = "cell_id")
+  summarize_by_cell(assigned, response_var = "y", id_col = "cell_id",
+                    cells_sf = tess$cells)
+}
 
-  stats_df <- summarize_by_cell(assigned, response_var = "y",
-                                id_col = "cell_id")
-  cells    <- left_join(cells, as.data.frame(stats_df)[, c("cell_id", "resp_mean_y")],
-                        by = "cell_id")
-
+# A map of the cell means, on a colour scale with the given limits.
+map_means <- function(cells, label, limits = NULL) {
   plot_tessellation_map(
     tessellation_sf = cells,
-    boundary        = boundary,
+    boundary        = nc_boundary,
     fill_col        = "resp_mean_y",
-    palette         = "viridis",
-    tile_alpha      = 0.9,
     outline_col     = "white",
     outline_size    = 0.3,
     boundary_col    = "grey20",
     boundary_size   = 0.8,
-    legend_title    = "Mean y",
-    title           = title,
-    subtitle        = sprintf("%d cells | %d observations",
-                              nrow(cells), nrow(points))
-  )
+    title           = sprintf("%s, %d cells", label, nrow(cells))
+  ) +
+    scale_fill_viridis_c(name = "Mean y", limits = limits, na.value = "grey60")
 }
 ```
 
-``` r
-
-make_choropleth(tess_voronoi, nc_boundary, points_sf, "Voronoi tessellation")
-```
-
-![The same response aggregated into forty Voronoi cells over North
-Carolina. Cell sizes follow the density of the observations, and the
-west-to-east gradient from low to high values is
-visible.](spatialkit_nc_demo_files/figure-html/choro-voronoi-1.png)
-
-Voronoi choropleth
-
-``` r
-
-make_choropleth(tess_hex, nc_boundary, points_sf, "Hexagonal grid")
-```
-
-![The same response aggregated into a regular hexagonal grid of about
-fifty equal-area cells, showing the same west-to-east gradient on a
-fixed geometry rather than one drawn from the
-data.](spatialkit_nc_demo_files/figure-html/choro-hex-1.png)
-
-Hex grid choropleth
-
-``` r
-
-make_choropleth(tess_square, nc_boundary, points_sf, "Square grid")
-```
-
-![The same response aggregated into a regular square grid of about
-forty-five cells, showing the same gradient with the axis-aligned
-artefacts a square grid
-introduces.](spatialkit_nc_demo_files/figure-html/choro-square-1.png)
-
-Square grid choropleth
-
-``` r
-
-make_choropleth(tess_tri, nc_boundary, points_sf, "Delaunay triangulation")
-```
-
-![The same response aggregated onto the Delaunay triangulation of the
-observation points, which produces many small irregular triangles rather
-than compact
-cells.](spatialkit_nc_demo_files/figure-html/choro-tri-1.png)
-
-Delaunay choropleth
-
-The three stacked on one shared colour scale. Each map drawn on its own
-gets its own scale, so a colour in one means a different value in the
-next; here the limits are set from all three together and `patchwork`
-then collects the legends into one, which is what makes reading down the
-page legitimate.
+The three maps below share one colour scale: its limits span all three
+sets of cell means, and `patchwork` collects the three legends into one,
+so a colour means the same value on every map. Grey cells hold no
+observation.
 
 ``` r
 
 library(patchwork)
 
-# The cell means of all three, so the colour scale can span them.
-cell_means <- function(tess) {
-  a <- assign_features_to_polygons(points_sf, tess$cells, polygon_id_col = "cell_id")
-  summarize_by_cell(a, response_var = "y", id_col = "cell_id")$resp_mean_y
-}
-lims <- range(unlist(lapply(list(tess_voronoi, tess_hex, tess_square), cell_means)),
-              na.rm = TRUE)
+means <- lapply(list(Voronoi = tess_voronoi, Hex = tess_hex, Square = tess_square),
+                on_cells)
+lims  <- range(unlist(lapply(means, `[[`, "resp_mean_y")), na.rm = TRUE)
 
-# One line per map instead of a title and a subtitle, and the cell count taken
-# from the tessellation rather than typed in.
-bare <- function(tess, label) {
-  make_choropleth(tess, nc_boundary, points_sf) +
-    ggplot2::scale_fill_viridis_c(name = "Mean y", limits = lims) +
-    ggplot2::labs(title = sprintf("%s, %d cells", label, nrow(tess$cells)),
-                  subtitle = NULL) +
-    ggplot2::theme(plot.title = ggplot2::element_text(size = ggplot2::rel(1)))
-}
-
-(bare(tess_voronoi, "Voronoi") /
- bare(tess_hex,     "Hex") /
- bare(tess_square,  "Square")) +
-  plot_layout(guides = "collect") +
-  plot_annotation(title = "Tessellation comparison, cell-level mean response")
-```
-
-![The Voronoi, hexagonal and square maps stacked on one shared colour
-scale, so the cell values can be compared down the page. All three show
-the same west-to-east gradient; they differ in how the cell boundaries
-fall.](spatialkit_nc_demo_files/figure-html/comparison-panel-1.png)
-
-All three at a glance
-
-------------------------------------------------------------------------
-
-## 5. Spatial cross-validation
-
-This is the part the rest of the package exists to support.
-
-### 5a. How far does correlation reach?
-
-[`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-fits an omnidirectional variogram and returns the effective range in CRS
-units — here, US survey feet. It also fits the four principal directions
-and reports their ranges in the `directional` attribute (with their
-largest-over-smallest ratio in `anisotropy`), but only as a diagnostic:
-each direction sees about a quarter of the point pairs, the maximum of
-four such fits is biased upward, and the windows are fixed to the
-coordinate axes, so nothing built from them is invariant to rotating the
-layer. The all-pairs fit is the estimate or there is none: the largest
-directional range never stands in for it. If you *know* the field is
-anisotropic, size blocks from the longest directional range explicitly:
-`max(attr(sac, "directional_fitted"), na.rm = TRUE)`, after checking
-`attr(sac, "directional_status")`, since `directional` is `NA` for a
-direction that ran past the fitted lags, which on such a field is often
-the long one. It returns `NA` (still classed `sac_range`, so it prints
-as `NA`) when the empirical variogram never reaches a sill, because an
-unidentified range must not be used to size blocks.
-
-``` r
-
-sac <- estimate_sac_range(points_sf, response_var = "y",
-                          predictor_vars = c("elevation", "pop_density"))
-sac
-```
-
-    ## NA 
-    ##   directional: 0 deg = 5145134 (past the fitted lags), 45 deg = 1618292 (past the fitted lags), 90 deg = 1760918 (past the fitted lags), 135 deg = 5145134 (past the fitted lags)
-    ##   in US survey feet of EPSG:2264; variogram of the residuals on predictor_vars (ols)
-
-``` r
-
-if (is.na(sac)) {
-  cat("no identified range:", attr(sac, "rejected_reason"), "\n")
-} else {
-  cat(sprintf("range = %.0f ft; anisotropy ratio %.2f\n",
-              as.numeric(sac), attr(sac, "anisotropy")))
-}
-```
-
-    ## no identified range: fitted range exceeds the largest lag fitted
-
-The variogram is attached either way, so `plot(sac)` draws the curve and
-lets you judge it rather than trust it (`plot(fit, type = "variogram")`
-does the same for a fitted model’s residuals). The distance axis is
-labelled in the units of the CRS the variogram was fitted in, and when
-no range was identified the subtitle says why. A rejected range must not
-be handed to `make_folds(auto_range = TRUE)`, which is why it comes back
-`NA` rather than as a long range.
-
-### 5b. Two fold schemes on the same data
-
-``` r
-
-# No range was identified in 5a, so the block size cannot come from the
-# variogram.  The field was built as a sine wave with a quarter-wavelength of
-# about 390,000 ft, the scale over which it changes sign; 400,000-ft blocks
-# hold out whole lobes of it.  cv_block_size_sweep() gives the cross-validated
-# error at each block size, and fold_separation() says which size matches a
-# map (5c below).
-folds_random  <- make_folds(points_sf, k = 5, method = "random_kfold", seed = 42)
-folds_blocked <- make_folds(points_sf, k = 5, method = "block_kfold",
-                            block_size = 400000, seed = 42)
-
-c(random = folds_random$k, blocked = folds_blocked$k,
-  blocks = folds_blocked$params$blocks_used)
-```
-
-    ##  random blocked  blocks 
-    ##       5       5      12
-
-[`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
-is the fastest way to see whether the blocks actually separate the data,
-and how wide they are:
-
-``` r
-
-library(patchwork)
-(plot_folds(folds_random,  points_sf, boundary = nc_boundary) /
- plot_folds(folds_blocked, points_sf, boundary = nc_boundary)) +
+(map_means(means$Voronoi, "Voronoi", lims) /
+ map_means(means$Hex,     "Hex",     lims) /
+ map_means(means$Square,  "Square",  lims)) +
   plot_layout(guides = "collect")
 ```
 
-![Two maps of the same points, random folds above and blocked folds
-below, sharing one fold legend. In the random map the five colours are
-interleaved everywhere; in the blocked map, with the block grid drawn
-behind, every block holds a single fold and each fold is two to four
-whole blocks: four of the five folds fall in two separate parts of the
-state, and the fifth's two blocks meet only at a
-corner.](spatialkit_nc_demo_files/figure-html/plot-folds-1.png)
+![The cell means of y on the Voronoi, hex and square cells, stacked on
+one colour scale. All three show the lowest values in the far west, the
+highest in the north-east and a band of lower values across the north of
+the centre; they differ in where the cell boundaries
+fall.](spatialkit_nc_demo_files/figure-html/comparison-panel-1.png)
 
-### 5c. The number the fold scheme changes
+The triangle map, on its own colour scale:
+
+``` r
+
+map_means(on_cells(tess_tri), "Delaunay triangles")
+```
+
+![The cell means of y on the Delaunay triangles. Most triangles are grey
+because they hold no observation; the coloured ones are small and
+scattered across the
+state.](spatialkit_nc_demo_files/figure-html/choro-tri-1.png)
+
+## Models fitted on the points
+
+The models below are fitted on the 300 points, not on the cell means;
+[`vignette("getting-started")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md)
+says when to fit on cells instead. The cells can still serve as
+cross-validation blocks:
+`make_folds(points_sf, k = 5, method = "block_kfold", blocks = tess_voronoi$cells)`
+holds out whole Voronoi cells.
+
+### A random forest and its residuals
 
 [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
 and
 [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
-need `ranger`. `include_coords = TRUE` hands the forest the coordinates,
-which lets it fit the training surface by location, so its error grows
-quickly with the distance from the data. Scoring the same model on both
-fold schemes shows how much:
-
-``` r
-
-cv_random  <- cv_rf(points_sf, "y", c("elevation", "pop_density"),
-                    folds = folds_random, include_coords = TRUE,
-                    num_trees = 300, seed = 1)
-cv_blocked <- cv_rf(points_sf, "y", c("elevation", "pop_density"),
-                    folds = folds_blocked, include_coords = TRUE,
-                    num_trees = 300, seed = 1)
-
-data.frame(
-  folds = c("random_kfold", "block_kfold"),
-  R2    = c(cv_random$overall$R2,   cv_blocked$overall$R2),
-  RMSE  = c(cv_random$overall$RMSE, cv_blocked$overall$RMSE)
-)
-```
-
-    ##          folds        R2     RMSE
-    ## 1 random_kfold 0.7945102 6.090085
-    ## 2  block_kfold 0.6313066 8.994703
-
-Random folds report R² = 0.795; blocked folds report 0.631 on the same
-fitted model, a drop of 21% of the reported skill.
-
-Which of the two to report depends on where the map will predict. The
-random estimate is the error of predicting among the points you have;
-the blocked one is the error of predicting whole blocks of the state
-from the rest. The map of section 7 predicts over the state these points
-were sampled across at random.
-[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
-sets the distances from such a map’s locations to the data beside the
-held-out distances of each scheme, and says which way each score errs
-for that map:
-
-``` r
-
-cells <- st_sample(nc_boundary, size = 2000, type = "regular")
-c(random  = attr(fold_separation(folds_random,  points_sf,
-                                 prediction_points = cells), "target")$reading,
-  blocked = attr(fold_separation(folds_blocked, points_sf,
-                                 prediction_points = cells), "target")$reading)
-```
-
-    ##    random   blocked 
-    ## "matched" "farther"
-
-`"matched"` is the scheme whose score is the error of that map,
-`"farther"` one that reads high for it, and `"closer"` one that reads
-low. A map that has to reach far beyond the points, into a region they
-never sampled, would turn the answer round.
-
-------------------------------------------------------------------------
-
-## 6. Fitting a model
+need `ranger`.
 
 ``` r
 
@@ -635,14 +418,13 @@ rf_fit
     ##   that predicts farther with cv_rf() on folds at its distances
     ##   (?fold_separation).
 
-Note that [`summary()`](https://rdrr.io/r/base/summary.html) on an
-`rf_fit` reports **out-of-bag** metrics, not in-sample ones —
-[`fitted.rf_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fitted.rf_fit.md)
+[`summary.spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.spatial_fit.md)
+on an `rf_fit` reports out-of-bag metrics, not in-sample ones:
+[`fitted.rf_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-fitted.md)
 returns out-of-bag predictions, and the printout says so. A `gwr_fit` or
-`bayesian_fit` reports genuinely in-sample metrics, so the two are not
-comparable;
-[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
-is.
+`bayesian_fit` reports in-sample metrics, so the two are not comparable;
+scores from the same folds are, as the comparison of backends below
+shows.
 
 ``` r
 
@@ -667,27 +449,20 @@ rf_fit$info$importance     # coef() on an rf_fit errors: a forest has no coeffic
     ##   elevation pop_density 
     ##   105.35583    83.25089
 
-The two printouts disagree in the third decimal of R² — `0.4733` above,
-`0.4715` here — while reporting an identical RMSE. Neither is wrong, and
-neither is a bug. Both read the *same* out-of-bag predictions; they
-differ only in the denominator of the variance they compare against.
-[`print.rf_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.rf_fit.md)
-echoes `ranger`’s own `r.squared`, which is `1 - MSE_oob / var(y)` using
-the unbiased (n − 1) sample variance.
-[`summary()`](https://rdrr.io/r/base/summary.html) recomputes
-`1 - SS_res / SS_tot` from the predictions, where
-`SS_tot = sum((y - mean(y))^2)` — an n denominator. The unexplained
-fraction therefore differs by exactly the factor n / (n − 1), here
-300/299, and RMSE, which involves no such comparison, matches to four
-decimals. If you need a figure comparable across backends, use
-[`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
-rather than either.
+The two printouts give different R² (0.4733 above, 0.4715 here) and the
+same RMSE. Both read the same out-of-bag predictions.
+[`print.rf_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.spatial_fit.md)
+echoes the R² that `ranger` reports, which compares the out-of-bag mean
+squared error with the variance of `y` computed with denominator n − 1;
+[`summary.spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.spatial_fit.md)
+uses denominator n. Their unexplained fractions therefore differ by the
+factor n / (n − 1), here 300 / 299.
 
-### Residual diagnostics
-
-[`plot()`](https://rdrr.io/r/graphics/plot.default.html) on any
-`spatial_fit` maps the residuals; visible structure means unmodelled
-spatial autocorrelation.
+[`plot.spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.spatial_fit.md)
+draws the residuals on a map by default (`type = "residuals"`);
+`"observed_predicted"`, `"variogram"` and, for a GWR fit,
+`"coefficients"` are the other views. Structure in the residual map is
+spatial autocorrelation the model has not captured, and
 [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
 puts a number on it.
 
@@ -697,9 +472,9 @@ plot(rf_fit, type = "residuals")
 ```
 
 ![Residuals of the random forest mapped over North Carolina on a
-red-to-blue scale. Positive residuals cluster in the west and negative
-ones through the centre, which is the visible spatial structure the
-model has not
+red-to-blue scale. Positive residuals cluster in the west-centre and the
+north-east, negative ones through the centre and the south-east. This is
+spatial structure the model has not
 captured.](spatialkit_nc_demo_files/figure-html/rf-resid-1.png)
 
 ``` r
@@ -711,7 +486,12 @@ cat(sprintf("Moran's I = %.4f (z = %.2f, p = %.3g)\n",
 
     ## Moran's I = 0.5443 (z = 20.12, p = 4.58e-90)
 
-### GWR, if `sp` is installed
+The residuals are autocorrelated (Moran’s I = 0.54, z = 20.1): the
+forest has not captured the spatial field added to `y`, which neither
+predictor carries. The section on spatial folds measures what that does
+to a cross-validated score.
+
+### A GWR fit, if `sp` is installed
 
 ``` r
 
@@ -724,74 +504,243 @@ gwr_fit <- fit_gwr_model(
 )
 
 gwr_met <- model_metrics(gwr_fit)
-# With adaptive = TRUE the bandwidth is a number of nearest neighbours, not a
-# distance in feet: each local regression uses the same count of points.
+# adaptive = TRUE: the bandwidth is a number of nearest neighbours, not feet.
 cat(sprintf("Bandwidth: %.0f neighbours | in-sample R2: %.3f | RMSE: %.3f\n",
             gwr_fit$info$bandwidth, gwr_met$R2, gwr_met$RMSE))
 ```
 
     ## Bandwidth: 44 neighbours | in-sample R2: 0.877 | RMSE: 4.701
 
-The fit raises no collinearity warning, but its survey of the local
-designs (`gwr_fit$info$local_collinearity`, see “Collinearity
-diagnostics” in
+GWR fits one weighted regression at each location, so each coefficient
+has a value at every point. `type = "coefficients"` maps one of them:
+
+``` r
+
+plot(gwr_fit, type = "coefficients", term = "elevation")
+```
+
+![The local GWR coefficient of elevation at each of the 300 points, from
+about 0.003 to 0.016. It is highest in a band through the centre and
+south-centre of the state and lowest in the north-centre and the
+north-east. The subtitle says no location is
+masked.](spatialkit_nc_demo_files/figure-html/gwr-coef-1.png)
+
+The simulation gives elevation the same effect, 0.01, everywhere, so the
+spread on the map is not variation in the true effect.
+
+In 25 of the 300 windows the local intercept is poorly determined: the
+condition index that includes the intercept (`cn` in
+`gwr_fit$info$local_collinearity`, see
 [`?fit_gwr_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md))
-is worth a look: in 25 of the 300 windows the condition index that
-includes the intercept (`cn`) is above 30. The cause is `elevation`: it
-averages about 3,000 but has a standard deviation of only about 400
-inside a 44-neighbour window, so locally it is nearly collinear with the
-intercept. What that leaves poorly determined is the local intercepts,
-not the slopes: the slope index (`cn_slopes`), which centres the
-predictors in each window, stays below 30 everywhere, so no slope is
-masked and the fit does not warn.
-`plot(gwr_fit, type = "coefficients", term = "Intercept")` draws those
-25 intercepts hollow. Centring the predictor
+is above 30. The cause is `elevation`, which averages about 3,000 but
+inside a window of 44 neighbours varies by little more than the noise
+the simulation added (standard deviation 400), so locally it is nearly
+collinear with the intercept. The slopes are well determined: their
+index (`cn_slopes`), which centres the predictors in each window, is at
+most 4.5, so the fit does not warn, and the elevation map above masks no
+location. With `term = "Intercept"` the same map draws the poorly
+determined intercepts hollow. Centring the predictor
 (`elevation - mean(elevation)`) gives the same bandwidth and fitted
 values and determines the intercepts too.
 
-### Comparing backends on identical folds
+## Scoring the model on spatial folds
+
+A random fold leaves each held-out point’s neighbours in the training
+data; a blocked fold holds out whole blocks of the state. With residuals
+as autocorrelated as the forest’s, the two schemes can give different
+scores; the runs below measure the difference on these data.
+
+### The autocorrelation range
+
+[`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+fits a variogram to the residuals of `y` on the predictors and returns
+the [autocorrelation
+range](https://elkronos.github.io/gis_modeling_toolkit/articles/glossary.html#autocorrelation-range)
+of the residuals in CRS units, here US survey feet. It returns `NA` when
+the variogram never levels off within the distances it was fitted over,
+because a range it cannot identify must not size the blocks.
+[`?estimate_sac_range`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+covers the directional fits and anisotropy.
+
+``` r
+
+sac <- estimate_sac_range(points_sf, response_var = "y",
+                          predictor_vars = c("elevation", "pop_density"))
+as.numeric(sac)
+```
+
+    ## [1] NA
+
+``` r
+
+attr(sac, "rejected_reason")
+```
+
+    ## [1] "fitted range exceeds the largest lag fitted"
+
+[`plot.sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.sac_range.md)
+draws the empirical variogram with the fitted model, so you can judge
+the fit; when no range was identified, the subtitle says why. Here the
+fitted curve is still rising at the largest distance it was fitted over.
+
+``` r
+
+plot(sac)
+```
+
+![The empirical variogram of the residuals, with point size showing the
+number of pairs, and the fitted model as a curve. The semivariance rises
+over most of the distances fitted and falls at the longest lag; the
+fitted curve is still rising at the largest lag, and the subtitle says
+the fitted range exceeds the largest lag
+fitted.](spatialkit_nc_demo_files/figure-html/sac-plot-1.png)
+
+### Random folds and blocks
+
+No range was identified, so the block size here comes from the
+simulation instead. The field changes sign about every 785,000 ft (π ×
+250,000), and 400,000 ft is about half that, the distance from a zero of
+the wave to its peak. On your own data, where the field is unknown,
+[`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md)
+gives the cross-validated error at each block size
+([`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md)).
+
+``` r
+
+folds_random  <- make_folds(points_sf, k = 5, method = "random_kfold", seed = 42)
+folds_blocked <- make_folds(points_sf, k = 5, method = "block_kfold",
+                            block_size = 400000, seed = 42)
+
+c(random = folds_random$k, blocked = folds_blocked$k,
+  blocks = folds_blocked$params$blocks_used)
+```
+
+    ##  random blocked  blocks 
+    ##       5       5      12
+
+[`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
+shows whether the blocks separate the data, and how wide they are:
+
+``` r
+
+library(patchwork)
+(plot_folds(folds_random,  points_sf, boundary = nc_boundary) /
+ plot_folds(folds_blocked, points_sf, boundary = nc_boundary)) +
+  plot_layout(guides = "collect")
+```
+
+![Two maps of the same points, random folds above and blocked folds
+below, sharing one fold legend. In the random map the five colours are
+interleaved everywhere; in the blocked map, with the block grid drawn
+behind, every block holds a single fold and each fold is two to four
+whole blocks: four of the five folds fall in two separate parts of the
+state, and the fifth's two blocks meet only at a
+corner.](spatialkit_nc_demo_files/figure-html/plot-folds-1.png)
+
+### The score under each scheme
+
+`include_coords = TRUE` gives the forest the coordinates, which lets it
+fit the training surface by location, so its error grows quickly with
+the distance from the data. Scoring it with the same predictors and
+settings on both fold schemes shows how much:
+
+``` r
+
+cv_random  <- cv_rf(points_sf, "y", c("elevation", "pop_density"),
+                    folds = folds_random, include_coords = TRUE,
+                    num_trees = 300, seed = 1)
+cv_blocked <- cv_rf(points_sf, "y", c("elevation", "pop_density"),
+                    folds = folds_blocked, include_coords = TRUE,
+                    num_trees = 300, seed = 1)
+
+data.frame(
+  folds = c("random_kfold", "block_kfold"),
+  R2    = c(cv_random$overall$R2,   cv_blocked$overall$R2),
+  RMSE  = c(cv_random$overall$RMSE, cv_blocked$overall$RMSE)
+)
+```
+
+    ##          folds        R2     RMSE
+    ## 1 random_kfold 0.7945102 6.090085
+    ## 2  block_kfold 0.6313066 8.994703
+
+Random folds report R² = 0.795; blocked folds report 0.631 with the same
+predictors and settings, a drop of 21 percent of the reported skill.
+
+Which of the two to report depends on where the map will predict. The
+random score is the error of predicting among the points you have; the
+blocked one is the error of predicting whole blocks of the state from
+the rest. The surface mapped at the end of this article covers the state
+these points were sampled across at random.
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+compares the distances from such a map’s locations to the data with the
+held-out distances of each scheme. Here `map_pts`, a regular sample of
+the state, stands in for that map’s grid:
+
+``` r
+
+map_pts <- st_sample(nc_boundary, size = 2000, type = "regular")
+reading <- c(
+  random  = attr(fold_separation(folds_random,  points_sf,
+                                 prediction_points = map_pts), "target")$reading,
+  blocked = attr(fold_separation(folds_blocked, points_sf,
+                                 prediction_points = map_pts), "target")$reading)
+reading
+```
+
+    ##    random   blocked 
+    ## "matched" "farther"
+
+`"matched"` says the held-out points sit about as far from their
+training data as the map’s locations sit from the data; `"farther"` says
+they sit farther, so that score tends to read high for this map. The
+reading compares nearest-neighbour distances and does not measure a
+bias.
+[`?fold_separation`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+lists all four readings, and
+[`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md)
+explains them. For a map of an area the points never sampled, the
+blocked score would be the closer match.
+
+The comparison of backends below and the area of applicability of the
+surface use the random folds, the scheme
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+reads as matched for this map.
+
+### Two backends on the same folds
 
 [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
-cross-validates each requested backend on the `folds` you pass. Any
-backend whose package is missing is dropped with a message, so the call
-still returns whatever could run.
+cross-validates each requested backend on the `folds` you pass, so their
+scores are comparable. A backend whose package is missing is dropped
+with a message, and the call returns the backends that could run.
 
 ``` r
 
 cmp <- compare_models_cv(
   points_sf, "y", c("elevation", "pop_density"),
   models   = c("RF", "GWR"),
-  folds    = folds_blocked,
+  folds    = folds_random,
   rf_args  = list(num_trees = 300)
 )
-cmp$overall
+cmp$overall[, c("model", "RMSE", "MAE", "R2")]
 ```
 
-    ##        RMSE       MAE      MAPE    SMAPE        R2 Adj_R2 n_pred n_MAPE n_SMAPE
-    ## 1  8.647533  6.974994  7.685077  7.66426 0.6592183     NA    300    300     300
-    ## 2 12.428033 10.235923 11.280144 11.17863 0.2961234     NA    300    300     300
-    ##   model
-    ## 1   GWR
-    ## 2    RF
+    ##   model     RMSE      MAE        R2
+    ## 1   GWR 5.591604 4.454352 0.8267726
+    ## 2    RF 9.823995 7.859748 0.4652879
 
-The RF row is the forest *without* the coordinates, and on the same
-blocked folds it scores worse than the coordinate forest in 5c did. That
-is not a contradiction. The field is a smooth wave that the two
-predictors do not carry, so the coordinates are informative out of block
-as well as in, and the blocked score says how much. What 5c measured was
-how much worse the coordinate forest predicts whole blocks of the state
-than it predicts among the points; what this table measures is what the
-predictors alone are worth. `Adj_R2` is `NA` in every `cv_*()` result’s
-`overall`: the pooled predictions come from `k` separately fitted models
-and have no single parameter count to adjust for.
+The RF row is the forest on the two predictors alone; on the same random
+folds the forest with coordinates scored R² = 0.795. The field is a
+smooth wave that neither predictor carries, and a forest given the
+coordinates can fit it by location.
 
-------------------------------------------------------------------------
-
-## 7. From a fit to a map, and where the map applies
+## A surface, and where it applies
 
 [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
-builds a regular grid over the training extent, joins covariates from
-the nearest observation, clips to the boundary and predicts:
+builds a regular grid over the training extent, takes each grid point’s
+covariates from the nearest observation, clips the grid to the outline
+and predicts. The map below uses `rf_fit`, the forest on the two
+predictors alone.
 
 ``` r
 
@@ -806,57 +755,41 @@ ggplot() +
   ggtitle("Predicted surface")
 ```
 
-![The fitted random forest predicted onto a regular grid over North
-Carolina and clipped to the state boundary, with predictions lowest in
-the far west and highest along the eastern
-coast.](spatialkit_nc_demo_files/figure-html/surface-1.png)
+![The random forest's predictions on a regular grid of points over North
+Carolina, clipped to the state outline. Predictions are lowest in the
+far west and highest in the
+north-east.](spatialkit_nc_demo_files/figure-html/surface-1.png)
 
 A fitted model returns a number for any location you hand it, including
 locations whose predictor values look nothing like the training data.
 [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
-marks where the cross-validated score actually applies. Pass the folds
-you validated with:
+marks where the cross-validated score applies. Pass it the folds the
+score came from, here the random ones:
 
 ``` r
 
-aoa <- area_of_applicability(surf, model = rf_fit, folds = folds_blocked)
+aoa <- area_of_applicability(surf, model = rf_fit, folds = folds_random)
 
 cat(sprintf("inside: %d | outside: %d | undetermined: %d | DI threshold %.3f\n",
             aoa$n_inside, aoa$n_outside, aoa$n_na, aoa$threshold))
 ```
 
-    ## inside: 1645 | outside: 0 | undetermined: 0 | DI threshold 0.170
+    ## inside: 1645 | outside: 0 | undetermined: 0 | DI threshold 0.152
 
 ``` r
 
-# AOA is NA wherever a predictor was missing or non-finite, and `!NA` is NA,
-# which R silently skips in a subscripted assignment. Test for TRUE and let
-# anything else count as outside.
-inside <- aoa$aoa$AOA %in% TRUE
-surf$.pred_masked <- ifelse(inside, surf$.pred, NA_real_)
-
-ggplot() +
-  geom_sf(data = surf, aes(colour = .pred_masked), size = 0.6) +
-  geom_sf(data = nc_boundary, fill = NA, colour = "grey20") +
-  scale_colour_viridis_c(name = "Predicted y", na.value = "grey85") +
-  theme_void() +
-  ggtitle("Predicted surface, extrapolations blanked out")
+# To blank the map outside the area. AOA is NA where a predictor is missing;
+# count those as outside.
+surf$.pred_masked <- ifelse(aoa$aoa$AOA %in% TRUE, surf$.pred, NA_real_)
 ```
 
-![The same predicted surface with cells outside the area of
-applicability blanked out. Nothing is blanked, because the grid took its
-covariates from the nearest observation and so holds no combination the
-model had not already
-seen.](spatialkit_nc_demo_files/figure-html/aoa-1.png)
-
-Nothing is masked here, and the reason is worth understanding rather
-than taking as reassurance: `predict_surface(covariates = points_sf)`
-copies predictor values from the **nearest observation**, so every grid
-cell carries a predictor vector some training point already had. Its
-dissimilarity index is therefore near zero by construction. The index
-earns its keep when the covariates come from somewhere else — a raster,
-a different survey, a future scenario. Hand it values outside the
-training range and it says so:
+No grid point is outside, because
+`predict_surface(covariates = points_sf)` copies predictor values from
+the nearest observation: every grid point carries a predictor vector
+some training point already had, so its dissimilarity index is 0 by
+construction. The index is useful when the covariates come from
+elsewhere, such as a raster, a different survey or a future scenario.
+Given values outside the training range, it marks them:
 
 ``` r
 
@@ -865,91 +798,33 @@ extreme <- st_sf(
   pop_density = c(mean(points_sf$pop_density), max(points_sf$pop_density) * 4),
   geometry    = st_geometry(points_sf)[1:2]
 )
-area_of_applicability(extreme, model = rf_fit, folds = folds_blocked)$aoa[, c("DI", "AOA")]
+st_drop_geometry(area_of_applicability(extreme, model = rf_fit,
+                                       folds = folds_random)$aoa)[, c("DI", "AOA")]
 ```
 
-    ## Simple feature collection with 2 features and 2 fields
-    ## Geometry type: POINT
-    ## Dimension:     XY
-    ## Bounding box:  xmin: 2604137 ymin: 653637.4 xmax: 2827401 ymax: 964007.8
-    ## Projected CRS: NAD83 / North Carolina (ftUS)
-    ##            DI   AOA                 geometry
-    ## 1  0.04806484  TRUE POINT (2827401 653637.4)
-    ## 2 15.68668080 FALSE POINT (2604137 964007.8)
+    ##            DI   AOA
+    ## 1  0.04806484  TRUE
+    ## 2 15.68668080 FALSE
 
-------------------------------------------------------------------------
+## Next
 
-## Summary
-
-| Tessellation | Cells | Notes                                                |
-|:-------------|------:|:-----------------------------------------------------|
-| Voronoi      |    40 | Adapts to point density via k-means seeds            |
-| Hex grid     |    49 | Uniform hexagons, good for regular sampling          |
-| Square grid  |    45 | Simplest regular grid                                |
-| Delaunay     |   586 | One triangle per Delaunay triplet; finest resolution |
-
-The choropleths show how each tessellation aggregates the response.
-Section 5 shows the thing that matters most: on the same data and the
-same fitted model, the fold scheme moves the reported score
-substantially, and only the blocked number describes the task you
-actually have.
-
-### Where to go next
-
-This page is the wide view. Each step has a vignette that stops and
-argues about it:
-
-| for | read |
-|:---|:---|
-| getting your own data in, and what the coordinates are in | [`vignette("getting-started")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md) |
-| how many cells, and the criteria that disagree | [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md) |
-| what a fold’s score estimates, the six fold schemes, and the error at each block size | [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md) |
-| residual autocorrelation, aggregation standard errors, coordinates as predictors and selection inside the folds | [`vignette("diagnostics")`](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md) |
-| handing the regions to someone else, and what to report | [`vignette("reporting")`](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.md) |
-
-Ten numbered scripts in `system.file("scripts", package = "spatialkit")`
-run the same ground at the console, printing what to look for in each
-figure before drawing it.
-
-    ## R version 4.6.2 (2026-10-29)
-    ## Platform: x86_64-pc-linux-gnu
-    ## Running under: Ubuntu 26.04.1 LTS
-    ## 
-    ## Matrix products: default
-    ## BLAS:   /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 
-    ## LAPACK: /usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblasp-r0.3.32.so;  LAPACK version 3.12.0
-    ## 
-    ## locale:
-    ##  [1] LC_CTYPE=C.UTF-8       LC_NUMERIC=C           LC_TIME=C.UTF-8       
-    ##  [4] LC_COLLATE=C.UTF-8     LC_MONETARY=C.UTF-8    LC_MESSAGES=C.UTF-8   
-    ##  [7] LC_PAPER=C.UTF-8       LC_NAME=C              LC_ADDRESS=C          
-    ## [10] LC_TELEPHONE=C         LC_MEASUREMENT=C.UTF-8 LC_IDENTIFICATION=C   
-    ## 
-    ## time zone: UTC
-    ## tzcode source: system (glibc)
-    ## 
-    ## attached base packages:
-    ## [1] stats     graphics  grDevices utils     datasets  methods   base     
-    ## 
-    ## other attached packages:
-    ## [1] patchwork_1.3.2       ggplot2_4.0.3         dplyr_1.2.1          
-    ## [4] sf_1.1-3              spatialkit_2.0.0.9000
-    ## 
-    ## loaded via a namespace (and not attached):
-    ##  [1] s2_1.1.13          magic_1.6-1-1      sass_0.4.10        generics_0.1.4    
-    ##  [5] class_7.3-24       KernSmooth_2.23-27 lattice_0.23-1     digest_0.6.39     
-    ##  [9] magrittr_2.0.5     evaluate_1.0.5     grid_4.6.2         RColorBrewer_1.1-3
-    ## [13] fastmap_1.2.0      jsonlite_2.0.0     Matrix_1.7-6       e1071_1.7-17      
-    ## [17] DBI_1.3.0          viridisLite_0.4.3  scales_1.4.0       textshaping_1.0.5 
-    ## [21] jquerylib_0.1.4    abind_1.4-8        cli_3.6.6          rlang_1.3.0       
-    ## [25] units_1.0-1        intervals_0.15.5   withr_3.0.3        cachem_1.1.0      
-    ## [29] yaml_2.3.12        otel_0.3.0         FNN_1.1.4.1        geometry_0.5.2    
-    ## [33] tools_4.6.2        ranger_0.18.0      spacetime_1.3-4    logger_0.4.3      
-    ## [37] vctrs_0.7.3        R6_2.6.1           proxy_0.4-29       classInt_0.4-11   
-    ## [41] zoo_1.9-1          lifecycle_1.0.5    fs_2.1.0           htmlwidgets_1.6.4 
-    ## [45] ragg_1.5.2         pkgconfig_2.0.3    desc_1.4.3         pkgdown_2.2.1     
-    ## [49] pillar_1.11.1      bslib_0.12.0       gtable_0.3.6       glue_1.8.1        
-    ## [53] Rcpp_1.1.2         gstat_2.1-6        systemfonts_1.3.2  xfun_0.62         
-    ## [57] tibble_3.3.1       tidyselect_1.2.1   knitr_1.52         farver_2.1.2      
-    ## [61] htmltools_0.5.9    labeling_0.4.3     rmarkdown_2.32     xts_0.14.3        
-    ## [65] wk_0.9.5           compiler_4.6.2     S7_0.2.2           sp_2.2-4
+[`vignette("troubleshooting")`](https://elkronos.github.io/gis_modeling_toolkit/articles/troubleshooting.md)
+lists the errors and warnings you are most likely to meet, what each
+means, and how to handle large layers, parallel folds, caches and the
+log. The main help pages this article relies on are
+[`?build_tessellation`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md),
+[`?summarize_by_cell`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
+[`?fit_rf_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md),
+[`?fit_gwr_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md),
+[`?estimate_sac_range`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md),
+[`?make_folds`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md),
+[`?fold_separation`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md),
+[`?compare_models_cv`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
+and
+[`?area_of_applicability`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md),
+and
+[`vignette("glossary")`](https://elkronos.github.io/gis_modeling_toolkit/articles/glossary.md)
+defines the terms. The script
+`system.file("scripts", "example_nc_demo.R", package = "spatialkit")`
+runs this example’s steps as one script at the console and writes its
+figures to a temporary folder.

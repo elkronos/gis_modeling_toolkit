@@ -66,6 +66,13 @@ and
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md),
 the two functions that attach the records this method removes.
 
+Other data preparation:
+[`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md),
+[`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md),
+[`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md),
+[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md),
+[`spatialkit-geometry`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)
+
 ## Examples
 
 ``` r
@@ -75,10 +82,10 @@ dat <- st_as_sf(
              resp = c(1, 2, NA, 4, 5), pred = c(1, 2, 3, 4, Inf)),
   coords = c("x", "y"), crs = 32632
 )
-clean <- prep_model_data(dat, "resp", "pred")   # warns: 2 of 5 rows dropped
-#> Warning: prep_model_data(): dropped 2 of 5 row(s) (40.0%): 1 with a missing value, 1 with a non-finite value and 0 without a location (an empty point, or a coordinate that is not finite or lies beyond 1e150). Rows affected by column: resp 1, pred 1. The response 'resp' averages 5 in the dropped rows that have one and 2.333 in the kept rows, a difference of 1.46 SD. The fit uses the 3 row(s) that remain; attr(, "dropped") lists the rows removed.
+# prep_model_data() warns that it dropped 2 of the 5 rows.
+clean <- suppressWarnings(prep_model_data(dat, "resp", "pred"))
 attr(clean, "dropped")$n          # 2
 #> [1] 2
-attr(clean[1:2, ], "dropped")     # NULL -- the record does not follow
+attr(clean[1:2, ], "dropped")     # NULL: the record does not follow
 #> NULL
 ```

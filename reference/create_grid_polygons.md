@@ -1,15 +1,13 @@
 # Create square or hexagonal grid polygons over a boundary
 
 Lays a regular grid of equal-area cells over `boundary` and clips it to
-that boundary. Reach for this rather than
+that boundary. Use it rather than
 [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
-when cell size should be a decision you make, instead of one dictated by
-where the observations happen to be. That is the case when you need
-per-cell rates comparable across the map, or a resolution that stays
-fixed as the sample grows. Hexagons (`type = "hex"`) avoid the
-axis-aligned artefacts of squares and give every cell the same distance
-to all six neighbours, which matters for anything that reads
-neighbourhoods.
+when you set the cell size yourself instead of letting the observations
+set it: per-cell rates comparable across the map, or a resolution that
+stays fixed as the sample grows. Hexagons (`type = "hex"`) avoid the
+axis-aligned artefacts of squares and put all six neighbours of a cell
+at the same distance.
 
 ## Usage
 
@@ -31,25 +29,26 @@ create_grid_polygons(
 
 - boundary:
 
-  Polygonal sf or sfc object. One that mixes XY and XYZ (or XYM)
-  geometries is read without Z and M, since sf reads a layer in the
-  dimension of its first geometry. So is one whose geometries carry M
-  (XYM or XYZM), which GEOS refuses. A row that is empty, or has a
-  coordinate that is not finite or lies beyond 1e150 (read as given, and
-  again after any move into another CRS), covers no ground and is left
-  out; a boundary with no such row left is refused with an error that
-  says so. A boundary in a geographic CRS with a vertex at a latitude
-  beyond 90 degrees, which is no place on the Earth, is refused with an
-  error of class `"spatialkit_cells_degenerate"` that names its rows and
-  says to check its CRS. A row the repair of `boundary` leaves without a
-  polygon (a ring with no height: every vertex on one line, or in
-  degrees on one parallel) is left out as well, and a boundary with no
-  polygon left is refused. A boundary without a CRS that `crs` stamps
-  with a geographic CRS is tested for its latitude in the same way.
+  Polygonal sf or sfc object, the study area the grid is laid over and
+  clipped to. Rows without a location, rows the repair leaves without a
+  polygon, vertices at a latitude beyond 90 and mixed dimensions are
+  handled as "Boundaries" in
+  [spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)
+  says. A boundary without a CRS that `crs` stamps with a geographic CRS
+  is tested for its latitude in the same way.
 
 - target_cells:
 
-  Optional approximate desired number of cells. The cell *size* is
+  Optional approximate desired number of cells. Besides a number it
+  accepts what `approx_n_cells` of
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  accepts and reads it the same way: the ranked levels of
+  [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+  (the first is used), a
+  [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+  result (its `$best`) or a
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
+  with the warnings and errors described there. The cell *size* is
   derived from it as `sqrt(area / target_cells)`, where `area` is that
   of the boundary's bounding box, so square grids get square cells; for
   hex grids the count is adjusted for hexagonal packing density and the
@@ -58,12 +57,11 @@ create_grid_polygons(
   lies; the count can, because hexagon rows are 0.87 `cellsize` apart
   while columns are `cellsize` apart (about 10 percent on a moderately
   elongated box, up to 1.7 times on a strip narrower than one hexagon).
-  The word "approximate" is load bearing: a grid of square cells over an
-  elongated bounding box needs more of them than a grid of rectangles
-  would (a 1000 x 1 strip at `target_cells = 9` yields cells of side
-  10.5 and about 95 of them), and clipping to an irregular boundary
-  moves the count again. Pass `cellsize` when the count matters more
-  than the shape.
+  The count is approximate: square cells over an elongated bounding box
+  need more cells than rectangles would (a 1000 x 1 strip at
+  `target_cells = 9` gives cells of side 10.5 and about 95 of them), and
+  clipping to an irregular boundary moves the count again. Pass
+  `cellsize` when the count matters more than the shape.
 
 - type:
 
@@ -72,24 +70,24 @@ create_grid_polygons(
 - cellsize:
 
   Optional numeric cell size (length 1 or 2), in the units of the
-  working CRS. Takes precedence over `n`: if both are supplied,
-  `cellsize` is used, `n` is ignored and a warning is logged. Supply
-  exactly one of `target_cells`, `cellsize` and `n`. For `type = "hex"`
-  a hexagon is defined by a single edge-to-edge distance, so only
-  `cellsize[1]` is used and a differing `cellsize[2]` is ignored with a
-  logged warning. A side of the boundary's bounding box that exceeds a
-  whole number of square cells, of this size or of the size derived from
-  `target_cells`, by no more than a margin of one part in 1e10 of the
-  largest coordinate of the boundary, at most a millionth of the
-  diagonal of its bounding box and at least four times the spacing of
-  doubles at that coordinate, gets that number of cells, so a box of
-  9000 by 6000 at 1000 gets 9 by 6 cells in any unit or origin, where
-  rounding could add a row or column. A boundary so far from the origin
-  of its coordinates that doubles there are spaced more than a millionth
-  of its extent apart (0.125 at 1e15, beside a boundary a few kilometres
-  across) has its grid lines rounded to that spacing; the grid is laid,
-  and a warning of class `"spatialkit_xy_imprecise"` gives the spacing
-  and the extent.
+  working CRS. Takes precedence over `n` and `target_cells`: if either
+  is also supplied, `cellsize` is used, the other is ignored and a
+  warning is logged. Supply exactly one of `target_cells`, `cellsize`
+  and `n`. For `type = "hex"` a hexagon is defined by a single
+  edge-to-edge distance, so only `cellsize[1]` is used and a differing
+  `cellsize[2]` is ignored with a logged warning. A side of the
+  boundary's bounding box that exceeds a whole number of square cells,
+  of this size or of the size derived from `target_cells`, by no more
+  than a margin of one part in 1e10 of the largest coordinate of the
+  boundary, at most a millionth of the diagonal of its bounding box and
+  at least four times the spacing of doubles at that coordinate, gets
+  that number of cells, so a box of 9000 by 6000 at 1000 gets 9 by 6
+  cells in any unit or origin, where rounding could add a row or column.
+  A boundary so far from the origin of its coordinates that doubles
+  there are spaced more than a millionth of its extent apart (0.125 at
+  1e15, beside a boundary a few kilometres across) has its grid lines
+  rounded to that spacing; the grid is laid, and a warning of class
+  `"spatialkit_xy_imprecise"` gives the spacing and the extent.
 
 - n:
 
@@ -103,19 +101,20 @@ create_grid_polygons(
   built with. Ignored (with a logged warning) when `cellsize` is also
   supplied. Passing both would otherwise truncate the grid to `n[1]` x
   `n[2]` cells anchored at the bounding-box corner, covering only part
-  of the boundary.
+  of the boundary. Wins over `target_cells`, which is then ignored with
+  a logged warning.
 
 - clip:
 
-  Logical; clip grid to boundary. In a projected or CRS-less grid, a
-  cell that meets the boundary only within a margin of the cell's edge
-  (the margin `cellsize` gives: one part in 1e10 of the largest
-  coordinate of the boundary, within its bounds; a cell whose edge lies
-  on the boundary's edge but for rounding) is dropped, rather than kept
-  as a sliver. The call stops when the clip leaves no cell, as it does
-  when the lattice has none: in degrees with s2 on, a boundary edge that
-  spans more than 180 degrees of longitude is read as the shorter
-  great-circle arc, the other way round the globe.
+  Logical; clip the grid to the boundary. Default `TRUE`. In a projected
+  or CRS-less grid, a cell that meets the boundary only within a margin
+  of the cell's edge (the margin `cellsize` gives: one part in 1e10 of
+  the largest coordinate of the boundary, within its bounds; a cell
+  whose edge lies on the boundary's edge up to rounding) is dropped,
+  rather than kept as a sliver. The call stops when the clip leaves no
+  cell, as it does when the lattice has none: in degrees with s2 on, a
+  boundary edge that spans more than 180 degrees of longitude is read as
+  the shorter great-circle arc, the other way round the globe.
 
 - crs:
 
@@ -171,19 +170,33 @@ create_grid_polygons(
 
 ## Value
 
-An sf polygon layer with poly_id column.
+An sf polygon layer with one column, `poly_id`, numbering the cells in
+the order
+[`sf::st_make_grid()`](https://r-spatial.github.io/sf/reference/st_make_grid.html)
+lays them (row by row from the bottom left). The numbering differs from
+that of
+[`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md)
+and
+[`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md),
+which sort cells by position; pass the result to
+[`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md)
+for IDs that do not depend on how the grid was built. Use one builder
+throughout an analysis, since a summary keyed on the IDs of one drawn on
+the cells of the other puts the values on the wrong cells.
 
 ## Details
 
 Size the grid with exactly one of `target_cells` (roughly how many cells
-you want, the package derives the rest), `cellsize` (a fixed edge length
-in CRS units) or `n` (a fixed number of columns and rows). See
-`@param cellsize` for what happens when more than one is given.
+you want; the package derives the rest), `cellsize` (a fixed edge length
+in CRS units) or `n` (a fixed number of columns and rows). When more
+than one is given, `cellsize` wins over the other two and `n` wins over
+`target_cells`; each argument ignored is named in a logged warning.
 
 ## See also
 
-Other tessellation:
+Other cell building:
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md),
+[`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md),
 [`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md),
 [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md),
 [`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md),
@@ -203,9 +216,9 @@ grid_sq  <- create_grid_polygons(bnd, target_cells = 100, type = "square")
 grid_hex <- create_grid_polygons(bnd, target_cells = 100, type = "hex")
 nrow(grid_sq)
 #> [1] 100
-# Hex counts run above target because clipping keeps every hexagon that
-# merely overhangs the boundary; the inflation is proportionally larger
-# at small target_cells.
+# The hex count runs above the target: clipping keeps every hexagon that
+# overhangs the boundary, and that adds more, in proportion, at a small
+# target_cells.
 nrow(grid_hex)
 #> [1] 114
 ```

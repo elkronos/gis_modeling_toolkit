@@ -4,15 +4,17 @@
 <meta charset="UTF-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>spatialkit: Tessellations, Spatial Cross-Validation and Models • spatialkit</title>
-<script src="../deps/jquery-3.6.0/jquery-3.6.0.min.js"></script><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<title>Worked example: North Carolina • spatialkit</title>
+<!-- katex math --><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous" onload="renderMathInElement(document.body);"></script><script src="../katex-auto.js"></script><script src="../deps/jquery-3.6.0/jquery-3.6.0.min.js"></script><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <link href="../deps/bootstrap-5.3.8/bootstrap.min.css" rel="stylesheet">
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
-<script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><meta property="og:title" content="spatialkit: Tessellations, Spatial Cross-Validation and Models">
-<meta name="description" content="The whole pipeline end to end on North Carolina: four tessellations, aggregation, folds, models, and a surface with its area of applicability.
+<script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><link href="../extra.css" rel="stylesheet">
+<meta property="og:title" content="Worked example: North Carolina">
+<meta name="description" content="The pipeline on a simulated field over North Carolina, comparing four tessellations, two fold schemes and two backends at cell counts set by hand.
 ">
-<meta property="og:description" content="The whole pipeline end to end on North Carolina: four tessellations, aggregation, folds, models, and a surface with its area of applicability.
+<meta property="og:description" content="The pipeline on a simulated field over North Carolina, comparing four tessellations, two fold schemes and two backends at cell counts set by hand.
 ">
 </head>
 <body>
@@ -37,16 +39,21 @@
 <li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><a class="dropdown-item" href="../articles/getting-started.html">Getting started</a></li>
+<li><a class="dropdown-item" href="../articles/getting-started.html">Get started</a></li>
     <li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>One topic at a time</h6></li>
+    <li><h6 class="dropdown-header" data-toc-skip>Step by step</h6></li>
     <li><a class="dropdown-item" href="../articles/resolution.html">Choosing a resolution</a></li>
+    <li><a class="dropdown-item" href="../articles/cells.html">Building cells and summarising them</a></li>
     <li><a class="dropdown-item" href="../articles/spatial-cross-validation.html">Spatial cross-validation</a></li>
-    <li><a class="dropdown-item" href="../articles/diagnostics.html">Diagnostics</a></li>
+    <li><a class="dropdown-item" href="../articles/models.html">Fitting and checking models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">Exporting and reporting results</a></li>
     <li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
-    <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
-    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
+    <li><h6 class="dropdown-header" data-toc-skip>Example</h6></li>
+    <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">Worked example: North Carolina</a></li>
+    <li><hr class="dropdown-divider"></li>
+    <li><h6 class="dropdown-header" data-toc-skip>Help</h6></li>
+    <li><a class="dropdown-item" href="../articles/troubleshooting.html">Troubleshooting and performance</a></li>
+    <li><a class="dropdown-item" href="../articles/glossary.html">Terms used on these pages</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -69,11 +76,10 @@
 <div class="row">
   <main id="main" class="col-md-9"><div class="page-header">
 
-      <h1>spatialkit: Tessellations, Spatial Cross-Validation and Models</h1>
+      <h1>Worked example: North Carolina</h1>
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">11 November 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/spatialkit_nc_demo.Rmd" class="external-link"><code>vignettes/spatialkit_nc_demo.Rmd</code></a></small>
       <div class="d-none name"><code>spatialkit_nc_demo.Rmd</code></div>
@@ -81,94 +87,59 @@ Chase</h4>
 
     
     
+<p>This article runs the pipeline on a simulated field over North
+Carolina, where the structure the cells and models should find is known,
+and compares four tessellations, two fold schemes and two backends on
+it. <code><a href="../articles/getting-started.html">vignette("getting-started")</a></code> takes the short path
+through the same steps. The state outline comes from the
+<code>nc.shp</code> file bundled with <code>sf</code>, so the article
+needs no other files.</p>
+<p><em>This article needs six optional packages: <code>ggplot2</code>
+for the figures, <code>patchwork</code> for the stacked panels,
+<code>geometry</code> for the Delaunay triangles, <code>ranger</code>
+for the random forest, <code>sp</code> for GWR and <code>gstat</code>
+for the variogram. Where one is missing, the code that needs it is shown
+but not run.</em></p>
 <div class="section level2">
-<h2 id="overview">Overview<a class="anchor" aria-label="anchor" href="#overview"></a>
+<h2 id="the-state-outline-in-feet">The state outline, in feet<a class="anchor" aria-label="anchor" href="#the-state-outline-in-feet"></a>
 </h2>
-<p>This vignette generates <strong>synthetic spatial data</strong> over
-North Carolina and walks through the <code>spatialkit</code> workflow
-end to end:</p>
-<ol style="list-style-type: decimal">
-<li>Load the boundary and check which optional packages are present</li>
-<li>Simulate observations with known structure over it</li>
-<li>Build four tessellation types (Voronoi, hex, square, Delaunay)</li>
-<li>Assign points to cells, aggregate with
-<code><a href="../reference/summarize_by_cell.html">summarize_by_cell()</a></code>, and map the cell means</li>
-<li>Estimate the autocorrelation range, build spatial CV folds, and
-score a model under <strong>blocked</strong> versus
-<strong>random</strong> folds</li>
-<li>Fit the models to keep: a random forest, GWR when <code>sp</code> is
-installed, and the two compared on identical folds</li>
-<li>Predict onto a surface and mark where that surface is
-extrapolation</li>
-</ol>
-<p>Everything is self-contained — the boundary comes from the
-<code>nc.shp</code> demo shapefile bundled with <code>sf</code>, so no
-external files are needed.</p>
-<p>The cell functions run at their defaults: density-weighted seeds
-(<code>partition = "density"</code>, from 3 starts) and a pooled value
-beside each cell mean (<code>estimate = "pooled"</code>).
-<code>partition = "kmeans"</code> in <code><a href="../reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code>
-and <code>estimate = "mean"</code> in <code><a href="../reference/summarize_by_cell.html">summarize_by_cell()</a></code>
-give the k-means seeds and the plain frame of earlier versions.</p>
-<p>Optional backends are checked at the top and every section that needs
-one is guarded, so this document renders with whatever you happen to
-have installed. This table always runs, even when the gate below it is
-shut – it is what says which backend is missing when the code stops
-producing output:</p>
-<pre><code><span><span class="co">##     package available                          used_for</span></span>
-<span><span class="co">## 1   ggplot2      TRUE                         all plots</span></span>
-<span><span class="co">## 2 patchwork      TRUE     the stacked comparison panels</span></span>
-<span><span class="co">## 3  geometry      TRUE       true Delaunay triangulation</span></span>
-<span><span class="co">## 4    ranger      TRUE             random forest backend</span></span>
-<span><span class="co">## 5     gstat      TRUE variogram / autocorrelation range</span></span>
-<span><span class="co">## 6        sp      TRUE                       GWR backend</span></span></code></pre>
-<hr>
-</div>
-<div class="section level2">
-<h2 id="packages-and-boundary">1. Packages and boundary<a class="anchor" aria-label="anchor" href="#packages-and-boundary"></a>
-</h2>
-<div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://elkronos.github.io/gis_modeling_toolkit/">spatialkit</a></span><span class="op">)</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r-spatial.github.io/sf/" class="external-link">sf</a></span><span class="op">)</span></span>
-<span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://dplyr.tidyverse.org" class="external-link">dplyr</a></span><span class="op">)</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://ggplot2.tidyverse.org" class="external-link">ggplot2</a></span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">42</span><span class="op">)</span></span></code></pre></div>
-<p>We load the North Carolina county boundaries shipped with
-<code>sf</code>, dissolve them into a single state outline, and project
-to <strong>NAD83 / North Carolina (ftUS)</strong> (EPSG:2264) so
-distances are planar rather than angular. Every distance, bandwidth and
-block size below is therefore in <strong>US survey feet</strong>, not
-metres — projected does not mean metric, and the unit is whatever the
-CRS says it is:</p>
-<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<p>The chunk below dissolves the county boundaries shipped with
+<code>sf</code> into one state outline and projects it to NAD83 / North
+Carolina (ftUS), EPSG:2264, so that distances are planar. Every distance
+and block size below is therefore in US survey feet, not metres (the GWR
+bandwidth is a count of neighbours). Projected does not mean metric: the
+unit is the one the CRS names.</p>
+<div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">nc_counties</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_read.html" class="external-link">st_read</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"shape/nc.shp"</span>, package <span class="op">=</span> <span class="st">"sf"</span><span class="op">)</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="va">nc_boundary</span> <span class="op">&lt;-</span> <span class="va">nc_counties</span> <span class="op">|&gt;</span></span>
 <span>  <span class="fu"><a href="https://r-spatial.github.io/sf/reference/geos_combine.html" class="external-link">st_union</a></span><span class="op">(</span><span class="op">)</span> <span class="op">|&gt;</span></span>
 <span>  <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_transform.html" class="external-link">st_transform</a></span><span class="op">(</span><span class="fl">2264</span><span class="op">)</span> <span class="op">|&gt;</span></span>
 <span>  <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sf.html" class="external-link">st_as_sf</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div>
-<hr>
 </div>
 <div class="section level2">
-<h2 id="synthetic-observations">2. Synthetic observations<a class="anchor" aria-label="anchor" href="#synthetic-observations"></a>
+<h2 id="a-simulated-field-with-known-structure">A simulated field with known structure<a class="anchor" aria-label="anchor" href="#a-simulated-field-with-known-structure"></a>
 </h2>
-<p>300 points inside the state boundary with two predictors and a
-spatially varying response:</p>
+<p>Three hundred points inside the outline carry two predictors and a
+response:</p>
 <ul>
 <li>
-<code>elevation</code> — gradient increasing west to east, plus
-noise</li>
+<code>elevation</code> rises from west to east, plus noise.</li>
 <li>
-<code>pop_density</code> — decays with distance from two fake
-“cities”</li>
+<code>pop_density</code> decays with the distance from two invented
+cities.</li>
 <li>
-<code>y</code> — driven by the two predictors <strong>plus a spatial
-field neither of them explains</strong>. That last term is deliberate:
-it is the unmodelled spatial structure that nearby observations carry,
-so a model’s error depends on how far from the data it predicts, and it
-is what section 5 measures.</li>
+<code>y</code> is the sum of the two predictors’ effects, a spatial
+field that neither predictor carries, and noise. The field is structure
+that nearby observations share, so a model’s error depends on how far
+from the data it predicts.</li>
 </ul>
-<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">n_points</span> <span class="op">&lt;-</span> <span class="fl">300</span></span>
 <span></span>
 <span><span class="va">pts_raw</span>    <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_sample.html" class="external-link">st_sample</a></span><span class="op">(</span><span class="va">nc_boundary</span>, size <span class="op">=</span> <span class="va">n_points</span>, type <span class="op">=</span> <span class="st">"random"</span><span class="op">)</span></span>
@@ -178,8 +149,8 @@ is what section 5 measures.</li>
 <span></span>
 <span><span class="va">elevation</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/scale.html" class="external-link">scale</a></span><span class="op">(</span><span class="va">x_coords</span><span class="op">)</span><span class="op">[</span>, <span class="fl">1</span><span class="op">]</span> <span class="op">*</span> <span class="fl">500</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n_points</span>, <span class="fl">3000</span>, <span class="fl">400</span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">city1</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1530000</span>, <span class="fl">550000</span><span class="op">)</span>   <span class="co"># Charlotte-ish in EPSG:2264</span></span>
-<span><span class="va">city2</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">2150000</span>, <span class="fl">750000</span><span class="op">)</span>   <span class="co"># Raleigh-ish</span></span>
+<span><span class="va">city1</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1530000</span>, <span class="fl">550000</span><span class="op">)</span>   <span class="co"># near Charlotte in EPSG:2264</span></span>
+<span><span class="va">city2</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">2150000</span>, <span class="fl">750000</span><span class="op">)</span>   <span class="co"># near Raleigh</span></span>
 <span><span class="va">dist_to_city</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">pmin</a></span><span class="op">(</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/MathFun.html" class="external-link">sqrt</a></span><span class="op">(</span><span class="op">(</span><span class="va">x_coords</span> <span class="op">-</span> <span class="va">city1</span><span class="op">[</span><span class="fl">1</span><span class="op">]</span><span class="op">)</span><span class="op">^</span><span class="fl">2</span> <span class="op">+</span> <span class="op">(</span><span class="va">y_coords</span> <span class="op">-</span> <span class="va">city1</span><span class="op">[</span><span class="fl">2</span><span class="op">]</span><span class="op">)</span><span class="op">^</span><span class="fl">2</span><span class="op">)</span>,</span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/MathFun.html" class="external-link">sqrt</a></span><span class="op">(</span><span class="op">(</span><span class="va">x_coords</span> <span class="op">-</span> <span class="va">city2</span><span class="op">[</span><span class="fl">1</span><span class="op">]</span><span class="op">)</span><span class="op">^</span><span class="fl">2</span> <span class="op">+</span> <span class="op">(</span><span class="va">y_coords</span> <span class="op">-</span> <span class="va">city2</span><span class="op">[</span><span class="fl">2</span><span class="op">]</span><span class="op">)</span><span class="op">^</span><span class="fl">2</span><span class="op">)</span></span>
@@ -200,30 +171,36 @@ is what section 5 measures.</li>
 <span>  pop_density <span class="op">=</span> <span class="va">pop_density</span>,</span>
 <span>  geometry    <span class="op">=</span> <span class="va">pts_raw</span></span>
 <span><span class="op">)</span></span></code></pre></div>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggplot.html" class="external-link">ggplot</a></span><span class="op">(</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggsf.html" class="external-link">geom_sf</a></span><span class="op">(</span>data <span class="op">=</span> <span class="va">nc_boundary</span>, fill <span class="op">=</span> <span class="st">"grey95"</span>, colour <span class="op">=</span> <span class="st">"black"</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggsf.html" class="external-link">geom_sf</a></span><span class="op">(</span>data <span class="op">=</span> <span class="va">points_sf</span>, <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/aes.html" class="external-link">aes</a></span><span class="op">(</span>colour <span class="op">=</span> <span class="va">y</span><span class="op">)</span>, size <span class="op">=</span> <span class="fl">1.1</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_viridis.html" class="external-link">scale_colour_viridis_c</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"Response (y)"</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggtheme.html" class="external-link">theme_void</a></span><span class="op">(</span><span class="op">)</span> <span class="op">+</span></span>
-<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html" class="external-link">ggtitle</a></span><span class="op">(</span><span class="st">"Raw observation points, North Carolina"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatialkit_nc_demo_files/figure-html/quick-peek-1.png" class="r-plt" alt="Three hundred simulated observation points scattered across North Carolina, coloured by response value. Lower values cluster in the west and higher values along the eastern coast." width="100%" style="display: block; margin: auto;"></p>
-<hr>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html" class="external-link">ggtitle</a></span><span class="op">(</span><span class="st">"Simulated observations"</span><span class="op">)</span></span></code></pre></div>
+<p><img src="spatialkit_nc_demo_files/figure-html/quick-peek-1.png" class="r-plt" alt="Three hundred simulated observation points scattered across North Carolina, coloured by response value. The lowest values are in the far west and the highest in the north-east, with lower values again through the north of the centre." width="100%" style="display: block; margin: auto;"></p>
 </div>
 <div class="section level2">
-<h2 id="four-tessellations">3. Four tessellations<a class="anchor" aria-label="anchor" href="#four-tessellations"></a>
+<h2 id="four-tessellations">Four tessellations<a class="anchor" aria-label="anchor" href="#four-tessellations"></a>
 </h2>
+<p><code><a href="../reference/build_tessellation.html">build_tessellation()</a></code> builds four kinds of cell from the
+same points and outline; <code><a href="../articles/cells.html">vignette("cells")</a></code> says which kind
+suits which purpose. The counts are set by hand, 40 seeds for the
+Voronoi cells and about 50 cells for each grid, so that the methods are
+compared at similar numbers of cells.
+<code><a href="../articles/resolution.html">vignette("resolution")</a></code> shows how to choose the count from
+the data.</p>
 <div class="section level3">
-<h3 id="a--voronoi-from-40-density-weighted-k-means-seeds">3a. Voronoi from ~40 density-weighted k-means seeds<a class="anchor" aria-label="anchor" href="#a--voronoi-from-40-density-weighted-k-means-seeds"></a>
+<h3 id="voronoi-cells-from-40-density-weighted-k-means-seeds">Voronoi cells from 40 density-weighted k-means seeds<a class="anchor" aria-label="anchor" href="#voronoi-cells-from-40-density-weighted-k-means-seeds"></a>
 </h3>
-<p>Voronoi cells are built around <em>seed</em> points, not the
-observations themselves. Seeding one cell per observation would give 300
-cells each containing a single point — a nearest-neighbour interpolation
-rather than an aggregation, with no within-cell variation to compute a
-standard error from. <code><a href="../reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code> clusters the
-observations first, each weighted by its local density, so cells are
-small where the observations are dense.</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<p>Voronoi cells grow around seed points, not around the observations.
+One cell per observation would give 300 cells of one point each: a
+nearest-neighbour interpolation rather than an aggregation, with no
+spread inside a cell to compute a standard error from.
+<code><a href="../reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code> clusters the observations first, each
+weighted by its local density, so cells are small where the observations
+are dense.</p>
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">seeds</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/get_voronoi_seeds.html">get_voronoi_seeds</a></span><span class="op">(</span></span>
 <span>  boundary      <span class="op">=</span> <span class="va">nc_boundary</span>,</span>
 <span>  sample_points <span class="op">=</span> <span class="va">points_sf</span>,</span>
@@ -238,22 +215,21 @@ small where the observations are dense.</p>
 <span><span class="va">outside</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/lengths.html" class="external-link">lengths</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/geos_binary_pred.html" class="external-link">st_intersects</a></span><span class="op">(</span><span class="va">seeds</span>, <span class="va">nc_boundary</span><span class="op">)</span><span class="op">)</span> <span class="op">==</span> <span class="fl">0</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/sum.html" class="external-link">sum</a></span><span class="op">(</span><span class="va">outside</span><span class="op">)</span>                   <span class="co"># seeds that lie outside the state outline</span></span></code></pre></div>
 <pre><code><span><span class="co">## [1] 1</span></span></code></pre>
-<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">tess_voronoi</span><span class="op">$</span><span class="va">index</span><span class="op">[</span><span class="va">outside</span><span class="op">]</span>    <span class="co"># the cell each of them generates</span></span></code></pre></div>
 <pre><code><span><span class="co">## [1] 38</span></span></code></pre>
-<p>A k-means centre is a mean of observations, and it can lie outside a
-boundary that is not convex. Here one density-weighted centre lies just
-outside the state outline, over a sound that coastal observations
-surround. Its cell, the part of the state nearer it than any other seed,
-is built inside the outline, and <code>tess_voronoi$index</code> gives
-the seed that cell, as it gives every seed the cell it generates.
-<code>seeds$cell_id &lt;- tess_voronoi$index</code> is then what
-<code><a href="../reference/cell_values_at.html">cell_values_at()</a></code> reads to place other locations.</p>
+<p>A k-means centre is a mean of observations, so it can lie outside an
+outline that is not convex. Here 1 of the 40 centres lies just outside
+the state outline, over a sound that coastal observations surround. Its
+cell, the part of the state nearer to it than to any other seed, is
+still built inside the outline. For seeds,
+<code>tess_voronoi$index</code> holds the <code>cell_id</code> each seed
+generates, including this one.</p>
 </div>
 <div class="section level3">
-<h3 id="b-and-3c--hex-and-square-grids-50-cells">3b and 3c. Hex and square grids (~50 cells)<a class="anchor" aria-label="anchor" href="#b-and-3c--hex-and-square-grids-50-cells"></a>
+<h3 id="hex-and-square-grids-of-about-50-cells">Hex and square grids of about 50 cells<a class="anchor" aria-label="anchor" href="#hex-and-square-grids-of-about-50-cells"></a>
 </h3>
-<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">tess_hex</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/build_tessellation.html">build_tessellation</a></span><span class="op">(</span></span>
 <span>  <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span>,</span>
 <span>  method <span class="op">=</span> <span class="st">"hex"</span>, approx_n_cells <span class="op">=</span> <span class="fl">50</span>, clip <span class="op">=</span> <span class="cn">TRUE</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span></span>
@@ -263,57 +239,60 @@ the seed that cell, as it gives every seed the cell it generates.
 <span>  <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span>,</span>
 <span>  method <span class="op">=</span> <span class="st">"square"</span>, approx_n_cells <span class="op">=</span> <span class="fl">50</span>, clip <span class="op">=</span> <span class="cn">TRUE</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
-<p>All four methods return cells carrying a <code>cell_id</code> column;
-the grid methods keep <code>poly_id</code> alongside it, holding the
-same values.</p>
-<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
+<p>All four methods return cells with a <code>cell_id</code> column; the
+grid methods keep <code>poly_id</code> beside it, holding the same
+values.</p>
+<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">tess_hex</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">## [1] "poly_id"  "geometry" "cell_id"</span></span></code></pre>
 </div>
 <div class="section level3">
-<h3 id="d--delaunay-triangles">3d. Delaunay triangles<a class="anchor" aria-label="anchor" href="#d--delaunay-triangles"></a>
+<h3 id="delaunay-triangles">Delaunay triangles<a class="anchor" aria-label="anchor" href="#delaunay-triangles"></a>
 </h3>
 <p><code>method = "triangles"</code> uses
 <code><a href="https://rdrr.io/pkg/geometry/man/delaunayn.html" class="external-link">geometry::delaunayn()</a></code> when <code>geometry</code> is
-installed. Without it, it does <strong>not</strong> error — it falls
-back to <code><a href="https://r-spatial.github.io/sf/reference/geos_unary.html" class="external-link">sf::st_triangulate()</a></code> (GEOS) on the point set and
-logs a warning. That is still the Delaunay triangulation of the input
-points; only the resolution of degenerate configurations can differ.
-Because the two paths are not identical, this section is guarded on
-<code>geometry</code> rather than on the call succeeding:</p>
-<div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
+installed, and otherwise falls back to <code><a href="https://r-spatial.github.io/sf/reference/geos_unary.html" class="external-link">sf::st_triangulate()</a></code>
+with a logged warning. Both give the Delaunay triangulation of the
+points; they can split degenerate (co-circular) configurations
+differently.</p>
+<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">tess_tri</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/build_tessellation.html">build_tessellation</a></span><span class="op">(</span></span>
 <span>  <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span>,</span>
 <span>  method <span class="op">=</span> <span class="st">"triangles"</span>, clip <span class="op">=</span> <span class="cn">TRUE</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">tess_tri</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## [1] 586</span></span></code></pre>
-<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span></span>
-<span>  <span class="st">"Voronoi: %d | Hex: %d | Square: %d | Triangles: %s\n"</span>,</span>
-<span>  <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">tess_voronoi</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span>,</span>
-<span>  <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">tess_hex</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span>,</span>
-<span>  <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">tess_square</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span>,</span>
-<span>  <span class="kw">if</span> <span class="op">(</span><span class="va">has_geom</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">tess_tri</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span> <span class="kw">else</span> <span class="st">"skipped (install 'geometry')"</span></span>
-<span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## Voronoi: 40 | Hex: 49 | Square: 45 | Triangles: 586</span></span></code></pre>
-<div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># has_geom is requireNamespace("geometry", quietly = TRUE), set in the</span></span>
-<span><span class="co"># hidden setup chunk with the other availability flags the table above shows.</span></span></code></pre></div>
-<hr>
+<span><span class="va">tri_assigned</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/assign_features_to_polygons.html">assign_features_to_polygons</a></span><span class="op">(</span><span class="va">points_sf</span>, <span class="va">tess_tri</span><span class="op">$</span><span class="va">cells</span>,</span>
+<span>                                            polygon_id_col <span class="op">=</span> <span class="st">"cell_id"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>triangles   <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">tess_tri</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span>,</span>
+<span>  with_points <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unique.html" class="external-link">unique</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/na.fail.html" class="external-link">na.omit</a></span><span class="op">(</span><span class="va">tri_assigned</span><span class="op">$</span><span class="va">cell_id</span><span class="op">)</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##   triangles with_points </span></span>
+<span><span class="co">##         586         189</span></span></code></pre>
+<p>The corners of the triangles are the observations themselves, so each
+observation falls in one of the triangles that meet at it, and most
+triangles hold none: 189 of 586 hold a point here.
+<code><a href="../reference/build_tessellation.html">?build_tessellation</a></code> describes triangles as useful for
+interpolation and adjacency work, not as an aggregation unit.</p>
+<p>The number of cells each method built:</p>
+<div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">sapply</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>Voronoi <span class="op">=</span> <span class="va">tess_voronoi</span>, Hex <span class="op">=</span> <span class="va">tess_hex</span>, Square <span class="op">=</span> <span class="va">tess_square</span>,</span>
+<span>            Triangles <span class="op">=</span> <span class="va">tess_tri</span><span class="op">)</span>,</span>
+<span>       <span class="kw">function</span><span class="op">(</span><span class="va">tess</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">tess</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##   Voronoi       Hex    Square Triangles </span></span>
+<span><span class="co">##        40        49        45       586</span></span></code></pre>
 </div>
 </div>
 <div class="section level2">
-<h2 id="cell-level-aggregation-with-summarize_by_cell">4. Cell-level aggregation with <code>summarize_by_cell()</code><a class="anchor" aria-label="anchor" href="#cell-level-aggregation-with-summarize_by_cell"></a>
+<h2 id="cell-means-and-their-standard-errors">Cell means and their standard errors<a class="anchor" aria-label="anchor" href="#cell-means-and-their-standard-errors"></a>
 </h2>
-<p><code><a href="../reference/assign_features_to_polygons.html">assign_features_to_polygons()</a></code> joins points to cells;
-<code><a href="../reference/summarize_by_cell.html">summarize_by_cell()</a></code> does the aggregation — means, standard
-deviations and standard errors for the response and every predictor,
-plus <code>n</code> and <code>cell_weight</code>, and beside each mean a
-pooled value, the mean pulled toward the cells around it. There is no
-need to write the <code><a href="https://dplyr.tidyverse.org/reference/group_by.html" class="external-link">group_by()</a></code>/<code><a href="https://dplyr.tidyverse.org/reference/summarise.html" class="external-link">summarise()</a></code> by
-hand, and doing so loses the design-effect machinery below.</p>
-<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
+<p><code><a href="../reference/assign_features_to_polygons.html">assign_features_to_polygons()</a></code> puts each point in a cell,
+and <code><a href="../reference/summarize_by_cell.html">summarize_by_cell()</a></code> reduces the points to one row per
+cell. Each row holds the count <code>n</code>; the mean, standard
+deviation and standard error of the response and of every predictor; a
+<code>cell_weight</code>; and beside each mean a pooled value, the
+cell’s mean pulled toward the mean of the observations in the 8 nearest
+cells (nearest by the centroid of their observations).
+<code><a href="../articles/cells.html">vignette("cells")</a></code> explains pooled values and when to report
+one.</p>
+<div class="sourceCode" id="cb16"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">assigned</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/assign_features_to_polygons.html">assign_features_to_polygons</a></span><span class="op">(</span><span class="va">points_sf</span>, <span class="va">tess_voronoi</span><span class="op">$</span><span class="va">cells</span>,</span>
 <span>                                        polygon_id_col <span class="op">=</span> <span class="st">"cell_id"</span><span class="op">)</span></span>
 <span></span>
@@ -324,25 +303,25 @@ hand, and doing so loses the design-effect machinery below.</p>
 <span>  id_col         <span class="op">=</span> <span class="st">"cell_id"</span></span>
 <span><span class="op">)</span></span>
 <span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/as.data.frame.html" class="external-link">as.data.frame</a></span><span class="op">(</span><span class="va">cell_stats</span><span class="op">)</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cell_id"</span>, <span class="st">"n"</span>, <span class="st">"resp_mean_y"</span>,</span>
-<span>                                   <span class="st">"..sd_resp_y"</span>, <span class="st">"..se_resp_y"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">##   cell_id n resp_mean_y ..sd_resp_y ..se_resp_y</span></span>
-<span><span class="co">## 1       1 6    62.89141    7.074136    2.888004</span></span>
-<span><span class="co">## 2       2 7    63.36230    7.516155    2.840840</span></span>
-<span><span class="co">## 3       3 5    67.11282    8.521317    3.810849</span></span>
-<span><span class="co">## 4       4 5    70.34951   12.427812    5.557886</span></span>
-<span><span class="co">## 5       5 5    79.61205    5.327447    2.382507</span></span>
-<span><span class="co">## 6       6 4    84.14516    7.886035    3.943018</span></span></code></pre>
-<p>The <code>..se_*</code> columns are <strong>IID</strong> standard
-errors at the default <code>deff = 1</code>. That is the right standard
-error for each cell’s own mean, the value a choropleth shows, when the
-points are spread through the cell. As a standard error for the
-population (grand) mean it is anticonservative when points inside a cell
-are spatially correlated. For that population-level use,
-<code>deff = "kish"</code> applies Kish’s design-effect correction from
-an estimated intra-class correlation, and
-<code>attr(., "deff_applied")</code> records what was used:</p>
-<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
+<span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/as.data.frame.html" class="external-link">as.data.frame</a></span><span class="op">(</span><span class="va">cell_stats</span><span class="op">)</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cell_id"</span>, <span class="st">"n"</span>, <span class="st">"resp_mean_y"</span>, <span class="st">"..se_resp_y"</span>,</span>
+<span>                                   <span class="st">"..pooled_resp_y"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##   cell_id n resp_mean_y ..se_resp_y ..pooled_resp_y</span></span>
+<span><span class="co">## 1       1 6    62.89141    2.888004        65.90426</span></span>
+<span><span class="co">## 2       2 7    63.36230    2.840840        66.32647</span></span>
+<span><span class="co">## 3       3 5    67.11282    3.810849        69.71523</span></span>
+<span><span class="co">## 4       4 5    70.34951    5.557886        72.31561</span></span>
+<span><span class="co">## 5       5 5    79.61205    2.382507        80.23328</span></span>
+<span><span class="co">## 6       6 4    84.14516    3.943018        84.77772</span></span></code></pre>
+<p>The <code>..se_*</code> columns are standard errors at the default
+<code>deff = 1</code>, which treats the points in a cell as independent.
+That is the standard error of each cell’s own mean, the value a map of
+the cells shows, when the points are spread through the cell. As a
+standard error for the population mean it is anticonservative when
+points inside a cell are spatially correlated, and
+<code>deff = "kish"</code> widens it by a design effect estimated from
+that correlation; <code><a href="../articles/cells.html">vignette("cells")</a></code> explains the design
+effect.</p>
+<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">cell_kish</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/summarize_by_cell.html">summarize_by_cell</a></span><span class="op">(</span></span>
 <span>  <span class="va">assigned</span>,</span>
 <span>  response_var   <span class="op">=</span> <span class="st">"y"</span>,</span>
@@ -355,238 +334,83 @@ an estimated intra-class correlation, and
 <span><span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span><span class="st">"method = %s | ICC(response) = %.3f | median design effect = %.2f\n"</span>,</span>
 <span>            <span class="va">deff</span><span class="op">$</span><span class="va">method</span>, <span class="va">deff</span><span class="op">$</span><span class="va">icc_resp</span>, <span class="fu">stats</span><span class="fu">::</span><span class="fu"><a href="https://rdrr.io/r/stats/median.html" class="external-link">median</a></span><span class="op">(</span><span class="va">deff</span><span class="op">$</span><span class="va">deff</span>, na.rm <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">## method = kish | ICC(response) = 0.737 | median design effect = 5.42</span></span></code></pre>
-<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># Inflation of the response standard error, cell by cell.</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">cell_kish</span><span class="op">$</span><span class="va">`..se_resp_y`</span> <span class="op">/</span> <span class="va">cell_stats</span><span class="op">$</span><span class="va">`..se_resp_y`</span><span class="op">)</span></span></code></pre></div>
+<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># How much the Kish standard error of the response exceeds the default one.</span></span>
+<span><span class="va">inflation</span> <span class="op">&lt;-</span> <span class="va">cell_kish</span><span class="op">$</span><span class="va">`..se_resp_y`</span> <span class="op">/</span> <span class="va">cell_stats</span><span class="op">$</span><span class="va">`..se_resp_y`</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">inflation</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. </span></span>
 <span><span class="co">##   3.067   4.220   4.540   4.624   5.120   6.973</span></span></code></pre>
+<p>The Kish standard error is a median 4.54 times the default one, more
+than the 2.33 that the square root of the median design effect gives,
+because an estimated design effect also corrects the within-cell
+standard deviation (<code><a href="../articles/cells.html">vignette("cells")</a></code>, “Standard errors and
+the design effect”).</p>
 <div class="section level3">
-<h3 id="choropleths">Choropleths<a class="anchor" aria-label="anchor" href="#choropleths"></a>
+<h3 id="maps-of-the-cell-means">Maps of the cell means<a class="anchor" aria-label="anchor" href="#maps-of-the-cell-means"></a>
 </h3>
-<div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co">#' Assign points to cells, summarise, and draw a choropleth.</span></span>
-<span><span class="va">make_choropleth</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">tess</span>, <span class="va">boundary</span>, <span class="va">points</span>, <span class="va">title</span> <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span> <span class="op">{</span></span>
-<span>  <span class="va">cells</span>    <span class="op">&lt;-</span> <span class="va">tess</span><span class="op">$</span><span class="va">cells</span></span>
-<span>  <span class="va">assigned</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/assign_features_to_polygons.html">assign_features_to_polygons</a></span><span class="op">(</span><span class="va">points</span>, <span class="va">cells</span>, polygon_id_col <span class="op">=</span> <span class="st">"cell_id"</span><span class="op">)</span></span>
+<p><code>summarize_by_cell(cells_sf = )</code> returns the summary on
+the cells themselves, ready for <code><a href="../reference/plot_tessellation_map.html">plot_tessellation_map()</a></code>.
+The two helpers below summarise a tessellation onto its cells and map
+the mean of <code>y</code>:</p>
+<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># The cell summary of y on the cells of one tessellation.</span></span>
+<span><span class="va">on_cells</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">tess</span><span class="op">)</span> <span class="op">{</span></span>
+<span>  <span class="va">assigned</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/assign_features_to_polygons.html">assign_features_to_polygons</a></span><span class="op">(</span><span class="va">points_sf</span>, <span class="va">tess</span><span class="op">$</span><span class="va">cells</span>,</span>
+<span>                                          polygon_id_col <span class="op">=</span> <span class="st">"cell_id"</span><span class="op">)</span></span>
+<span>  <span class="fu"><a href="../reference/summarize_by_cell.html">summarize_by_cell</a></span><span class="op">(</span><span class="va">assigned</span>, response_var <span class="op">=</span> <span class="st">"y"</span>, id_col <span class="op">=</span> <span class="st">"cell_id"</span>,</span>
+<span>                    cells_sf <span class="op">=</span> <span class="va">tess</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span></span>
+<span><span class="op">}</span></span>
 <span></span>
-<span>  <span class="va">stats_df</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/summarize_by_cell.html">summarize_by_cell</a></span><span class="op">(</span><span class="va">assigned</span>, response_var <span class="op">=</span> <span class="st">"y"</span>,</span>
-<span>                                id_col <span class="op">=</span> <span class="st">"cell_id"</span><span class="op">)</span></span>
-<span>  <span class="va">cells</span>    <span class="op">&lt;-</span> <span class="fu"><a href="https://dplyr.tidyverse.org/reference/mutate-joins.html" class="external-link">left_join</a></span><span class="op">(</span><span class="va">cells</span>, <span class="fu"><a href="https://rdrr.io/r/base/as.data.frame.html" class="external-link">as.data.frame</a></span><span class="op">(</span><span class="va">stats_df</span><span class="op">)</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cell_id"</span>, <span class="st">"resp_mean_y"</span><span class="op">)</span><span class="op">]</span>,</span>
-<span>                        by <span class="op">=</span> <span class="st">"cell_id"</span><span class="op">)</span></span>
-<span></span>
+<span><span class="co"># A map of the cell means, on a colour scale with the given limits.</span></span>
+<span><span class="va">map_means</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">cells</span>, <span class="va">label</span>, <span class="va">limits</span> <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span> <span class="op">{</span></span>
 <span>  <span class="fu"><a href="../reference/plot_tessellation_map.html">plot_tessellation_map</a></span><span class="op">(</span></span>
 <span>    tessellation_sf <span class="op">=</span> <span class="va">cells</span>,</span>
-<span>    boundary        <span class="op">=</span> <span class="va">boundary</span>,</span>
+<span>    boundary        <span class="op">=</span> <span class="va">nc_boundary</span>,</span>
 <span>    fill_col        <span class="op">=</span> <span class="st">"resp_mean_y"</span>,</span>
-<span>    palette         <span class="op">=</span> <span class="st">"viridis"</span>,</span>
-<span>    tile_alpha      <span class="op">=</span> <span class="fl">0.9</span>,</span>
 <span>    outline_col     <span class="op">=</span> <span class="st">"white"</span>,</span>
 <span>    outline_size    <span class="op">=</span> <span class="fl">0.3</span>,</span>
 <span>    boundary_col    <span class="op">=</span> <span class="st">"grey20"</span>,</span>
 <span>    boundary_size   <span class="op">=</span> <span class="fl">0.8</span>,</span>
-<span>    legend_title    <span class="op">=</span> <span class="st">"Mean y"</span>,</span>
-<span>    title           <span class="op">=</span> <span class="va">title</span>,</span>
-<span>    subtitle        <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span><span class="st">"%d cells | %d observations"</span>,</span>
-<span>                              <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">points</span><span class="op">)</span><span class="op">)</span></span>
-<span>  <span class="op">)</span></span>
+<span>    title           <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span><span class="st">"%s, %d cells"</span>, <span class="va">label</span>, <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span><span class="op">)</span></span>
+<span>  <span class="op">)</span> <span class="op">+</span></span>
+<span>    <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_viridis.html" class="external-link">scale_fill_viridis_c</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"Mean y"</span>, limits <span class="op">=</span> <span class="va">limits</span>, na.value <span class="op">=</span> <span class="st">"grey60"</span><span class="op">)</span></span>
 <span><span class="op">}</span></span></code></pre></div>
-<div class="sourceCode" id="cb25"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu">make_choropleth</span><span class="op">(</span><span class="va">tess_voronoi</span>, <span class="va">nc_boundary</span>, <span class="va">points_sf</span>, <span class="st">"Voronoi tessellation"</span><span class="op">)</span></span></code></pre></div>
-<div class="figure" style="text-align: center">
-<img src="spatialkit_nc_demo_files/figure-html/choro-voronoi-1.png" class="r-plt" alt="The same response aggregated into forty Voronoi cells over North Carolina. Cell sizes follow the density of the observations, and the west-to-east gradient from low to high values is visible." width="100%"><p class="caption">
-Voronoi choropleth
-</p>
-</div>
-<div class="sourceCode" id="cb26"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu">make_choropleth</span><span class="op">(</span><span class="va">tess_hex</span>, <span class="va">nc_boundary</span>, <span class="va">points_sf</span>, <span class="st">"Hexagonal grid"</span><span class="op">)</span></span></code></pre></div>
-<div class="figure" style="text-align: center">
-<img src="spatialkit_nc_demo_files/figure-html/choro-hex-1.png" class="r-plt" alt="The same response aggregated into a regular hexagonal grid of about fifty equal-area cells, showing the same west-to-east gradient on a fixed geometry rather than one drawn from the data." width="100%"><p class="caption">
-Hex grid choropleth
-</p>
-</div>
-<div class="sourceCode" id="cb27"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu">make_choropleth</span><span class="op">(</span><span class="va">tess_square</span>, <span class="va">nc_boundary</span>, <span class="va">points_sf</span>, <span class="st">"Square grid"</span><span class="op">)</span></span></code></pre></div>
-<div class="figure" style="text-align: center">
-<img src="spatialkit_nc_demo_files/figure-html/choro-square-1.png" class="r-plt" alt="The same response aggregated into a regular square grid of about forty-five cells, showing the same gradient with the axis-aligned artefacts a square grid introduces." width="100%"><p class="caption">
-Square grid choropleth
-</p>
-</div>
-<div class="sourceCode" id="cb28"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu">make_choropleth</span><span class="op">(</span><span class="va">tess_tri</span>, <span class="va">nc_boundary</span>, <span class="va">points_sf</span>, <span class="st">"Delaunay triangulation"</span><span class="op">)</span></span></code></pre></div>
-<div class="figure" style="text-align: center">
-<img src="spatialkit_nc_demo_files/figure-html/choro-tri-1.png" class="r-plt" alt="The same response aggregated onto the Delaunay triangulation of the observation points, which produces many small irregular triangles rather than compact cells." width="100%"><p class="caption">
-Delaunay choropleth
-</p>
-</div>
-<p>The three stacked on one shared colour scale. Each map drawn on its
-own gets its own scale, so a colour in one means a different value in
-the next; here the limits are set from all three together and
-<code>patchwork</code> then collects the legends into one, which is what
-makes reading down the page legitimate.</p>
-<div class="sourceCode" id="cb29"><pre class="downlit sourceCode r">
+<p>The three maps below share one colour scale: its limits span all
+three sets of cell means, and <code>patchwork</code> collects the three
+legends into one, so a colour means the same value on every map. Grey
+cells hold no observation.</p>
+<div class="sourceCode" id="cb23"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://patchwork.data-imaginist.com" class="external-link">patchwork</a></span><span class="op">)</span></span>
 <span></span>
-<span><span class="co"># The cell means of all three, so the colour scale can span them.</span></span>
-<span><span class="va">cell_means</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">tess</span><span class="op">)</span> <span class="op">{</span></span>
-<span>  <span class="va">a</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/assign_features_to_polygons.html">assign_features_to_polygons</a></span><span class="op">(</span><span class="va">points_sf</span>, <span class="va">tess</span><span class="op">$</span><span class="va">cells</span>, polygon_id_col <span class="op">=</span> <span class="st">"cell_id"</span><span class="op">)</span></span>
-<span>  <span class="fu"><a href="../reference/summarize_by_cell.html">summarize_by_cell</a></span><span class="op">(</span><span class="va">a</span>, response_var <span class="op">=</span> <span class="st">"y"</span>, id_col <span class="op">=</span> <span class="st">"cell_id"</span><span class="op">)</span><span class="op">$</span><span class="va">resp_mean_y</span></span>
-<span><span class="op">}</span></span>
-<span><span class="va">lims</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/range.html" class="external-link">range</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">lapply</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="va">tess_voronoi</span>, <span class="va">tess_hex</span>, <span class="va">tess_square</span><span class="op">)</span>, <span class="va">cell_means</span><span class="op">)</span><span class="op">)</span>,</span>
-<span>              na.rm <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="va">means</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">lapply</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>Voronoi <span class="op">=</span> <span class="va">tess_voronoi</span>, Hex <span class="op">=</span> <span class="va">tess_hex</span>, Square <span class="op">=</span> <span class="va">tess_square</span><span class="op">)</span>,</span>
+<span>                <span class="va">on_cells</span><span class="op">)</span></span>
+<span><span class="va">lims</span>  <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/range.html" class="external-link">range</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">lapply</a></span><span class="op">(</span><span class="va">means</span>, <span class="va">`[[`</span>, <span class="st">"resp_mean_y"</span><span class="op">)</span><span class="op">)</span>, na.rm <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span></span>
-<span><span class="co"># One line per map instead of a title and a subtitle, and the cell count taken</span></span>
-<span><span class="co"># from the tessellation rather than typed in.</span></span>
-<span><span class="va">bare</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">tess</span>, <span class="va">label</span><span class="op">)</span> <span class="op">{</span></span>
-<span>  <span class="fu">make_choropleth</span><span class="op">(</span><span class="va">tess</span>, <span class="va">nc_boundary</span>, <span class="va">points_sf</span><span class="op">)</span> <span class="op">+</span></span>
-<span>    <span class="fu">ggplot2</span><span class="fu">::</span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_viridis.html" class="external-link">scale_fill_viridis_c</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"Mean y"</span>, limits <span class="op">=</span> <span class="va">lims</span><span class="op">)</span> <span class="op">+</span></span>
-<span>    <span class="fu">ggplot2</span><span class="fu">::</span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html" class="external-link">labs</a></span><span class="op">(</span>title <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span><span class="st">"%s, %d cells"</span>, <span class="va">label</span>, <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">tess</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span><span class="op">)</span>,</span>
-<span>                  subtitle <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span> <span class="op">+</span></span>
-<span>    <span class="fu">ggplot2</span><span class="fu">::</span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/theme.html" class="external-link">theme</a></span><span class="op">(</span>plot.title <span class="op">=</span> <span class="fu">ggplot2</span><span class="fu">::</span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/element.html" class="external-link">element_text</a></span><span class="op">(</span>size <span class="op">=</span> <span class="fu">ggplot2</span><span class="fu">::</span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/element.html" class="external-link">rel</a></span><span class="op">(</span><span class="fl">1</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="op">}</span></span>
-<span></span>
-<span><span class="op">(</span><span class="fu">bare</span><span class="op">(</span><span class="va">tess_voronoi</span>, <span class="st">"Voronoi"</span><span class="op">)</span> <span class="op">/</span></span>
-<span> <span class="fu">bare</span><span class="op">(</span><span class="va">tess_hex</span>,     <span class="st">"Hex"</span><span class="op">)</span> <span class="op">/</span></span>
-<span> <span class="fu">bare</span><span class="op">(</span><span class="va">tess_square</span>,  <span class="st">"Square"</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
-<span>  <span class="fu"><a href="https://patchwork.data-imaginist.com/reference/plot_layout.html" class="external-link">plot_layout</a></span><span class="op">(</span>guides <span class="op">=</span> <span class="st">"collect"</span><span class="op">)</span> <span class="op">+</span></span>
-<span>  <span class="fu"><a href="https://patchwork.data-imaginist.com/reference/plot_annotation.html" class="external-link">plot_annotation</a></span><span class="op">(</span>title <span class="op">=</span> <span class="st">"Tessellation comparison, cell-level mean response"</span><span class="op">)</span></span></code></pre></div>
-<div class="figure" style="text-align: center">
-<img src="spatialkit_nc_demo_files/figure-html/comparison-panel-1.png" class="r-plt" alt="The Voronoi, hexagonal and square maps stacked on one shared colour scale, so the cell values can be compared down the page. All three show the same west-to-east gradient; they differ in how the cell boundaries fall." width="100%"><p class="caption">
-All three at a glance
-</p>
-</div>
-<hr>
+<span><span class="op">(</span><span class="fu">map_means</span><span class="op">(</span><span class="va">means</span><span class="op">$</span><span class="va">Voronoi</span>, <span class="st">"Voronoi"</span>, <span class="va">lims</span><span class="op">)</span> <span class="op">/</span></span>
+<span> <span class="fu">map_means</span><span class="op">(</span><span class="va">means</span><span class="op">$</span><span class="va">Hex</span>,     <span class="st">"Hex"</span>,     <span class="va">lims</span><span class="op">)</span> <span class="op">/</span></span>
+<span> <span class="fu">map_means</span><span class="op">(</span><span class="va">means</span><span class="op">$</span><span class="va">Square</span>,  <span class="st">"Square"</span>,  <span class="va">lims</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://patchwork.data-imaginist.com/reference/plot_layout.html" class="external-link">plot_layout</a></span><span class="op">(</span>guides <span class="op">=</span> <span class="st">"collect"</span><span class="op">)</span></span></code></pre></div>
+<p><img src="spatialkit_nc_demo_files/figure-html/comparison-panel-1.png" class="r-plt" alt="The cell means of y on the Voronoi, hex and square cells, stacked on one colour scale. All three show the lowest values in the far west, the highest in the north-east and a band of lower values across the north of the centre; they differ in where the cell boundaries fall." width="100%" style="display: block; margin: auto;"></p>
+<p>The triangle map, on its own colour scale:</p>
+<div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu">map_means</span><span class="op">(</span><span class="fu">on_cells</span><span class="op">(</span><span class="va">tess_tri</span><span class="op">)</span>, <span class="st">"Delaunay triangles"</span><span class="op">)</span></span></code></pre></div>
+<p><img src="spatialkit_nc_demo_files/figure-html/choro-tri-1.png" class="r-plt" alt="The cell means of y on the Delaunay triangles. Most triangles are grey because they hold no observation; the coloured ones are small and scattered across the state." width="100%" style="display: block; margin: auto;"></p>
 </div>
 </div>
 <div class="section level2">
-<h2 id="spatial-cross-validation">5. Spatial cross-validation<a class="anchor" aria-label="anchor" href="#spatial-cross-validation"></a>
+<h2 id="models-fitted-on-the-points">Models fitted on the points<a class="anchor" aria-label="anchor" href="#models-fitted-on-the-points"></a>
 </h2>
-<p>This is the part the rest of the package exists to support.</p>
+<p>The models below are fitted on the 300 points, not on the cell means;
+<code><a href="../articles/getting-started.html">vignette("getting-started")</a></code> says when to fit on cells
+instead. The cells can still serve as cross-validation blocks:
+<code>make_folds(points_sf, k = 5, method = "block_kfold", blocks = tess_voronoi$cells)</code>
+holds out whole Voronoi cells.</p>
 <div class="section level3">
-<h3 id="a--how-far-does-correlation-reach">5a. How far does correlation reach?<a class="anchor" aria-label="anchor" href="#a--how-far-does-correlation-reach"></a>
-</h3>
-<p><code><a href="../reference/estimate_sac_range.html">estimate_sac_range()</a></code> fits an omnidirectional variogram
-and returns the effective range in CRS units — here, US survey feet. It
-also fits the four principal directions and reports their ranges in the
-<code>directional</code> attribute (with their largest-over-smallest
-ratio in <code>anisotropy</code>), but only as a diagnostic: each
-direction sees about a quarter of the point pairs, the maximum of four
-such fits is biased upward, and the windows are fixed to the coordinate
-axes, so nothing built from them is invariant to rotating the layer. The
-all-pairs fit is the estimate or there is none: the largest directional
-range never stands in for it. If you <em>know</em> the field is
-anisotropic, size blocks from the longest directional range explicitly:
-<code>max(attr(sac, "directional_fitted"), na.rm = TRUE)</code>, after
-checking <code>attr(sac, "directional_status")</code>, since
-<code>directional</code> is <code>NA</code> for a direction that ran
-past the fitted lags, which on such a field is often the long one. It
-returns <code>NA</code> (still classed <code>sac_range</code>, so it
-prints as <code>NA</code>) when the empirical variogram never reaches a
-sill, because an unidentified range must not be used to size blocks.</p>
-<div class="sourceCode" id="cb30"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">sac</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/estimate_sac_range.html">estimate_sac_range</a></span><span class="op">(</span><span class="va">points_sf</span>, response_var <span class="op">=</span> <span class="st">"y"</span>,</span>
-<span>                          predictor_vars <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"elevation"</span>, <span class="st">"pop_density"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="va">sac</span></span></code></pre></div>
-<pre><code><span><span class="co">## NA </span></span>
-<span><span class="co">##   directional: 0 deg = 5145134 (past the fitted lags), 45 deg = 1618292 (past the fitted lags), 90 deg = 1760918 (past the fitted lags), 135 deg = 5145134 (past the fitted lags)</span></span>
-<span><span class="co">##   in US survey feet of EPSG:2264; variogram of the residuals on predictor_vars (ols)</span></span></code></pre>
-<div class="sourceCode" id="cb32"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/NA.html" class="external-link">is.na</a></span><span class="op">(</span><span class="va">sac</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span>
-<span>  <span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="st">"no identified range:"</span>, <span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">sac</span>, <span class="st">"rejected_reason"</span><span class="op">)</span>, <span class="st">"\n"</span><span class="op">)</span></span>
-<span><span class="op">}</span> <span class="kw">else</span> <span class="op">{</span></span>
-<span>  <span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span><span class="st">"range = %.0f ft; anisotropy ratio %.2f\n"</span>,</span>
-<span>              <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="va">sac</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">sac</span>, <span class="st">"anisotropy"</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="op">}</span></span></code></pre></div>
-<pre><code><span><span class="co">## no identified range: fitted range exceeds the largest lag fitted</span></span></code></pre>
-<p>The variogram is attached either way, so <code>plot(sac)</code> draws
-the curve and lets you judge it rather than trust it
-(<code>plot(fit, type = "variogram")</code> does the same for a fitted
-model’s residuals). The distance axis is labelled in the units of the
-CRS the variogram was fitted in, and when no range was identified the
-subtitle says why. A rejected range must not be handed to
-<code>make_folds(auto_range = TRUE)</code>, which is why it comes back
-<code>NA</code> rather than as a long range.</p>
-</div>
-<div class="section level3">
-<h3 id="b--two-fold-schemes-on-the-same-data">5b. Two fold schemes on the same data<a class="anchor" aria-label="anchor" href="#b--two-fold-schemes-on-the-same-data"></a>
-</h3>
-<div class="sourceCode" id="cb34"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># No range was identified in 5a, so the block size cannot come from the</span></span>
-<span><span class="co"># variogram.  The field was built as a sine wave with a quarter-wavelength of</span></span>
-<span><span class="co"># about 390,000 ft, the scale over which it changes sign; 400,000-ft blocks</span></span>
-<span><span class="co"># hold out whole lobes of it.  cv_block_size_sweep() gives the cross-validated</span></span>
-<span><span class="co"># error at each block size, and fold_separation() says which size matches a</span></span>
-<span><span class="co"># map (5c below).</span></span>
-<span><span class="va">folds_random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">points_sf</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"random_kfold"</span>, seed <span class="op">=</span> <span class="fl">42</span><span class="op">)</span></span>
-<span><span class="va">folds_blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">points_sf</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>,</span>
-<span>                            block_size <span class="op">=</span> <span class="fl">400000</span>, seed <span class="op">=</span> <span class="fl">42</span><span class="op">)</span></span>
-<span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>random <span class="op">=</span> <span class="va">folds_random</span><span class="op">$</span><span class="va">k</span>, blocked <span class="op">=</span> <span class="va">folds_blocked</span><span class="op">$</span><span class="va">k</span>,</span>
-<span>  blocks <span class="op">=</span> <span class="va">folds_blocked</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">blocks_used</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">##  random blocked  blocks </span></span>
-<span><span class="co">##       5       5      12</span></span></code></pre>
-<p><code><a href="../reference/plot_folds.html">plot_folds()</a></code> is the fastest way to see whether the
-blocks actually separate the data, and how wide they are:</p>
-<div class="sourceCode" id="cb36"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://patchwork.data-imaginist.com" class="external-link">patchwork</a></span><span class="op">)</span></span>
-<span><span class="op">(</span><span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">folds_random</span>,  <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span><span class="op">)</span> <span class="op">/</span></span>
-<span> <span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">folds_blocked</span>, <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
-<span>  <span class="fu"><a href="https://patchwork.data-imaginist.com/reference/plot_layout.html" class="external-link">plot_layout</a></span><span class="op">(</span>guides <span class="op">=</span> <span class="st">"collect"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatialkit_nc_demo_files/figure-html/plot-folds-1.png" class="r-plt" alt="Two maps of the same points, random folds above and blocked folds below, sharing one fold legend. In the random map the five colours are interleaved everywhere; in the blocked map, with the block grid drawn behind, every block holds a single fold and each fold is two to four whole blocks: four of the five folds fall in two separate parts of the state, and the fifth's two blocks meet only at a corner." width="100%" style="display: block; margin: auto;"></p>
-</div>
-<div class="section level3">
-<h3 id="c--the-number-the-fold-scheme-changes">5c. The number the fold scheme changes<a class="anchor" aria-label="anchor" href="#c--the-number-the-fold-scheme-changes"></a>
+<h3 id="a-random-forest-and-its-residuals">A random forest and its residuals<a class="anchor" aria-label="anchor" href="#a-random-forest-and-its-residuals"></a>
 </h3>
 <p><code><a href="../reference/fit_rf_model.html">fit_rf_model()</a></code> and <code><a href="../reference/cv_rf.html">cv_rf()</a></code> need
-<code>ranger</code>. <code>include_coords = TRUE</code> hands the forest
-the coordinates, which lets it fit the training surface by location, so
-its error grows quickly with the distance from the data. Scoring the
-same model on both fold schemes shows how much:</p>
-<div class="sourceCode" id="cb37"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">cv_random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_rf.html">cv_rf</a></span><span class="op">(</span><span class="va">points_sf</span>, <span class="st">"y"</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"elevation"</span>, <span class="st">"pop_density"</span><span class="op">)</span>,</span>
-<span>                    folds <span class="op">=</span> <span class="va">folds_random</span>, include_coords <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>                    num_trees <span class="op">=</span> <span class="fl">300</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
-<span><span class="va">cv_blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_rf.html">cv_rf</a></span><span class="op">(</span><span class="va">points_sf</span>, <span class="st">"y"</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"elevation"</span>, <span class="st">"pop_density"</span><span class="op">)</span>,</span>
-<span>                    folds <span class="op">=</span> <span class="va">folds_blocked</span>, include_coords <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>                    num_trees <span class="op">=</span> <span class="fl">300</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
-<span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
-<span>  folds <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"random_kfold"</span>, <span class="st">"block_kfold"</span><span class="op">)</span>,</span>
-<span>  R2    <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">cv_random</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">R2</span>,   <span class="va">cv_blocked</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">R2</span><span class="op">)</span>,</span>
-<span>  RMSE  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">cv_random</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span>, <span class="va">cv_blocked</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span></span>
-<span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">##          folds        R2     RMSE</span></span>
-<span><span class="co">## 1 random_kfold 0.7945102 6.090085</span></span>
-<span><span class="co">## 2  block_kfold 0.6313066 8.994703</span></span></code></pre>
-<p>Random folds report R<sup>2</sup> = 0.795; blocked folds report 0.631
-on the same fitted model, a drop of 21% of the reported skill.</p>
-<p>Which of the two to report depends on where the map will predict. The
-random estimate is the error of predicting among the points you have;
-the blocked one is the error of predicting whole blocks of the state
-from the rest. The map of section 7 predicts over the state these points
-were sampled across at random. <code><a href="../reference/fold_separation.html">fold_separation()</a></code> sets the
-distances from such a map’s locations to the data beside the held-out
-distances of each scheme, and says which way each score errs for that
-map:</p>
-<div class="sourceCode" id="cb39"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">cells</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_sample.html" class="external-link">st_sample</a></span><span class="op">(</span><span class="va">nc_boundary</span>, size <span class="op">=</span> <span class="fl">2000</span>, type <span class="op">=</span> <span class="st">"regular"</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>random  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="fu"><a href="../reference/fold_separation.html">fold_separation</a></span><span class="op">(</span><span class="va">folds_random</span>,  <span class="va">points_sf</span>,</span>
-<span>                                 prediction_points <span class="op">=</span> <span class="va">cells</span><span class="op">)</span>, <span class="st">"target"</span><span class="op">)</span><span class="op">$</span><span class="va">reading</span>,</span>
-<span>  blocked <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="fu"><a href="../reference/fold_separation.html">fold_separation</a></span><span class="op">(</span><span class="va">folds_blocked</span>, <span class="va">points_sf</span>,</span>
-<span>                                 prediction_points <span class="op">=</span> <span class="va">cells</span><span class="op">)</span>, <span class="st">"target"</span><span class="op">)</span><span class="op">$</span><span class="va">reading</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">##    random   blocked </span></span>
-<span><span class="co">## "matched" "farther"</span></span></code></pre>
-<p><code>"matched"</code> is the scheme whose score is the error of that
-map, <code>"farther"</code> one that reads high for it, and
-<code>"closer"</code> one that reads low. A map that has to reach far
-beyond the points, into a region they never sampled, would turn the
-answer round.</p>
-<hr>
-</div>
-</div>
-<div class="section level2">
-<h2 id="fitting-a-model">6. Fitting a model<a class="anchor" aria-label="anchor" href="#fitting-a-model"></a>
-</h2>
-<div class="sourceCode" id="cb41"><pre class="downlit sourceCode r">
+<code>ranger</code>.</p>
+<div class="sourceCode" id="cb25"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">rf_fit</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/fit_rf_model.html">fit_rf_model</a></span><span class="op">(</span><span class="va">points_sf</span>, response_var <span class="op">=</span> <span class="st">"y"</span>,</span>
 <span>                       predictor_vars <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"elevation"</span>, <span class="st">"pop_density"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">rf_fit</span></span></code></pre></div>
@@ -605,13 +429,13 @@ answer round.</p>
 <span><span class="co">##   farther from the data than the samples sit from each other. Score a map</span></span>
 <span><span class="co">##   that predicts farther with cv_rf() on folds at its distances</span></span>
 <span><span class="co">##   (?fold_separation).</span></span></code></pre>
-<p>Note that <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> on an <code>rf_fit</code> reports
-<strong>out-of-bag</strong> metrics, not in-sample ones —
-<code><a href="../reference/fitted.rf_fit.html">fitted.rf_fit()</a></code> returns out-of-bag predictions, and the
-printout says so. A <code>gwr_fit</code> or <code>bayesian_fit</code>
-reports genuinely in-sample metrics, so the two are not comparable;
-<code><a href="../reference/compare_models_cv.html">compare_models_cv()</a></code> is.</p>
-<div class="sourceCode" id="cb43"><pre class="downlit sourceCode r">
+<p><code><a href="../reference/summary.spatial_fit.html">summary.spatial_fit()</a></code> on an <code>rf_fit</code> reports
+out-of-bag metrics, not in-sample ones: <code><a href="../reference/spatial_fit-fitted.html">fitted.rf_fit()</a></code>
+returns out-of-bag predictions, and the printout says so. A
+<code>gwr_fit</code> or <code>bayesian_fit</code> reports in-sample
+metrics, so the two are not comparable; scores from the same folds are,
+as the comparison of backends below shows.</p>
+<div class="sourceCode" id="cb27"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">rf_fit</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">## Summary of &lt;rf_fit&gt; fit (n = 300)</span></span>
 <span><span class="co">## </span></span>
@@ -622,43 +446,41 @@ reports genuinely in-sample metrics, so the two are not comparable;
 <span><span class="co">##     MAE     = 7.8448</span></span>
 <span><span class="co">##     R^2     = 0.4715</span></span>
 <span><span class="co">##     SMAPE   = 8.65%</span></span></code></pre>
-<div class="sourceCode" id="cb45"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb29"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">rf_fit</span><span class="op">$</span><span class="va">info</span><span class="op">$</span><span class="va">importance</span>     <span class="co"># coef() on an rf_fit errors: a forest has no coefficients</span></span></code></pre></div>
 <pre><code><span><span class="co">##   elevation pop_density </span></span>
 <span><span class="co">##   105.35583    83.25089</span></span></code></pre>
-<p>The two printouts disagree in the third decimal of R² —
-<code>0.4733</code> above, <code>0.4715</code> here — while reporting an
-identical RMSE. Neither is wrong, and neither is a bug. Both read the
-<em>same</em> out-of-bag predictions; they differ only in the
-denominator of the variance they compare against.
-<code><a href="../reference/print.rf_fit.html">print.rf_fit()</a></code> echoes <code>ranger</code>’s own
-<code>r.squared</code>, which is <code>1 - MSE_oob / var(y)</code> using
-the unbiased (n − 1) sample variance. <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> recomputes
-<code>1 - SS_res / SS_tot</code> from the predictions, where
-<code>SS_tot = sum((y - mean(y))^2)</code> — an n denominator. The
-unexplained fraction therefore differs by exactly the factor n / (n −
-1), here 300/299, and RMSE, which involves no such comparison, matches
-to four decimals. If you need a figure comparable across backends, use
-<code><a href="../reference/cv_rf.html">cv_rf()</a></code> rather than either.</p>
-<div class="section level3">
-<h3 id="residual-diagnostics">Residual diagnostics<a class="anchor" aria-label="anchor" href="#residual-diagnostics"></a>
-</h3>
-<p><code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> on any <code>spatial_fit</code> maps the
-residuals; visible structure means unmodelled spatial autocorrelation.
-<code><a href="../reference/residual_morans_i.html">residual_morans_i()</a></code> puts a number on it.</p>
-<div class="sourceCode" id="cb47"><pre class="downlit sourceCode r">
+<p>The two printouts give different R² (0.4733 above, 0.4715 here) and
+the same RMSE. Both read the same out-of-bag predictions.
+<code><a href="../reference/print.spatial_fit.html">print.rf_fit()</a></code> echoes the R² that <code>ranger</code>
+reports, which compares the out-of-bag mean squared error with the
+variance of <code>y</code> computed with denominator n − 1;
+<code><a href="../reference/summary.spatial_fit.html">summary.spatial_fit()</a></code> uses denominator n. Their unexplained
+fractions therefore differ by the factor n / (n − 1), here 300 /
+299.</p>
+<p><code><a href="../reference/plot.spatial_fit.html">plot.spatial_fit()</a></code> draws the residuals on a map by
+default (<code>type = "residuals"</code>);
+<code>"observed_predicted"</code>, <code>"variogram"</code> and, for a
+GWR fit, <code>"coefficients"</code> are the other views. Structure in
+the residual map is spatial autocorrelation the model has not captured,
+and <code><a href="../reference/residual_morans_i.html">residual_morans_i()</a></code> puts a number on it.</p>
+<div class="sourceCode" id="cb31"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">rf_fit</span>, type <span class="op">=</span> <span class="st">"residuals"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatialkit_nc_demo_files/figure-html/rf-resid-1.png" class="r-plt" alt="Residuals of the random forest mapped over North Carolina on a red-to-blue scale. Positive residuals cluster in the west and negative ones through the centre, which is the visible spatial structure the model has not captured." width="100%" style="display: block; margin: auto;"></p>
-<div class="sourceCode" id="cb48"><pre class="downlit sourceCode r">
+<p><img src="spatialkit_nc_demo_files/figure-html/rf-resid-1.png" class="r-plt" alt="Residuals of the random forest mapped over North Carolina on a red-to-blue scale. Positive residuals cluster in the west-centre and the north-east, negative ones through the centre and the south-east. This is spatial structure the model has not captured." width="100%" style="display: block; margin: auto;"></p>
+<div class="sourceCode" id="cb32"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">mi</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/residual_morans_i.html">residual_morans_i</a></span><span class="op">(</span><span class="va">rf_fit</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span><span class="st">"Moran's I = %.4f (z = %.2f, p = %.3g)\n"</span>,</span>
 <span>            <span class="va">mi</span><span class="op">$</span><span class="va">observed</span>, <span class="va">mi</span><span class="op">$</span><span class="va">z</span>, <span class="va">mi</span><span class="op">$</span><span class="va">p_value</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">## Moran's I = 0.5443 (z = 20.12, p = 4.58e-90)</span></span></code></pre>
+<p>The residuals are autocorrelated (Moran’s I = 0.54, z = 20.1): the
+forest has not captured the spatial field added to <code>y</code>, which
+neither predictor carries. The section on spatial folds measures what
+that does to a cross-validated score.</p>
 </div>
 <div class="section level3">
-<h3 id="gwr-if-sp-is-installed">GWR, if <code>sp</code> is installed<a class="anchor" aria-label="anchor" href="#gwr-if-sp-is-installed"></a>
+<h3 id="a-gwr-fit-if-sp-is-installed">A GWR fit, if <code>sp</code> is installed<a class="anchor" aria-label="anchor" href="#a-gwr-fit-if-sp-is-installed"></a>
 </h3>
-<div class="sourceCode" id="cb50"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb34"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">gwr_fit</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/fit_gwr_model.html">fit_gwr_model</a></span><span class="op">(</span></span>
 <span>  data_sf        <span class="op">=</span> <span class="va">points_sf</span>,</span>
 <span>  response_var   <span class="op">=</span> <span class="st">"y"</span>,</span>
@@ -668,69 +490,183 @@ residuals; visible structure means unmodelled spatial autocorrelation.
 <span><span class="op">)</span></span>
 <span></span>
 <span><span class="va">gwr_met</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/model_metrics.html">model_metrics</a></span><span class="op">(</span><span class="va">gwr_fit</span><span class="op">)</span></span>
-<span><span class="co"># With adaptive = TRUE the bandwidth is a number of nearest neighbours, not a</span></span>
-<span><span class="co"># distance in feet: each local regression uses the same count of points.</span></span>
+<span><span class="co"># adaptive = TRUE: the bandwidth is a number of nearest neighbours, not feet.</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span><span class="st">"Bandwidth: %.0f neighbours | in-sample R2: %.3f | RMSE: %.3f\n"</span>,</span>
 <span>            <span class="va">gwr_fit</span><span class="op">$</span><span class="va">info</span><span class="op">$</span><span class="va">bandwidth</span>, <span class="va">gwr_met</span><span class="op">$</span><span class="va">R2</span>, <span class="va">gwr_met</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">## Bandwidth: 44 neighbours | in-sample R2: 0.877 | RMSE: 4.701</span></span></code></pre>
-<p>The fit raises no collinearity warning, but its survey of the local
-designs (<code>gwr_fit$info$local_collinearity</code>, see “Collinearity
-diagnostics” in <code><a href="../reference/fit_gwr_model.html">?fit_gwr_model</a></code>) is worth a look: in 25 of
-the 300 windows the condition index that includes the intercept
-(<code>cn</code>) is above 30. The cause is <code>elevation</code>: it
-averages about 3,000 but has a standard deviation of only about 400
-inside a 44-neighbour window, so locally it is nearly collinear with the
-intercept. What that leaves poorly determined is the local intercepts,
-not the slopes: the slope index (<code>cn_slopes</code>), which centres
-the predictors in each window, stays below 30 everywhere, so no slope is
-masked and the fit does not warn.
-<code>plot(gwr_fit, type = "coefficients", term = "Intercept")</code>
-draws those 25 intercepts hollow. Centring the predictor
+<p>GWR fits one weighted regression at each location, so each
+coefficient has a value at every point.
+<code>type = "coefficients"</code> maps one of them:</p>
+<div class="sourceCode" id="cb36"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">gwr_fit</span>, type <span class="op">=</span> <span class="st">"coefficients"</span>, term <span class="op">=</span> <span class="st">"elevation"</span><span class="op">)</span></span></code></pre></div>
+<p><img src="spatialkit_nc_demo_files/figure-html/gwr-coef-1.png" class="r-plt" alt="The local GWR coefficient of elevation at each of the 300 points, from about 0.003 to 0.016. It is highest in a band through the centre and south-centre of the state and lowest in the north-centre and the north-east. The subtitle says no location is masked." width="100%" style="display: block; margin: auto;"></p>
+<p>The simulation gives elevation the same effect, 0.01, everywhere, so
+the spread on the map is not variation in the true effect.</p>
+<p>In 25 of the 300 windows the local intercept is poorly determined:
+the condition index that includes the intercept (<code>cn</code> in
+<code>gwr_fit$info$local_collinearity</code>, see
+<code><a href="../reference/fit_gwr_model.html">?fit_gwr_model</a></code>) is above 30. The cause is
+<code>elevation</code>, which averages about 3,000 but inside a window
+of 44 neighbours varies by little more than the noise the simulation
+added (standard deviation 400), so locally it is nearly collinear with
+the intercept. The slopes are well determined: their index
+(<code>cn_slopes</code>), which centres the predictors in each window,
+is at most 4.5, so the fit does not warn, and the elevation map above
+masks no location. With <code>term = "Intercept"</code> the same map
+draws the poorly determined intercepts hollow. Centring the predictor
 (<code>elevation - mean(elevation)</code>) gives the same bandwidth and
 fitted values and determines the intercepts too.</p>
 </div>
+</div>
+<div class="section level2">
+<h2 id="scoring-the-model-on-spatial-folds">Scoring the model on spatial folds<a class="anchor" aria-label="anchor" href="#scoring-the-model-on-spatial-folds"></a>
+</h2>
+<p>A random fold leaves each held-out point’s neighbours in the training
+data; a blocked fold holds out whole blocks of the state. With residuals
+as autocorrelated as the forest’s, the two schemes can give different
+scores; the runs below measure the difference on these data.</p>
 <div class="section level3">
-<h3 id="comparing-backends-on-identical-folds">Comparing backends on identical folds<a class="anchor" aria-label="anchor" href="#comparing-backends-on-identical-folds"></a>
+<h3 id="the-autocorrelation-range">The autocorrelation range<a class="anchor" aria-label="anchor" href="#the-autocorrelation-range"></a>
+</h3>
+<p><code><a href="../reference/estimate_sac_range.html">estimate_sac_range()</a></code> fits a variogram to the residuals
+of <code>y</code> on the predictors and returns the <a href="glossary.html#autocorrelation-range">autocorrelation range</a> of
+the residuals in CRS units, here US survey feet. It returns
+<code>NA</code> when the variogram never levels off within the distances
+it was fitted over, because a range it cannot identify must not size the
+blocks. <code><a href="../reference/estimate_sac_range.html">?estimate_sac_range</a></code> covers the directional fits and
+anisotropy.</p>
+<div class="sourceCode" id="cb37"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">sac</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/estimate_sac_range.html">estimate_sac_range</a></span><span class="op">(</span><span class="va">points_sf</span>, response_var <span class="op">=</span> <span class="st">"y"</span>,</span>
+<span>                          predictor_vars <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"elevation"</span>, <span class="st">"pop_density"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="va">sac</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">## [1] NA</span></span></code></pre>
+<div class="sourceCode" id="cb39"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">sac</span>, <span class="st">"rejected_reason"</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">## [1] "fitted range exceeds the largest lag fitted"</span></span></code></pre>
+<p><code><a href="../reference/plot.sac_range.html">plot.sac_range()</a></code> draws the empirical variogram with the
+fitted model, so you can judge the fit; when no range was identified,
+the subtitle says why. Here the fitted curve is still rising at the
+largest distance it was fitted over.</p>
+<div class="sourceCode" id="cb41"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">sac</span><span class="op">)</span></span></code></pre></div>
+<p><img src="spatialkit_nc_demo_files/figure-html/sac-plot-1.png" class="r-plt" alt="The empirical variogram of the residuals, with point size showing the number of pairs, and the fitted model as a curve. The semivariance rises over most of the distances fitted and falls at the longest lag; the fitted curve is still rising at the largest lag, and the subtitle says the fitted range exceeds the largest lag fitted." width="100%" style="display: block; margin: auto;"></p>
+</div>
+<div class="section level3">
+<h3 id="random-folds-and-blocks">Random folds and blocks<a class="anchor" aria-label="anchor" href="#random-folds-and-blocks"></a>
+</h3>
+<p>No range was identified, so the block size here comes from the
+simulation instead. The field changes sign about every 785,000 ft (π ×
+250,000), and 400,000 ft is about half that, the distance from a zero of
+the wave to its peak. On your own data, where the field is unknown,
+<code><a href="../reference/cv_block_size_sweep.html">cv_block_size_sweep()</a></code> gives the cross-validated error at
+each block size (<code><a href="../articles/spatial-cross-validation.html">vignette("spatial-cross-validation")</a></code>).</p>
+<div class="sourceCode" id="cb42"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">folds_random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">points_sf</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"random_kfold"</span>, seed <span class="op">=</span> <span class="fl">42</span><span class="op">)</span></span>
+<span><span class="va">folds_blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">points_sf</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>,</span>
+<span>                            block_size <span class="op">=</span> <span class="fl">400000</span>, seed <span class="op">=</span> <span class="fl">42</span><span class="op">)</span></span>
+<span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>random <span class="op">=</span> <span class="va">folds_random</span><span class="op">$</span><span class="va">k</span>, blocked <span class="op">=</span> <span class="va">folds_blocked</span><span class="op">$</span><span class="va">k</span>,</span>
+<span>  blocks <span class="op">=</span> <span class="va">folds_blocked</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">blocks_used</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##  random blocked  blocks </span></span>
+<span><span class="co">##       5       5      12</span></span></code></pre>
+<p><code><a href="../reference/plot_folds.html">plot_folds()</a></code> shows whether the blocks separate the data,
+and how wide they are:</p>
+<div class="sourceCode" id="cb44"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://patchwork.data-imaginist.com" class="external-link">patchwork</a></span><span class="op">)</span></span>
+<span><span class="op">(</span><span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">folds_random</span>,  <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span><span class="op">)</span> <span class="op">/</span></span>
+<span> <span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">folds_blocked</span>, <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://patchwork.data-imaginist.com/reference/plot_layout.html" class="external-link">plot_layout</a></span><span class="op">(</span>guides <span class="op">=</span> <span class="st">"collect"</span><span class="op">)</span></span></code></pre></div>
+<p><img src="spatialkit_nc_demo_files/figure-html/plot-folds-1.png" class="r-plt" alt="Two maps of the same points, random folds above and blocked folds below, sharing one fold legend. In the random map the five colours are interleaved everywhere; in the blocked map, with the block grid drawn behind, every block holds a single fold and each fold is two to four whole blocks: four of the five folds fall in two separate parts of the state, and the fifth's two blocks meet only at a corner." width="100%" style="display: block; margin: auto;"></p>
+</div>
+<div class="section level3">
+<h3 id="the-score-under-each-scheme">The score under each scheme<a class="anchor" aria-label="anchor" href="#the-score-under-each-scheme"></a>
+</h3>
+<p><code>include_coords = TRUE</code> gives the forest the coordinates,
+which lets it fit the training surface by location, so its error grows
+quickly with the distance from the data. Scoring it with the same
+predictors and settings on both fold schemes shows how much:</p>
+<div class="sourceCode" id="cb45"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">cv_random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_rf.html">cv_rf</a></span><span class="op">(</span><span class="va">points_sf</span>, <span class="st">"y"</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"elevation"</span>, <span class="st">"pop_density"</span><span class="op">)</span>,</span>
+<span>                    folds <span class="op">=</span> <span class="va">folds_random</span>, include_coords <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>                    num_trees <span class="op">=</span> <span class="fl">300</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="va">cv_blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_rf.html">cv_rf</a></span><span class="op">(</span><span class="va">points_sf</span>, <span class="st">"y"</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"elevation"</span>, <span class="st">"pop_density"</span><span class="op">)</span>,</span>
+<span>                    folds <span class="op">=</span> <span class="va">folds_blocked</span>, include_coords <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>                    num_trees <span class="op">=</span> <span class="fl">300</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
+<span>  folds <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"random_kfold"</span>, <span class="st">"block_kfold"</span><span class="op">)</span>,</span>
+<span>  R2    <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">cv_random</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">R2</span>,   <span class="va">cv_blocked</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">R2</span><span class="op">)</span>,</span>
+<span>  RMSE  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">cv_random</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span>, <span class="va">cv_blocked</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span></span>
+<span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##          folds        R2     RMSE</span></span>
+<span><span class="co">## 1 random_kfold 0.7945102 6.090085</span></span>
+<span><span class="co">## 2  block_kfold 0.6313066 8.994703</span></span></code></pre>
+<p>Random folds report R² = 0.795; blocked folds report 0.631 with the
+same predictors and settings, a drop of 21 percent of the reported
+skill.</p>
+<p>Which of the two to report depends on where the map will predict. The
+random score is the error of predicting among the points you have; the
+blocked one is the error of predicting whole blocks of the state from
+the rest. The surface mapped at the end of this article covers the state
+these points were sampled across at random.
+<code><a href="../reference/fold_separation.html">fold_separation()</a></code> compares the distances from such a map’s
+locations to the data with the held-out distances of each scheme. Here
+<code>map_pts</code>, a regular sample of the state, stands in for that
+map’s grid:</p>
+<div class="sourceCode" id="cb47"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">map_pts</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_sample.html" class="external-link">st_sample</a></span><span class="op">(</span><span class="va">nc_boundary</span>, size <span class="op">=</span> <span class="fl">2000</span>, type <span class="op">=</span> <span class="st">"regular"</span><span class="op">)</span></span>
+<span><span class="va">reading</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span></span>
+<span>  random  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="fu"><a href="../reference/fold_separation.html">fold_separation</a></span><span class="op">(</span><span class="va">folds_random</span>,  <span class="va">points_sf</span>,</span>
+<span>                                 prediction_points <span class="op">=</span> <span class="va">map_pts</span><span class="op">)</span>, <span class="st">"target"</span><span class="op">)</span><span class="op">$</span><span class="va">reading</span>,</span>
+<span>  blocked <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="fu"><a href="../reference/fold_separation.html">fold_separation</a></span><span class="op">(</span><span class="va">folds_blocked</span>, <span class="va">points_sf</span>,</span>
+<span>                                 prediction_points <span class="op">=</span> <span class="va">map_pts</span><span class="op">)</span>, <span class="st">"target"</span><span class="op">)</span><span class="op">$</span><span class="va">reading</span><span class="op">)</span></span>
+<span><span class="va">reading</span></span></code></pre></div>
+<pre><code><span><span class="co">##    random   blocked </span></span>
+<span><span class="co">## "matched" "farther"</span></span></code></pre>
+<p><code>"matched"</code> says the held-out points sit about as far from
+their training data as the map’s locations sit from the data;
+<code>"farther"</code> says they sit farther, so that score tends to
+read high for this map. The reading compares nearest-neighbour distances
+and does not measure a bias. <code><a href="../reference/fold_separation.html">?fold_separation</a></code> lists all
+four readings, and <code><a href="../articles/spatial-cross-validation.html">vignette("spatial-cross-validation")</a></code>
+explains them. For a map of an area the points never sampled, the
+blocked score would be the closer match.</p>
+<p>The comparison of backends below and the area of applicability of the
+surface use the random folds, the scheme <code><a href="../reference/fold_separation.html">fold_separation()</a></code>
+reads as matched for this map.</p>
+</div>
+<div class="section level3">
+<h3 id="two-backends-on-the-same-folds">Two backends on the same folds<a class="anchor" aria-label="anchor" href="#two-backends-on-the-same-folds"></a>
 </h3>
 <p><code><a href="../reference/compare_models_cv.html">compare_models_cv()</a></code> cross-validates each requested
-backend on the <code>folds</code> you pass. Any backend whose package is
-missing is dropped with a message, so the call still returns whatever
-could run.</p>
-<div class="sourceCode" id="cb52"><pre class="downlit sourceCode r">
+backend on the <code>folds</code> you pass, so their scores are
+comparable. A backend whose package is missing is dropped with a
+message, and the call returns the backends that could run.</p>
+<div class="sourceCode" id="cb49"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">cmp</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/compare_models_cv.html">compare_models_cv</a></span><span class="op">(</span></span>
 <span>  <span class="va">points_sf</span>, <span class="st">"y"</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"elevation"</span>, <span class="st">"pop_density"</span><span class="op">)</span>,</span>
 <span>  models   <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"RF"</span>, <span class="st">"GWR"</span><span class="op">)</span>,</span>
-<span>  folds    <span class="op">=</span> <span class="va">folds_blocked</span>,</span>
+<span>  folds    <span class="op">=</span> <span class="va">folds_random</span>,</span>
 <span>  rf_args  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>num_trees <span class="op">=</span> <span class="fl">300</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
-<span><span class="va">cmp</span><span class="op">$</span><span class="va">overall</span></span></code></pre></div>
-<pre><code><span><span class="co">##        RMSE       MAE      MAPE    SMAPE        R2 Adj_R2 n_pred n_MAPE n_SMAPE</span></span>
-<span><span class="co">## 1  8.647533  6.974994  7.685077  7.66426 0.6592183     NA    300    300     300</span></span>
-<span><span class="co">## 2 12.428033 10.235923 11.280144 11.17863 0.2961234     NA    300    300     300</span></span>
-<span><span class="co">##   model</span></span>
-<span><span class="co">## 1   GWR</span></span>
-<span><span class="co">## 2    RF</span></span></code></pre>
-<p>The RF row is the forest <em>without</em> the coordinates, and on the
-same blocked folds it scores worse than the coordinate forest in 5c did.
-That is not a contradiction. The field is a smooth wave that the two
-predictors do not carry, so the coordinates are informative out of block
-as well as in, and the blocked score says how much. What 5c measured was
-how much worse the coordinate forest predicts whole blocks of the state
-than it predicts among the points; what this table measures is what the
-predictors alone are worth. <code>Adj_R2</code> is <code>NA</code> in
-every <code>cv_*()</code> result’s <code>overall</code>: the pooled
-predictions come from <code>k</code> separately fitted models and have
-no single parameter count to adjust for.</p>
-<hr>
+<span><span class="va">cmp</span><span class="op">$</span><span class="va">overall</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"model"</span>, <span class="st">"RMSE"</span>, <span class="st">"MAE"</span>, <span class="st">"R2"</span><span class="op">)</span><span class="op">]</span></span></code></pre></div>
+<pre><code><span><span class="co">##   model     RMSE      MAE        R2</span></span>
+<span><span class="co">## 1   GWR 5.591604 4.454352 0.8267726</span></span>
+<span><span class="co">## 2    RF 9.823995 7.859748 0.4652879</span></span></code></pre>
+<p>The RF row is the forest on the two predictors alone; on the same
+random folds the forest with coordinates scored R² = 0.795. The field is
+a smooth wave that neither predictor carries, and a forest given the
+coordinates can fit it by location.</p>
 </div>
 </div>
 <div class="section level2">
-<h2 id="from-a-fit-to-a-map-and-where-the-map-applies">7. From a fit to a map, and where the map applies<a class="anchor" aria-label="anchor" href="#from-a-fit-to-a-map-and-where-the-map-applies"></a>
+<h2 id="a-surface-and-where-it-applies">A surface, and where it applies<a class="anchor" aria-label="anchor" href="#a-surface-and-where-it-applies"></a>
 </h2>
 <p><code><a href="../reference/predict_surface.html">predict_surface()</a></code> builds a regular grid over the
-training extent, joins covariates from the nearest observation, clips to
-the boundary and predicts:</p>
-<div class="sourceCode" id="cb54"><pre class="downlit sourceCode r">
+training extent, takes each grid point’s covariates from the nearest
+observation, clips the grid to the outline and predicts. The map below
+uses <code>rf_fit</code>, the forest on the two predictors alone.</p>
+<div class="sourceCode" id="cb51"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">surf</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/predict_surface.html">predict_surface</a></span><span class="op">(</span><span class="va">rf_fit</span>, n_cells <span class="op">=</span> <span class="fl">3000</span>,</span>
 <span>                        covariates <span class="op">=</span> <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span><span class="op">)</span></span>
 <span></span>
@@ -740,189 +676,56 @@ the boundary and predicts:</p>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_viridis.html" class="external-link">scale_colour_viridis_c</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"Predicted y"</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggtheme.html" class="external-link">theme_void</a></span><span class="op">(</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html" class="external-link">ggtitle</a></span><span class="op">(</span><span class="st">"Predicted surface"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatialkit_nc_demo_files/figure-html/surface-1.png" class="r-plt" alt="The fitted random forest predicted onto a regular grid over North Carolina and clipped to the state boundary, with predictions lowest in the far west and highest along the eastern coast." width="100%" style="display: block; margin: auto;"></p>
+<p><img src="spatialkit_nc_demo_files/figure-html/surface-1.png" class="r-plt" alt="The random forest's predictions on a regular grid of points over North Carolina, clipped to the state outline. Predictions are lowest in the far west and highest in the north-east." width="100%" style="display: block; margin: auto;"></p>
 <p>A fitted model returns a number for any location you hand it,
 including locations whose predictor values look nothing like the
 training data. <code><a href="../reference/area_of_applicability.html">area_of_applicability()</a></code> marks where the
-cross-validated score actually applies. Pass the folds you validated
-with:</p>
-<div class="sourceCode" id="cb55"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">aoa</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/area_of_applicability.html">area_of_applicability</a></span><span class="op">(</span><span class="va">surf</span>, model <span class="op">=</span> <span class="va">rf_fit</span>, folds <span class="op">=</span> <span class="va">folds_blocked</span><span class="op">)</span></span>
+cross-validated score applies. Pass it the folds the score came from,
+here the random ones:</p>
+<div class="sourceCode" id="cb52"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">aoa</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/area_of_applicability.html">area_of_applicability</a></span><span class="op">(</span><span class="va">surf</span>, model <span class="op">=</span> <span class="va">rf_fit</span>, folds <span class="op">=</span> <span class="va">folds_random</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span><span class="st">"inside: %d | outside: %d | undetermined: %d | DI threshold %.3f\n"</span>,</span>
 <span>            <span class="va">aoa</span><span class="op">$</span><span class="va">n_inside</span>, <span class="va">aoa</span><span class="op">$</span><span class="va">n_outside</span>, <span class="va">aoa</span><span class="op">$</span><span class="va">n_na</span>, <span class="va">aoa</span><span class="op">$</span><span class="va">threshold</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## inside: 1645 | outside: 0 | undetermined: 0 | DI threshold 0.170</span></span></code></pre>
-<div class="sourceCode" id="cb57"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># AOA is NA wherever a predictor was missing or non-finite, and `!NA` is NA,</span></span>
-<span><span class="co"># which R silently skips in a subscripted assignment. Test for TRUE and let</span></span>
-<span><span class="co"># anything else count as outside.</span></span>
-<span><span class="va">inside</span> <span class="op">&lt;-</span> <span class="va">aoa</span><span class="op">$</span><span class="va">aoa</span><span class="op">$</span><span class="va">AOA</span> <span class="op"><a href="https://rdrr.io/r/base/match.html" class="external-link">%in%</a></span> <span class="cn">TRUE</span></span>
-<span><span class="va">surf</span><span class="op">$</span><span class="va">.pred_masked</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/ifelse.html" class="external-link">ifelse</a></span><span class="op">(</span><span class="va">inside</span>, <span class="va">surf</span><span class="op">$</span><span class="va">.pred</span>, <span class="cn">NA_real_</span><span class="op">)</span></span>
-<span></span>
-<span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggplot.html" class="external-link">ggplot</a></span><span class="op">(</span><span class="op">)</span> <span class="op">+</span></span>
-<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggsf.html" class="external-link">geom_sf</a></span><span class="op">(</span>data <span class="op">=</span> <span class="va">surf</span>, <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/aes.html" class="external-link">aes</a></span><span class="op">(</span>colour <span class="op">=</span> <span class="va">.pred_masked</span><span class="op">)</span>, size <span class="op">=</span> <span class="fl">0.6</span><span class="op">)</span> <span class="op">+</span></span>
-<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggsf.html" class="external-link">geom_sf</a></span><span class="op">(</span>data <span class="op">=</span> <span class="va">nc_boundary</span>, fill <span class="op">=</span> <span class="cn">NA</span>, colour <span class="op">=</span> <span class="st">"grey20"</span><span class="op">)</span> <span class="op">+</span></span>
-<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_viridis.html" class="external-link">scale_colour_viridis_c</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"Predicted y"</span>, na.value <span class="op">=</span> <span class="st">"grey85"</span><span class="op">)</span> <span class="op">+</span></span>
-<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggtheme.html" class="external-link">theme_void</a></span><span class="op">(</span><span class="op">)</span> <span class="op">+</span></span>
-<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html" class="external-link">ggtitle</a></span><span class="op">(</span><span class="st">"Predicted surface, extrapolations blanked out"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatialkit_nc_demo_files/figure-html/aoa-1.png" class="r-plt" alt="The same predicted surface with cells outside the area of applicability blanked out. Nothing is blanked, because the grid took its covariates from the nearest observation and so holds no combination the model had not already seen." width="100%" style="display: block; margin: auto;"></p>
-<p>Nothing is masked here, and the reason is worth understanding rather
-than taking as reassurance:
+<pre><code><span><span class="co">## inside: 1645 | outside: 0 | undetermined: 0 | DI threshold 0.152</span></span></code></pre>
+<div class="sourceCode" id="cb54"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># To blank the map outside the area. AOA is NA where a predictor is missing;</span></span>
+<span><span class="co"># count those as outside.</span></span>
+<span><span class="va">surf</span><span class="op">$</span><span class="va">.pred_masked</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/ifelse.html" class="external-link">ifelse</a></span><span class="op">(</span><span class="va">aoa</span><span class="op">$</span><span class="va">aoa</span><span class="op">$</span><span class="va">AOA</span> <span class="op"><a href="https://rdrr.io/r/base/match.html" class="external-link">%in%</a></span> <span class="cn">TRUE</span>, <span class="va">surf</span><span class="op">$</span><span class="va">.pred</span>, <span class="cn">NA_real_</span><span class="op">)</span></span></code></pre></div>
+<p>No grid point is outside, because
 <code>predict_surface(covariates = points_sf)</code> copies predictor
-values from the <strong>nearest observation</strong>, so every grid cell
-carries a predictor vector some training point already had. Its
-dissimilarity index is therefore near zero by construction. The index
-earns its keep when the covariates come from somewhere else — a raster,
-a different survey, a future scenario. Hand it values outside the
-training range and it says so:</p>
-<div class="sourceCode" id="cb58"><pre class="downlit sourceCode r">
+values from the nearest observation: every grid point carries a
+predictor vector some training point already had, so its dissimilarity
+index is 0 by construction. The index is useful when the covariates come
+from elsewhere, such as a raster, a different survey or a future
+scenario. Given values outside the training range, it marks them:</p>
+<div class="sourceCode" id="cb55"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">extreme</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/sf.html" class="external-link">st_sf</a></span><span class="op">(</span></span>
 <span>  elevation   <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/mean.html" class="external-link">mean</a></span><span class="op">(</span><span class="va">points_sf</span><span class="op">$</span><span class="va">elevation</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">max</a></span><span class="op">(</span><span class="va">points_sf</span><span class="op">$</span><span class="va">elevation</span><span class="op">)</span> <span class="op">*</span> <span class="fl">4</span><span class="op">)</span>,</span>
 <span>  pop_density <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/mean.html" class="external-link">mean</a></span><span class="op">(</span><span class="va">points_sf</span><span class="op">$</span><span class="va">pop_density</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">max</a></span><span class="op">(</span><span class="va">points_sf</span><span class="op">$</span><span class="va">pop_density</span><span class="op">)</span> <span class="op">*</span> <span class="fl">4</span><span class="op">)</span>,</span>
 <span>  geometry    <span class="op">=</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">st_geometry</a></span><span class="op">(</span><span class="va">points_sf</span><span class="op">)</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">2</span><span class="op">]</span></span>
 <span><span class="op">)</span></span>
-<span><span class="fu"><a href="../reference/area_of_applicability.html">area_of_applicability</a></span><span class="op">(</span><span class="va">extreme</span>, model <span class="op">=</span> <span class="va">rf_fit</span>, folds <span class="op">=</span> <span class="va">folds_blocked</span><span class="op">)</span><span class="op">$</span><span class="va">aoa</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"DI"</span>, <span class="st">"AOA"</span><span class="op">)</span><span class="op">]</span></span></code></pre></div>
-<pre><code><span><span class="co">## Simple feature collection with 2 features and 2 fields</span></span>
-<span><span class="co">## Geometry type: POINT</span></span>
-<span><span class="co">## Dimension:     XY</span></span>
-<span><span class="co">## Bounding box:  xmin: 2604137 ymin: 653637.4 xmax: 2827401 ymax: 964007.8</span></span>
-<span><span class="co">## Projected CRS: NAD83 / North Carolina (ftUS)</span></span>
-<span><span class="co">##            DI   AOA                 geometry</span></span>
-<span><span class="co">## 1  0.04806484  TRUE POINT (2827401 653637.4)</span></span>
-<span><span class="co">## 2 15.68668080 FALSE POINT (2604137 964007.8)</span></span></code></pre>
-<hr>
+<span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">st_drop_geometry</a></span><span class="op">(</span><span class="fu"><a href="../reference/area_of_applicability.html">area_of_applicability</a></span><span class="op">(</span><span class="va">extreme</span>, model <span class="op">=</span> <span class="va">rf_fit</span>,</span>
+<span>                                       folds <span class="op">=</span> <span class="va">folds_random</span><span class="op">)</span><span class="op">$</span><span class="va">aoa</span><span class="op">)</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"DI"</span>, <span class="st">"AOA"</span><span class="op">)</span><span class="op">]</span></span></code></pre></div>
+<pre><code><span><span class="co">##            DI   AOA</span></span>
+<span><span class="co">## 1  0.04806484  TRUE</span></span>
+<span><span class="co">## 2 15.68668080 FALSE</span></span></code></pre>
 </div>
 <div class="section level2">
-<h2 id="summary">Summary<a class="anchor" aria-label="anchor" href="#summary"></a>
+<h2 id="next">Next<a class="anchor" aria-label="anchor" href="#next"></a>
 </h2>
-<table class="table">
-<colgroup>
-<col width="33%">
-<col width="33%">
-<col width="33%">
-</colgroup>
-<thead><tr class="header">
-<th align="left">Tessellation</th>
-<th align="right">Cells</th>
-<th align="left">Notes</th>
-</tr></thead>
-<tbody>
-<tr class="odd">
-<td align="left">Voronoi</td>
-<td align="right">40</td>
-<td align="left">Adapts to point density via k-means seeds</td>
-</tr>
-<tr class="even">
-<td align="left">Hex grid</td>
-<td align="right">49</td>
-<td align="left">Uniform hexagons, good for regular sampling</td>
-</tr>
-<tr class="odd">
-<td align="left">Square grid</td>
-<td align="right">45</td>
-<td align="left">Simplest regular grid</td>
-</tr>
-<tr class="even">
-<td align="left">Delaunay</td>
-<td align="right">586</td>
-<td align="left">One triangle per Delaunay triplet; finest
-resolution</td>
-</tr>
-</tbody>
-</table>
-<p>The choropleths show how each tessellation aggregates the response.
-Section 5 shows the thing that matters most: on the same data and the
-same fitted model, the fold scheme moves the reported score
-substantially, and only the blocked number describes the task you
-actually have.</p>
-<div class="section level3">
-<h3 id="where-to-go-next">Where to go next<a class="anchor" aria-label="anchor" href="#where-to-go-next"></a>
-</h3>
-<p>This page is the wide view. Each step has a vignette that stops and
-argues about it:</p>
-<table class="table">
-<colgroup>
-<col width="50%">
-<col width="50%">
-</colgroup>
-<thead><tr class="header">
-<th align="left">for</th>
-<th align="left">read</th>
-</tr></thead>
-<tbody>
-<tr class="odd">
-<td align="left">getting your own data in, and what the coordinates are
-in</td>
-<td align="left"><code><a href="../articles/getting-started.html">vignette("getting-started")</a></code></td>
-</tr>
-<tr class="even">
-<td align="left">how many cells, and the criteria that disagree</td>
-<td align="left"><code><a href="../articles/resolution.html">vignette("resolution")</a></code></td>
-</tr>
-<tr class="odd">
-<td align="left">what a fold’s score estimates, the six fold schemes,
-and the error at each block size</td>
-<td align="left"><code><a href="../articles/spatial-cross-validation.html">vignette("spatial-cross-validation")</a></code></td>
-</tr>
-<tr class="even">
-<td align="left">residual autocorrelation, aggregation standard errors,
-coordinates as predictors and selection inside the folds</td>
-<td align="left"><code><a href="../articles/diagnostics.html">vignette("diagnostics")</a></code></td>
-</tr>
-<tr class="odd">
-<td align="left">handing the regions to someone else, and what to
-report</td>
-<td align="left"><code><a href="../articles/reporting.html">vignette("reporting")</a></code></td>
-</tr>
-</tbody>
-</table>
-<p>Ten numbered scripts in
-<code>system.file("scripts", package = "spatialkit")</code> run the same
-ground at the console, printing what to look for in each figure before
-drawing it.</p>
-<pre><code><span><span class="co">## R version 4.6.2 (2026-10-29)</span></span>
-<span><span class="co">## Platform: x86_64-pc-linux-gnu</span></span>
-<span><span class="co">## Running under: Ubuntu 26.04.1 LTS</span></span>
-<span><span class="co">## </span></span>
-<span><span class="co">## Matrix products: default</span></span>
-<span><span class="co">## BLAS:   /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 </span></span>
-<span><span class="co">## LAPACK: /usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblasp-r0.3.32.so;  LAPACK version 3.12.0</span></span>
-<span><span class="co">## </span></span>
-<span><span class="co">## locale:</span></span>
-<span><span class="co">##  [1] LC_CTYPE=C.UTF-8       LC_NUMERIC=C           LC_TIME=C.UTF-8       </span></span>
-<span><span class="co">##  [4] LC_COLLATE=C.UTF-8     LC_MONETARY=C.UTF-8    LC_MESSAGES=C.UTF-8   </span></span>
-<span><span class="co">##  [7] LC_PAPER=C.UTF-8       LC_NAME=C              LC_ADDRESS=C          </span></span>
-<span><span class="co">## [10] LC_TELEPHONE=C         LC_MEASUREMENT=C.UTF-8 LC_IDENTIFICATION=C   </span></span>
-<span><span class="co">## </span></span>
-<span><span class="co">## time zone: UTC</span></span>
-<span><span class="co">## tzcode source: system (glibc)</span></span>
-<span><span class="co">## </span></span>
-<span><span class="co">## attached base packages:</span></span>
-<span><span class="co">## [1] stats     graphics  grDevices utils     datasets  methods   base     </span></span>
-<span><span class="co">## </span></span>
-<span><span class="co">## other attached packages:</span></span>
-<span><span class="co">## [1] patchwork_1.3.2       ggplot2_4.0.3         dplyr_1.2.1          </span></span>
-<span><span class="co">## [4] sf_1.1-3              spatialkit_2.0.0.9000</span></span>
-<span><span class="co">## </span></span>
-<span><span class="co">## loaded via a namespace (and not attached):</span></span>
-<span><span class="co">##  [1] s2_1.1.13          magic_1.6-1-1      sass_0.4.10        generics_0.1.4    </span></span>
-<span><span class="co">##  [5] class_7.3-24       KernSmooth_2.23-27 lattice_0.23-1     digest_0.6.39     </span></span>
-<span><span class="co">##  [9] magrittr_2.0.5     evaluate_1.0.5     grid_4.6.2         RColorBrewer_1.1-3</span></span>
-<span><span class="co">## [13] fastmap_1.2.0      jsonlite_2.0.0     Matrix_1.7-6       e1071_1.7-17      </span></span>
-<span><span class="co">## [17] DBI_1.3.0          viridisLite_0.4.3  scales_1.4.0       textshaping_1.0.5 </span></span>
-<span><span class="co">## [21] jquerylib_0.1.4    abind_1.4-8        cli_3.6.6          rlang_1.3.0       </span></span>
-<span><span class="co">## [25] units_1.0-1        intervals_0.15.5   withr_3.0.3        cachem_1.1.0      </span></span>
-<span><span class="co">## [29] yaml_2.3.12        otel_0.3.0         FNN_1.1.4.1        geometry_0.5.2    </span></span>
-<span><span class="co">## [33] tools_4.6.2        ranger_0.18.0      spacetime_1.3-4    logger_0.4.3      </span></span>
-<span><span class="co">## [37] vctrs_0.7.3        R6_2.6.1           proxy_0.4-29       classInt_0.4-11   </span></span>
-<span><span class="co">## [41] zoo_1.9-1          lifecycle_1.0.5    fs_2.1.0           htmlwidgets_1.6.4 </span></span>
-<span><span class="co">## [45] ragg_1.5.2         pkgconfig_2.0.3    desc_1.4.3         pkgdown_2.2.1     </span></span>
-<span><span class="co">## [49] pillar_1.11.1      bslib_0.12.0       gtable_0.3.6       glue_1.8.1        </span></span>
-<span><span class="co">## [53] Rcpp_1.1.2         gstat_2.1-6        systemfonts_1.3.2  xfun_0.62         </span></span>
-<span><span class="co">## [57] tibble_3.3.1       tidyselect_1.2.1   knitr_1.52         farver_2.1.2      </span></span>
-<span><span class="co">## [61] htmltools_0.5.9    labeling_0.4.3     rmarkdown_2.32     xts_0.14.3        </span></span>
-<span><span class="co">## [65] wk_0.9.5           compiler_4.6.2     S7_0.2.2           sp_2.2-4</span></span></code></pre>
-</div>
+<p><code><a href="../articles/troubleshooting.html">vignette("troubleshooting")</a></code> lists the errors and
+warnings you are most likely to meet, what each means, and how to handle
+large layers, parallel folds, caches and the log. The main help pages
+this article relies on are <code><a href="../reference/build_tessellation.html">?build_tessellation</a></code>,
+<code><a href="../reference/summarize_by_cell.html">?summarize_by_cell</a></code>, <code><a href="../reference/fit_rf_model.html">?fit_rf_model</a></code>,
+<code><a href="../reference/fit_gwr_model.html">?fit_gwr_model</a></code>, <code><a href="../reference/estimate_sac_range.html">?estimate_sac_range</a></code>,
+<code><a href="../reference/make_folds.html">?make_folds</a></code>, <code><a href="../reference/fold_separation.html">?fold_separation</a></code>,
+<code><a href="../reference/compare_models_cv.html">?compare_models_cv</a></code> and <code><a href="../reference/area_of_applicability.html">?area_of_applicability</a></code>,
+and <code><a href="../articles/glossary.html">vignette("glossary")</a></code> defines the terms. The script
+<code>system.file("scripts", "example_nc_demo.R", package = "spatialkit")</code>
+runs this example’s steps as one script at the console and writes its
+figures to a temporary folder.</p>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside>

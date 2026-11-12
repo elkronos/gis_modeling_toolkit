@@ -1,10 +1,11 @@
-# Compute goodness-of-fit metrics for a spatial model
+# Compute goodness-of-fit metrics for a fitted model
 
 Reports RMSE, MAE, MAPE, SMAPE, \\R^2\\ and adjusted \\R^2\\ for any
-`spatial_fit`, in one row and on one scale, so that fits from different
-backends can be read side by side. Reach for it to score a model on data
-you hold out yourself (pass it as `newdata`), or to get a quick
-in-sample reading of how closely a fit tracks its training data.
+`spatial_fit` as a one-row data frame. With `newdata` it scores rows you
+held out yourself. Without it, it reads the fit's own fitted values:
+in-sample for a GWR or a Bayesian GP fit, out-of-bag for a random
+forest. Those numbers do not compare across backends, and the data frame
+carries no label saying which kind it holds.
 
 ## Usage
 
@@ -23,34 +24,39 @@ model_metrics(object, newdata = NULL, ...)
 
 - ...:
 
-  Additional arguments passed to predict(). The metrics are computed
-  from one predicted value per row, so `draws = TRUE` (a Bayesian fit)
-  and `se.fit = TRUE` (a GWR), with which
-  [`predict()`](https://rdrr.io/r/stats/predict.html) returns a matrix
-  or a list, are refused.
+  Passed to [`predict()`](https://rdrr.io/r/stats/predict.html) when
+  `newdata` is given. Without `newdata` nothing reads them, so any
+  argument here is an error, which catches a misspelt `newdata`. The
+  metrics are computed from one predicted value per row, so
+  `draws = TRUE` (a Bayesian GP fit) and `se.fit = TRUE` (a GWR fit),
+  with which [`predict()`](https://rdrr.io/r/stats/predict.html) returns
+  a matrix or a list, are refused.
 
 - newdata:
 
-  Optional sf object for out-of-sample evaluation. If NULL, fitted
-  values are used (in-sample, or out-of-bag for an `rf_fit`; see above).
+  Optional sf object of held-out rows, carrying the response and the
+  predictors. If `NULL`, the fitted values are used (in-sample, or
+  out-of-bag for an `rf_fit`; see "What the metrics are computed on").
 
 ## Value
 
-A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2, n_MAPE and
-n_SMAPE (the last two are the rows each percentage error was averaged
-over; see "Percentage errors on responses with zeros"). `Adj_R2` is
-always `NA`: GWR's effective parameter count far exceeds the global
-predictor count and a GP model has no simple `p`, so it is deliberately
-suppressed. A non-numeric response is an error: a character or factor
-response cannot be scored, and used to come back as `n = 0` with every
-metric `NA`; a logical response is treated as 0/1.
+A one-row data.frame with `n`, `RMSE`, `MAE`, `MAPE`, `SMAPE`, `R2`,
+`Adj_R2`, `n_MAPE` and `n_SMAPE` (the last two are the rows each
+percentage error was averaged over). `Adj_R2` is always `NA`: a GWR's
+effective number of parameters far exceeds the global predictor count
+and a GP model has no simple `p`. A character or factor response is an
+error; a logical response is scored as 0/1.
 
 ## Details
 
-It is not a substitute for cross-validation. With `newdata = NULL` the
-numbers are in-sample for a `gwr_fit` or `bayesian_fit`, and a GWR can
-reach a near-perfect in-sample \\R^2\\ at a small bandwidth without
-predicting anything. For a figure you can report, use
+Use this function for one fit.
+[`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md)
+runs it over a list of fits and labels each row with its basis, and
+[`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+adds information criteria and residual Moran's I to that table. None of
+the three refits a model. An in-sample score is not a cross-validation
+score: a GWR can reach a near-perfect in-sample \\R^2\\ at a small
+bandwidth without predicting anything. For a figure you can report, use
 [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md),
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md),
 [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
@@ -60,39 +66,37 @@ or
 ## What the metrics are computed on
 
 With `newdata = NULL` the metrics come from `fitted(object)`. That is
-**in-sample** for a `gwr_fit` or a `bayesian_fit`, but **out-of-bag**
-for an `rf_fit`, whose
-[`fitted()`](https://rdrr.io/r/stats/fitted.values.html) method returns
-out-of-bag predictions (see
-[`fit_rf_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)).
-The data.frame `model_metrics()` returns carries no label distinguishing
-the two, so check `object$info$fitted_are_oob` before comparing numbers
-across backends;
+in-sample for a GWR or a Bayesian GP fit, and out-of-bag for a random
+forest, whose [`fitted()`](https://rdrr.io/r/stats/fitted.values.html)
+method returns out-of-bag predictions (see
+[`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)).
+Check `object$info$fitted_are_oob` before comparing numbers across
+backends;
 [`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md)
 and
 [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
-record it per model in a `metric_basis` column.
-[`compare_models_cv`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
+record it per model in a `metric_basis` column, and
+[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
 scores every backend the same way.
 
 \\R^2\\ is \\1 - RSS/TSS\\ with the total sum of squares taken about the
-mean of the response the model was *fitted* to. In sample that is the
-ordinary \\R^2\\. With `newdata` it is out-of-sample \\R^2\\, the
-convention every `cv_*()` function uses: the model is measured against
-the prediction it had to beat, the training mean, not against the new
-rows' own mean, which it could not have known. It is below 0 when the
-model predicts the new rows worse than the training mean does, and it is
-`NA` when the response does not vary about that baseline beyond the
-rounding of its values, whatever its units and origin.
+mean of the response the model was fitted to. In sample that is the
+ordinary \\R^2\\. With `newdata` it is the out-of-sample \\R^2\\ every
+`cv_*()` function uses: the model is measured against the training mean,
+the prediction it had to beat, and not against the new rows' own mean,
+which it could not have known. It is below 0 when the model predicts the
+new rows worse than the training mean does, and `NA` when the response
+does not vary about that mean beyond the rounding of its values,
+whatever its units and origin.
 
-A `gwr_fit` whose response
+A GWR fit whose response
 [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
 took about a centre (`fit$engine$centres$response`, a response at a
 large offset) is scored on the response and the fitted values or
-predictions less that centre, which keep the spread a double rounds away
-at the response's size: `RMSE`, `MAE` and \\R^2\\ are those of the same
-values at 0, and `MAPE` and `SMAPE` divide the same errors by the values
-in the response's units.
+predictions less that centre, which keep digits that rounding at the
+response's size would lose: `RMSE`, `MAE` and \\R^2\\ are those of the
+same values at 0, and `MAPE` and `SMAPE` divide the same errors by the
+values in the response's units.
 [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) and
 [`predict()`](https://rdrr.io/r/stats/predict.html) still return values
 in the response's units.
@@ -106,99 +110,77 @@ denominator is non-zero, and are `NA` when no row qualifies. Non-zero is
 judged at the scale of the data: a denominator no larger than 100
 machine epsilons times the largest one counts as zero, so the rule does
 not depend on the units of the response. The `n_MAPE` and `n_SMAPE`
-columns record how many rows that was; the `n` column counts finite
-observation/prediction pairs. Read a percentage error next to its count:
-when `n_MAPE < n`, `MAPE` is an average over a subset of the data,
-whatever its value.
+columns record how many rows that was; the `n` column (`n_pred` in a
+cross-validation result) counts finite observation/prediction pairs.
+Read a percentage error next to that count: when `n_MAPE` is smaller,
+`MAPE` is an average over a subset of the data, whatever its value.
 
-This bites on any response taking exact zeros: counts, rainfall,
+Any response taking exact zeros is affected: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out
-of 120, `MAPE` is an average over the 58 non-zero rows, which
-`n_MAPE = 58` now says. `SMAPE` fails differently and more subtly: it
-drops the rows where observation and prediction are both near zero
-(which on a well-fitted zero-inflated model are the rows it got
-*right*), so it averages the harder rows only and reads worse than the
-fit deserves; `n_SMAPE` shows how many rows it kept, and the count is
-only a label, not a repair.
+of 120, `MAPE` averages the 58 non-zero rows and `n_MAPE` is 58. `SMAPE`
+drops the rows where observation and prediction are both near zero,
+which on a well-fitted zero-inflated model are the rows it got right, so
+it averages the harder rows only and reads worse than the fit deserves.
+`n_SMAPE` shows how many rows it kept; it does not correct the average.
 
-`RMSE`, `MAE` and \\R^2\\ use every finite row and are unaffected;
-prefer them whenever the response can be zero. For a Bayesian fit,
+`RMSE`, `MAE` and \\R^2\\ use every finite row; prefer them whenever the
+response can be zero. For a Bayesian GP fit,
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
-additionally reports CRPS and interval coverage, which are proper
-scoring rules and have no such failure mode.
+also reports CRPS and interval coverage, which are proper scoring rules
+and are defined at zero.
 
 ## Which metrics survive a non-Gaussian response
 
 RMSE and MAE are defined for any numeric response and are what to read
 for a count, a rate or a bounded outcome. MAPE and SMAPE assume a
-response that is rarely zero (see the previous section), and R-squared
-and adjusted R-squared compare residual variance to total variance,
-which is the right comparison for a Gaussian response and a loose one
-for anything whose variance tracks its mean. None of the four is wrong
-to compute; each is Gaussian-shaped thinking, and on a Poisson or
-zero-inflated response should be read as a rough summary rather than a
-score.
+response that is rarely zero (see "Percentage errors on responses with
+zeros"), and \\R^2\\ and adjusted \\R^2\\ compare residual variance to
+total variance, which suits a Gaussian response and fits loosely
+anything whose variance tracks its mean. On a Poisson or zero-inflated
+response read the four as a rough summary rather than a score.
 
-For the Bayesian backend,
+For the Bayesian GP,
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
-additionally reports CRPS and interval coverage at 50, 80 and 95
-percent. Both are proper scoring rules computed from posterior draws, so
-they are meaningful for any `family` that predicts one number per row (a
-count, a rate, a binary or bounded outcome), and they are the numbers to
-compare when the response is not Gaussian. A categorical or ordinal
-family predicts a probability per response category instead, so
+also reports CRPS and interval coverage at its `coverage_levels` (50, 80
+and 95 percent by default). Both are proper scoring rules computed from
+posterior draws, so they are meaningful for any `family` that predicts
+one number per row (a count, a rate, a binary or bounded outcome), and
+they are the numbers to compare when the response is not Gaussian. A
+categorical or ordinal family predicts a probability per response
+category instead, so
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
 refuses one before fitting anything. When every fold fails, the
 `fold_metrics` frame
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
-returns carries the CRPS column but not the `coverage_*` columns, so
-code that reads those columns must tolerate their absence.
+returns carries the `CRPS` column but not the `coverage_*` columns, so
+code that reads those columns must allow for their absence.
 
 ## See also
 
-Other model evaluation:
+Other in-sample checks:
 [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md),
-[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md),
 [`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md),
+[`print.morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.morans_i.md),
 [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
-
-Other methods on a fitted model:
-[`coef.bayesian_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.bayesian_fit.md),
-[`coef.gwr_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.gwr_fit.md),
-[`coef.rf_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.rf_fit.md),
-[`fitted.bayesian_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fitted.bayesian_fit.md),
-[`fitted.gwr_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fitted.gwr_fit.md),
-[`fitted.rf_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fitted.rf_fit.md),
-[`predict.bayesian_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.bayesian_fit.md),
-[`predict.gwr_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.gwr_fit.md),
-[`predict.rf_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.rf_fit.md),
-[`print.rf_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.rf_fit.md),
-[`print.spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.spatial_fit.md),
-[`residuals.bayesian_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residuals.bayesian_fit.md),
-[`residuals.gwr_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residuals.gwr_fit.md),
-[`residuals.rf_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residuals.rf_fit.md),
-[`summary.spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.spatial_fit.md)
 
 ## Examples
 
 ``` r
-if (requireNamespace("ranger", quietly = TRUE)) {
-  library(sf)
-  set.seed(1)
-  pts <- st_as_sf(
-    data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
-               a = rnorm(60)),
-    coords = c("x", "y"), crs = 32632
-  )
-  pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
-  # Fit on 40 rows and keep 20 back, so the second call really is out of
-  # sample; scoring the training rows again would only re-read the fit.
-  fit <- fit_rf_model(pts[1:40, ], "z", "a", num_trees = 50, seed = 1)
-  print(model_metrics(fit))                    # in-sample (out-of-bag for RF)
-  model_metrics(fit, newdata = pts[41:60, ])   # on the 20 held-out rows
-}
+library(sf)
+set.seed(1)
+pts <- st_as_sf(
+  data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+             a = rnorm(60)),
+  coords = c("x", "y"), crs = 32632
+)
+# An offset keeps the response away from zero, where MAPE is undefined.
+pts$z <- 10 + 2 * pts$a + rnorm(60, 0, 0.3)
+# Fit on 40 rows and keep 20 back, so the second call is out of sample.
+fit <- fit_rf_model(pts[1:40, ], "z", "a", num_trees = 50, seed = 1)
+model_metrics(fit)                           # out-of-bag for a forest
 #>    n     RMSE       MAE     MAPE    SMAPE        R2 Adj_R2 n_MAPE n_SMAPE
-#> 1 40 0.409009 0.3236812 86.57837 50.87364 0.9541711     NA     40      40
-#>    n      RMSE       MAE     MAPE    SMAPE        R2 Adj_R2 n_MAPE n_SMAPE
-#> 1 20 0.5080838 0.3836504 158.4334 63.30707 0.9022065     NA     20      20
+#> 1 40 0.409009 0.3236812 3.425689 3.390414 0.9541711     NA     40      40
+model_metrics(fit, newdata = pts[41:60, ])   # on the 20 held-out rows
+#>    n      RMSE       MAE    MAPE    SMAPE        R2 Adj_R2 n_MAPE n_SMAPE
+#> 1 20 0.5080838 0.3836504 3.56621 3.649174 0.9022065     NA     20      20
 ```

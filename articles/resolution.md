@@ -1,80 +1,47 @@
 # Choosing a resolution
 
-*This article needs two optional packages: **gstat**, which fits the
-variogram behind the autocorrelation range, and **ggplot2** for the
-figures. When either is missing the code is shown but not run, and a
-note at the top says so.*
-
-## The question
-
-Before point observations can be aggregated into regions, something has
-to decide how many regions. Twenty cells over a county smooth away most
-of the variation you came to measure. Two thousand give you cells
-holding one observation each, where the standard errors are undefined
-and every cell mean is one number pretending to be an average.
-
-Administrative boundaries settle this by fiat: you get the census tracts
-that exist. Drawing the regions yourself removes the fiat and leaves the
-decision with you, and the number propagates into the variance of the
-cell means, the design effect, and the size of the blocks a spatial
-cross-validation holds out.
-
-Three functions answer the question, in increasing order of how much
-they tell you.
-[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-reads an elbow off the coordinates alone and runs on the hard
-dependencies; when the points give it an elbow it is the quick answer,
-and the one
-[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-accepts directly.
+The number of cells sets what each cell value averages over. Too few
+cells smooth away the variation you came to measure. Too many leave
+cells that hold one observation each, where the standard error is
+undefined and the cell mean is a single observation. The count also sets
+the variance of the cell means, the design effect, and the size of the
+blocks a spatial cross-validation holds out when it uses the cells as
+blocks.
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-scores every cell count on a ladder in five columns at once, four count
-criteria and one diagnostic, and needs gstat for two of them.
+scores candidate counts and
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-reads one criterion off that profile, and
-[`summary()`](https://rdrr.io/r/base/summary.html) on the profile reads
-the count criteria side by side. If the cells will feed a model, the
-profile is the one to use. If you need a count now and the data are all
-you have, the elbow is defensible when the points cluster, and this
-article says where it falls short. On points spread evenly there is no
-elbow to read, and both functions say so: the profile leaves its `elbow`
-column empty, and
-[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-returns `NA`, since the count it would have returned was chosen by the
-ends of its ladder, not by the data.
-
-Called with the response and nothing else,
-[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-takes its defaults: one level at 4.5 observations per cell, scored for
-the pooled value that
+reads one off the profile. Given the response and nothing else, they
+choose the count for the [pooled
+value](https://elkronos.github.io/gis_modeling_toolkit/articles/glossary.html#pooled-value)
+that
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-reports by default, in density-weighted cells, with no variogram fitted.
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-then reads the count off that size (“Setting a size” below). A ladder
-argument such as `n_levels` gives the ladder this article reads first.
-Each earlier default is one argument away:
-`estimate = NULL, obs_per_cell = NULL` in the profile for the ladder
-without the pooled value’s columns, `sac = NULL` for a variogram on a
-ladder of sizes, `partition = "kmeans"` for k-means cells from 25
-starts, `criterion = "cp"` in
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
-and `estimate = "mean"` in
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md).
+reports by default.
 
-The argument that says “how many” is spelled differently by the function
-it belongs to: `max_levels` bounds the elbow’s ladder, `n_levels` sets
-the profile’s and `obs_per_cell` sets it in observations per cell,
-`approx_n_cells` and `target_cells` are what the grid builders take, and
-`n` is what
-[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
-takes. Each of the last three accepts the object the first two return.
+*This article needs two optional packages: `gstat` for the variogram and
+`ggplot2` for the figure. Where one is missing, the code that needs it
+is shown but not run.*
 
-## A fixture with known structure
+The two calls with their defaults:
 
-A simulated exponential field, so the structure is known before anything
-is fitted. The covariance parameter `a = 100` gives an effective range
-of 300 units across a 1000-unit square, and `sd = 1` adds a nugget large
-enough to matter later.
+``` r
+
+prof <- resolution_profile(pts, response_var = "z")
+sel  <- select_resolution(prof)
+```
+
+[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+reads a count off the coordinates alone, and finds one only when the
+points cluster.
+
+## A field with known structure
+
+The examples use a simulated field, so its structure is known before
+anything is fitted. The 500 points are spread uniformly over a 1,000 m
+square. The field has an exponential covariance with range parameter 100
+m (`exp(-d / 100)`), so its correlation falls to 5 percent at about 300
+m, three times the range parameter, and `rnorm(n, sd = 1)` adds a
+nugget: measurement noise that does not depend on distance, here of
+variance 1.
 
 ``` r
 
@@ -90,365 +57,25 @@ xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(1e-8, n))) %*% rnorm(n)) +
 pts  <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 ```
 
-## The short answer
+## A size for pooled values
 
-[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-returns a few candidate cell counts, best first, when the WSS curve of a
-k-means clustering of the points has an elbow, and `NA` when it has
-none.
-
-``` r
-
-lv <- determine_optimal_levels(pts, max_levels = 40)
-lv
-```
-
-    ## [1] NA
-    ## attr(,"structured")
-    ## [1] FALSE
-    ## attr(,"sag")
-    ## [1] 0.001046518
-
-This fixture’s points are uniform, so their within-cluster sum of
-squares falls like `c / k` all the way down and bends nowhere of its
-own. The call finds no elbow and returns `NA`, with `structured = FALSE`
-and the largest sag of the curve as attributes, and a warning of class
-`spatialkit_no_elbow` that says why. `on_no_elbow = "warn"` returns the
-count the rule lands on instead, with the same warning, which says that
-`max_levels` chose it: a larger `max_levels` would give a larger answer.
-Read an elbow only off points that cluster; here the profile below is
-the better guide.
-
-When there is an elbow, `lv` is what
-[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
-takes as `n`, and what
-[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-takes as `approx_n_cells` for its `"hex"` and `"square"` methods; both
-use its first element. Given `lv` itself, both stop on the `NA` and say
-where it came from; `lv[1]` drops the attributes that tell them, and
-they then say only that `NA` is not a number of cells. Voronoi has no
-cell count to set: it grows one cell per point you hand it, which is why
-the count is set when you place the seeds rather than when you
-tessellate them. The last section shows the two calls in order.
-
-Two things to know about this function before you rely on it. Its
-`criterion = "morans_i"` setting ranks the counts around the elbow by
-Moran’s z of the cell means, which is a diagnostic and not a count rule;
-the call returns the ranking with a warning of class
-`spatialkit_diagnostic_ranking` that says so. `criterion = "combined"`
-keeps the elbow’s ranking of those counts and reports Moran’s I beside
-it in `attr(, "diagnostics")`. Both need a `response_var`; without one
-the call warns and falls back to `"geometric"`, and under `"geometric"`,
-the default, a `response_var` is not read. And its ladder runs from 1 to
-`max_levels` with no lower bound from the spatial correlation of the
-data, so it can prefer cells wider than the field’s own correlation
-range. The profile below reports that bound, and
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-reads `reliability` from it up, which is why the two can disagree.
-
-## The profile
-
-[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-fits every level on a ladder and reports what each one costs, so you can
-see the shape of the trade-off before picking a point on it. `n_levels`
-asks for that ladder. Levels are spaced logarithmically, because cell
-diameter falls as $`L^{-1/2}`$. At its defaults the profile also scores
-the leave-one-out error of the pooled value, `loo`, at every level, and
-draws the cells by density-weighted k-means.
-
-``` r
-
-prof <- resolution_profile(pts, response_var = "z", n_levels = 16)
-prof
-```
-
-    ## Resolution profile: 16 levels on 500 points
-    ##   ladder      : 2 to 55 cells (floor 17 from range 242.9, not applied, ceiling 55 from min_cell_n = 9)
-    ##   variogram   : nugget 0.702, partial sill 1.42, range 242.9
-    ##   scored on   : response; 3 density-weighted k-means++ starts (power 1, 8 neighbours) per level; WSS rises at 0 step(s)
-    ##   one cell    : rss 1040, cp 2.08 (one mean for the layer; a level has to beat it)
-    ##   estimate    : pooled toward the 8 nearest cells; loo on 500 rows of the layer; one cell: loo 2.08
-    ##   elbow       : none; the WSS curve falls as it does with no cluster structure
-    ## 
-    ##  levels      wss wss_spread elbow cell_n_min cell_n_median cell_diam_median
-    ##       2 52800000   0.000415    NA        228         250.0            649.0
-    ##       3 32100000   0.002270    NA        151         164.0            485.0
-    ##       4 21400000   0.000549    NA        109         128.0            412.0
-    ##       5 17800000   0.043100    NA         93         101.0            375.0
-    ##       6 15300000   0.053200    NA         70          82.5            348.0
-    ##       8 10300000   0.040100    NA         43          65.0            281.0
-    ##       9  8810000   0.085700    NA         42          56.0            264.0
-    ##      12  6510000   0.028400    NA         29          41.5            226.0
-    ##      15  5190000   0.038600    NA         23          32.0            199.0
-    ##      17  4600000   0.116000    NA         17          28.0            184.0
-    ##      18  4350000   0.121000    NA         19          27.5            177.0
-    ##      23  3270000   0.132000    NA         14          21.0            147.0
-    ##      28  2680000   0.011600    NA          8          19.0            142.0
-    ##      35  1940000   0.049200    NA          7          14.0            124.0
-    ##      44  1530000   0.103000    NA          6          11.0            103.0
-    ##      55  1240000   0.106000    NA          3           9.0             93.3
-    ##   rss   cp  moran_i moran_z reliability cells_resp cell_resp_mean
-    ##  1020 2.05       NA      NA       0.760          2         250.00
-    ##  1000 2.02       NA      NA       0.800          3         167.00
-    ##  1010 2.03       NA      NA       0.811          4         125.00
-    ##   915 1.84       NA      NA       0.814          5         100.00
-    ##   909 1.84       NA      NA       0.814          6          83.30
-    ##   958 1.94       NA      NA       0.811          8          62.50
-    ##   919 1.86       NA      NA       0.808          9          55.60
-    ##   932 1.90 -0.09730 -0.1030       0.799         12          41.70
-    ##   864 1.77 -0.00439  0.9290       0.790         15          33.30
-    ##   869 1.79 -0.02560  0.4870       0.783         17          29.40
-    ##   849 1.75  0.00450  0.8920       0.780         18          27.80
-    ##   784 1.63 -0.04780 -0.0311       0.765         23          21.70
-    ##   733 1.54 -0.00928  0.3800       0.750         28          17.90
-    ##   683 1.46  0.03300  0.9050       0.732         35          14.30
-    ##   695 1.51  0.18200  3.2400       0.710         44          11.40
-    ##   649 1.45  0.18900  3.5200       0.686         55           9.09
-    ##  scored_per_cell  loo loo_se share_alone own_weight
-    ##           250.00 2.07 0.1230           0      0.914
-    ##           167.00 2.03 0.1220           0      0.917
-    ##           125.00 2.05 0.1220           0      0.835
-    ##           100.00 1.87 0.1100           0      0.951
-    ##            83.30 1.86 0.1130           0      0.936
-    ##            62.50 1.98 0.1170           0      0.847
-    ##            55.60 1.90 0.1120           0      0.885
-    ##            41.70 1.95 0.1130           0      0.824
-    ##            33.30 1.83 0.1100           0      0.858
-    ##            29.40 1.85 0.1160           0      0.841
-    ##            27.80 1.82 0.1120           0      0.855
-    ##            21.70 1.71 0.1050           0      0.866
-    ##            17.90 1.63 0.1000           0      0.885
-    ##            14.30 1.56 0.0933           0      0.850
-    ##            11.40 1.63 0.0996           0      0.767
-    ##             9.09 1.59 0.0974           0      0.724
-
-One row per level. `cell_n_median` and `cell_diam_median` are usually
-the first two columns worth reading: how many points a typical cell
-holds, and how big it is in CRS units. `cell_diam_median` is twice the
-median root-mean-square distance of a cell’s points from its centre,
-about 0.8 of the side of a square cell of the same area, so compare it
-against something you already know about your own data, such as the
-spacing of a sampling grid or the size of a field, with that factor in
-mind.
-
-### Four criteria and a diagnostic
-
-| criterion | measures | needs | direction |
-|----|----|----|----|
-| `elbow` | how far the log of the within-cluster sum of squares sags below a power law (the straight log-log line from one cell to the last level); `NA` at every level when the points have no cluster structure | coordinates only | larger |
-| `cp` | Mallows’ $`C_p`$ of the piecewise-constant approximation of the response by cell means | a response, and a variogram for the nugget | smaller |
-| `moran_z` | Moran’s z of the cell means (of their regression residuals when predictors are given): whether neighbouring cells resemble each other | a response | a diagnostic, not a count rule |
-| `reliability` | the share of the spread in the cell means that is signal, not sampling noise | a variogram | larger |
-| `loo` | the leave-one-out error of the cell value the profile scores, the pooled value by default (“Setting a size”) | a response | smaller |
-
-`elbow` sees the coordinates and knows nothing about what you measured.
-`cp` and `reliability` split the practical question in half: how well
-the cells represent the field, and whether the cell values can be told
-apart from noise. What `cp` estimates is the error of re-measuring the
-sampled sites, each predicted by the mean of its cell, with the
-variogram’s nugget as the noise of one measurement. For a new location
-the penalty would also need the spread of the field inside a cell, which
-the nugget leaves out. `moran_z` is a diagnostic of the cell means and
-not a count rule. It grows as the cells get finer than the range,
-because neighbouring cells then resemble each other, and it is near zero
-at the coarsest counts it is computed at whatever the data. It does not
-say how well the cells represent the response, so
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-refuses it unless asked with `diagnostic = TRUE`, and
-[`summary()`](https://rdrr.io/r/base/summary.html) leaves it out unless
-it is named.
-
-``` r
-
-plot(prof)
-```
-
-![Four stacked panels against the number of cells on a shared axis, from
-2 to 55; there is no elbow panel because these uniform points have no
-elbow. Mallows' Cp falls across the ladder and is lowest at 55 cells,
-the last level. Reliability rises to a peak near 5 cells and declines
-after it. The leave-one-out error of the pooled value falls as Cp does
-and is lowest at 35 cells. The absolute Moran's z of the cell means is
-drawn from 12 cells on, stays near 1 or below up to 35 cells and climbs
-past 3 at 44. A red dot and dotted line mark the level selected for Cp,
-at 55 cells, for reliability, at 17 cells, and for the leave-one-out
-error, at 35 cells, with a shaded band over the levels within tolerance
-of each; the Moran panel has no selected
-level.](resolution_files/figure-html/plot-profile-1.png)
-
-Two behaviours are worth knowing before reading the numbers.
-
-**`cp` needs a nugget to have an interior optimum.** On a smooth field
-the piecewise-constant approximation keeps improving as cells shrink,
-the penalty is too small to stop it, and the minimum lands wherever
-`min_cell_n` stops the ladder. The support ceiling is then doing the
-choosing, and
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-flags it.
-
-This fixture has a fitted nugget of 0.7 against a partial sill of 1.42,
-and `cp` still falls to the last level of the ladder here: its minimum
-is the support ceiling, as
-[`summary()`](https://rdrr.io/r/base/summary.html) says below.
-
-**`reliability` is highest at a coarse count**, because bigger cells
-hold more points and average away more noise. Its maximum usually lies
-below the range floor, where cells are wider than the range.
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-therefore reads it from the floor up, and what it returns is then the
-floor: a bound on the analysis, with the range choosing and not the
-curve. The next section is about spotting that.
-
-## Choosing, and the flat region
-
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-picks the level a criterion prefers and reports the band around it.
-
-``` r
-
-sel <- select_resolution(prof, criterion = "reliability")
-sel
-```
-
-    ## Resolution by reliability: 17 cells
-    ##   flat region : 17 to 18 (2 of 16 levels)
-    ##   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
-    ##   note        : the optimum is the range floor (area / range^2); the bound is
-    ##                 choosing, not the criterion. Fewer cells would be wider than
-    ##                 the range and average over more than one patch of the field.
-
-`sel$best` is the optimum and `sel$flat` is every level within `tol` of
-it. Quote the band when you write the analysis up. `tol` is relative to
-the optimum’s value for `cp` and `reliability`, and relative to the
-criterion’s range for `elbow` and `moran_z`, whose optima can be zero.
-
-Two flags say when a bound chose instead of the criterion:
-
-``` r
-
-c(at_floor = sel$at_floor, at_ceiling = sel$at_ceiling)
-```
-
-    ##   at_floor at_ceiling 
-    ##       TRUE      FALSE
-
-`at_floor` is `TRUE` here. Reliability wanted to keep going coarser and
-the correlation-range floor stopped it, so read the answer as *at most
-this fine* and take the number as a bound on the analysis, not as an
-optimum. The floor is a fact about the data, so the fix is a different
-question, not a different `tol`.
-
-Criteria can prefer different levels while agreeing on a region.
-[`summary()`](https://rdrr.io/r/base/summary.html) on the profile reads
-the count criteria at once, and closes with the levels that every band
-contains:
-
-``` r
-
-summary(prof)
-```
-
-    ## Resolution picks: 3 criteria over 16 levels (2 to 55 cells)
-    ## 
-    ##   cells: density-weighted k-means++ starts (power 1, 8 neighbours)
-    ## 
-    ##    criterion best flat region levels in band
-    ##           cp   55      35, 55              2
-    ##  reliability   17    17 to 18              2
-    ##          loo   35      35, 55              2
-    ## 
-    ##   cp: the optimum is the support ceiling (n / min_cell_n).
-    ##   reliability: the optimum is the range floor (area / range^2).
-    ##   There the bound is choosing, not the criterion.
-    ## 
-    ##   picks span 17 to 55 cells (3.2x)
-    ##   no level is in every flat region: the criteria disagree over the
-    ##   whole ladder. plot() draws the curves they were read from.
-
-A band is a set of levels, not an interval, because the criterion curves
-are not monotone: the `cp` band above accepts 35 and 55 and rejects the
-44 between them, while a solid run of 2 rungs prints as a range, as
-`reliability` does with `17 to 18`. Where the bands overlap you have a
-defensible set of levels, and the last line names it;
-`attr(summary(prof), "common")` returns the same levels for use in code,
-and `attr(summary(prof), "bands")` each criterion’s region in full.
-Where they do not overlap, the criteria are answering different
-questions and you have to say which one your analysis needs. An empty
-intersection is a result: it says this field has no single resolution
-that satisfies every way of asking.
-
-The table is not a decision procedure, and nothing in the package picks
-among its criteria for you. Cross-validating a model at each suggested
-level is affordable, but it does not settle the question either: on a
-simulated field the level that won on cross-validated $`R^2`$ moved with
-the fold seed, and the coarsest grid won most often because its score
-had the widest spread, not because it was better.
-
-## What the ladder can support
-
-The ladder runs from 2 cells to a ceiling the data impose. The profile
-records that ceiling and, beside it, a floor from the autocorrelation
-range.
-
-``` r
-
-str(attr(prof, "bounds"))
-```
-
-    ## List of 15
-    ##  $ floor       : int 17
-    ##  $ ceiling     : int 55
-    ##  $ ceiling_from: chr "min_cell_n"
-    ##  $ supported   : logi TRUE
-    ##  $ area        : num 976371
-    ##  $ range       : num 243
-    ##  $ n           : int 500
-    ##  $ n_sample    : int 500
-    ##  $ n_distinct  : int 500
-    ##  $ min_cell_n  : int 9
-    ##  $ range_floor : logi FALSE
-    ##  $ n_response  : int 500
-    ##  $ n_scored    : int 500
-    ##  $ levels_given: logi FALSE
-    ##  $ predictors  : logi FALSE
-
-The ceiling is `floor(n / min_cell_n)`, with `n` the rows that carry a
-response when one is given, or the number of distinct locations when
-that is smaller (one short of it when no location repeats);
-`ceiling_from` says which. Past it the average cell holds too few points
-to estimate anything from, or k-means has more centres to place than
-distinct points. The floor is `ceiling(area / range^2)`, from the fitted
-autocorrelation range: cells wider than the range average over more than
-one patch of the field, mixing values the field itself keeps apart. The
-range is an estimate, so by default the floor is reported and not
-applied: it is a level of the ladder,
-`select_resolution(criterion = "reliability")` reads from it up, and
-`range_floor = TRUE` starts the ladder there.
-
-When the floor exceeds the ceiling, the data cannot support a
-tessellation that respects their own correlation structure. `supported`
-is `FALSE`, a warning says so, and the ladder still runs from 2 to the
-ceiling so the cost of each level stays visible. The usual causes are
-too few points for the extent, or a correlation range shorter than the
-spacing between observations.
-
-## Setting a size
-
-Of the criteria above, all but `loo` score the plain mean of a cell.
+By default
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-reports beside it, by default, a *pooled* value: the cell’s mean pulled
-toward the mean of the 8 cells around it, by a weight that grows with
-the number of observations the cell holds (`estimate = "pooled"`;
-[`vignette("reporting")`](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.md)
-shows how to read and report one). For that value no criterion sets the
-count. A *size* does: the number of observations a cell is to hold on
-average, `obs_per_cell`. A size `s` on `n` observations is
-`max(2, round(n / s))` cells.
+reports, beside each cell’s mean, a pooled value: the cell’s mean pulled
+toward the mean of the observations in the 8 nearest cells (nearest by
+the centroid of their observations), by a weight that grows with the
+number of observations the cell holds. `estimate = "pooled"` selects it,
+and
+[`vignette("cells")`](https://elkronos.github.io/gis_modeling_toolkit/articles/cells.md)
+shows how to read one. The count for pooled values comes from a
+[size](https://elkronos.github.io/gis_modeling_toolkit/articles/glossary.html#size),
+`obs_per_cell`: the number of observations a cell is to hold on average.
+A size `s` on `n` observations gives `max(2, round(n / s))` cells. The
+printed output counts observations as rows.
 
 The default profile is one size, 4.5, scored for the pooled value, and
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-reads the count off it by that size. This is the call with nothing named
-but the response:
+reads the count off it by that size:
 
 ``` r
 
@@ -465,14 +92,25 @@ select_resolution(prof_default)
     ##   note        : the count is set by obs_per_cell = 4.5, the default; no
     ##                 criterion chose it.
 
-`obs_per_cell` puts the profile’s ladder in those terms, one level per
-size, with the centres fitted to every row. `estimate` names the cell
+The cells are density-weighted k-means cells: each point is weighted by
+its local density. Density weighting gives cells of about equal counts
+once there are more cells than clusters of points. At the default size
+that holds on any layer whose clusters hold more than a few
+observations, which is why the default size uses the density-weighted
+partition
+([`?resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
+section “The partition”). `partition = "kmeans"` gives plain k-means
+cells instead.
+
+`obs_per_cell` also takes several sizes, one
+[level](https://elkronos.github.io/gis_modeling_toolkit/articles/glossary.html#level)
+each, with the centres fitted to every row. `estimate` names the cell
 value the profile scores, the pooled value unless it says otherwise:
 
 ``` r
 
-prof_size <- resolution_profile(pts, response_var = "z",
-                                obs_per_cell = c(12, 9, 6, 4.5, 3))
+sizes     <- c(12, 9, 6, 4.5, 3)
+prof_size <- resolution_profile(pts, response_var = "z", obs_per_cell = sizes)
 as.data.frame(prof_size)[, c("levels", "scored_per_cell", "loo",
                              "share_alone", "own_weight")]
 ```
@@ -490,65 +128,66 @@ Three of the columns say what a size leaves a cell value to stand on.
   is predicted by the value of its cell computed without it, and the
   squared errors are averaged. It needs no variogram. `sac = "auto"`,
   the default, fits none on a ladder of sizes, so `cp` and `reliability`
-  are `NA` in this profile.
+  are `NA` in this profile; `sac = NULL` fits one and fills them.
 - `share_alone` is the share of the observations that are the only one
   in their cell.
 - `own_weight` is the median weight a pooled value gives its cell’s own
   mean. At 1 the pooled values are the plain means; at 0 each is the
   mean of the cell’s neighbours.
 
-At the size of the default profile this ladder has other centres, and so
-another `loo`, than that profile had: a profile draws the starts of its
-levels in turn from one random stream under `seed`, so a level’s centres
-depend on the other levels of the ladder.
+At the default size this ladder has the same 111 cells, and the same
+`loo`, as the default profile. Each level’s starts run on a random
+stream of their own, seeded from `seed` and the level, so a level gets
+the same centres on any ladder that holds it and is fitted to the same
+rows.
 
 `select_resolution(criterion = "size")` returns the level of a size. It
-searches for no optimum, so the result has no flat region and sits on no
-bound:
+searches for no optimum, so the result has no [flat
+region](https://elkronos.github.io/gis_modeling_toolkit/articles/glossary.html#flat-region)
+and sits on no bound. Here it returns the default call’s count:
 
 ``` r
 
 sel_size <- select_resolution(prof_size, criterion = "size",
                               obs_per_cell = 4.5)
-sel_size
+sel_size$best
 ```
 
-    ## Resolution by size: 111 cells
-    ##   size        : 4.5 rows per cell, the default (obs_per_cell); 500 rows / 111 cells = 4.50
-    ##   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
-    ##   estimate    : pooled toward the 8 nearest cells
-    ##   at this size: 0.6% of the rows are alone in their cell; median own weight 0.57
-    ##   loo         : 1.51 (one cell for the layer: 2.08)
-    ##   note        : the count is set by obs_per_cell = 4.5, the default; no
-    ##                 criterion chose it.
+    ## [1] 111
 
-`loo` is in the table to compare sizes by, not to choose one. For pooled
-values it tends to keep falling as the cells shrink, so its minimum
-tends to be the finest size offered, and the end of the ladder would
-then be choosing. On 200 simulated layers of 1,500 clustered
-observations of a field plus noise, profiled at seven sizes from 18 to
-2, the lowest `loo` of the pooled value was at the size 2 on 176
-(`dev/sim-pooled-values.R` in the package’s repository;
+`loo` shows what each size costs, but its minimum does not pick a size.
+For pooled values `loo` tends to keep falling as the cells shrink, so
+its minimum tends to be the finest size offered, and the last level of
+the ladder would then set the count. On 200 simulated layers of 1,500
+clustered observations of a field plus noise, profiled at seven sizes
+from 18 to 2, the lowest `loo` of the pooled value was at the size 2 on
+176 of the 200 layers
+([`dev/sim-pooled-values.R`](https://github.com/elkronos/gis_modeling_toolkit/blob/main/dev/sim-pooled-values.R)
+in the package’s GitHub repository;
 [`?resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-gives the settings).
+gives the settings). In the table above the lowest `loo` is at 167
+cells, the finest size offered. The size is therefore the caller’s
+choice, made on other grounds: how many observations a cell value should
+stand on, which `share_alone` and `own_weight` describe.
 
-In the table above the lowest `loo` is at 167 cells, the finest size
-offered.
+In the table, at 12 observations per cell no observation sits alone in
+its cell and the median own weight is 0.83; at 3, 6 percent of the
+observations sit alone in their cell and it is 0.57. A larger size gives
+fewer cells, whose pooled values rest more on their own observations.
 
-The size is therefore the caller’s choice, made on other grounds: how
-many observations a cell value should stand on, which `share_alone` and
-`own_weight` describe. Under a size neither the cells, which are fitted
-to the coordinates, nor their number, which is a count of rows, depend
-on the response, so the count is not fitted to the values it will
-summarise.
+Under a size neither the cells, which are fitted to the coordinates, nor
+their number, which is a count of rows, depend on the response, so the
+count is not fitted to the values it will summarise.
 
 A size does not ask whether the response has spatial structure the cells
 can use, so the selection asks it separately. `structured` is `FALSE`
 when one mean for the whole layer predicts a left-out observation as
-well as the cells do. The count stands either way, since a size set it
-and no criterion, and the functions that take the selection as a count
-then warn (class `spatialkit_no_structure`) that the cell values will
-say little that one mean does not.
+well as the cells do or better, within `tol`. It is also `FALSE` when an
+F test of the cell means against one mean gives a p-value of 0.05 or
+more. The count stands either way, since a size set it and no criterion,
+and the functions that take the selection as a count then warn (class
+`spatialkit_no_structure`) that the cell values will say little that one
+mean does not.
 
 ``` r
 
@@ -561,9 +200,9 @@ data.frame(structured = sel_size$structured, loo = sel_size$loo,
 
 The selection goes to
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md),
-as in “Next” below. It carries a record of how the count was set,
-`sel_size$count_rule`, which the seeds, the cells and the assigned layer
-hand on to
+as “From a count to cells” shows. It carries a record of how the count
+was set, `sel_size$count_rule`, which the seeds, the cells and the
+assigned layer hand on to
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md).
 The summary then checks that it reports the cell value the count was
 chosen for, on the cells and rows that were scored.
@@ -575,7 +214,9 @@ observation is predicted by the mean of the other observations of its
 cell, or, when it is alone in its cell, by the mean of the cell of its
 nearest other observation. `estimate = "mean"` scores that error in the
 profile, and the default `obs_per_cell = "auto"` then offers the seven
-sizes 18, 12, 9, 6, 4.5, 3 and 2:
+sizes 18, 12, 9, 6, 4.5, 3 and 2. `estimate = "mean"` in
+[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+reports the plain means without the pooled columns.
 
 ``` r
 
@@ -612,27 +253,369 @@ criterion chose it.
 `sel_loo$flat` is every level whose error is within `tol` of the lowest,
 and it is the answer to quote, as for any criterion. `loo_se` is the
 standard error of one level’s mean squared error. It is not the standard
-error of the difference between two levels: their errors come from the
-same observations.
+error of the difference between two levels, since their errors come from
+the same observations.
 
-Three things to know before relying on this criterion. The count now
-depends on the values of the response, so the next section applies, and
-`select_on = "split"` reads `loo` on one half of the layer. The error
-describes locations among the observations: it compares counts where
-data are near, and says nothing about the error of a map away from them.
-And it sets the count of plain means only; for pooled values a size
-does, as above. In the simulation of that section the lowest `loo` of
-the plain mean was at the finest size on none of the 200 layers: it was
-at 6 observations per cell on 86 of them, at 4.5 on 51 and at 9 on 49.
+The count now depends on the values of the response, so “Choosing on one
+half, estimating on the other” below applies, and `select_on = "split"`
+reads `loo` on one half of the layer. The error describes locations
+among the observations: it compares counts where data are near, and says
+nothing about the error of a map away from them. It sets the count of
+plain means only; for pooled values a size does. In the simulation
+described under “A size for pooled values”, the lowest `loo` of the
+plain mean was at the finest size on none of the 200 layers. It was at 6
+observations per cell on 86 of them, at 4.5 on 51 and at 9 on 49.
 
-`criterion = "auto"` is the rule that goes with the profile’s estimate:
-`"size"` for pooled values and `"loo"` for plain means. It is
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)‘s
-default, and a profile built with `estimate` and passed straight to
+`criterion = "auto"`, the default of
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
+is the rule that goes with the profile’s estimate: `"size"` for pooled
+values, `"loo"` for plain means and `"cp"` for a profile without an
+estimate. A profile built with `estimate` and passed straight to
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
-as `n` is read the same way. `criterion = "cp"` reads Mallows’ Cp, which
-neither profile of these two sections has, since neither fitted a
-variogram.
+as `n` is read the same way. Mallows’ Cp needs a variogram, which
+neither profile of these two sections fitted.
+
+## A ladder of counts
+
+`n_levels` asks
+[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+for a ladder of cell counts in place of a size. The profile fits every
+level and reports what each one costs, so you can see the shape of the
+trade-off before picking a point on it. The levels are spaced
+logarithmically, because cell diameter falls as L^{-1/2}, with L the
+number of cells. The cells are density-weighted, as in the default
+profile, and the profile still scores the pooled value’s `loo` at every
+level; `estimate = NULL` leaves those columns out.
+
+``` r
+
+prof <- resolution_profile(pts, response_var = "z", n_levels = 16)
+print(as.data.frame(prof)[, c("levels", "cell_n_median", "cell_diam_median",
+                              "cp", "reliability", "loo", "moran_z")],
+      digits = 3)
+```
+
+    ##    levels cell_n_median cell_diam_median   cp reliability  loo moran_z
+    ## 1       2         250.0            648.9 2.05       0.760 2.07      NA
+    ## 2       3         164.0            484.8 2.02       0.800 2.03      NA
+    ## 3       4         127.5            412.2 2.03       0.811 2.05      NA
+    ## 4       5         101.0            374.9 1.84       0.814 1.87      NA
+    ## 5       6          82.5            348.2 1.84       0.814 1.86      NA
+    ## 6       8          65.0            281.0 1.94       0.811 1.98      NA
+    ## 7       9          56.0            264.4 1.86       0.808 1.90      NA
+    ## 8      12          41.5            226.5 1.90       0.799 1.95 -0.1028
+    ## 9      15          32.0            199.4 1.77       0.790 1.83  0.9286
+    ## 10     17          28.0            183.7 1.79       0.783 1.85  0.4871
+    ## 11     18          27.5            176.8 1.75       0.780 1.82  0.8921
+    ## 12     23          21.0            147.2 1.63       0.765 1.71 -0.0311
+    ## 13     28          19.0            141.7 1.54       0.750 1.63  0.3802
+    ## 14     35          14.0            124.1 1.46       0.732 1.56  0.9053
+    ## 15     44          11.0            103.0 1.51       0.710 1.63  3.2407
+    ## 16     55           9.0             93.3 1.45       0.686 1.59  3.5156
+
+One row per level. `cell_n_median` and `cell_diam_median` say how many
+points a typical cell holds and how big it is in CRS units, here metres.
+`cell_diam_median` is twice the median root-mean-square distance of a
+cell’s points from its centre, about 0.8 of the side of a square cell of
+the same area. Compare it, with that factor in mind, against something
+you know about your data, such as the spacing of a sampling grid or the
+size of a field. `print(prof)` gives every column, with a header that
+states the ladder, its bounds and the variogram.
+
+### What the ladder can support
+
+The ladder runs from 2 cells to a [support
+ceiling](https://elkronos.github.io/gis_modeling_toolkit/articles/glossary.html#support-ceiling)
+the data impose. The profile records that ceiling and, beside it, a
+[range
+floor](https://elkronos.github.io/gis_modeling_toolkit/articles/glossary.html#range-floor)
+from the autocorrelation range:
+
+``` r
+
+str(attr(prof, "bounds")[c("floor", "ceiling", "ceiling_from", "supported",
+                           "range")])
+```
+
+    ## List of 5
+    ##  $ floor       : int 17
+    ##  $ ceiling     : int 55
+    ##  $ ceiling_from: chr "min_cell_n"
+    ##  $ supported   : logi TRUE
+    ##  $ range       : num 243
+
+The ceiling is the smaller of `floor(n / min_cell_n)`, with `n` the rows
+that carry a response, and the most centres k-means can place: the
+number of distinct locations, or one fewer than the points when no
+location repeats. On a layer larger than `sample_n` the fits run on a
+subsample and the ceiling is at most half of it. `ceiling_from` names
+the bound that applied. Past the ceiling the average cell holds too few
+points to estimate anything from, or k-means has more centres to place
+than distinct points.
+
+The floor is `ceiling(area / range^2)`, from the fitted autocorrelation
+range. Cells wider than the range average over more than one patch of
+the field, mixing values the field itself keeps apart. The range is an
+estimate, so by default the floor is reported and not applied: it is a
+level of the ladder, `select_resolution(criterion = "reliability")`
+reads from it up, and `range_floor = TRUE` starts the ladder there.
+
+When the floor exceeds the ceiling, the data cannot support a
+tessellation that respects their own correlation structure. `supported`
+is `FALSE`, a warning says so, and the ladder still runs from 2 to the
+ceiling so the cost of each level stays visible. The usual causes are
+too few points for the extent, or an autocorrelation range shorter than
+the spacing between observations.
+
+### Four criteria and a diagnostic
+
+| criterion | measures | needs | direction |
+|----|----|----|----|
+| `elbow` | how far the log of the within-cluster sum of squares (WSS) of the coordinates sags below a power law (the straight log-log line from one cell to the last level); `NA` at every level when the points have no cluster structure | coordinates only | larger |
+| `cp` | Mallows’ C_p of the piecewise-constant approximation of the response by cell means: the fit of the cell means, penalised for the number of cells | a response, and a variogram for the nugget | smaller |
+| `moran_z` | Moran’s z of the cell means (of their regression residuals when predictors are given): whether neighbouring cells resemble each other | a response | none: a diagnostic, not a count rule |
+| `reliability` | the share of the spread in the cell means that is signal rather than sampling noise | a variogram | larger |
+| `loo` | the leave-one-out error of the cell value the profile scores, the pooled value by default | a response | smaller |
+
+`elbow` sees the coordinates and knows nothing about what you measured.
+`cp` and `reliability` split the practical question in half: how well
+the cells represent the field, and whether the cell values can be told
+apart from noise. What `cp` estimates is the error of re-measuring the
+sampled sites, each predicted by the mean of its cell, with the
+variogram’s nugget as the noise of one measurement. For a new location
+the penalty would also need the spread of the field inside a cell, which
+the nugget leaves out. `moran_z` grows as the cells get finer than the
+range, because neighbouring cells then resemble each other, and at the
+coarsest counts where it is computed it is near zero whatever the data.
+It does not say how well the cells represent the response, so
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+refuses it unless asked with `diagnostic = TRUE`, and
+[`summary()`](https://rdrr.io/r/base/summary.html) on the profile
+([`?summary.resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.resolution_profile.md))
+leaves it out unless it is named.
+
+`plot(prof)` draws the criteria against the number of cells;
+[`?plot.resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.resolution_profile.md)
+describes the panels.
+
+``` r
+
+plot(prof)
+```
+
+![Stacked panels against the number of cells, from 2 to 55: Mallows' Cp,
+reliability and the leave-one-out error of the pooled value, and the
+absolute Moran's z of the cell means. A dot and a dotted line mark the
+level selected for Mallows' Cp at 55 cells, reliability at 17 cells and
+the leave-one-out error at 35 cells, with a shaded band over each flat
+region; the Moran panel has no selected
+level.](resolution_files/figure-html/plot-profile-1.png)
+
+`cp` can stop inside the ladder only when there is a nugget. On a smooth
+field the piecewise-constant approximation keeps improving as cells
+shrink, the penalty is too small to stop it, and the minimum lands
+wherever `min_cell_n` stops the ladder. The support ceiling then does
+the choosing, and
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+flags it.
+
+This fixture has a fitted nugget of 0.7 against a partial sill of 1.42,
+and `cp` still falls to the last level of the ladder: its minimum is the
+support ceiling, as [`summary()`](https://rdrr.io/r/base/summary.html)
+says below.
+
+`reliability` is highest at a coarse count, because bigger cells hold
+more points and average away more noise. Here its maximum is at 6 cells,
+below the range floor of 17, where cells are wider than the range.
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+therefore reads it from the floor up, and then returns the floor, a
+bound on the analysis that the range sets.
+
+### Choosing, and the flat region
+
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+picks the level a criterion prefers and reports the flat region around
+it. On a ladder of counts, name the criterion. With none,
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+applies the profile’s default rule, 4.5 observations per cell for pooled
+values:
+
+``` r
+
+auto <- select_resolution(prof)
+```
+
+    ## Warning: select_resolution(): obs_per_cell = 4.5 asks for 111 cells, which is
+    ## not a level of this profile; the nearest level, 55 cells (9.09 rows per cell),
+    ## is used. Build the profile with obs_per_cell = 4.5 to score that count.
+
+``` r
+
+auto$best
+```
+
+    ## [1] 55
+
+That asks for 111 cells, which this ladder does not have, so the call
+warns (class `spatialkit_size_not_reached`) and returns the nearest
+level, 55.
+
+``` r
+
+sel <- select_resolution(prof, criterion = "reliability")
+sel
+```
+
+    ## Resolution by reliability: 17 cells
+    ##   flat region : 17 to 18 (2 of 16 levels)
+    ##   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)
+    ##   note        : the optimum is the range floor (area / range^2); the bound is
+    ##                 choosing, not the criterion. Fewer cells would be wider than
+    ##                 the range and average over more than one patch of the field.
+
+`sel$best` is the optimum and `sel$flat` is every level within `tol` of
+it. Quote the flat region when you write the analysis up. `tol` (default
+0.02) is relative to the optimum’s value for `cp`, `reliability` and
+`loo`, and relative to the criterion’s range for `elbow` and `moran_z`,
+whose optima can be zero.
+
+Two flags say when a bound chose instead of the criterion:
+
+``` r
+
+c(at_floor = sel$at_floor, at_ceiling = sel$at_ceiling)
+```
+
+    ##   at_floor at_ceiling 
+    ##       TRUE      FALSE
+
+`at_floor` is `TRUE` here. The reliability curve keeps rising toward
+coarser counts, and the floor from the autocorrelation range stops it
+there, so 17 is the coarsest count the range allows, set by the floor
+and not by the criterion; quote it as a bound, not as the criterion’s
+choice. Changing `tol` will not move it.
+
+Criteria can prefer different levels and still share some.
+[`summary()`](https://rdrr.io/r/base/summary.html) reads the count
+criteria side by side and closes with the levels that every flat region
+contains:
+
+``` r
+
+summary(prof)
+```
+
+    ## Resolution picks: 3 criteria over 16 levels (2 to 55 cells)
+    ## 
+    ##   cells: density-weighted k-means++ starts (power 1, 8 neighbours)
+    ## 
+    ##    criterion best flat region levels in flat region
+    ##           cp   55      35, 55                     2
+    ##  reliability   17    17 to 18                     2
+    ##          loo   35      35, 55                     2
+    ## 
+    ##   cp: the optimum is the support ceiling (n / min_cell_n).
+    ##   reliability: the optimum is the range floor (area / range^2).
+    ##   There the bound is choosing, not the criterion.
+    ## 
+    ##   picks span 17 to 55 cells (3.2x)
+    ##   no level is in every flat region: the criteria disagree over the
+    ##   whole ladder. plot() draws the curves they were read from.
+
+A flat region is a set of levels and can skip some, because the
+criterion curves are not monotone: the flat region of `cp` above holds
+35 and 55 and leaves out the 44 between them. A run of 2 adjacent levels
+prints as a range, as `reliability` does with `17 to 18`.
+`attr(summary(prof), "common")` returns the levels that every flat
+region contains, for use in code, and `attr(summary(prof), "bands")`
+each criterion’s flat region in full. Here no level is in every flat
+region, so no single count satisfies every criterion, and you have to
+say which question your analysis asks.
+
+[`summary()`](https://rdrr.io/r/base/summary.html) reports each
+criterion’s best level and flat region side by side and does not choose
+among them.
+
+## An elbow from the coordinates alone
+
+[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+reads the coordinates and no response. It returns a few candidate cell
+counts, best first, when the WSS curve of a k-means clustering of the
+points has an elbow, and `NA` when it has none. The curve runs from 1
+cell to `max_levels`. On points drawn around six centres it finds the
+elbow:
+
+``` r
+
+set.seed(1)
+centre <- data.frame(x = runif(6, 100, 900), y = runif(6, 100, 900))
+k      <- sample(6, 300, replace = TRUE)
+clus   <- st_as_sf(data.frame(x = 5e5 + centre$x[k] + rnorm(300, sd = 25),
+                              y = 5e6 + centre$y[k] + rnorm(300, sd = 25)),
+                   coords = c("x", "y"), crs = 32632)
+determine_optimal_levels(clus, max_levels = 40)
+```
+
+    ## [1] 6 5 7
+    ## attr(,"structured")
+    ## [1] TRUE
+    ## attr(,"sag")
+    ## [1] 1.418144
+
+The fixture’s points are uniform, so their WSS falls like `c / k` all
+the way down and bends nowhere:
+
+``` r
+
+lv <- determine_optimal_levels(pts, max_levels = 40)
+```
+
+    ## Warning: determine_optimal_levels(): the WSS curve has no elbow: on log-log
+    ## axes it falls in a straight line, as it does for points with no cluster
+    ## structure. k = 7 is where the chord rule lands on such a curve, set by the
+    ## ladder (k = 1 to 40, max_levels) rather than by the data. Choose the count on
+    ## other grounds, e.g. resolution_profile() with a response. Returning NA
+    ## (on_no_elbow = "na").
+
+``` r
+
+lv
+```
+
+    ## [1] NA
+    ## attr(,"structured")
+    ## [1] FALSE
+    ## attr(,"sag")
+    ## [1] 0.001046518
+
+The call returns `NA`, with `structured = FALSE` and the largest sag of
+the curve as attributes, and the warning of class `spatialkit_no_elbow`
+says why. `on_no_elbow = "warn"` returns the count the rule lands on
+instead, with the same warning, which says that `max_levels` chose it: a
+larger `max_levels` would give a larger answer. On points like these,
+use the profile.
+
+When there is an elbow, `lv` is what
+[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
+takes as `n`, and “From a count to cells” below names the other
+arguments that take it. Given an `NA` result itself,
+[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
+and
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+stop and say where it came from. `lv[1]` drops the attributes that tell
+them, and they then say only that `NA` is not a number of cells.
+
+`criterion = "morans_i"` ranks the counts near the elbow by Moran’s z of
+the cell means, a diagnostic. `criterion = "combined"` keeps the elbow’s
+ranking of those counts and reports Moran’s I beside it. Both need a
+`response_var`, and
+[`?determine_optimal_levels`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+covers them. The ladder of
+[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+has no floor from the autocorrelation range, so it can prefer cells
+wider than the range. That is one reason it can disagree with
+`select_resolution(criterion = "reliability")`, which reads from the
+floor up.
 
 ## Choosing on one half, estimating on the other
 
@@ -645,71 +628,94 @@ the row positions of both parts.
 
 prof_split <- resolution_profile(pts, response_var = "z", n_levels = 16,
                                  select_on = "split")
-sp <- attr(prof_split, "split")
-sp
+halves <- attr(prof_split, "split")
+halves
 ```
 
     ## Spatial half-split (block_kfold, seed 123): 251 selection rows, 249 estimation rows
     ##   $selection and $estimation are row positions in the layer as passed.
 
-The split is spatially blocked, not random, and records the method and
-seed that produced it. A random half would put neighbours of every
-selection point in the estimation set, and on an autocorrelated field
-that leaks the structure you are choosing against. Blocking reduces that
-leak without removing it: the two halves share a border, and points on
-either side of it within the correlation range are still correlated, so
-read the separation as a large improvement on a random half rather than
-as independence.
+The split is spatially blocked, and records the method and seed that
+produced it. A random half would put neighbours of every selection point
+in the estimation set, and on an autocorrelated field that leaks the
+structure you are choosing against. Blocking reduces that leak without
+removing it: the two halves share a border, and points on either side of
+it within the autocorrelation range are still correlated.
 
-Choose from `prof_split`, then aggregate the rows in `sp$estimation`.
-The cells on the ladder are still drawn on every point, so the count it
-picks is a count for the whole layer, and the ladder is as long as the
-full profile’s. Only the steps that read the response (the variogram,
-`cp`, `moran_z`, `loo`) use the selection half. The cost is power: those
-criteria see half the data, so the profile is noisier and the band
-wider. The estimation rows also fill only their own half of the layer: a
-cell inside the selection half gets none of them, and a cell across the
-border between the halves is estimated from the part of it on the
-estimation side. Read standard errors only off cells whose points are
-all estimation rows.
+Choose from `prof_split`, then aggregate the rows in
+`halves$estimation`. The cells on the ladder are still drawn on every
+point, so the count it picks is a count for the whole layer, and the
+ladder is as long as the full profile’s. Only the steps that read the
+response (the variogram, `cp`, `moran_z`, `loo`) use the selection half.
+Those steps see half the data, so the profile is noisier and its flat
+regions can be wider. The estimation rows also fill only their own half
+of the layer. A cell inside the selection half gets none of them, and a
+cell across the border between the halves is estimated from the part of
+it on the estimation side. Read standard errors only off cells whose
+points are all estimation rows.
 
 ``` r
 
-unlist(attr(prof_split, "bounds")[c("floor", "ceiling", "n", "supported")])
+str(attr(prof_split, "bounds")[c("floor", "ceiling", "n", "supported")])
 ```
 
-    ##     floor   ceiling         n supported 
-    ##        21        55       500         1
+    ## List of 4
+    ##  $ floor    : int 21
+    ##  $ ceiling  : int 55
+    ##  $ n        : int 500
+    ##  $ supported: logi TRUE
 
 The floor can differ from the full profile’s, because it comes from the
 range estimated on the selection half.
 
-## Next
+## From a count to cells
 
-Hand the selection to whichever call decides the cell count. For a
-Voronoi tessellation that is
-[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md).
-Given the
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-result itself, it returns the centres of the partition the profile
-scored, and a k-means partition, weighted or not, is the Voronoi
-partition of its centres, so the cells built on those seeds are the
-cells the criteria judged; the bare count `sel$best` would run a new
-k-means, whose cells are not. (A profile without an estimate that fitted
-its centres to a subsample, on a layer larger than `sample_n`, has its
-chosen level refitted to every point first, and those centres are
-returned; their cells are then not the cells the criteria judged.) This
-selection sits on the range floor, so the call warns that a bound chose
-the count (class `spatialkit_bound_chosen`; warnings are not shown in
-this article).
+`n` in
+[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md),
+`approx_n_cells` in
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-then works on the seeds:
+and `target_cells` in
+[`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+each take a plain number or what
+[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md),
+[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+or
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+returns. Of the candidates
+[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+ranks, they use the first.
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+reads `approx_n_cells` for its `"hex"` and `"square"` methods.
+
+For Voronoi cells, hand the
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+result to
+[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
+as `n`. It returns the centres of the partition the profile scored, and
+a k-means partition, weighted or not, is the Voronoi partition of its
+centres, so the Voronoi cells of those seeds are the cells the criteria
+judged. The bare count `sel$best` would run a new k-means and give other
+cells. When the selection sits on a bound, as this one does at the range
+floor, the call warns that a bound chose the count (class
+`spatialkit_bound_chosen`).
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+then builds the cells on the seeds:
 
 ``` r
 
 bnd   <- clip_target_for(pts, expand = 0.02, quiet = TRUE)
 seeds <- get_voronoi_seeds(boundary = bnd, method = "kmeans", n = sel,
                            sample_points = pts)
+```
+
+    ## Warning: get_voronoi_seeds(): `n` is 17 cells, the optimum of `reliability`,
+    ## and that optimum is the range floor (area / range^2): the bound chose the
+    ## count, not the criterion. Fewer cells would be wider than the range and average
+    ## over more than one patch of the field. Pass a number as `n` to set the count
+    ## yourself.
+
+``` r
+
 cells <- build_tessellation(seeds, boundary = bnd, method = "voronoi",
                             quiet = TRUE)
 nrow(cells$cells)
@@ -717,33 +723,58 @@ nrow(cells$cells)
 
     ## [1] 17
 
-For a lattice the count goes to
+A Voronoi tessellation grows one cell per seed, so its count is set when
+you place the seeds. Passing `approx_n_cells` with `method = "voronoi"`
+warns and is ignored, and without the seeding step you get one cell per
+observation, a nearest-neighbour interpolation of the points.
+
+For a hex or square grid the selection goes to
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-itself, and the points go in directly:
+itself, which gives the same warning on a bound, and the points go in
+directly:
 
 ``` r
 
 hex <- build_tessellation(pts, boundary = bnd, method = "hex",
-                          approx_n_cells = sel$best, quiet = TRUE)
+                          approx_n_cells = sel, quiet = TRUE)
+```
+
+    ## Warning: build_tessellation(): `approx_n_cells` is 17 cells, the optimum of
+    ## `reliability`, and that optimum is the range floor (area / range^2): the bound
+    ## chose the count, not the criterion. Fewer cells would be wider than the range
+    ## and average over more than one patch of the field. Pass a number as
+    ## `approx_n_cells` to set the count yourself.
+
+``` r
+
 nrow(hex$cells)
 ```
 
     ## [1] 27
 
-The hex count overshoots the request: the target is adjusted for packing
-density and then clipped to an irregular boundary, so `approx_n_cells`
-is approximate in both directions. The seeded Voronoi hits the number
-exactly, because the seeds are the cells.
+The hex grid has 27 cells for a request of 17. The target is adjusted
+for hexagonal packing, and the hexagons the boundary cuts are kept as
+cells, so `approx_n_cells` is approximate. The seeded Voronoi
+tessellation has exactly the count asked for, because the seeds are the
+cells.
 
-Passing `approx_n_cells` with `method = "voronoi"` warns and is ignored.
-Without the seeding step you get one cell per observation, which is a
-nearest-neighbour interpolation rather than a resolution.
+## Next
 
-[`vignette("spatialkit_nc_demo")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md)
-runs the whole pipeline on real boundaries.
+The next article in reading order is
+[`vignette("cells")`](https://elkronos.github.io/gis_modeling_toolkit/articles/cells.md),
+which draws the cells, puts each observation in one and reports each
+cell’s value with the right standard error. This article relied on
+[`?resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
+[`?select_resolution`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
+[`?summary.resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.resolution_profile.md),
+[`?plot.resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.resolution_profile.md),
+[`?determine_optimal_levels`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md),
+[`?get_voronoi_seeds`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
+and
+[`?build_tessellation`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md).
 [`?resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-documents how each criterion behaved on simulated fields, with the
-references;
+gives each criterion’s definition and its references, and
 [`?determine_optimal_levels`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-covers the k-means++ restart budget and the nine-cell floor below which
-the model-aware criteria carry no information.
+explains why its Moran’s I criteria need more than nine cells.
+[`vignette("glossary")`](https://elkronos.github.io/gis_modeling_toolkit/articles/glossary.md)
+defines the terms this article uses.

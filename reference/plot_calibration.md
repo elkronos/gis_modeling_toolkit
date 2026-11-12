@@ -3,12 +3,11 @@
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
 scores every fold's posterior predictive intervals at each of
 `coverage_levels`: the share of held-out observations the interval of
-that nominal level contained. One coverage number cannot show a pattern;
-the pairs can. This draws observed coverage against nominal with the
-diagonal, one point per level for the fold-weighted pooled value (from
-`predictive_coverage`) and one faint point per fold, so systematic
-over-confidence (points below the line) or intervals wider than they
-need to be (above it) are read at a glance. Three levels is a thin
+that nominal level contained. This draws observed coverage against
+nominal with the diagonal, one point per level for the fold-weighted
+pooled value (from `predictive_coverage`) and one faint point per fold,
+so you can see systematic over-confidence (points below the line) or
+intervals wider than they need to be (above it). Three levels is a thin
 curve; pass `coverage_levels = seq(0.1, 0.9, by = 0.1)` to
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
 for a full one. Each level is drawn at the nominal value
@@ -34,7 +33,7 @@ plot_calibration(cv, ...)
 
 - ...:
 
-  Ignored.
+  Not used.
 
 ## Value
 
@@ -42,16 +41,16 @@ A `ggplot` object.
 
 ## See also
 
-Other plotting:
-[`plot.aoa()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.aoa.md),
-[`plot.block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.block_size_sweep.md),
-[`plot.feature_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.feature_selection.md),
-[`plot.gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.gwr_model_selection.md),
-[`plot.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.resolution_profile.md),
-[`plot.sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.sac_range.md),
-[`plot.spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.spatial_fit.md),
-[`plot_cv_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_cv_metrics.md),
-[`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
+[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md),
+which makes the result.
+
+Other cross-validation:
+[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md),
+[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md),
+[`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md),
+[`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md),
+[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md),
+[`plot_cv_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_cv_metrics.md)
 
 ## Examples
 

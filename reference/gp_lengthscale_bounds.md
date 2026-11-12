@@ -1,9 +1,13 @@
-# Heuristic length-scale bounds for a squared-exponential GP
+# Compute length-scale bounds for a squared-exponential GP
 
-Computes sensible prior bounds for the GP length-scale parameter
-\\\ell\\ of a squared-exponential (exponentiated-quadratic) kernel,
-\\k(h) = \exp(-h^2 / (2\ell^2))\\. The "effective range" where
-correlation drops to ~5% is \\\ell \sqrt{2 \ln 20} \approx 2.45\\\ell\\.
+Computes lower and upper bounds for the length-scale \\\ell\\ of a
+squared-exponential (exponentiated-quadratic) kernel, \\k(h) = \exp(-h^2
+/ (2\ell^2))\\, from the spread of the pairwise distances between the
+points.
+[`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+calibrates its length-scale prior over them. The effective range, where
+the correlation drops to 5 percent, is \\\ell \sqrt{2 \ln 20} \approx
+2.45\\\ell\\.
 
 ## Usage
 
@@ -17,20 +21,20 @@ gp_lengthscale_bounds(coords_xy, q_small = 0.25, max_n = 1000L)
 
   Numeric matrix or data.frame of coordinates with at least two columns;
   the first two are used, and replicated rows are collapsed before the
-  distance quantiles are taken. A row with a coordinate that is missing,
-  not finite or beyond 1e150 has no location: it is left out, with a
-  warning of class `spatialkit_rows_dropped` that gives the count.
+  distance quantiles are taken, because
   [`brms::gp()`](https://paulbuerkner.com/brms/reference/gp.html)
-  defaults to `gr = TRUE` and reduces its covariates to unique rows, so
-  a heavily-sampled station would otherwise weight the quantile by how
-  often it was measured rather than by where the sites are.
+  (`gr = TRUE`, its default) reduces its covariates to unique rows: a
+  station sampled many times would otherwise weight the quantile by how
+  often it was measured rather than by where the sites are. A row with a
+  coordinate that is missing, not finite or beyond 1e150 has no
+  location: it is left out, with a warning of class
+  `spatialkit_rows_dropped` that gives the count.
 
 - q_small:
 
-  Numeric quantile for the lower bound, a single number in `[0, 1]`.
-  Default 0.25. Previous versions used 0.1, but the 10th percentile can
-  be dominated by within-cluster spacing in clustered data, producing a
-  misleadingly small lower bound.
+  Quantile of the pairwise distances for the lower bound, a single
+  number in `[0, 1]`. Default 0.25. On clustered data a low quantile
+  reflects the spacing within clusters.
 
 - max_n:
 
@@ -43,36 +47,46 @@ gp_lengthscale_bounds(coords_xy, q_small = 0.25, max_n = 1000L)
 
 ## Value
 
-Named numeric vector `c(lower, upper)` on the length-scale;
-`c(lower = 0.001, upper = 1)` when fewer than two distinct located rows
-or no positive distances remain.
+Named numeric vector `c(lower, upper)`: length-scales in the units of
+`coords_xy`. `lower` is the `q_small` quantile of the distinct pairwise
+distances divided by \\\sqrt{2 \ln 20}\\ (about 2.45); `upper` is the
+largest pairwise distance divided by the same factor, and at least 1.2
+times `lower`. `c(lower = 0.001, upper = 1)` when fewer than two
+distinct located rows or no positive distances remain.
+[`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+standardises the coordinates before it calls this function, so its
+bounds are in those standardised units.
 
 ## Details
 
-Subsamples large datasets to avoid O(n^2) memory and time cost.
-
-These are the bounds a length-scale *prior* is calibrated over, not the
-scales a fitted model can resolve: that depends on the basis size
-(`gp_k` in
-[`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md),
-which reports it as `$info$gp_ell_min`, and in map units as
-`$info$gp_resolution`). Both bounds are fixed fractions of the spread of
+The lower bound is the `q_small` quantile of the pairwise distances (by
+default the 25th percentile) taken as an effective range, and the upper
+bound is the largest pairwise distance taken as an effective range. The
+inverse-gamma prior that
+[`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+calibrates on them puts 1 percent of its mass below the lower bound and
+1 percent above the upper. Both are fixed fractions of the spread of
 pairwise distances, so they do not shrink as points are added to the
 same area: more points help the data identify a short range, but they
-make neither these bounds nor the derived basis finer.
+make neither these bounds nor the basis derived from them finer.
 
-The lower bound is the 25th percentile of the pairwise distances, as an
-effective range. On real layouts that is 14 to 33 percent of the extent
-along each axis (about 32 km on a uniform 100 km square), and the prior
-built on it puts 1 percent of its mass below it. A surface whose range
-is shorter needs two things, not one: a basis fine enough to represent
-it and a prior that allows it. A larger `gp_k` under the prior
-calibrated here changes almost nothing, because the prior still holds
-the length-scale above this bound.
+These are the bounds a length-scale prior is calibrated over, not the
+scales a fitted model can resolve, which depend on the basis size
+(`gp_k` in
+[`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md),
+which reports it as `$info$gp_ell_min`, and in CRS units as
+`$info$gp_resolution`). A surface whose range is shorter than the lower
+bound needs a basis fine enough to represent it and a prior that allows
+it. A larger `gp_k` under the prior calibrated here changes almost
+nothing, because the prior still holds the length-scale above this
+bound.
 [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
 therefore moves the prior's lower tail down to the length-scale the
 basis resolves whenever `gp_resolution` or an explicit `gp_k` asks for a
 finer basis than the one derived from these bounds.
+
+Large layers are subsampled (`max_n`) to bound the cost of the pairwise
+distances, which grows with the square of the points.
 
 ## See also
 
@@ -80,15 +94,21 @@ Other model fitting:
 [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md),
 [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md),
 [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md),
-[`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md),
-[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+[`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md)
 
 ## Examples
 
 ``` r
+# 500 points spread evenly over a square of side 100 km, in metres.
 set.seed(1)
-xy <- cbind(runif(50), runif(50))
-gp_lengthscale_bounds(xy)
+xy <- cbind(runif(500, 0, 1e5), runif(500, 0, 1e5))
+b <- gp_lengthscale_bounds(xy)
+b
+#>    lower    upper 
+#> 13445.22 55051.07 
+# The bounds as effective ranges: the 25th percentile of the pairwise
+# distances, about a third of the side, and the largest distance.
+b * sqrt(2 * log(20))
 #>     lower     upper 
-#> 0.1253801 0.4778780 
+#>  32910.48 134751.08 
 ```

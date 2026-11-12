@@ -1,11 +1,10 @@
 # Plot a fitted spatial model
 
-Diagnostic plots for a `spatial_fit`. The package previously shipped
-[`print()`](https://rdrr.io/r/base/print.html) and
-[`summary()`](https://rdrr.io/r/base/summary.html) methods but no
-[`plot()`](https://rdrr.io/r/graphics/plot.default.html), so the checks
-most likely to reveal a problem (is there structure left in the
-residuals, and where is it) had to be written by hand each time.
+Draws one of four diagnostic plots of a `spatial_fit`, as a ggplot2
+object: the residuals mapped at the training locations, observed against
+fitted values, the residual variogram beside the response's, or, for a
+GWR, the map of one local coefficient. Use it to see whether spatial
+structure is left in the residuals, and where.
 
 ## Usage
 
@@ -67,14 +66,13 @@ plot(
       residuals of a fitted trend understate the variogram (see
       [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md),
       "Detrending and the residual-variogram bias"). The distance axis
-      is labelled in the units of the CRS the variogram was actually
-      fitted in, which is not necessarily the fit's own CRS (lon/lat
-      data are projected first). Each curve is the variogram
+      is labelled in the units of the CRS the variogram was fitted in,
+      which is not always the fit's own CRS (lon/lat data are projected
+      first). Each curve is the variogram
       [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
       returns for its variable, which is over all point pairs. A fit
       that identified no range says why in the subtitle, since the
-      overlaid model line is then not a fit to believe. Requires
-      'gstat'.
+      overlaid model line is then not a fit to believe. Requires gstat.
 
   `"coefficients"`
 
@@ -125,46 +123,39 @@ A `ggplot` object.
 
 ## See also
 
-[`coef.gwr_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.gwr_fit.md)
+[`coef.gwr_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-coef.md)
 for the coefficients themselves.
 
-Other plotting:
-[`plot.aoa()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.aoa.md),
-[`plot.block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.block_size_sweep.md),
-[`plot.feature_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.feature_selection.md),
-[`plot.gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.gwr_model_selection.md),
-[`plot.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.resolution_profile.md),
-[`plot.sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.sac_range.md),
-[`plot_calibration()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_calibration.md),
-[`plot_cv_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_cv_metrics.md),
-[`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
+Other fit methods:
+[`print.spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.spatial_fit.md),
+[`spatial_fit-coef`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-coef.md),
+[`spatial_fit-fitted`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-fitted.md),
+[`spatial_fit-predict`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-predict.md),
+[`spatial_fit-residuals`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatial_fit-residuals.md),
+[`summary.spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.spatial_fit.md)
 
 ## Examples
 
 ``` r
 # Works on any spatial_fit; a forest keeps the example free of the optional
-# GWR/Stan backends.
-if (requireNamespace("ranger", quietly = TRUE) &&
-    requireNamespace("ggplot2", quietly = TRUE)) {
-  library(sf)
-  # price depends on elevation, which the forest sees, and on a spatially
-  # correlated field it does not: that field is what the residual plots
-  # are there to find.
-  set.seed(2)
-  n <- 120
-  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-                   elev = rnorm(n))
-  D  <- as.matrix(dist(xy[, c("x", "y")]))
-  xy$price <- 10 + 2 * xy$elev +
-    as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) %*% rnorm(n))
-  pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-  fit <- fit_rf_model(pts, "price", "elev", num_trees = 100, seed = 1)
-  # print() each one: inside a braced block only the last value is drawn.
-  print(plot(fit, type = "residuals"))          # structure left in the residuals
-  print(plot(fit, type = "observed_predicted"))
-  if (requireNamespace("gstat", quietly = TRUE))
-    plot(fit, type = "variogram")   # residual and response variograms compared
-}
+# GWR and Stan backends.
+library(sf)
+# price depends on elevation, which the forest sees, and on a spatially
+# correlated field it does not: that field is what the residual plots are
+# there to find.
+set.seed(2)
+n <- 120
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+                 elev = rnorm(n))
+D  <- as.matrix(dist(xy[, c("x", "y")]))
+xy$price <- 10 + 2 * xy$elev +
+  as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) %*% rnorm(n))
+pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+fit <- fit_rf_model(pts, "price", "elev", num_trees = 100, seed = 1)
+plot(fit, type = "residuals")            # structure left in the residuals
 
+plot(fit, type = "observed_predicted")
 
+if (requireNamespace("gstat", quietly = TRUE))
+  plot(fit, type = "variogram")          # residual and response variograms
 ```

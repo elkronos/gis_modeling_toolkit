@@ -1,4 +1,4 @@
-# Cell values at other locations
+# Read cell values at new locations
 
 Gives each location of `newdata` the value of the cell it lies in, read
 from a
@@ -163,11 +163,11 @@ it is.
 The function raises no classed warning of its own; the warning that says
 how `seeds` without a CRS were read (step 1) and the one that counts the
 seeds outside the polygons of `values` left without a cell (step 3) are
-plain ones. It passes on what
+plain ones. It passes on the conditions that
 [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md),
 a CRS transformation and
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
-raise, but for one error and one warning. The error of class
+raise, with two exceptions. The error of class
 `spatialkit_features_degenerate` with which
 [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
 refuses a polygon s2 cannot take a centroid of, or a centroid GEOS puts
@@ -258,7 +258,7 @@ The function works in six steps.
     function read them for the rows of `points`: the locations are
     handed to it in the CRS of `points`, whatever CRS `newdata` arrived
     in. Where that join runs on the sphere and s2 refuses a polygon of
-    `values` (see Details in
+    `values` (see "Joins in longitude and latitude" in
     [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)),
     the call stops with an error of class
     `"spatialkit_cells_degenerate"` that gives the rows of `values` s2
@@ -345,7 +345,7 @@ tie is a tie between distances computed from the coordinates in the
 working CRS, so on gridded locations the same layer in another projected
 CRS can put a location on a boundary in the other cell; another unit or
 origin of the same CRS moves only the last bits of the distances and
-settles the ties the same way, but for one case. The margin grows with
+settles the ties the same way, with one exception. The margin grows with
 the largest coordinate (about 0.46 mm at a UTM northing near 4,550 km,
 about half a micrometre once the origin lies next to data 5 km across),
 so a location whose distances to two of them differ by less than the
@@ -367,23 +367,8 @@ and
 [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
 are the tools for deciding where a prediction applies.
 
-A simulation shows how the interval's coverage falls with `dist_ratio`
-(`dev/sim-pooled-values.R` in the package's repository; "Pooled values"
-in
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-describes it). Each of 200 layers has 1,500 clustered observations in
-333 cells, 300 further observations held out at random among them and
-300 held out as a block, which leaves a gap in the layer. Over the
-held-out observations of all layers, the interval at `obs_level = 0.90`
-held 91.5 percent of those with a `dist_ratio` below 1, 89.2 percent
-from 1 to 2, 83.9 percent from 2 to 4, 77.9 percent from 4 to 8 and 69.5
-percent above 8. It held 89.6 percent of the observations held out at
-random and 75.1 percent of those in the block. A second simulation, on
-fields whose level jumps at boundaries, gave this function's interval to
-held-out observations; "Intervals: which one answers which question" in
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-gives its coverage, which in cells of one training observation fell
-short of `obs_level` on one kind of field.
+The interval's coverage falls as `dist_ratio` grows; "How this was
+checked" gives the figures.
 
 ## Without the FNN package
 
@@ -401,6 +386,21 @@ about 44,700 distinct scored locations the call stops without FNN
 however few they are. The result is the same with and without the
 package.
 
+## How this was checked
+
+A simulation shows how the interval's coverage falls with `dist_ratio`
+([`dev/sim-pooled-values.R`](https://github.com/elkronos/gis_modeling_toolkit/blob/main/dev/sim-pooled-values.R)
+in the package's GitHub repository; "How this was checked" in
+[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+describes it). Each of 200 layers has 1,500 clustered observations in
+333 cells, 300 further observations held out at random among them and
+300 held out as a block, which leaves a gap in the layer. Over the
+held-out observations of all layers, the interval at `obs_level = 0.90`
+held 91.5 percent of those with a `dist_ratio` below 1, 89.2 percent
+from 1 to 2, 83.9 percent from 2 to 4, 77.9 percent from 4 to 8 and 69.5
+percent above 8. It held 89.6 percent of the observations held out at
+random and 75.1 percent of those in the block.
+
 ## See also
 
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
@@ -412,14 +412,10 @@ and
 [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
 for where a prediction applies.
 
-Other aggregation:
+Other assign and summarise:
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md),
-[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md),
 [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md),
-[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
-[`summary.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.resolution_profile.md)
+[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
 
 ## Examples
 
@@ -443,8 +439,7 @@ newpts <- all_pts[351:400, ]
 prof  <- resolution_profile(pts, "income")
 sel   <- select_resolution(prof)
 seeds <- get_voronoi_seeds(method = "kmeans", n = sel, sample_points = pts)
-tess  <- build_tessellation(seeds, method = "voronoi")
-#> create_voronoi_polygons(): deriving boundary from the cover the seeds carry (its hull or polygons, grown by 2% of the diagonal).
+tess  <- build_tessellation(seeds, method = "voronoi", quiet = TRUE)
 asg   <- assign_features_to_polygons(pts, tess$cells, polygon_id_col = "cell_id")
 out   <- summarize_by_cell(asg, "income", id_col = "cell_id",
                            cells_sf = tess$cells, obs_level = 0.90)

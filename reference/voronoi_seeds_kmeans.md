@@ -1,17 +1,16 @@
-# K-means seed generation from point coordinates
+# Place seeds at k-means cluster centres
 
 Places `k` seed points at k-means cluster centres of the observed
 coordinates, so seeds (and the Voronoi cells built from them) follow the
 sampling density: clusters of observations attract seeds, empty ground
-gets none. Reach for this when you want cells that follow the data, so
-that counts per cell vary far less than on a fixed grid over clustered
-points (the density kind, the default, evens them out once there are
-more cells than clusters of points; plain k-means,
-`partition = "kmeans"`, minimises the spread of points around each
-centre and does not equalise them), which is what keeps per-cell
+gets none. Use it when the cells should follow the data. With the
+default density kind the cells hold similar numbers of observations once
+there are more cells than clusters of points, which keeps per-cell
 aggregates in
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-from resting on one or two observations. Use
+from resting on one or two observations. Plain k-means
+(`partition = "kmeans"`) minimises the spread of points around each
+centre and does not even out the counts. Use
 [`voronoi_seeds_random()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_random.md)
 instead when you want coverage of the study area rather than of the
 data, and
@@ -82,11 +81,10 @@ voronoi_seeds_kmeans(
 
 - nstart:
 
-  The number of starts, of which the best is kept. `NULL` (default) is
-  the kind's own number: 3 for `partition = "density"` and 10 for
-  `partition = "kmeans"`, the default of earlier versions. A number is
-  run under either kind and either `init`: `nstart = 10` gives the
-  density kind the starts it had when 10 was the default.
+  The number of starts, of which the best is kept. `NULL` (default) uses
+  3 starts for `partition = "density"` and 10 for
+  `partition = "kmeans"`. A number is run under either kind and either
+  `init`.
 
 - partition:
 
@@ -97,16 +95,15 @@ voronoi_seeds_kmeans(
   `k` is above the number of dense places, and counts about as uneven as
   `"kmeans"` gives below that. `"kmeans"`: the same sum unweighted;
   compact cells whose counts are several times higher in dense places
-  than in sparse ones. It is the run of earlier versions, whose default
-  it was: [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) from
-  10 random starts on the rows as they come, with the coordinates
-  centred, divided by the diagonal of their bounding box and rounded to
-  2^-30 of it, so that the seeds do not move with the unit or the
-  origin; on gridded locations they can differ from those of earlier
-  versions, and where the locations span less than a kilometre a change
-  of unit or origin can still move them (see "The partition" in
+  than in sparse ones. It is
+  [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) from 10
+  random starts on the rows as they come, with the coordinates centred,
+  divided by the diagonal of their bounding box and rounded to 2^-30 of
+  it, so that the seeds do not move with the unit or the origin; where
+  the locations span less than a kilometre a change of unit or origin
+  can still move them (see "The partition" in
   [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)).
-  Without the 'FNN' package the density kind finds its weights by
+  Without the FNN package the density kind finds its weights by
   comparing every pair of distinct locations, so its time grows with the
   square of their number; the seeds are the same, and nothing stops the
   call. See "Details".
@@ -118,12 +115,12 @@ voronoi_seeds_kmeans(
   them) or `"kmeans++"` (the seeds one at a time, each in proportion to
   its squared distance from those already drawn, times its weight under
   `partition = "density"`). `NULL` (default) is each kind's own rule:
-  `"random"` for `partition = "kmeans"`, the run this function has
-  always made, and `"kmeans++"` for `partition = "density"`. Under
-  `partition = "kmeans"` from random starts the points are clustered in
-  the order their rows come in; with `init = "kmeans++"`, and under
-  `partition = "density"`, the rows are put in coordinate order first,
-  so the seeds do not depend on their order.
+  `"random"` for `partition = "kmeans"` and `"kmeans++"` for
+  `partition = "density"`. Under `partition = "kmeans"` from random
+  starts the points are clustered in the order their rows come in; with
+  `init = "kmeans++"`, and under `partition = "density"`, the rows are
+  put in coordinate order first, so the seeds do not depend on their
+  order.
 
 - density_power:
 
@@ -152,7 +149,7 @@ voronoi_seeds_kmeans(
 
 ## Value
 
-An sf object of **at most** `k` cluster-centre POINTs (fewer when `k` is
+An sf object of at most `k` cluster-centre POINTs (fewer when `k` is
 clamped, see `k`), with `seed_id` and `method = "kmeans"` columns
 matching
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md),
@@ -210,29 +207,29 @@ with `attr(, "refit")`.
 squared distances from the points to their nearest seed, from `nstart`
 random starts by
 [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) (Hartigan-Wong)
-unless `init` says otherwise; it was the default of earlier versions.
-The seeds follow the square root of the point density, so the cells are
-compact, smaller where the points are dense, and a cell in a dense place
-still holds several times the points of a cell in a sparse place.
-`"density"` weights each point by its local density (the number of
-points in the disc that reaches its `density_k`-th nearest neighbour,
-over the disc's area) to the power `density_power`, and is the default.
-At the default power of 1 the seeds follow the point density itself, and
-the cells are compact: many small cells where the points are dense, a
-few large ones where they are sparse. They hold about the same number of
-points each once `k` is above the number of dense places (clusters of
-points). With fewer cells than that a cell takes in whole clusters,
-large and small, and the counts are about as uneven as under `"kmeans"`.
-The density kind is the best of `nstart` starts, each refined by at most
-100 steps of Lloyd's iteration (`iter_max` sets another limit, and a
-kept start that was cut off at the limit is a warning of class
-`"spatialkit_not_converged"`); it does not depend on the order of the
-rows or on the unit of the coordinates, and points at one location share
-a cell. A seed can end with no point at counts from about a fifth of the
-points up, mostly from `init = "random"`; that is a warning of class
+unless `init` says otherwise. The seeds follow the square root of the
+point density, so the cells are compact, smaller where the points are
+dense, and a cell in a dense place still holds several times the points
+of a cell in a sparse place. `"density"` weights each point by its local
+density (the number of points in the disc that reaches its
+`density_k`-th nearest neighbour, over the disc's area) to the power
+`density_power`, and is the default. At the default power of 1 the seeds
+follow the point density itself, and the cells are compact: many small
+cells where the points are dense, a few large ones where they are
+sparse. They hold about the same number of points each once `k` is above
+the number of dense places (clusters of points). With fewer cells than
+that a cell takes in whole clusters, large and small, and the counts are
+about as uneven as under `"kmeans"`. The density kind is the best of
+`nstart` starts, each refined by at most 100 steps of Lloyd's iteration
+(`iter_max` sets another limit, and a kept start that was cut off at the
+limit is a warning of class `"spatialkit_not_converged"`); it does not
+depend on the order of the rows or on the unit of the coordinates, and
+points at one location share a cell. A seed can end with no point at
+counts from about a fifth of the points up, mostly from
+`init = "random"`; that is a warning of class
 `"spatialkit_empty_cells"`. "The partition" in
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-gives the details and a simulated comparison of the two kinds.
+gives the details and a comparison of the two kinds.
 
 The centres lie inside the points, so their own hull is smaller than the
 data's. The result carries the convex hull of `points_sf` as
@@ -243,8 +240,9 @@ no `boundary` is passed, so every point of `points_sf` falls in a cell.
 
 ## See also
 
-Other tessellation:
+Other cell building:
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md),
+[`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md),
 [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md),
 [`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md),
 [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md),
@@ -280,7 +278,7 @@ seeds         # the cluster centres, as an sf POINT layer in the points' CRS
 #> 6   POINT (500799 5000911)       6 kmeans
 #> 7 POINT (500785.6 5000620)       7 kmeans
 #> 8 POINT (500513.3 5000135)       8 kmeans
-# The k-means seeds of earlier versions: 10 random starts.
+# Plain k-means from 10 random starts.
 voronoi_seeds_kmeans(pts, k = 8, partition = "kmeans")
 #> Simple feature collection with 8 features and 2 fields
 #> Geometry type: POINT

@@ -1,8 +1,8 @@
-# Generate seed points for Voronoi tessellation
+# Place seeds for a Voronoi tessellation
 
-Creates an sf POINT layer of "seed" locations. Multiple strategies are
-supported: user-provided points, uniform random sampling within a
-boundary, or k-means clustering of a sampling cloud.
+Creates an sf POINT layer of seed locations, one per cell of the Voronoi
+tessellation built on them: k-means centres of a cloud of points, points
+drawn uniformly inside a boundary, or points you provide.
 
 ## Usage
 
@@ -27,75 +27,31 @@ get_voronoi_seeds(
 
 - boundary:
 
-  Optional polygonal sf object defining the sampling area. One that
-  mixes XY and XYZ (or XYM) geometries is read without Z and M, since sf
-  reads a layer in the dimension of its first geometry. So is one whose
-  geometries carry M (XYM or XYZM), which GEOS refuses. Where seeds or
-  the k-means cloud are sampled inside it, its rows are repaired with
-  [`sf::st_make_valid()`](https://r-spatial.github.io/sf/reference/valid.html)
-  before they are unioned. In longitude and latitude the union runs with
-  s2, and a row s2 still refuses (crossing edges, a vertex listed twice)
-  is repaired again, with crossing edges split as GEOS splits them in a
-  projected CRS; a row s2 refuses even then stops the call with an error
-  of class `"spatialkit_cells_degenerate"` that names it and says to
-  transform `boundary` to a projected CRS. A row that is empty, or has a
-  coordinate that is not finite or lies beyond 1e150 (read as given, and
-  again after any move into another CRS), covers no ground and is left
-  out; a boundary with no such row left is refused with an error that
-  says so. A boundary in a geographic CRS with a vertex at a latitude
-  beyond 90 degrees, which is no place on the Earth, is refused with an
-  error of class `"spatialkit_cells_degenerate"` that names its rows and
-  says to check its CRS. A row the repair leaves without a polygon (a
-  ring with no height: every vertex on one line, or in degrees on one
-  parallel) is left out as well, and a boundary with no polygon left is
-  refused. In longitude and latitude, a boundary whose bounding box is
-  over 10,000 times its area (small pieces far apart), which sf does not
-  sample whole, is sampled piece by piece, the points shared among the
-  pieces in proportion to their areas; a piece whose own box is over
-  10,000 times its area stops the call with an error that says to
-  transform `boundary` to a projected CRS. A boundary whose bounding box
-  has no height or no width (three vertices on one parallel) is refused.
-  In longitude and latitude s2 reads the edges as great circles, which
-  leave the bounding box read from the coordinates, and sf (without the
-  lwgeom package) draws in that box: a boundary whose box has less than
-  half its area on the sphere (three vertices on or near one parallel)
-  is refused too. That error, and the error for a box with no height
-  whose vertices lie on one parallel other than the equator, say to
-  transform `boundary` to a projected CRS in which a parallel is a
-  curve, such as the one
-  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
-  picks for it (a polar one, such as EPSG:3413 or 3031, for a ring
-  around a pole), where the region has an area and lies in its box. sf
-  draws the points in the bounding box and keeps those inside, so it
-  draws the number asked for times the ratio of the box to the area. In
-  any CRS, a boundary that would take more than 10^6 points drawn in its
-  box, or 10 times the points asked for if more (small pieces far apart,
-  a thin strip at a slant), is sampled piece by piece in the same way
-  (or whole, in draws of at most 10^6 points in its box, where that
-  takes less time), and a piece that would still take more is drawn in
-  such draws. Where the points drawn in all would exceed 2e7 (or 10
-  times the points asked for, if more), the call stops before any draw
-  with an error that gives the ratio and says to pass `sample_points`
-  (`method = "kmeans"`, whose cloud is `max(2000, 50 * n)` points) or to
-  ask for fewer seeds.
+  Optional polygonal sf object defining the sampling area. Rows without
+  a location, rows the repair leaves without a polygon, vertices at a
+  latitude beyond 90 and mixed dimensions are handled as "Boundaries" in
+  [spatialkit-geometry](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-geometry.md)
+  says; "Sampling inside the boundary" gives how points are drawn in it.
 
 - method:
 
-  One of "kmeans", "random", "provided".
+  How to place the seeds: `"kmeans"` (default; cluster centres of
+  `sample_points`, or of points drawn in `boundary`), `"random"`
+  (uniform in `boundary`) or `"provided"` (the points in `seeds`).
 
 - n:
 
   Integer; number of seeds to return. Required for `method = "kmeans"`
-  and `method = "random"`. **Ignored** for `method = "provided"`, where
+  and `method = "random"`. Ignored for `method = "provided"`, where
   every row of `seeds` is returned; a mismatch between `n` and
   `nrow(seeds)` is reported as a warning.
 
   For `method = "kmeans"` it is an upper bound only: k-means cannot
   produce more centres than there are distinct positions in the sampling
   cloud, nor as many centres as there are rows. When `n` exceeds either
-  ceiling it is clamped, with a warning naming the count actually used.
-  `n = nrow(sample_points)` is the common case, and yields
-  `nrow(sample_points) - 1` seeds. Check
+  ceiling it is clamped, with a warning naming the count used. Asking
+  for as many seeds as there are points (`n = nrow(sample_points)`)
+  gives `nrow(sample_points) - 1`. Check
   [`nrow()`](https://rdrr.io/r/base/nrow.html) on the result; do not
   assume `n`.
 
@@ -145,10 +101,10 @@ get_voronoi_seeds(
   `attr(, "refit")`: their cells are near the cells judged but not the
   same. `sample_points`, when given, is then only assigned to them (for
   `attr(, "kmeans")`) and gives the cover, and `boundary` only sets the
-  CRS and the cover (see "Details"); `kmeans_nstart`, `kmeans_iter` and
-  `set_seed` are not used, and neither are `partition`, `init` and the
-  density settings: the centres are of the kind the profile was built
-  with, and naming another here is a warning of class
+  CRS and the cover; `kmeans_nstart`, `kmeans_iter` and `set_seed` are
+  not used, and neither are `partition`, `init` and the density
+  settings: the centres are of the kind the profile was built with, and
+  naming another here is a warning of class
   `"spatialkit_partition_unused"`. A call names what it supplies: a
   `partition` or an `init` passed in the call; with
   `partition = "density"` passed, both density settings at their values,
@@ -189,13 +145,12 @@ get_voronoi_seeds(
 
 - kmeans_nstart:
 
-  The number of starts, of which the best is kept. `NULL` (default) is
-  the kind's own number: 3 for `partition = "density"` and 10 for
-  `partition = "kmeans"`, the default of earlier versions.
-  `kmeans_nstart = 10` gives the density kind the starts it had when 10
-  was the default. Under `partition = "kmeans"` from random starts it is
-  `nstart` of [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html).
-  A fresh partition is not the one
+  The number of starts, of which the best is kept. `NULL` (default) uses
+  3 starts for `partition = "density"` and 10 for
+  `partition = "kmeans"`. Under `partition = "kmeans"` from random
+  starts it is `nstart` of
+  [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html). A fresh
+  partition is not the one
   [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
   scored a count on; pass the selection or profile itself as `n` for
   that one (see `n`). Under `partition = "density"`, and with
@@ -206,18 +161,27 @@ get_voronoi_seeds(
 
 - kmeans_iter:
 
-  Integer; iter.max for kmeans(). Default 100. Under
-  `partition = "density"` it is the most steps of Lloyd's iteration a
-  start takes. Under `partition = "density"`, and with
-  `init = "kmeans++"`, it has to be a positive whole number, and a kept
-  start that was cut off at it is a warning of class
-  `"spatialkit_not_converged"` (`partition = "kmeans"` from random
-  starts keeps the warning
+  Integer; `iter.max` for
+  [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html). Default 100
+  for both kinds
+  ([`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)
+  uses 50 for plain k-means by default). Under `partition = "density"`
+  it is the most steps of Lloyd's iteration a start takes. Under
+  `partition = "density"`, and with `init = "kmeans++"`, it has to be a
+  positive whole number, and a kept start that was cut off at it is a
+  warning of class `"spatialkit_not_converged"` (`partition = "kmeans"`
+  from random starts keeps the warning
   [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) gives).
 
 - set_seed:
 
-  Optional integer RNG seed.
+  Optional integer seed for the random draws. Default `NULL`: the draws
+  come from the session's random-number stream, so
+  [`set.seed()`](https://rdrr.io/r/base/Random.html) before the call
+  makes it reproducible. A number gives the same seeds every time and
+  leaves the caller's stream as it was.
+  ([`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)
+  defaults to 456 instead.)
 
 - partition:
 
@@ -230,19 +194,17 @@ get_voronoi_seeds(
   the number of dense places (clusters) in the cloud; below that the
   counts are about as uneven as under `"kmeans"`. `"kmeans"` is the same
   sum unweighted: compact cells, with several times the points in a cell
-  of a dense place that a cell of a sparse place holds. It is the run of
-  earlier versions, whose default it was:
+  of a dense place that a cell of a sparse place holds. It is
   [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) from 10
   random starts on the rows as they come, with the coordinates centred,
   divided by the diagonal of their bounding box and rounded to 2^-30 of
-  it, so that the seeds do not move with the unit or the origin; on
-  gridded locations they can differ from those of earlier versions, and
-  where the locations span less than a kilometre a change of unit or
-  origin can still move them (see "The partition" in
+  it, so that the seeds do not move with the unit or the origin; where
+  the locations span less than a kilometre a change of unit or origin
+  can still move them (see "The partition" in
   [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)).
   The density kind follows the density of `sample_points`; a cloud this
   function draws inside `boundary` is uniform and has none to follow.
-  Without the 'FNN' package the density kind finds its weights by
+  Without the FNN package the density kind finds its weights by
   comparing every pair of distinct locations, so its time grows with the
   square of their number; the seeds are the same, and nothing stops the
   call. See "The partition" in
@@ -257,12 +219,12 @@ get_voronoi_seeds(
   or `"kmeans++"` (the seeds one at a time, each in proportion to its
   squared distance from those already drawn, times its weight under
   `partition = "density"`). `NULL` (default) is each kind's own rule:
-  `"random"` for `partition = "kmeans"`, the run this function has
-  always made, and `"kmeans++"` for `partition = "density"`. Under
-  `partition = "kmeans"` from random starts the cloud is clustered in
-  the order its rows come in; with `init = "kmeans++"`, and under
-  `partition = "density"`, the rows are put in coordinate order first,
-  so the seeds do not depend on their order.
+  `"random"` for `partition = "kmeans"` and `"kmeans++"` for
+  `partition = "density"`. Under `partition = "kmeans"` from random
+  starts the cloud is clustered in the order its rows come in; with
+  `init = "kmeans++"`, and under `partition = "density"`, the rows are
+  put in coordinate order first, so the seeds do not depend on their
+  order.
 
 - density_power:
 
@@ -374,10 +336,54 @@ A seed with every part of the study area nearer another seed has no
 cell, `NA` in `index`, and a warning of class `spatialkit_unassigned`
 gives the number.
 
+## Sampling inside the boundary
+
+Seeds drawn by `method = "random"`, and the cloud `method = "kmeans"`
+draws when no `sample_points` are given, are sampled inside `boundary`.
+Its rows are repaired with
+[`sf::st_make_valid()`](https://r-spatial.github.io/sf/reference/valid.html)
+before they are unioned. In longitude and latitude the union runs with
+s2, and a row s2 still refuses (crossing edges, a vertex listed twice)
+is repaired again, with crossing edges split as GEOS splits them in a
+projected CRS; a row s2 refuses even then stops the call with an error
+of class `"spatialkit_cells_degenerate"` that names it and says to
+transform `boundary` to a projected CRS.
+
+In longitude and latitude, a boundary whose bounding box is over 10,000
+times its area (small pieces far apart), which sf does not sample whole,
+is sampled piece by piece, the points shared among the pieces in
+proportion to their areas; a piece whose own box is over 10,000 times
+its area stops the call with an error that says to transform `boundary`
+to a projected CRS. A boundary whose bounding box has no height or no
+width (three vertices on one parallel) is refused. In longitude and
+latitude s2 reads the edges as great circles, which leave the bounding
+box read from the coordinates, and sf (without lwgeom) draws in that
+box: a boundary whose box has less than half its area on the sphere
+(three vertices on or near one parallel) is refused too. That error, and
+the error for a box with no height whose vertices lie on one parallel
+other than the equator, say to transform `boundary` to a projected CRS
+in which a parallel is a curve, such as the one
+[`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+picks for it (a polar one, such as EPSG:3413 or 3031, for a ring around
+a pole), where the region has an area and lies in its box.
+
+sf draws the points in the bounding box and keeps those inside, so it
+draws the number asked for times the ratio of the box to the area. In
+any CRS, a boundary that would take more than 10^6 points drawn in its
+box, or 10 times the points asked for if more (small pieces far apart, a
+thin strip at a slant), is sampled piece by piece in the same way (or
+whole, in draws of at most 10^6 points in its box, where that takes less
+time), and a piece that would still take more is drawn in such draws.
+Where the points drawn in all would exceed 2e7 (or 10 times the points
+asked for, if more), the call stops before any draw with an error that
+gives the ratio and says to pass `sample_points` (`method = "kmeans"`,
+whose cloud is `max(2000, 50 * n)` points) or to ask for fewer seeds.
+
 ## See also
 
-Other tessellation:
+Other cell building:
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md),
+[`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md),
 [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md),
 [`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md),
 [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md),
@@ -406,10 +412,9 @@ get_voronoi_seeds(bnd, method = "random", n = 5, set_seed = 1)
 #> 4       4 random  POINT (90.82078 62.9114)
 #> 5       5 random POINT (20.16819 6.178627)
 
-# Seeds from a cloud with one dense place: density-weighted k-means by
-# default, from 3 starts; partition = "kmeans" gives the k-means run of
-# earlier versions.  The points each seed's cell holds, under each kind,
-# with more seeds than dense places:
+# Seeds from a cloud with one dense place: density-weighted k-means (the
+# default, 3 starts) against plain k-means.  The fewest and most points a
+# seed's cell holds under each kind, with more seeds than dense places:
 set.seed(2)
 cloud <- st_as_sf(data.frame(x = c(rnorm(150, 30, 5), runif(50, 0, 100)),
                              y = c(rnorm(150, 30, 5), runif(50, 0, 100))),
@@ -419,12 +424,10 @@ dens <- get_voronoi_seeds(bnd, method = "kmeans", n = 20,
 km   <- get_voronoi_seeds(bnd, method = "kmeans", n = 20,
                           sample_points = cloud, set_seed = 1,
                           partition = "kmeans")
-rbind(density = sort(attr(dens, "kmeans")$size),
-      kmeans  = sort(attr(km, "kmeans")$size))   # points per seed
-#>         [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10] [,11] [,12] [,13]
-#> density    6    8    8    8    8    9    9    9   10    10    11    11    11
-#> kmeans     1    2    2    3    5    5    5    6    6     7     7     8     9
-#>         [,14] [,15] [,16] [,17] [,18] [,19] [,20]
-#> density    11    11    11    12    12    12    13
-#> kmeans     10    10    14    18    24    26    32
+sizes <- list(density = attr(dens, "kmeans")$size,
+              kmeans  = attr(km, "kmeans")$size)
+sapply(sizes, range)   # fewest and most points per seed
+#>      density kmeans
+#> [1,]       6      1
+#> [2,]      13     32
 ```

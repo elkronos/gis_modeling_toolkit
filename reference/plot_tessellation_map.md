@@ -1,7 +1,8 @@
 # Plot a tessellation map with optional boundary, seeds, and features
 
-Builds a layered ggplot2 map of polygon tessellations and optional
-overlays for a study boundary, seed points, and additional features.
+Builds a layered ggplot2 map of the cells, with optional overlays of a
+study boundary, seed points and other features. Requires the ggplot2
+package.
 
 ## Usage
 
@@ -69,7 +70,12 @@ plot_tessellation_map(
 
 - palette:
 
-  Viridis palette name. Default "viridis".
+  Viridis palette, passed as `option` to
+  [`ggplot2::scale_fill_viridis_c()`](https://ggplot2.tidyverse.org/reference/scale_viridis.html)
+  or
+  [`ggplot2::scale_fill_viridis_d()`](https://ggplot2.tidyverse.org/reference/scale_viridis.html):
+  `"viridis"` (default), `"magma"`, `"inferno"`, `"plasma"`,
+  `"cividis"`, `"rocket"`, `"mako"` or `"turbo"`.
 
 - na_fill:
 
@@ -81,19 +87,23 @@ plot_tessellation_map(
 
 - outline_col, outline_size:
 
-  Colour and line width of the tessellation outline.
+  Colour and line width of the cell outlines. Defaults `"white"` and
+  0.2.
 
 - features_col, features_size:
 
-  Colour and point size of the feature overlay.
+  Colour and point size of the feature overlay. Defaults `"#333333"` and
+  0.5.
 
 - seeds_col, seeds_size:
 
-  Colour and point size of the seed overlay.
+  Colour and point size of the seed overlay. Defaults `"#1f77b4"` and
+  1.5.
 
 - boundary_col, boundary_size:
 
-  Colour and line width of the boundary outline.
+  Colour and line width of the boundary outline. Defaults `"#111111"`
+  and 0.6.
 
 - labels:
 
@@ -104,13 +114,15 @@ plot_tessellation_map(
 - label_col:
 
   Name of the COLUMN holding the label text. Default `NULL`: the first
-  of `"grid_id"`, `"cell_id"`, `"poly_id"`, `"polygon_id"` and `"id"`
-  the layer has, so the cells of
+  of `"poly_id"`, `"polygon_id"`, `"id"`, `"cell_id"` and `"grid_id"`
+  the layer has, the order in which
+  [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
+  reads a polygon layer's IDs, so the cells of
   [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-  (`cell_id`) and the output of
+  and the output of
   [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-  (`poly_id`) are labelled without naming one. A `units` or `difftime`
-  column is drawn formatted, with its unit.
+  are labelled without naming one, by the ID the summary is keyed on. A
+  `units` or `difftime` column is drawn formatted, with its unit.
 
 - label_size:
 
@@ -126,12 +138,8 @@ plot_tessellation_map(
 
 - theme:
 
-  A ggplot2 theme, or NULL (the default) to use
+  A ggplot2 theme. Default `NULL`, which uses
   [`ggplot2::theme_void()`](https://ggplot2.tidyverse.org/reference/ggtheme.html).
-  The default is resolved inside the function rather than in the
-  formals, so that a Suggests package is never evaluated before the
-  [`requireNamespace()`](https://rdrr.io/r/base/ns-load.html) check has
-  run.
 
 - target_crs:
 
@@ -180,8 +188,9 @@ without the vertices it cannot place), with a warning of class
 
 ## See also
 
-Other tessellation:
+Other cell building:
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md),
+[`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md),
 [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md),
 [`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md),
 [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md),
@@ -206,11 +215,11 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   # shaded by the cell mean rather than by an arbitrary ID.  Each cell
   # holds one point, so there is nothing to pool: estimate = "mean".
   tess  <- build_tessellation(pts, method = "voronoi", quiet = TRUE)
-  cells <- summarize_by_cell(assign_features_to_polygons(pts, tess$cells),
-                             response_var = "z", cells_sf = tess$cells,
-                             estimate = "mean")
+  asg   <- assign_features_to_polygons(pts, tess$cells,
+                                       polygon_id_col = "cell_id")
+  cells <- summarize_by_cell(asg, response_var = "z", id_col = "cell_id",
+                             cells_sf = tess$cells, estimate = "mean")
   plot_tessellation_map(cells, features_sf = pts, fill_col = "resp_mean_z",
                         legend_title = "mean z")
 }
-#> assign_features_to_polygons(): `polygons_sf` has no 'poly_id' column; the polygon IDs are read from its 'cell_id' column and returned as `poly_id`.
 ```
