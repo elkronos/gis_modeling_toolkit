@@ -13,6 +13,7 @@ jobs:
   R-CMD-check:
     runs-on: ${{ matrix.config.os }}
     name: ${{ matrix.config.os }} (${{ matrix.config.r }})
+    timeout-minutes: 120
 
     strategy:
       fail-fast: false
@@ -38,6 +39,7 @@ jobs:
       - uses: r-lib/actions/setup-pandoc@v2
 
       - uses: r-lib/actions/setup-r@v2
+        timeout-minutes: 15
         with:
           r-version: ${{ matrix.config.r }}
           http-user-agent: ${{ matrix.config.http-user-agent }}
@@ -74,6 +76,7 @@ jobs:
       # intervals, spacetime, sftime and stars with it; none declares a system
       # requirement, but on r-devel they build from source, which is slower.
       - uses: r-lib/actions/setup-r-dependencies@v2
+        timeout-minutes: 40
         with:
           dependencies: '"hard"'
           extra-packages: |
@@ -99,6 +102,7 @@ jobs:
   backends:
     runs-on: ubuntu-latest
     name: ubuntu-latest (release, with optional backends)
+    timeout-minutes: 150
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
@@ -114,6 +118,7 @@ jobs:
       - uses: r-lib/actions/setup-pandoc@v2
 
       - uses: r-lib/actions/setup-r@v2
+        timeout-minutes: 15
         with:
           r-version: 'release'
           use-public-rspm: true
@@ -134,6 +139,7 @@ jobs:
       # compare the regression-residual moments against; without it that
       # comparison skips.
       - uses: r-lib/actions/setup-r-dependencies@v2
+        timeout-minutes: 40
         with:
           dependencies: '"hard"'
           extra-packages: |

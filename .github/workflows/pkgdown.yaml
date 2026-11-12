@@ -21,6 +21,7 @@ permissions: read-all
 jobs:
   pkgdown:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     # Only restrict concurrency for non-PR jobs
     concurrency:
       group: pkgdown-${{ github.event_name != 'pull_request' || github.run_id }}
@@ -34,6 +35,7 @@ jobs:
       - uses: r-lib/actions/setup-pandoc@v2
 
       - uses: r-lib/actions/setup-r@v2
+        timeout-minutes: 15
         with:
           use-public-rspm: true
 
@@ -55,6 +57,7 @@ jobs:
       # fit (the chunks that show one are eval = FALSE), and the Stan
       # toolchain is not worth installing to build a website.
       - uses: r-lib/actions/setup-r-dependencies@v2
+        timeout-minutes: 40
         with:
           dependencies: '"hard"'
           extra-packages: |
