@@ -1,0 +1,165 @@
+---
+title: "Terms used on these pages"
+description: >
+  Short definitions of the terms the articles and help pages use.
+author: "Justin Chase"
+output:
+  rmarkdown::html_vignette:
+    toc: false
+vignette: >
+  %\VignetteIndexEntry{Terms used on these pages}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+The articles and help pages use the terms below in these senses.
+
+[area of applicability (AOA)]{#area-of-applicability}
+:   The prediction locations where a model's cross-validated score can be
+    expected to hold: those whose dissimilarity index is at or below a
+    threshold, the largest dissimilarity index of the training rows that is
+    not an outlier. `area_of_applicability()` computes it.
+
+[autocorrelation range]{#autocorrelation-range}
+:   The distance beyond which two observations are close to uncorrelated, in
+    the units of the CRS the variogram is fitted in. `estimate_sac_range()`
+    returns it as the effective range of an exponential variogram: three
+    times the fitted range parameter, where the semivariance reaches about
+    95 percent of the sill. A block or a buffer has to exceed it to keep
+    held-out rows apart from their training data.
+
+[backend]{#backend}
+:   One of the three model fitters behind the `spatial_fit` class: the
+    random forest (`fit_rf_model()`), GWR (geographically weighted
+    regression, `fit_gwr_model()`) and the Bayesian GP (a Bayesian model
+    with a Gaussian-process term in the coordinates,
+    `fit_bayesian_spatial_model()`). `new_spatial_fit()` wraps a model of
+    your own in the same class.
+
+[block]{#block}
+:   A piece of the study area that a fold holds out whole: a cell of a
+    rectangular grid, at least `block_size` on each side when that is given,
+    or one of the polygons passed in `blocks`.
+    `make_folds(method = "block_kfold")` builds the grid.
+
+[cell]{#cell}
+:   A polygon of a tessellation: a Voronoi cell, a hexagon, a square or a
+    Delaunay triangle. `assign_features_to_polygons()` puts each observation
+    in one cell, and the `poly_id` column names it.
+
+[cell's true mean]{#cells-true-mean}
+:   What a cell value estimates: the expected value of one further
+    observation located in the cell the way its observations were. It is not
+    the average of a surface over the cell's area, which would give weight to
+    ground that holds no observation. "Pooled values" in
+    `?summarize_by_cell` defines it.
+
+[CRS units]{#crs-units}
+:   The unit of the coordinate reference system a function works in, such
+    as the metre for a UTM zone. Distances, block sizes, bandwidths and
+    ranges are given in it. A function that measures distances moves a
+    lon/lat layer into a projected CRS that `ensure_projected()` chooses,
+    whose unit is the metre (`?"spatialkit-geometry"`).
+
+[design effect (`deff`)]{#design-effect}
+:   The factor by which correlation among a cell's observations inflates the
+    variance of the cell mean as an estimate of the population mean;
+    `n / deff` is then the cell's effective sample size.
+    `summarize_by_cell(deff = )` applies it to the standard errors. At the
+    default, `deff = 1`, the standard error is that of the cell's own mean,
+    which needs no such correction when the cell's observations are spread
+    through it.
+
+[dissimilarity index (DI)]{#dissimilarity-index}
+:   The distance from a prediction location to the nearest training row in
+    the space of the predictors, each centred and scaled by the training
+    data's own mean and standard deviation and weighted by importance when
+    the model carries it, divided by the mean distance between training
+    rows. Meyer and Pebesma (2021) define it, and `area_of_applicability()`
+    computes it.
+
+[flat region]{#flat-region}
+:   The levels whose criterion value is within `tol` of the optimum, which
+    `select_resolution()` returns with the count it chooses. The criteria
+    do not rise or fall steadily with the count, so the flat region is a set
+    of levels that can leave out some in between. Report it with the count.
+
+[fold]{#fold}
+:   One split of a cross-validation: the rows held out and the rows the
+    model is trained on to predict them. `make_folds()` returns the folds,
+    each a `train` and a `test` set of row IDs.
+
+[level]{#level}
+:   A candidate cell count on the ladder that `resolution_profile()` scores.
+    `select_resolution()` chooses one of the levels.
+
+[lon/lat]{#lon-lat}
+:   Coordinates in degrees of longitude and latitude, in a geographic CRS.
+    See [CRS units](#crs-units) for how distances are measured on such a
+    layer.
+
+[nugget, sill, range]{#nugget-sill-range}
+:   The variogram's value at zero distance (the noise), the value it levels
+    off at (the total variance), and the distance at which it gets there.
+    `sac_nugget()` reads the nugget of an `estimate_sac_range()` result.
+
+[pooled value]{#pooled-value}
+:   A cell's mean pulled toward the mean of the observations in the 8
+    nearest cells (nearest by the centroid of their observations). The own
+    weight, the share of the pooled value that is the cell's own mean, grows
+    with the cell's count. `summarize_by_cell()` returns pooled values
+    beside the plain means by default (`estimate = "pooled"`), and "Pooled
+    values" in its help gives the formula.
+
+[range floor]{#range-floor}
+:   The fewest cells the autocorrelation range allows: the area of the
+    points' convex hull divided by the square of the range, rounded up, and
+    at least 2. A cell wider than the range averages over more than one
+    patch of the field. `resolution_profile()` reports the floor and by
+    default does not apply it;
+    `select_resolution(criterion = "reliability")` reads the levels from the
+    floor up.
+
+[row ID]{#row-id}
+:   `..row_id`, the column by which folds, cross-validated predictions and
+    the record of dropped rows name rows. The `cv_*()` functions number the
+    rows in it when a layer has none. `make_folds()` names rows by this
+    column when the layer has it, and by row position otherwise.
+
+[size]{#size}
+:   The mean number of observations a cell is to hold, `obs_per_cell` in
+    `resolution_profile()`. A size `s` gives `max(2, round(n / s))` cells,
+    with `n` the rows that carry a response, or every point without one. The
+    default profile scores one size, 4.5, and that sets the default count of
+    cells for pooled values.
+
+[support ceiling]{#support-ceiling}
+:   The most cells the data support on a ladder of counts: the scored rows
+    (those with a response and every predictor, or every point without a
+    response) divided by `min_cell_n`, 9 by default, rounded down. On a
+    ladder of sizes the finest level takes its place. When a criterion's
+    optimum sits on the ceiling or on the range floor, that bound sets the
+    count, and `select_resolution()` names it in `edge`.
+
+[variogram]{#variogram}
+:   The semivariance of a variable against the distance between pairs of
+    points, where the semivariance is half the mean squared difference of
+    the pairs at that distance. `estimate_sac_range()` fits an exponential
+    model with a nugget to it, and `plot()` on the result
+    (`?plot.sac_range`) draws the variogram, with the fitted model where a
+    range was identified.
+
+## Next
+
+This is the last article in reading order. The help pages that give these
+terms in full are `?area_of_applicability`, `?estimate_sac_range`,
+`?make_folds`, `?resolution_profile`, `?select_resolution`,
+`?summarize_by_cell` and `?"spatialkit-geometry"`. `?spatialkit` lists every
+step of the pipeline with its functions.
+
+## References
+
+Meyer, H. and Pebesma, E. (2021). Predicting into unknown space? Estimating
+the area of applicability of spatial prediction models. *Methods in Ecology
+and Evolution* 12(9), 1620–1633.
+<https://doi.org/10.1111/2041-210X.13650>
