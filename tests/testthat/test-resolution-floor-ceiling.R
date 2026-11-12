@@ -161,4 +161,44 @@ test_that("reliability says in its note that a floor above every level was not h
   sel <- select_resolution(p, criterion = "reliability")
   expect_identical(sel$range_floor, attr(p, "bounds")$floor)
   expect_false("floor" %in% names(sel$note))
+  # A ladder that reaches the floor, but with reliability NA at every level
+  # at or above it, cannot hold it either, and the note names the finest
+  # level at which reliability is finite.
+  fl <- attr(p, "bounds")$floor
+  na_top <- p
+  na_top$reliability[na_top$levels >= fl] <- NA_real_
+  expect_gte(max(na_top$levels), fl)
+  sel <- select_resolution(na_top, criterion = "reliability", range_floor = TRUE)
+  expect_identical(sel$range_floor, NA_integer_)
+  expect_identical(unname(sel$note[["floor"]]), sprintf(paste0(
+    "the range floor (%d cells, area / range^2) lies above every level at which reliability ",
+    "is finite (the finest is %d cells), so it was not held: reliability was read at every ",
+    "level, and its optimum is a count whose cells are wider than the range."),
+    fl, max(na_top$levels[na_top$levels < fl])))
+  # A floor past the integer range is NA in the bounds; the note reads it
+  # from the area and the range.
+  past <- suppressWarnings(resolution_profile(pts, "z", sac = .fc_sac(pts, 1), n_levels = 8,
+                                              nstart = 2, range_floor = TRUE))
+  b <- attr(past, "bounds")
+  expect_identical(b$floor, NA_integer_)
+  expect_identical(b$floor_applied, FALSE)
+  sel <- select_resolution(past, criterion = "reliability", range_floor = TRUE)
+  expect_identical(sel$range_floor, NA_integer_)
+  expect_identical(unname(sel$note[["floor"]]), sprintf(paste0(
+    "the range floor (%.0f cells, area / range^2) lies above every level of the ladder ",
+    "(2 to %d cells), so it was not held: reliability was read at every level, and its ",
+    "optimum is a count whose cells are wider than the range."),
+    max(2, ceiling(b$area / b$range^2)), max(past$levels)))
+  expect_gt(ceiling(b$area / b$range^2), .Machine$integer.max)
+  # A ladder the caller set with `levels` is read as given, with no note,
+  # though the floor lies above every level.
+  given <- suppressWarnings(resolution_profile(pts, "z", sac = .fc_sac(pts, 2000),
+                                               levels = c(4L, 8L, 16L), nstart = 2,
+                                               range_floor = TRUE))
+  b <- attr(given, "bounds")
+  expect_true(b$levels_given)
+  expect_gt(b$floor, max(given$levels))
+  sel <- select_resolution(given, criterion = "reliability", range_floor = TRUE)
+  expect_identical(sel$range_floor, NA_integer_)
+  expect_false("floor" %in% names(sel$note))
 })
