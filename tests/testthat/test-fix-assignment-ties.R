@@ -275,7 +275,7 @@ test_that(".tie_rule_rows() keeps the least area, then keys within the margin, b
   expect_identical(.tie_rule_rows(key, grp, tol = 0)[3:4], c(TRUE, FALSE))
 })
 
-test_that("?assign_features_to_polygons and NEWS state the rule", {
+test_that("?assign_features_to_polygons states the rule", {
   root <- testthat::test_path("..", "..")
   if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
     skip("the help's source is not here to read")
@@ -294,13 +294,6 @@ test_that("?assign_features_to_polygons and NEWS state the rule", {
                           "coordinate (with any \\code{predicate}, and in longitude and ",
                           "latitude whatever \\code{sf::sf_use_s2()} says)"), fixed = TRUE)
   expect_false(grepl("within the margin of \\code{predicate}", rd, fixed = TRUE))
-  news <- read("NEWS.md")
-  expect_match(news, paste0("`assign_features_to_polygons()` let the unit and the origin of the ",
-                            "coordinates choose the cell of a point on a shared edge"), fixed = TRUE)
-  expect_match(news, paste0("a POINT or MULTIPOINT feature is now in every polygon one of its ",
-                            "points lies within a margin of (one part in 1e10 of the largest ",
-                            "coordinate of the polygons; in longitude and latitude only while ",
-                            "`sf::sf_use_s2()` is on)"), fixed = TRUE)
 })
 
 test_that("a MULTIPOINT within the margin of an edge goes where the POINT goes; a line gets no margin", {

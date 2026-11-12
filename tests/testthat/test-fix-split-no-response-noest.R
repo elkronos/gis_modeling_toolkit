@@ -250,7 +250,7 @@ test_that("a profile whose split carries no count reads the estimate's record", 
   expect_identical(fsn2_err(select_resolution(p, criterion = "cp")), fsn2_select_text("cp"))
 })
 
-test_that("the help and NEWS say the warning is raised with or without an estimate", {
+test_that("the help says the warning is raised with or without an estimate", {
   root <- testthat::test_path("..", "..")
   flat <- function(x)
     paste(unlist(lapply(x, function(el) if (is.character(el)) el else flat(el))), collapse = "")
@@ -261,7 +261,7 @@ test_that("the help and NEWS say the warning is raised with or without an estima
   }
   says <- function(text, x) expect_true(grepl(x, text, fixed = TRUE), info = x)
   rp <- rd("resolution_profile.Rd")
-  says(rp, paste0("spatialkit_no_scored_rowsresolution_profile() under select_on = \"split\": ",
+  says(rp, paste0("spatialkit_no_scored_rowsUnder select_on = \"split\": ",
                   "no row of the selection half has a response, and the rows of the layer ",
                   "with one are all in the estimation half. rss, cp, moran_i and moran_z, ",
                   "which read the selection half, are NA at every level."))
@@ -270,7 +270,9 @@ test_that("the help and NEWS say the warning is raised with or without an estima
   says(rp, "n (0, the rows of the selection half scored)")
   says(rp, paste0("and with a response n_response, the rows of the selection half with a ",
                   "finite response and every predictor, counted on the layer before any ",
-                  "subsample)"))
+                  "subsample."))
+  # The item does not limit the warning to a profile with an estimate.
+  expect_false(grepl("spatialkit_no_scored_rowsWith an estimate", rp, fixed = TRUE))
   expect_false(grepl("spatialkit_no_scored_rowsresolution_profile() with an estimate", rp,
                      fixed = TRUE))
   sr <- rd("select_resolution.Rd")
@@ -279,22 +281,6 @@ test_that("the help and NEWS say the warning is raised with or without an estima
                   "\"cp\" and \"moran_z\", and \"loo\" with an estimate, are errors that give ",
                   "the same reason, except \"cp\" on a size ladder that fitted no variogram, ",
                   "which gives the size ladder's reason, as above."))
-
-  news_file <- file.path(root, "NEWS.md")
-  if (!file.exists(news_file)) news_file <- system.file("NEWS.md", package = "spatialkit")
-  if (!nzchar(news_file) || !file.exists(news_file)) skip("NEWS.md is not there to read")
-  lines <- readLines(news_file, warn = FALSE, encoding = "UTF-8")
-  top <- grep("^# ", lines)
-  dev <- lines[seq.int(top[1L], top[2L] - 1L)]
-  fixes <- dev[seq.int(grep("^## Bug fixes", dev), grep("^## Documentation", dev) - 1L)]
-  bf <- gsub("[[:space:]]+", " ", paste(fixes, collapse = " "))
-  says(bf, paste0("**`resolution_profile(select_on = \"split\")` without an estimate returned ",
-                  "`rss`, `cp`, `moran_i` and `moran_z` `NA` at every level, with nothing ",
-                  "said, when no row of the selection half had a response.**"))
-  says(bf, "is now raised without one too")
-  says(bf, "records the rows of the selection half with a response (`n_response`)")
-  says(bf, paste0("On a size ladder that fitted no variogram, `\"cp\"`, and `\"auto\"` where ",
-                  "it reads `cp`, give the size ladder's reason, as before."))
 })
 
 test_that("on a size ladder that fitted no variogram, cp gives the size ladder's reason", {

@@ -362,10 +362,15 @@ test_that("the help says the builders read their layers in x and y", {
     expect_match(page(nm), paste0("A cover, given or attached, that mixes XY and XYZ (or XYM) ",
                                   "geometries, or that carries M, is read in x and y"),
                  fixed = TRUE, info = nm)
+  # A boundary whose geometries carry M is read as ?spatialkit-geometry
+  # says, in x and y.
   for (nm in c("clip_target_for.Rd", "create_voronoi_polygons.Rd", "create_grid_polygons.Rd",
                "build_tessellation.Rd", "get_voronoi_seeds.Rd", "voronoi_seeds_random.Rd"))
-    expect_match(page(nm), "So is one whose geometries carry M (XYM or XYZM), which GEOS refuses",
+    expect_match(page(nm), "mixed dimensions are handled as \"Boundaries\" in spatialkit-geometry",
                  fixed = TRUE, info = nm)
+  expect_match(page("spatialkit-geometry.Rd"),
+               "A boundary that mixes dimensions or carries M is read in x and y.", fixed = TRUE)
+  expect_match(page("spatialkit-geometry.Rd"), "GEOS refuses M", fixed = TRUE)
   expect_match(page("create_grid_polygons_cached.Rd"),
                "or whose geometries carry M (XYM or XYZM), is read without Z and M", fixed = TRUE)
   expect_match(page("ensure_stable_poly_id.Rd"),

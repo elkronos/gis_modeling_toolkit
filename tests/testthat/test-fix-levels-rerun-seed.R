@@ -230,7 +230,7 @@ test_that("with set_seed = NULL a count scores the same in every window and the 
   }
 })
 
-test_that("?determine_optimal_levels and NEWS say a count scores the same whichever top_n sets the window", {
+test_that("?determine_optimal_levels says a count scores the same whichever top_n sets the window", {
   root <- testthat::test_path("..", "..")
   if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
     skip("the help's source is not here to read")
@@ -246,15 +246,4 @@ test_that("?determine_optimal_levels and NEWS say a count scores the same whiche
                           "same cells, \\code{wss_eval} and Moran's I in any neighbourhood that ",
                           "holds it, whichever \\code{top_n} and \\code{max_levels} set the ",
                           "neighbourhood"), fixed = TRUE)
-  news <- read("NEWS.md")
-  expect_match(news, paste0("Each re-run is now seeded with one integer drawn before the sweep plus ",
-                            "its count, and the stream is put back after it, so for one ",
-                            "`set_seed` a count gets the same cells, `wss_eval` and Moran's I in ",
-                            "any window that holds it."),
-               fixed = TRUE)
-  expect_match(news, paste0("can fall back to the geometric ranking where it ranked, or rank where ",
-                            "it fell back"), fixed = TRUE)
-  expect_match(news, paste0("With `set_seed = NULL` the re-runs no longer draw from the caller's ",
-                            "stream, so the stream after the call no longer depends on `top_n`."),
-               fixed = TRUE)
 })

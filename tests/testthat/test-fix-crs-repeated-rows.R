@@ -181,10 +181,11 @@ test_that("the help says copies of one location count once and pairs under 1 mm 
   rd <- if (file.exists(file)) tools::parse_Rd(file) else tools::Rd_db("spatialkit")[["ensure_projected.Rd"]]
   expect_s3_class(rd, "Rd")
   txt <- gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
+  expect_match(txt, paste0("comparing planar with geodesic distances over the pairs at least ",
+                           "1 mm apart."), fixed = TRUE)
   expect_match(txt, paste0("plus the vertices of its outline when fewer than 40 distinct points ",
                            "remain, so a single study-area polygon is scored too, however many ",
                            "rows repeat it; copies of one location count once, and rows without ",
-                           "a finite location are left out) and comparing planar with geodesic ",
-                           "distances over the pairs at least 1 mm apart"), fixed = TRUE)
+                           "a finite location are left out."), fixed = TRUE)
   expect_false(grepl("when it has fewer than 40 features", txt, fixed = TRUE))
 })

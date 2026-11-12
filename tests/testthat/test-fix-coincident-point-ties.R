@@ -305,9 +305,10 @@ test_that("?predict_surface states which grid points beside two points within th
   # (BUG-268): the tie adds a length margin, so the help no longer says
   # that a grid point a few centimetres from them takes the nearer by its
   # coordinates.
-  expect_match(txt, paste0("as does a grid point near two points that lie within that margin of ",
-                           "each other (two records of one station that differ only in the last ",
-                           "bits of their coordinates), however near it lies"), fixed = TRUE)
+  expect_match(txt, paste0("A grid point near two points that lie within the margin of each ",
+                           "other (two records of one station that differ only in the last bits ",
+                           "of their coordinates) takes the same one however near it lies."),
+               fixed = TRUE)
   expect_no_match(txt, "twenty million times the distance", fixed = TRUE)
   expect_no_match(txt, "or over two points that differ only in the last bits", fixed = TRUE)
 })

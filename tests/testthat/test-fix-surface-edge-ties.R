@@ -460,12 +460,12 @@ test_that("?predict_surface states the tie rule for lines and polygons", {
         else tools::Rd_db("spatialkit")[["predict_surface.Rd"]]
   page <- gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
   expect_match(page, paste0(
-    "A grid point the same distance from several features of a layer of lines or ",
-    "polygons, or of one that mixes them with points"), fixed = TRUE)
+    "Lines and polygons, or a layer that mixes them with points (on the edge two ",
+    "polygons share, say)."), fixed = TRUE)
   expect_match(page, paste0(
-    "takes the one whose bounding-box centre is lowest in x, then lowest in y, x values ",
-    "and y values within one part in ten million of the diagonal of the bounding box ",
-    "of covariates counting as one, then the first in row order. For a layer in degrees ",
-    "the nearest feature is sf::st_nearest_feature()'s"), fixed = TRUE)
+    "Among them the feature whose bounding-box centre is lowest in x is taken, then ",
+    "lowest in y, x values and y values within one part in ten million of the diagonal ",
+    "of the bounding box of covariates counting as one, then the first in row order. ",
+    "A layer in degrees. The nearest feature is sf::st_nearest_feature()'s"), fixed = TRUE)
   expect_no_match(page, "For lines and polygons, and for points in degrees", fixed = TRUE)
 })

@@ -235,7 +235,7 @@ test_that("?predict_surface and ?cell_values_at state the margin of the point ti
                  "plus one part in ten million of the least squared distance")
   ps <- read_rd("predict_surface")
   expect_match(ps, rule, fixed = TRUE)
-  expect_match(ps, paste0("as does a grid point near two points that lie within that margin of ",
+  expect_match(ps, paste0("A grid point near two points that lie within the margin of ",
                           "each other"), fixed = TRUE)
   expect_no_match(ps, "twenty million", fixed = TRUE)
   cv <- read_rd("cell_values_at")
@@ -330,7 +330,7 @@ test_that("the margin moves with the origin, as the help states", {
   expect_identical(fill(local), c(2L, 2L, 2L))
 })
 
-test_that("the help pages and the vignette state the margin and its dependence on the origin", {
+test_that("the help pages state the margin and its dependence on the origin", {
   read_rd <- function(name) {
     file <- testthat::test_path("..", "..", "man", paste0(name, ".Rd"))
     rd <- if (file.exists(file)) tools::parse_Rd(file) else tools::Rd_db("spatialkit")[[paste0(name, ".Rd")]]
@@ -344,12 +344,13 @@ test_that("the help pages and the vignette state the margin and its dependence o
                       "one origin and by more with another goes to the lower-numbered centre ",
                       "with the first and to the nearer with the second"), fixed = TRUE)
   expect_match(read_rd("predict_surface"),
-               paste0("Both margins grow with the largest coordinate (about 0.46 mm at a UTM ",
+               paste0("It grows with the largest coordinate: about 0.46 mm at a UTM ",
                       "northing near 4,550 km"), fixed = TRUE)
-  vig <- testthat::test_path("..", "..", "vignettes", "diagnostics.Rmd")
+  # The vignette leaves the margin to the help pages and does not give the
+  # older rule.
+  vig <- testthat::test_path("..", "..", "vignettes", "cells.Rmd")
   skip_if_not(file.exists(vig), "the vignette sources are not here")
   txt <- gsub("[[:space:]]+", " ", paste(readLines(vig, warn = FALSE), collapse = " "))
   expect_no_match(txt, "whose squares agree to one part in ten million count as the same",
                   fixed = TRUE)
-  expect_match(txt, "lengthened by a small margin", fixed = TRUE)
 })

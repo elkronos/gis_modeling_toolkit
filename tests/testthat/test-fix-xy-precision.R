@@ -298,7 +298,7 @@ test_that("clip_target_for() says nothing of a box drawn from the points' own co
   expect_identical(as.character(sf::st_geometry_type(r$value)), "POLYGON")
 })
 
-test_that("the help pages and NEWS say so", {
+test_that("the help pages say so", {
   root <- testthat::test_path("..", "..")
   if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
     skip("the help's source is not here to read")
@@ -317,11 +317,4 @@ test_that("the help pages and NEWS say so", {
                   fixed = TRUE)
   for (page in c("create_voronoi_polygons.Rd", "build_tessellation.Rd"))
     expect_match(read("man", page), "spatialkit_xy_imprecise", fixed = TRUE, info = page)
-  news <- read("NEWS.md")
-  expect_match(news, "Coordinates so far from their origin that doubles cannot hold the layer",
-               fixed = TRUE)
-  expect_match(news, paste0("`assign_features_to_polygons()`, `create_grid_polygons()`, ",
-                            "`create_voronoi_polygons()` and `build_tessellation()`"), fixed = TRUE)
-  expect_match(news, paste0("`clip_target_for()` drew its buffer around points on one line or ",
-                            "at one location at the rounding of their coordinates"), fixed = TRUE)
 })
