@@ -765,7 +765,8 @@ it with, so that ladder starts at 2 as well.  On a layer larger than
 \code{sample_n} the ceiling is also held to half the subsample's scored
 rows (two per cell, the least a fitted cell can be scored on; half the
 subsample without a response); \code{ceiling_from} is then
-\code{"sample_n"}, a floor above that is logged with a request to raise
+\code{"sample_n"}, a floor above that raises a warning of class
+\code{spatialkit_floor_above_ceiling} with a request to raise
 \code{sample_n}, and it does not make \code{supported} \code{FALSE}.
 
 The floor moves with the range estimate, and the ceiling with \eqn{n}.
@@ -1064,6 +1065,12 @@ package raises.
 \item{\code{spatialkit_not_supported}}{\code{supported} is \code{FALSE},
 because the range floor exceeds the
 ceiling or because fewer than two cells meet \code{min_cell_n}.}
+\item{\code{spatialkit_floor_above_ceiling}}{The range floor lies
+above the ceiling that \code{sample_n} sets on a layer that supports
+it, so the floor is above every level and is not applied;
+\code{supported} stays \code{TRUE}.  The condition carries
+\code{reason} (\code{"sample_n"}), \code{floor}, \code{ceiling},
+\code{n} and \code{n_sample}.  Raise \code{sample_n}.}
 \item{\code{spatialkit_response_ceiling}}{Rows that are not scored (no
 response, or with \code{predictor_vars}
 a predictor missing) lowered the ceiling.  The message names the

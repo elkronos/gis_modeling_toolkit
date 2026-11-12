@@ -740,6 +740,13 @@ before upgrading a running analysis.
 * **`determine_optimal_levels()` returned 1 for a layer with no rows.** It
   is now an error.
 
+* **`resolution_profile()` only logged a range floor above the ceiling that
+  `sample_n` sets.** The floor is then above every level and is not
+  applied, and `select_resolution()` cannot hold `reliability` to it. It is
+  now an R warning of class `spatialkit_floor_above_ceiling`, which asks for
+  a larger `sample_n`. `supported` stays `TRUE`, since the layer supports
+  the floor.
+
 ### Build the cells
 
 * **`build_tessellation()` with a geographic `crs` built every method in

@@ -943,7 +943,8 @@
 #' \code{sample_n} the ceiling is also held to half the subsample's scored
 #' rows (two per cell, the least a fitted cell can be scored on; half the
 #' subsample without a response); \code{ceiling_from} is then
-#' \code{"sample_n"}, a floor above that is logged with a request to raise
+#' \code{"sample_n"}, a floor above that raises a warning of class
+#' \code{spatialkit_floor_above_ceiling} with a request to raise
 #' \code{sample_n}, and it does not make \code{supported} \code{FALSE}.
 #'
 #' The floor moves with the range estimate, and the ceiling with \eqn{n}.
@@ -1236,6 +1237,12 @@
 #'   \item{\code{spatialkit_not_supported}}{\code{supported} is \code{FALSE},
 #'     because the range floor exceeds the
 #'     ceiling or because fewer than two cells meet \code{min_cell_n}.}
+#'   \item{\code{spatialkit_floor_above_ceiling}}{The range floor lies
+#'     above the ceiling that \code{sample_n} sets on a layer that supports
+#'     it, so the floor is above every level and is not applied;
+#'     \code{supported} stays \code{TRUE}.  The condition carries
+#'     \code{reason} (\code{"sample_n"}), \code{floor}, \code{ceiling},
+#'     \code{n} and \code{n_sample}.  Raise \code{sample_n}.}
 #'   \item{\code{spatialkit_response_ceiling}}{Rows that are not scored (no
 #'     response, or with \code{predictor_vars}
 #'     a predictor missing) lowered the ceiling.  The message names the
@@ -2954,13 +2961,20 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                     data = list(reason = "floor above ceiling", n = n_support,
                                 min_cell_n = min_cell_n))
     else if (floor_raw > ceiling_L)
-      .log_warn(paste0("resolution_profile(): cells no wider than the autocorrelation ",
-                       "range (%s) need at least %.0f of them, which the %d %s ",
-                       "support, but k-means on the %d-point subsample can fit at ",
-                       "most %d; raise `sample_n`. %s."),
-                .fmt_len(range_eff), floor_raw, n_support, support_what, n, ceiling_L,
-                if (levels_given) given_text()
-                else sprintf("The profile runs from 2 to %d", ceiling_L))
+      # A classed warning, as for the data's own ceiling: the floor is above
+      # every level, so it is not applied, and select_resolution() cannot
+      # hold `reliability` to it.  It was a log line alone, which reaches
+      # neither tryCatch() nor options(warn = 2).
+      .warn_classed("spatialkit_floor_above_ceiling",
+                    paste0("resolution_profile(): cells no wider than the autocorrelation ",
+                           "range (%s) need at least %.0f of them, which the %d %s ",
+                           "support, but k-means on the %d-point subsample can fit at ",
+                           "most %d; raise `sample_n`. %s."),
+                    .fmt_len(range_eff), floor_raw, n_support, support_what, n, ceiling_L,
+                    if (levels_given) given_text()
+                    else sprintf("The profile runs from 2 to %d", ceiling_L),
+                    data = list(reason = "sample_n", floor = floor_raw, ceiling = ceiling_L,
+                                n = n_support, n_sample = n))
     # With range_floor = FALSE, the default, the ladder starts at 2 whatever the
     # range, and the floor is only reported.  The range is an estimate.  It is
     # re-estimated on every subset, and a floor that applies on one fold and
