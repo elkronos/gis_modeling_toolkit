@@ -37,8 +37,8 @@ tour_pause <- function() {
   invisible(readline("  [enter] "))
 }
 
-# Announce what the next figure is for. A plot with no stated expectation is
-# not a check; it is a picture you will nod at.
+# Say what the next figure should show before drawing it, so that looking at
+# the figure checks something.
 look_for <- function(...) cat("\n  LOOK FOR:", paste0(..., collapse = ""), "\n")
 
 # Draw to the device, or write a PNG when an output directory was set.
@@ -67,23 +67,22 @@ skip_without <- function(pkgs, what) {
 }
 
 # --- The fixture the whole tour runs on --------------------------------------
-# A simulated exponential field on a 1000-unit square. The structure is known,
-# so every diagnostic has something true to find: the covariance is exp(-d/80),
-# which puts the true effective range at 240 units.
+# A simulated exponential field on a square of side 1000 m. The structure is
+# known, so every diagnostic has something true to find: the covariance is
+# exp(-d/80), with d in metres, which puts the true effective range at 240 m.
 #
-# Do not expect a fitted variogram to recover that number. Scripts 02 and 04
-# report about 357 on `z`; the field on its own, with no nugget at all, still
-# fits at about 315. Most of the gap is what fitting a single realisation over
-# a limited span of lags does, and the nugget that `elev` and the measurement
-# noise contribute widens it further. A fitted range is a working number here,
-# not a measurement of the 240 -- which is worth knowing before anyone "fixes"
-# the fixture to make the two agree.
+# A fitted variogram does not recover that number. Scripts 02 to 04 report
+# about 351 m on `z`, and the field on its own, with no nugget, fits at about
+# 266 m. Fitting one realisation over a limited span of lags opens the first
+# part of that gap; the nugget that `elev` and the measurement noise add opens
+# the rest. Read a fitted range here as a working number. The gap from 240 m is
+# expected, and the fixture needs no fix.
 #
 # The columns: `z` is the response, built from `elev` plus the field. `noise` is
-# a decoy. `slope` is a west-to-east gradient that does NOT enter `z` at all --
-# but this particular field realisation happens to drift west to east too, so
-# slope predicts z anyway. Script 08 measures that accident and shows what a
-# variable search does with it.
+# a decoy. `slope` is a west-to-east gradient that does not enter `z`. This
+# realisation of the field also drifts west to east, so `slope` predicts `z`
+# anyway; script 08 measures that coincidence and shows what a variable search
+# does with it.
 tour_points <- function(n = 400, a = 80, seed = 42) {
   set.seed(seed)
   xy <- data.frame(x = stats::runif(n, 0, 1000), y = stats::runif(n, 0, 1000))
@@ -99,7 +98,7 @@ tour_points <- function(n = 400, a = 80, seed = 42) {
   xy$slope <- 2 * xy$x / 1000 + stats::rnorm(n, sd = 0.2)
   # Move the square into UTM zone 32N, the CRS it is stamped with: x from
   # 500000 and y from 5000000. At 0 to 1000 it would sit on the equator west
-  # of the zone. Every result is computed in planar units, so the shift only
+  # of the zone. Every result is computed in planar metres, so the shift only
   # changes the coordinates the scripts print.
   xy$x <- xy$x + 5e5
   xy$y <- xy$y + 5e6
@@ -110,8 +109,8 @@ tour_points <- function(n = 400, a = 80, seed = 42) {
 tour_boundary <- function(pts) clip_target_for(pts, expand = 0.02, quiet = TRUE)
 
 # A learner with no optional dependencies: a cubic trend surface in the
-# coordinates. It is deliberately capable of memorising location, which is what
-# makes the fold scheme visible in script 03.
+# coordinates. It can memorise location, which makes the effect of the fold
+# scheme visible in script 03.
 tour_fit <- function(train_sf, ...) {
   d <- sf::st_drop_geometry(train_sf)
   d$x <- sf::st_coordinates(train_sf)[, 1]

@@ -32,8 +32,8 @@ registerS3method("predict", "mean_fit", predict.mean_fit)
 registerS3method("predict", "elev_fit", predict.elev_fit)
 
 step("06.1", "One set of folds for every candidate")
-# This is the part people skip. Build the folds ONCE and pass them to every
-# run, or the differences you read off the table are partly fold luck.
+# Build the folds once and pass them to every run. With separate folds, part
+# of each difference in the table comes from the folds each run drew.
 folds <- make_folds(pts, k = 5, method = "block_kfold", seed = 1,
                     boundary = bnd, block_size = 250)
 cat(sprintf("  %d blocked folds, block_size 250, seed 1\n", folds$k))
@@ -49,8 +49,9 @@ tab <- do.call(rbind, lapply(names(runs), function(nm)
 print(tab, row.names = FALSE, digits = 4)
 
 step("06.2", "Compare fold by fold, not mean to mean")
-# The same folds means the per-fold scores are PAIRED, so you can look at the
-# differences directly instead of comparing two averages with overlapping spread.
+# On the same folds the per-fold scores are paired, so you can read the
+# differences fold by fold instead of comparing two averages with overlapping
+# spread.
 per_fold <- sapply(runs, function(r) r$fold_metrics$RMSE)
 rownames(per_fold) <- paste("fold", runs[[1]]$fold_metrics$fold)
 print(round(per_fold, 3))
@@ -64,12 +65,12 @@ if (all(d < 0)) {
       "  which part of the map was held out.\n", sep = "")
 } else {
   cat("  It wins on average but not everywhere, so the ranking does depend on\n",
-      "  which part of the map was held out. Say how many folds, not just the\n",
-      "  mean.\n", sep = "")
+      "  which part of the map was held out. Report on how many folds it wins\n",
+      "  as well as the mean.\n", sep = "")
 }
 
 # The trend surface is the counter-example: worst of the three on average, yet
-# it wins outright on several individual folds.
+# it beats the intercept on some folds.
 d2 <- per_fold[, "trend surface"] - per_fold[, "intercept only"]
 cat(sprintf("  trend surface beats the intercept on %d of %d folds and loses the\n",
             sum(d2 < 0), length(d2)))
@@ -86,8 +87,8 @@ if (!skip_without("ggplot2", "the metric plot")) {
 }
 
 step("06.4", "The built-in backends")
-# compare_models_cv() drives the package's own model families (RF, GWR,
-# Bayesian) through one interface and one set of folds.
+# compare_models_cv() runs the package's own backends (random forest, GWR,
+# Bayesian GP) through one interface and one set of folds.
 avail <- c(RF = have("ranger"), GWR = have("sp"), Bayesian = have("brms"))
 cat("  backends available here:",
     paste(names(avail)[avail], collapse = ", "), "\n")
@@ -102,8 +103,8 @@ if (any(avail[c("RF", "GWR")])) {
              "it is.")
     show_plot(plot_cv_metrics(cmp, metric = "RMSE"), "06-backends.png")
   }
-  cat("  Bayesian is left out here because it is slow; script 10 runs it and\n",
-      "  shows what its extra output buys.\n", sep = "")
+  cat("  The Bayesian GP is left out here because it is slow; script 10 runs it\n",
+      "  and scores its prediction intervals.\n", sep = "")
 } else {
   cat("  SKIPPED: install.packages(c(\"ranger\", \"sp\"))\n")
 }

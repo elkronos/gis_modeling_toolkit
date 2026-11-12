@@ -14,9 +14,9 @@ step("05.1", "Wrap a model so the rest of the package can use it")
 # the response and predictor names, and the training layer. A `predict` method
 # is enough for the cv_* functions; add `fitted` and `residuals` and the
 # in-sample diagnostics and plots work too. Leave `fitted` out and
-# `model_metrics()` names the method it wants -- which is why script 09.5
-# registers one. `_common.R` builds `tour_fit` this way, methods included, in
-# about twenty-five lines.
+# `model_metrics()` stops with an error that names the method it needs, which
+# is why script 09.5 registers one. `_common.R` builds `tour_fit` this way,
+# methods included, in about twenty-five lines.
 fit <- tour_fit(pts)
 print(summary(fit))
 
@@ -27,10 +27,11 @@ cv  <- cv_spatial(pts, "z", "elev", fit_fn = tour_fit,
                                      seed = 1, boundary = tour_boundary(pts),
                                      block_size = 250))
 cat(sprintf("  in-sample RMSE   %.3f\n", ins$RMSE))
-cat(sprintf("  blocked CV RMSE  %.3f  (%.1fx worse)\n",
+cat(sprintf("  blocked CV RMSE  %.3f  (%.1f times the in-sample RMSE)\n",
             cv$overall$RMSE[1L], cv$overall$RMSE[1L] / ins$RMSE))
-cat("  The first number says how well the model reproduces what it was shown.\n",
-    "  Only the second is an estimate of anything you care about.\n", sep = "")
+cat("  The first number says how well the model reproduces the data it was\n",
+    "  fitted to. The second estimates its error when it predicts into gaps\n",
+    "  a block wide.\n", sep = "")
 
 step("05.3", "What is left in the residuals")
 # If the residuals are still clustered in space, something structured is
@@ -43,7 +44,8 @@ cat(sprintf("\n  I = %.3f, p = %.2g: %s\n", mi$observed, mi$p_value,
               "no detectable structure left in the residuals"))
 cat("  Structure left over means a predictor, a trend term or a correlated\n",
     "  error structure is missing. Run the same statistic again after adding\n",
-    "  one: a drop toward zero is your evidence that it did real work.\n", sep = "")
+    "  one: a drop toward zero shows that the addition accounts for part of\n",
+    "  that structure.\n", sep = "")
 
 # A second look, with a different weights matrix. Moran's I is a statement
 # about the neighbourhood you defined, so changing k changes the answer.
@@ -51,7 +53,7 @@ for (kk in c(4L, 8L, 16L)) {
   m <- residual_morans_i(fit, k = kk)
   cat(sprintf("  k = %2d neighbours -> I = %.3f, z = %5.2f\n", kk, m$observed, m$z))
 }
-cat("  Report the k you used. An unstated k is an unreproducible statistic.\n")
+cat("  Report the k you used; a reader needs it to reproduce the statistic.\n")
 
 step("05.4", "Three plots, three questions")
 if (!skip_without("ggplot2", "the diagnostic plots")) {
@@ -75,19 +77,21 @@ if (!skip_without("ggplot2", "the diagnostic plots")) {
 }
 
 step("05.5", "Percentage error on a response that crosses zero")
-# `z` here is centred near zero, so dividing by it is meaningless: a residual of
-# 0.1 next to an observation of 0.001 is a 10,000% error. The metric is reported
-# because it is conventional, not because it is always applicable.
+# `z` here is centred near zero, so dividing by it means nothing: a residual of
+# 0.1 next to an observation of 0.001 is a 10,000 percent error.
+# model_metrics() reports MAPE because it is a common metric; it is meaningful
+# only for some responses.
 cat(sprintf("  response range: %.2f to %.2f, %d observations within 0.1 of zero\n",
             min(pts$z), max(pts$z), sum(abs(pts$z) < 0.1)))
 cat(sprintf("  MAPE  %8.1f%%   <- driven by the near-zero observations\n", ins$MAPE))
 cat(sprintf("  SMAPE %8.1f%%   <- bounded, but still not interpretable here\n", ins$SMAPE))
 cat(sprintf("  RMSE  %8.3f     <- in the units of z, which is what to report\n", ins$RMSE))
 cat("  Percentage errors need a response with a meaningful zero and no values\n",
-    "  near it. Rainfall and population qualify; anomalies and log-ratios do not.\n",
+    "  near it. Population totals over large areas qualify; anomalies and\n",
+    "  log-ratios do not.\n",
     sep = "")
 
-step("05.6", "Is aggregating to cells even worth it?")
+step("05.6", "Would kriging improve on the cell means?")
 # Cell means are a summary. `kriging_adequacy()` asks whether a geostatistical
 # model of the same data would beat that summary, which is the question behind
 # 'should I report cell means or a surface'.
@@ -116,7 +120,6 @@ if (!skip_without("gstat", "the adequacy check")) {
   cat(sprintf(paste0("  what would it buy?                     median kr_gain %.2f, the share of\n",
                      "     the plain mean's error variance that kriging removes in a cell\n"),
               stats::median(ka$kr_gain, na.rm = TRUE)))
-  cat("  The interesting case is honest uncertainties AND a large gain: that is\n",
-      "  when the extra machinery earns its place in the methods section.\n",
-      sep = "")
+  cat("  Kriging is worth adding to the methods when the z-score variance is\n",
+      "  near 1 and the gain is large.\n", sep = "")
 }

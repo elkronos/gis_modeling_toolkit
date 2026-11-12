@@ -11,8 +11,8 @@ pts <- tour_points()
 bnd <- tour_boundary(pts)
 
 # Train on the western half only. `slope` runs west to east in this fixture, so
-# the eastern half is genuinely new ground in predictor space, not just on the
-# map -- which is the situation the area of applicability exists to detect.
+# the eastern half is new ground in predictor space as well as on the map: the
+# situation the area of applicability detects.
 west <- pts[sf::st_coordinates(pts)[, 1] < 5e5 + 500, ]   # x runs 5e5 to 5e5 + 1000
 ws_fit <- function(train_sf, ...) {
   new_spatial_fit(subclass = "ws_fit",
@@ -30,9 +30,9 @@ registerS3method("predict", "ws_fit", predict.ws_fit)
 fit <- ws_fit(west)
 
 step("07.1", "The default grid covers the training data, not the boundary")
-# This catches people out. The grid is built from the bounding box of the data
-# the model was fitted on. A `boundary` only clips that grid; it cannot extend
-# it past where the training points reach.
+# predict_surface() builds its grid from the bounding box of the data the
+# model was fitted on. A `boundary` only clips that grid; it cannot extend it
+# past where the training points reach.
 cat(sprintf("  trained on %d of %d points, slope %.2f to %.2f\n",
             nrow(west), nrow(pts), min(west$slope), max(west$slope)))
 srf_default <- predict_surface(fit, boundary = bnd, n_cells = 2000,
@@ -47,7 +47,7 @@ cat("  Hand it a `grid` of your own to predict anywhere else.\n")
 step("07.2", "Predicting onto ground the model has not seen")
 # A plain point grid over the whole boundary. `covariates` supplies the
 # predictor values by nearest neighbour, so the layer you pass has to cover the
-# area you are predicting on, not just the area you trained on.
+# area you are predicting on as well as the area you trained on.
 grid <- sf::st_sf(geometry = sf::st_make_grid(bnd, n = c(60, 60), what = "centers"))
 grid <- grid[lengths(sf::st_intersects(grid, bnd)) > 0L, ]
 srf  <- predict_surface(fit, grid = grid, covariates = pts)
@@ -57,16 +57,15 @@ cat(sprintf("  %d prediction points, slope %.2f to %.2f (training stopped at %.2
 step("07.3", "Which of those predictions are extrapolations")
 aoa <- area_of_applicability(srf, model = fit)
 print(aoa)
-cat(sprintf("\n  %.0f%% of the map is inside the AOA. The rest is the model\n",
+cat(sprintf("\n  %.0f percent of the map is inside the AOA. Outside it the model\n",
             100 * aoa$n_inside / (aoa$n_inside + aoa$n_outside)))
-cat("  answering a question it was never asked. It will still return numbers.\n")
+cat("  extrapolates, and it still returns numbers there.\n")
 
 step("07.4", "Draw the surface and the mask")
 if (!skip_without("ggplot2", "the surface maps")) {
   srf$inside <- aoa$aoa$AOA
-  look_for("the predicted surface. Nothing about it looks wrong in the east, ",
-           "which is the problem: an extrapolation looks exactly like a ",
-           "prediction.")
+  look_for("the predicted surface. Nothing in the east looks wrong: on a map ",
+           "an extrapolation looks like any other prediction.")
   show_plot(
     ggplot2::ggplot() +
       ggplot2::geom_sf(data = srf, ggplot2::aes(colour = .data$.pred), size = 0.8) +
@@ -94,13 +93,13 @@ if (!skip_without("ggplot2", "the surface maps")) {
 }
 
 step("07.5", "Getting it out of R as a raster")
-# `predict_surface()` returns POINTS, one per grid node, because that is what a
-# model predicts at. Most GIS software wants a raster.
+# `predict_surface()` returns points, one per grid node, because a model
+# predicts at points. Most GIS software wants a raster.
 cat("  the surface is a",
     as.character(unique(sf::st_geometry_type(srf))), "layer\n")
 out <- if (nzchar(tour_out)) tour_out else tempdir()
 if (have("stars")) {
-  # The grid was 60 x 60 over the boundary, so that is the cell size to ask for.
+  # The grid was 60 by 60 over the boundary, so that is the cell size to ask for.
   bb <- sf::st_bbox(bnd)
   dx <- as.numeric(bb["xmax"] - bb["xmin"]) / 60
   dy <- as.numeric(bb["ymax"] - bb["ymin"]) / 60
@@ -112,7 +111,7 @@ if (have("stars")) {
   cat("  SKIPPED (GeoTIFF): install.packages(\"stars\"), or rasterise with\n",
       "  terra::rasterize() if you already have terra.\n", sep = "")
 }
-# The vector route, for anyone who would rather keep the cells:
+# The vector route keeps the points:
 f2 <- file.path(out, "07-surface.gpkg")
 sf::st_write(srf[".pred"], f2, delete_dsn = TRUE, quiet = TRUE)
 cat("  wrote", f2, " (GeoPackage, opens in QGIS)\n")
@@ -122,9 +121,9 @@ step("07.6", "Mask first, then summarise")
 inside <- aoa$aoa$AOA
 cat(sprintf("  mean of the whole surface      %.3f\n", mean(srf$.pred)))
 cat(sprintf("  mean inside the AOA only       %.3f\n", mean(srf$.pred[inside])))
-cat(sprintf("  they differ by %.1f%% of the inside-AOA standard deviation\n",
+cat(sprintf("  they differ by %.1f percent of the inside-AOA standard deviation\n",
             100 * abs(mean(srf$.pred) - mean(srf$.pred[inside])) /
               stats::sd(srf$.pred[inside])))
-cat("  Do it in that order. Any number you quote from a surface -- a mean, a\n",
-    "  total, a share above some threshold -- inherits whatever the model made\n",
-    "  up outside its applicability.\n", sep = "")
+cat("  Mask first. Any number you quote from a surface (a mean, a total, a\n",
+    "  share above some threshold) otherwise includes the predictions the\n",
+    "  model extrapolated.\n", sep = "")

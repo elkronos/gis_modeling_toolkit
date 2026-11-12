@@ -15,8 +15,8 @@ pts <- tour_points()
 
 step("09.1", "Fit one")
 # GWR fits a separate regression at every observation, weighting the others by
-# distance. `adaptive = TRUE` (the default) sets the bandwidth in NUMBER OF
-# NEIGHBOURS rather than distance, which is what you want when sampling density
+# distance. `adaptive = TRUE` (the default) sets the bandwidth as a number of
+# neighbours rather than a distance, which suits data whose sampling density
 # varies across the study area.
 gw <- fit_gwr_model(pts, "z", c("elev", "slope"))
 print(summary(gw))
@@ -28,7 +28,7 @@ if (isTRUE(gw$info$bandwidth_is_fallback))
 
 step("09.2", "The output is a coefficient per point")
 cf <- coef(gw)
-cat(sprintf("  %d rows x %d coefficients\n", nrow(cf), ncol(cf)))
+cat(sprintf("  %d rows by %d coefficients\n", nrow(cf), ncol(cf)))
 print(round(apply(cf, 2, function(v) stats::quantile(v, c(0, 0.5, 1), na.rm = TRUE)), 3))
 cat("  A coefficient whose sign changes across the map is the finding. It is\n",
     "  also the thing to be most careful about: local collinearity produces\n",
@@ -38,13 +38,15 @@ step("09.3", "Check for local collinearity before believing any of it")
 # Two predictors that are globally independent can be nearly collinear inside a
 # small neighbourhood. Where that happens the local coefficients are unstable
 # and their signs are arbitrary.
-# n_local_collinear counts the locations whose local SLOPES are collinear (a
-# slope condition index above 30); n_local_singular counts the locations whose
-# coefficients came back non-finite, which is undefined kernel weights (several
-# observations at one point), not a singular window: that stops the fit.
+# n_local_collinear counts the locations whose local slopes are collinear (a
+# slope condition index above 30, or a singular window). n_local_singular
+# counts the locations with a local coefficient that is NA: a rank-deficient
+# window, where a predictor does not vary among the observations that carry
+# weight, the predictors are exactly collinear, or fewer observations than
+# parameters carry weight. The fit warns about both.
 cat(sprintf("  locations with collinear local slopes: %d of %d\n",
             gw$info$n_local_collinear, nrow(cf)))
-cat(sprintf("  locations with non-finite coefficients (undefined kernel weights): %d\n",
+cat(sprintf("  locations with an NA local coefficient (rank-deficient window): %d\n",
             gw$info$n_local_singular))
 if (gw$info$n_local_collinear > 0)
   cat("  Widen the bandwidth or drop a predictor before reading the maps.\n")
@@ -60,7 +62,7 @@ if (!skip_without("ggplot2", "the coefficient maps")) {
   show_plot(plot(gw, type = "coefficients", term = "slope"), "09-coef-slope.png")
 }
 
-step("09.5", "Is it actually better than a global fit?")
+step("09.5", "Does it beat a global fit out of sample?")
 # GWR fits one regression per point, so its in-sample error is nearly always the
 # lower of the two. The comparison that means something is cross-validated, on
 # blocked folds.
@@ -78,8 +80,8 @@ predict.gl_fit <- function(object, newdata = NULL, ...) {
   if (is.null(newdata)) return(stats::fitted(object$engine))
   as.numeric(stats::predict(object$engine, newdata = sf::st_drop_geometry(newdata)))
 }
-# cv_spatial() only ever needs `predict`. model_metrics() on the fit ITSELF
-# needs `fitted` as well, and says so rather than guessing.
+# cv_spatial() needs only `predict`. model_metrics() on the fit itself also
+# needs `fitted`, and stops with an error that names it when it is missing.
 fitted.gl_fit <- function(object, ...) stats::fitted(object$engine)
 registerS3method("predict", "gl_fit", predict.gl_fit)
 registerS3method("fitted",  "gl_fit", fitted.gl_fit)
@@ -97,9 +99,9 @@ if (abs(gap) < 0.02) {
       "  this map the relationship does not vary enough to pay for one\n",
       "  regression per point.\n", sep = "")
 } else if (gap < 0) {
-  cat(sprintf("  GWR is %.0f%% better out of sample, so it earns its place.\n", -100 * gap))
+  cat(sprintf("  GWR is %.0f percent better out of sample, so it earns its place.\n", -100 * gap))
 } else {
-  cat(sprintf("  GWR is %.0f%% worse out of sample: the local fits were memorising.\n",
+  cat(sprintf("  GWR is %.0f percent worse out of sample: the local fits were memorising.\n",
               100 * gap))
 }
 
@@ -122,7 +124,7 @@ step("09.7", "Before you read a coefficient map as a causal map")
 # A GWR coefficient surface describes how the local regression had to bend to
 # fit the data there. Omitted variables, edge effects and local collinearity all
 # show up as spatial variation in the coefficients, and none of them is the
-# effect of the predictor changing across the region.
+# effect of the predictor changing across the study area.
 cat("  Before writing 'the effect of elevation is stronger in the north':\n")
 cat("   - check 09.3 for local collinearity\n")
 cat("   - check whether the pattern survives a wider bandwidth\n")

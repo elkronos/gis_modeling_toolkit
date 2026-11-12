@@ -41,7 +41,7 @@ shape <- function(x, label, tol = 0.03) {
   rel <- diff(blk$value) / utils::head(blk$value, -1L)
   ok  <- vapply(seq_along(rel), function(i) all(rel[i:length(rel)] < tol), logical(1))
   knee <- which(ok)[1L]
-  cat(sprintf("  %-16s random %.3f | blocked %.3f at %.0f units -> %.3f at %.0f\n",
+  cat(sprintf("  %-16s random %.3f | blocked %.3f at %.0f m -> %.3f at %.0f m\n",
               label, rnd, blk$value[1L], blk$block_size[1L],
               blk$value[nrow(blk)], blk$block_size[nrow(blk)]))
   if (is.na(knee)) {
@@ -49,7 +49,7 @@ shape <- function(x, label, tol = 0.03) {
   } else if (knee == 1L) {
     cat("    flat throughout: this score does not depend on block size\n")
   } else {
-    cat(sprintf("    flattens from %.0f units on (%.0f%% of the %.0f-unit range)\n",
+    cat(sprintf("    flattens from %.0f m on (%.0f percent of the %.0f m range)\n",
                 blk$block_size[knee],
                 100 * blk$block_size[knee] / attr(x, "sac_range"),
                 attr(x, "sac_range")))
@@ -69,12 +69,13 @@ print(sw)
 step("04.2", "Reading the shape")
 shape(sw, "interpolator")
 cat("  The curve is the error at each distance from the data. While the blocks\n",
-    "  are narrower than the autocorrelation, test points still have training\n",
-    "  neighbours nearby, and the score is the error of predicting that close\n",
-    "  to the data. Past the range the neighbours tell the model little, and\n",
-    "  widening the blocks further changes little. The curve does not say which\n",
-    "  size to report: that is the size whose test points sit as far from the\n",
-    "  data as the locations the map will predict at, which 04.3 reads.\n", sep = "")
+    "  are narrower than the autocorrelation range, test points still have\n",
+    "  training neighbours nearby, and the score is the error of predicting\n",
+    "  that close to the data. Past the range the neighbours tell the model\n",
+    "  little, and widening the blocks further changes little. The curve does\n",
+    "  not say which size to report: that is the size whose test points sit as\n",
+    "  far from the data as the locations the map will predict at, which 04.3\n",
+    "  reads.\n", sep = "")
 
 step("04.3", "Which size matches a map of the area")
 # fold_separation() sets the held-out distances of each size's folds beside the
@@ -88,7 +89,7 @@ for (nm in names(res)) {
   r <- attr(fold_separation(res[[nm]]$folds, pts, prediction_points = map_pts),
             "target")$reading
   cat(sprintf("  %-14s %s\n",
-              if (nm == "random_kfold") nm else sprintf("%.0f units", as.numeric(nm)), r))
+              if (nm == "random_kfold") nm else sprintf("%.0f m", as.numeric(nm)), r))
 }
 
 step("04.4", "The picture for the appendix")
@@ -112,8 +113,8 @@ if (!skip_without("ggplot2", "the second sweep plot")) {
   show_plot(plot(sw2), "04-sweep-trend.png")
 }
 cat("  A curve like that says the model degrades smoothly with distance from\n",
-    "  its training data, so the score depends entirely on how far the map has\n",
-    "  to predict from the data. Script 07 measures that distance directly.\n",
+    "  its training data, so the score depends on how far from the data the\n",
+    "  map has to predict. Script 07 measures where the model stops applying.\n",
     sep = "")
 
 step("04.6", "What this costs")
@@ -138,7 +139,7 @@ if (nrow(short)) {
               attr(sw, "k")))
   print(short[, c("block_size", "blocks_used", "k", "n_folds_succeeded", "value")],
         row.names = FALSE, digits = 4)
-  cat("  Weaker evidence, not the answer.\n")
+  cat("  Read those rows as weaker evidence.\n")
 } else {
   cat(sprintf("  every size ran the full k = %d here. Check the column anyway:\n",
               attr(sw, "k")))

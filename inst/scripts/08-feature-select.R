@@ -10,21 +10,21 @@ source(file.path(.tour_dir, "_common.R"))
 pts <- tour_points()
 
 # One candidate that drives the response, one that only looks as if it does, and
-# four that are nothing. `elev` is in the formula that generated `z`. `slope` is
-# not -- but this field realisation drifts west to east, and so does slope, so
-# it predicts `z` by coincidence. `noise` and junk1-3 are there to give the
-# search something to overfit to.
+# four that are noise. `elev` is in the formula that generated `z`. `slope` is
+# not, but this realisation of the field drifts west to east, and so does
+# `slope`, so it predicts `z` by coincidence. `noise` and junk1 to junk3 give
+# the search something to overfit to.
 set.seed(11)
 pts$junk1 <- stats::rnorm(nrow(pts))
 pts$junk2 <- stats::rnorm(nrow(pts))
 pts$junk3 <- stats::rnorm(nrow(pts))
 cands <- c("elev", "slope", "noise", "junk1", "junk2", "junk3")
-# Block size: a little UNDER the range script 02 estimates on z (about 357),
-# because the 1000-unit square holds only four blocks of 360, fewer than the
-# five folds, and the half-layer of 08.5 only two. Blocks this size leave some
-# held-out points within the range of training data across their edges, so the
-# scores below are the error of predicting a little closer to the data than
-# range-sized blocks would hold them.
+# Block size: a little under the range script 02 estimates on z (about 351 m).
+# Blocks of 360 m make a 2 by 2 grid over the square, four blocks for five
+# folds, and two blocks over the half-layer of 08.5; 300 m makes nine and
+# six. Blocks this size leave some held-out points within the range of training
+# data across their edges, so the scores below are the error of predicting a
+# little closer to the data than range-sized blocks would hold them.
 BS <- 300
 
 xy <- sf::st_coordinates(pts)
@@ -32,14 +32,14 @@ cat(sprintf("  slope has no effect on z by construction, yet cor(slope, z) = %.2
             stats::cor(pts$slope, pts$z)))
 cat(sprintf("  because this field happens to drift west to east: cor(easting, z) = %.2f.\n",
             stats::cor(xy[, 1], pts$z)))
-cat("  A search cannot tell that apart from a real effect, and neither can you.\n")
+cat("  A variable search cannot tell that coincidence from a real effect.\n")
 
-# select_features_forward() calls fit_fn(train_sf, predictor_vars) -- TWO
+# select_features_forward() calls fit_fn(train_sf, predictor_vars), with two
 # arguments. A learner written for cv_spatial() takes one, so it needs this
-# wrapper. Get it wrong and every candidate scores exactly what the null model
-# scored, so nothing is selected; the function warns that fit_fn appears to be
-# ignoring its second argument, which is the only way to tell that apart from
-# a data set in which nothing predicts anything.
+# wrapper. Without it every candidate scores exactly what the null model
+# scored, and nothing is selected; the function then warns that fit_fn appears
+# to be ignoring its second argument, which tells that case apart from data in
+# which no candidate predicts the response.
 lm_on <- function(train_sf, vars) {
   d <- sf::st_drop_geometry(train_sf)
   f <- stats::as.formula(paste("z ~",
@@ -65,10 +65,10 @@ cat(sprintf("  selected: %s\n",
 cat(sprintf("  RMSE: %.3f (from %.3f with no predictors)\n",
             sel$score, sel$history$score[sel$history$step == 0L]))
 
-step("08.2", "The margin, not just the winner")
-# `history` holds every candidate tried at every step. The useful column is the
-# GAP between the step winner and the runner-up: a wide gap is a real predictor,
-# a hair's breadth is the search choosing between noises.
+step("08.2", "How far each pick beat the runner-up")
+# `history` holds every candidate tried at every step. Read the gap between the
+# step winner and the runner-up: a wide gap is a real predictor, a hair's
+# breadth is the search choosing between noises.
 h <- sel$history[sel$history$step > 0L, ]
 for (st in sort(unique(h$step))) {
   hs <- h[h$step == st, ]
@@ -94,19 +94,18 @@ step("08.3", "Did it take any of the decoys?")
 decoys <- intersect(sel$selected, c("noise", "junk1", "junk2", "junk3"))
 if (length(decoys)) {
   cat(sprintf("  yes: %s\n", paste(decoys, collapse = ", ")))
-  cat("  Six candidates and five folds is enough rope. This is how greedy\n",
-      "  search behaves, not a failure of the implementation.\n", sep = "")
+  cat("  Greedy search over six candidates on five folds picks up noise like\n",
+      "  this; the margins in 08.2 show how little separated it.\n", sep = "")
 } else {
   cat("  none this time, on these folds. That is one sample; 08.5 runs the\n",
       "  same search on half the data and gets a different answer.\n", sep = "")
 }
 
 step("08.4", "Tighten it with tol")
-# `tol` is the smallest improvement a candidate must deliver to be admitted,
-# in the metric's own units -- RMSE here, so units of `z`, not a percentage.
-# That is what makes it usable: set it to the smallest improvement that would
-# change a decision you actually make. It is the cheapest guard there is
-# against the hairline gaps in 08.2.
+# `tol` is the improvement a candidate must exceed to be admitted, in the
+# metric's own units: RMSE here, so units of `z`, not a percentage. Set it to
+# the smallest improvement that would change a decision you make; it guards
+# against the hairline gaps in 08.2 at no extra cost.
 for (tl in c(0, 0.01, 0.05, 0.2)) {
   s <- select_features_forward(pts, "z", cands, fit_fn = lm_on, k = 5,
                                method = "block_kfold", block_size = BS,
@@ -134,11 +133,12 @@ cat(sprintf("  selected on the search half : %s\n",
             paste(sel_sp$selected, collapse = ", ")))
 cat(sprintf("  score on the search half    : %.3f\n", sel_sp$score))
 cat(sprintf("  score on the held-out half  : %.3f", sel_sp$score_holdout))
-cat(sprintf("   (%.0f%% worse)\n",
+cat(sprintf("   (%.0f percent higher)\n",
             100 * (sel_sp$score_holdout / sel_sp$score - 1)))
 cat("  Part of that gap is the selection effect. Part is that the two scores\n",
-    "  come from different rows, a different region and a different amount of\n",
-    "  training data, so the gap is one estimate, not a measurement of it.\n",
+    "  come from different rows, a different part of the map and a different\n",
+    "  amount of training data, so the gap is a rough estimate of the\n",
+    "  selection effect.\n",
     sep = "")
 
 step("08.6", "Two runs, two answers, one write-up")
