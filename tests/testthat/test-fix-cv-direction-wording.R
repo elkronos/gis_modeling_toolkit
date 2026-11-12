@@ -200,7 +200,8 @@
 # cross-validated score errs for a map, by page.  Each stands on its page.
 .CVW_OTHER_SENSES <- list(
   # An in-sample fit, and a score chosen as the best of many.
-  "?fitted.gwr_fit" = "summary() on a gwr_fit reports an optimistic fit",
+  "?spatial_fit-fitted" =
+    "so summary(), and model_metrics() without newdata, report an optimistic fit",
   "?gwr_model_selection" = c(
     "an in-sample criterion is optimistic in a way that a spatially blocked estimate is not",
     # AICc counts the rows at one location as independent.
@@ -209,8 +210,6 @@
   "?select_features_forward" = c(
     "optimistically biased because it was chosen as the best of many",
     "optimistically biased by construction",
-    "An honest performance estimate needs data the selection never saw",
-    "automatically nested and leak-free",
     # A standard error over the folds.
     "a standard error over rows would understate the noise"),
   # A selection made inside each fold, and folds that failed.
@@ -219,37 +218,25 @@
     "the fold that fails is often the hardest to predict, so it may flatter the model"),
   # The response among its own predictors.
   "?prep_model_data" = "Using it as its own predictor is leakage no backend catches",
-  "README" = c("it is leakage in the forest",
-               "the criteria that disagree, the leak, and the default size"),
   # Intervals, standard errors, variances, tests, a comparison of estimands,
   # a print, seeds, distances in degrees, the area of applicability.
   "?cv_bayes" = "whether those intervals are honest at locations the model has not seen",
-  "?fit_bayesian_spatial_model" = c(
-    "the honest diagnostic is to report both side by side",
-    "On a fit with nothing left over the test is conservative"),
-  "?summary.resolution_profile" = "a row subset of the result reads honestly",
-  "?voronoi_seeds_random" = "It is also the honest choice for a null or sensitivity comparison",
+  "?fit_bayesian_spatial_model" = "On a fit with nothing left over the test is conservative",
   "?area_of_applicability" = c(
     "giving a small threshold and a conservative AOA",
     "which overstates dissimilarity along directions the model barely uses",
     "silently understate the distances"),
   "?kriging_adequacy" = c(
     "under spatial correlation it understates the error",
-    "in that unit overstate the disagreement",
-    "how badly the kriging variance is understated (or overstated)",
-    "With the nugget understated tenfold"),
+    "how badly the kriging variance is understated (or overstated)"),
   "?plot.spatial_fit" = "residuals of a fitted trend understate the variogram",
   "?residual_morans_i" = c(
     "The random forest is anticonservative under both",
     "the variance is understated whichever is used",
     "GWR is conservative under both"),
   "?summarize_by_cell" = c(
-    "the naive SE is anticonservative (too small)",
     "understates sigma^2",
-    "it is anticonservative for the block average too",
     "their standard errors are understated"),
-  "vignette diagnostics" = c("says the naive standard error was optimistic",
-                             "above 1 means it is understated"),
   "vignette spatialkit_nc_demo" =
     "it is anticonservative when points inside a cell are spatially correlated",
   # The selection and estimation halves of select_on = "split".
@@ -266,8 +253,7 @@
     "A flatter-than-1:1 cloud",
     "are the kriging uncertainties honest?",
     "the model understates its own error",
-    "the model overstates its own error",
-    "The interesting case is honest uncertainties AND a large gain"),
+    "the model overstates its own error"),
   "script 06-cv-compare.R" = "The honest write-up either (a) reports the selection",
   "script 08-feature-select.R" = c(
     "Choosing predictors without letting the choice flatter the score",
@@ -318,7 +304,7 @@
 # for word where they stand (squashed: no backticks, single spaces).
 .CVW_PINNED <- list(
   "?spatialkit-package" = c(
-    paste("Fold. make_folds() builds spatial cross-validation folds: blocked,",
+    paste("Make folds. make_folds() builds spatial cross-validation folds: blocked,",
           "buffered, leave-location-out or nearest-neighbour distance-matched.",
           "A cross-validated error is the error at the distance the folds put",
           "between the held-out points and their training data: it reads low",
@@ -362,7 +348,7 @@
     paste("so under spatial autocorrelation it is the error of predicting among",
           "the samples, as random k-fold is, and reads low for predictions made",
           "farther from the data than the samples sit from each other")),
-  "?print.rf_fit" = paste(
+  "?print.spatial_fit" = paste(
     "its out-of-bag error, a random hold-out, is its error among the samples",
     "and reads low for predictions made farther from the data;"),
   "?estimate_sac_range" = c(
@@ -377,42 +363,44 @@
     paste("Treat the range from a count response as no more than an order of",
           "magnitude, since it can come out long or short")),
   "?fold_separation" = paste(
-    "cv_block_size_sweep() for the cross-validated error at each block size.",
-    "The sweep does not say which size matches a map; this function does,",
-    "read on the folds of each size with the map's locations as",
-    "prediction_points."),
+    "cv_block_size_sweep() gives the cross-validated error at each block size,",
+    "but not which size matches a map. This function does, read on the folds",
+    "of each size (the $folds of each element of attr(sweep, \"results\")) with",
+    "the map's locations as prediction_points."),
   "vignette spatial-cross-validation" = c(
     "## The error at each block size",
     "{r separation}",
-    paste("| random_kfold | a random 1/k of rows | the map predicts among the",
-          "samples (an area they cover evenly), or the data are not",
-          "autocorrelated |"),
-    "fold_separation(fr, pts, prediction_points = cells)",
-    paste("\"matched\" says the held-out points sit about as far from their",
-          "training data as the map's cells do, so the score is the error of",
-          "that map; \"farther\" says they sit farther, and the score reads high",
-          "for it; \"closer\", the reading of random folds on clustered samples",
-          "with a map of the whole region, says it reads low."),
-    paste("The curve does not say which size to report; the size to read is the",
-          "one whose folds match the map")),
+    paste("| random_kfold | a random 1/k of the rows | nothing | k | predicts",
+          "among the samples, over an area they cover evenly |"),
+    "sep <- fold_separation(folds, data, prediction_points = map_pts)",
+    "sep_blocked <- fold_separation(fb, pts, prediction_points = map_pts)",
+    paste("\"matched\": the held-out points sit about as far from their training",
+          "data as the map's points do, so the score estimates the error at the",
+          "map's distances."),
+    "\"farther\": they sit farther, and the score tends to read high for this map.",
+    paste("\"closer\": they sit closer, and the score tends to read low for this",
+          "map. Random folds on clustered samples, with a map of the whole region,",
+          "read this way."),
+    paste("To choose a size, run fold_separation() on the folds of each size, the",
+          "$folds of each element of attr(sw, \"results\"), against the map's",
+          "points.")),
   "vignette spatialkit_nc_demo" = c(
     "Which of the two to report depends on where the map will predict.",
     "{r cv-separation}",
-    "fold_separation(folds_random, points_sf, prediction_points = cells)",
-    paste("\"matched\" is the scheme whose score is the error of that map,",
-          "\"farther\" one that reads high for it, and \"closer\" one that reads",
-          "low."),
-    "cv_block_size_sweep() gives the cross-validated",
-    paste("What 5c measured was how much worse the coordinate forest predicts",
-          "whole blocks of the state than it predicts among the points;")),
+    "fold_separation(folds_random, points_sf, prediction_points = map_pts)",
+    paste("\"matched\" says the held-out points sit about as far from their",
+          "training data as the map's locations sit from the data; \"farther\"",
+          "says they sit farther, so that score tends to read high for this map."),
+    "cv_block_size_sweep() gives the cross-validated"),
   "vignette reporting" = c(
     "{r block-vs-range, echo=FALSE, results='asis', eval=has_gstat}",
-    "that is the error of the map depends on where the map predicts.",
+    paste("Whether that makes the score optimistic depends on how far the map's",
+          "grid points"),
     "fold_separation(folds, pts, sac = sac, prediction_points = surface)",
-    "m(folds$params$block_size), m(sac), reading, says[[reading]]",
-    paste("Read together, those lines say the run failed two of its own checks,",
-          "the score and the residuals, which is what a report is for.")),
-  "README" = "| check which way a CV score errs for my map | fold_separation(prediction_points = ) |",
+    "m(edge), m(signif(sac, 2)), blocks, reading, says[[reading]]"),
+  "README" = paste("A map's error depends on where it predicts, and fold_separation()",
+                   "compares the folds' distances from the training data with the",
+                   "map's."),
   "script 03-folds.R" = c(
     "fold_separation(f, pts, prediction_points = map_pts)",
     paste("Neither number is the error of every map. Report the one whose folds",
@@ -423,7 +411,7 @@
           "test points sit as far from the data as the locations the map will",
           "predict at")),
   "script example_nc_demo.R" = c(
-    "fold_separation(f, points_sf, prediction_points = cells)",
+    "fold_separation(f, points_sf, prediction_points = map_pts)",
     "Which of the two to report depends on where the map will predict"))
 
 
@@ -523,13 +511,14 @@ test_that("the rules find a direction without a target, and pass one with a targ
 
 test_that("no page says which way a cross-validated score errs without naming where the model will predict", {
   pages <- .cvw_pages()
-  expect_gt(length(grep("^\\?", names(pages))), 75L)
+  expect_gt(length(grep("^\\?", names(pages))), 65L)
   expect_true(all(paste("script", c("03-folds.R", "04-block-size.R", "08-feature-select.R",
                                     "example_nc_demo.R")) %in% names(pages)))
   if (.cvw_have_vignettes())
     expect_true(all(paste("vignette", c("spatial-cross-validation", "reporting",
                                         "spatialkit_nc_demo", "getting-started",
-                                        "diagnostics", "resolution")) %in% names(pages)))
+                                        "models", "cells", "resolution",
+                                        "troubleshooting", "glossary")) %in% names(pages)))
   for (what in names(pages)) {
     expect_false(is.null(pages[[what]]), info = what)
     paras <- .cvw_paragraphs(pages[[what]])
@@ -579,9 +568,9 @@ test_that("each page that gave a direction without a target says instead what th
   expect_length(at, 1L)
   says <- eval(exprs[[at]][[3L]], baseenv())
   expect_identical(names(says), c("matched", "closer", "farther", "mixed"))
-  expect_match(says[["matched"]], "sit about as far from their training data as the cells do, so the score is the error of this map", fixed = TRUE)
-  expect_match(says[["closer"]], "sit closer to their training data than the cells do, so the score tends to read low for this map; wider blocks", fixed = TRUE)
-  expect_match(says[["farther"]], "sit farther from their training data than the cells do, so the score tends to read high for this map; narrower blocks", fixed = TRUE)
+  expect_match(says[["matched"]], "sit about as far from their training data as the grid points do, so the score is the error of this map", fixed = TRUE)
+  expect_match(says[["closer"]], "sit closer to their training data than the grid points do, so the score tends to read low for this map; wider blocks", fixed = TRUE)
+  expect_match(says[["farther"]], "sit farther from their training data than the grid points do, so the score tends to read high for this map; narrower blocks", fixed = TRUE)
   expect_match(says[["mixed"]], "no single direction", fixed = TRUE)
   for (r in c("closer", "farther"))
     expect_match(says[[r]], "make_folds(method = \"knndm\", prediction_points = surface)", fixed = TRUE)
@@ -611,7 +600,14 @@ test_that("?cv_block_size_sweep says what the rise of its curve measures", {
   expect_match(.cvw_rd_arguments(.cvw_rd("cv_block_size_sweep"))[["include_random"]],
                "Also cross-validate with random folds, as the reference: the error of predicting among the samples",
                fixed = TRUE)
-  p <- .cvw_rd_part(.cvw_rd("plot.block_size_sweep"), "\\description")
+  # The plot method is documented on the same page, in its section "The plot".
+  rd <- .cvw_rd("cv_block_size_sweep")
+  expect_true("plot.block_size_sweep" %in%
+                vapply(rd[vapply(rd, .cvw_tag, character(1)) == "\\alias"], .cvw_flat, character(1)))
+  sections <- rd[vapply(rd, .cvw_tag, character(1)) == "\\section"]
+  titles <- vapply(sections, function(sec) .cvw_squash(.cvw_flat(sec[[1L]])), character(1))
+  expect_identical(sum(titles == "The plot"), 1L)
+  p <- .cvw_squash(.cvw_flat(sections[[which(titles == "The plot")[1L]]][[2L]]))
   expect_match(p, paste("its height at a size is the error at that distance from the data,",
                         "and the error of a map only where the locations it predicts at sit",
                         "that far from the observations."), fixed = TRUE)
