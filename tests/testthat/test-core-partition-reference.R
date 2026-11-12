@@ -1,12 +1,12 @@
 # tests/testthat/test-core-partition-reference.R
 # ---------------------------------------------------------------------------
-# The package's density kind and its random starts reproduce the experiment
-# that tested them.
+# The package's density kind and its random starts reproduce the reference
+# functions of helper-partition-reference.R.
 #
-# den_centres() and rnd_centres() (helper-partition-reference.R) are that
-# experiment's functions.  Two of den_centres()'s guards depend on the unit
-# of the coordinates: the neighbour distance is not taken below 1, and Lloyd's
-# iteration stops when no centre moves by 1e-6.  The package states both as
+# den_centres() and rnd_centres() are those functions.  Two of
+# den_centres()'s guards depend on the unit of the coordinates: the neighbour
+# distance is not taken below 1, and Lloyd's iteration stops when no centre
+# moves by 1e-6.  The package states both as
 # fractions of the extent.  On point sets where neither guard binds (every
 # 8th-neighbour distance is far above 1, and a step either moves a centre by
 # far more than 1e-6 or not at all), given the same point order and seed,
@@ -142,7 +142,7 @@ test_that("where the reference's floor of one unit binds, the package's does not
 
 test_that("get_voronoi_seeds(partition = \"density\") returns den_centres()'s centres", {
   # Through the public function: 3 starts, 40 Lloyd steps, 8 neighbours,
-  # power 1, the settings of the experiment.
+  # power 1, the settings of the reference.
   skip_if_not_installed("FNN")
   xy  <- .pr_sets()$clustered
   pts <- partition_points_sf(xy)
