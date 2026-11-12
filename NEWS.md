@@ -747,6 +747,13 @@ before upgrading a running analysis.
   a larger `sample_n`. `supported` stays `TRUE`, since the layer supports
   the floor.
 
+* **`attr(resolution_profile(), "bounds")` did not say that a range floor
+  above the ceiling was not applied.** Under `range_floor = TRUE` it
+  recorded `range_floor` as `TRUE` beside a floor above every level, which
+  nothing applied. The bounds of such a profile now carry
+  `floor_applied = FALSE`. The field is added in that case only, so the
+  bounds of every other profile are as they were.
+
 ### Build the cells
 
 * **`build_tessellation()` with a geographic `crs` built every method in

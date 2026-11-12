@@ -373,7 +373,8 @@ Attributes:
 \code{supported},
 \code{area}, \code{range}, \code{n} (the points in the layer),
 \code{n_sample} (the points the k-means fits ran on),
-\code{n_distinct}, \code{min_cell_n}, \code{range_floor},
+\code{n_distinct}, \code{min_cell_n}, \code{range_floor} (the
+argument),
 \code{n_response} (the rows of the layer that carry a response and,
 with \code{predictor_vars}, every predictor, which the support
 ceiling counts; \code{NA} without a \code{response_var}),
@@ -382,7 +383,9 @@ read; \code{NA} without a \code{response_var}), \code{levels_given}
 (whether \code{levels} set the ladder), \code{predictors} (whether
 \code{predictor_vars} were given) and, where rows have a response
 and none of them every predictor, \code{n_response_only} (the rows
-with a finite response).
+with a finite response), and, where the range floor lies above the
+ceiling, \code{floor_applied} (\code{FALSE}: the floor is above
+every level and is not applied, whatever \code{range_floor} is).
 On a ladder that \code{obs_per_cell} sets, \code{bounds} describes
 that ladder: \code{ceiling} is the finest level; \code{ceiling_from}
 is \code{"obs_per_cell"}, \code{"distinct locations"},

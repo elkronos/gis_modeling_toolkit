@@ -90,3 +90,43 @@ test_that("a floor above the ceiling sample_n sets is a classed warning, not a l
   expect_length(.fc_of(d, "spatialkit_floor_above_ceiling"), 0L)
   expect_false(attr(d$value, "bounds")$supported)
 })
+
+
+
+test_that("the bounds mark a floor above the ceiling as not applied", {
+  skip_if_not_installed("gstat")
+  # Above the data's ceiling and above the ceiling sample_n sets, under
+  # either range_floor: the argument is recorded as given, and the floor is
+  # marked as not applied.
+  for (rf in c(TRUE, FALSE)) {
+    for (r in list(data = .fc_data(rf), subsample = .fc_subsample(rf))) {
+      b <- attr(r$value, "bounds")
+      expect_gt(b$floor, b$ceiling)
+      expect_identical(b$range_floor, rf)
+      expect_identical(b$floor_applied, FALSE)
+      expect_identical(min(r$value$levels), 2L)
+    }
+  }
+  # On a ladder of sizes the floor above the finest level is not applied
+  # either.
+  pts <- .fc_layer(300, 3000, 1)
+  sizes <- suppressWarnings(resolution_profile(pts, "z", sac = .fc_sac(pts, 2000),
+                                               obs_per_cell = c(18, 9), nstart = 2))
+  b <- attr(sizes, "bounds")
+  expect_gt(b$floor, b$ceiling)
+  expect_false(b$supported)
+  expect_identical(b$floor_applied, FALSE)
+  # A floor below the ceiling adds nothing to the bounds: the ladder starts
+  # at it under range_floor = TRUE, and range_floor says which.
+  sac <- .fc_sac(pts, 40000)
+  on <- suppressWarnings(resolution_profile(pts, "z", sac = sac, n_levels = 8, nstart = 2,
+                                            range_floor = TRUE))
+  b <- attr(on, "bounds")
+  expect_gt(b$floor, 2L)
+  expect_lt(b$floor, b$ceiling)
+  expect_identical(min(on$levels), b$floor)
+  expect_false("floor_applied" %in% names(b))
+  off <- suppressWarnings(resolution_profile(pts, "z", sac = sac, n_levels = 8, nstart = 2))
+  expect_identical(min(off$levels), 2L)
+  expect_false("floor_applied" %in% names(attr(off, "bounds")))
+})

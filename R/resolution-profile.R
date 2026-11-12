@@ -1751,7 +1751,8 @@
 #'       \code{supported},
 #'       \code{area}, \code{range}, \code{n} (the points in the layer),
 #'       \code{n_sample} (the points the k-means fits ran on),
-#'       \code{n_distinct}, \code{min_cell_n}, \code{range_floor},
+#'       \code{n_distinct}, \code{min_cell_n}, \code{range_floor} (the
+#'       argument),
 #'       \code{n_response} (the rows of the layer that carry a response and,
 #'       with \code{predictor_vars}, every predictor, which the support
 #'       ceiling counts; \code{NA} without a \code{response_var}),
@@ -1760,7 +1761,9 @@
 #'       (whether \code{levels} set the ladder), \code{predictors} (whether
 #'       \code{predictor_vars} were given) and, where rows have a response
 #'       and none of them every predictor, \code{n_response_only} (the rows
-#'       with a finite response).
+#'       with a finite response), and, where the range floor lies above the
+#'       ceiling, \code{floor_applied} (\code{FALSE}: the floor is above
+#'       every level and is not applied, whatever \code{range_floor} is).
 #'       On a ladder that \code{obs_per_cell} sets, \code{bounds} describes
 #'       that ladder: \code{ceiling} is the finest level; \code{ceiling_from}
 #'       is \code{"obs_per_cell"}, \code{"distinct locations"},
@@ -3016,6 +3019,12 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # of them complete: read by .no_complete_row().  Recorded in that case
   # only, so the record of every other profile is as it was.
   if (no_complete) bounds$n_response_only <- n_resp_only
+  # A range floor above the ceiling is above every level, so nothing applies
+  # it, whatever `range_floor` says: the bounds said TRUE of such a floor
+  # under range_floor = TRUE, and a reader of `floor` alone could take it
+  # for the ladder's start.  Recorded in that case only, as above.
+  if (is.finite(range_eff) && range_eff > 0 && floor_raw > ceiling_L)
+    bounds$floor_applied <- FALSE
   # The sizes, largest first, and the level each gives: NA for a size that
   # was dropped.
   if (size_ladder) {
