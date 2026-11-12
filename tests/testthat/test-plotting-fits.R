@@ -379,13 +379,14 @@ test_that("the variogram labels give the unit in short form, the caption's range
   p <- plot(r)
   expect_identical(p$labels$x, "Distance (m)")
   expect_match(p$labels$subtitle, "^Effective range = [0-9.]+ m$")
+  # A layer with no CRS keeps "CRS units".
+  expect_identical(.crs_unit_short(NA_character_), NA_character_)
+  expect_identical(.crs_unit_short("EPSG:2264"), "US ft")
+  skip_if_not_installed("ranger")
   fit <- fit_rf_model(pts, "price", "elev", num_trees = 50, seed = 1)
   cap <- gsub("\n", " ", plot(fit, type = "variogram")$labels$caption)
   if (grepl("effective ranges", cap, fixed = TRUE))
     expect_match(cap, "effective ranges [0-9.]+ m \\(residuals\\) and [0-9.]+ m \\(response\\)")
-  # A layer with no CRS keeps "CRS units".
-  expect_identical(.crs_unit_short(NA_character_), NA_character_)
-  expect_identical(.crs_unit_short("EPSG:2264"), "US ft")
 })
 
 test_that("the sweep's axis names the CRS's unit and its table fits 80 columns", {
