@@ -299,6 +299,12 @@ NULL
 #'   the interval (at 0.90, fewer than 100 residuals), so its ends are
 #'   unstable. Ask for a lower `obs_level`, which needs fewer residuals.
 #'   Fields: `columns`, `needed`, `level` and `n`.
+#' * `spatialkit_floor_above_ceiling`. Raised by [resolution_profile()]. The
+#'   range floor lies above the ceiling that `sample_n` sets, though the
+#'   layer supports it, so the floor is above every level and is not
+#'   applied, and [select_resolution()] cannot hold `reliability` to it.
+#'   `supported` stays `TRUE`. Raise `sample_n`. Fields: `reason`, `floor`,
+#'   `ceiling`, `n` and `n_sample`.
 #' * `spatialkit_fold_args_ignored`. Raised by [cv_spatial()], [cv_rf()],
 #'   [cv_gwr()], [cv_bayes()] and [compare_models_cv()]. `block_size` or
 #'   `auto_range = TRUE` was given beside `folds`, which leaves them nothing

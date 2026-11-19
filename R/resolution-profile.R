@@ -943,7 +943,8 @@
 #' \code{sample_n} the ceiling is also held to half the subsample's scored
 #' rows (two per cell, the least a fitted cell can be scored on; half the
 #' subsample without a response); \code{ceiling_from} is then
-#' \code{"sample_n"}, a floor above that is logged with a request to raise
+#' \code{"sample_n"}, a floor above that raises a warning of class
+#' \code{spatialkit_floor_above_ceiling} with a request to raise
 #' \code{sample_n}, and it does not make \code{supported} \code{FALSE}.
 #'
 #' The floor moves with the range estimate, and the ceiling with \eqn{n}.
@@ -1236,6 +1237,12 @@
 #'   \item{\code{spatialkit_not_supported}}{\code{supported} is \code{FALSE},
 #'     because the range floor exceeds the
 #'     ceiling or because fewer than two cells meet \code{min_cell_n}.}
+#'   \item{\code{spatialkit_floor_above_ceiling}}{The range floor lies
+#'     above the ceiling that \code{sample_n} sets on a layer that supports
+#'     it, so the floor is above every level and is not applied;
+#'     \code{supported} stays \code{TRUE}.  The condition carries
+#'     \code{reason} (\code{"sample_n"}), \code{floor}, \code{ceiling},
+#'     \code{n} and \code{n_sample}.  Raise \code{sample_n}.}
 #'   \item{\code{spatialkit_response_ceiling}}{Rows that are not scored (no
 #'     response, or with \code{predictor_vars}
 #'     a predictor missing) lowered the ceiling.  The message names the
@@ -1744,7 +1751,8 @@
 #'       \code{supported},
 #'       \code{area}, \code{range}, \code{n} (the points in the layer),
 #'       \code{n_sample} (the points the k-means fits ran on),
-#'       \code{n_distinct}, \code{min_cell_n}, \code{range_floor},
+#'       \code{n_distinct}, \code{min_cell_n}, \code{range_floor} (the
+#'       argument),
 #'       \code{n_response} (the rows of the layer that carry a response and,
 #'       with \code{predictor_vars}, every predictor, which the support
 #'       ceiling counts; \code{NA} without a \code{response_var}),
@@ -1753,7 +1761,9 @@
 #'       (whether \code{levels} set the ladder), \code{predictors} (whether
 #'       \code{predictor_vars} were given) and, where rows have a response
 #'       and none of them every predictor, \code{n_response_only} (the rows
-#'       with a finite response).
+#'       with a finite response), and, where the range floor lies above the
+#'       ceiling, \code{floor_applied} (\code{FALSE}: the floor is above
+#'       every level and is not applied, whatever \code{range_floor} is).
 #'       On a ladder that \code{obs_per_cell} sets, \code{bounds} describes
 #'       that ladder: \code{ceiling} is the finest level; \code{ceiling_from}
 #'       is \code{"obs_per_cell"}, \code{"distinct locations"},
@@ -2954,13 +2964,20 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                     data = list(reason = "floor above ceiling", n = n_support,
                                 min_cell_n = min_cell_n))
     else if (floor_raw > ceiling_L)
-      .log_warn(paste0("resolution_profile(): cells no wider than the autocorrelation ",
-                       "range (%s) need at least %.0f of them, which the %d %s ",
-                       "support, but k-means on the %d-point subsample can fit at ",
-                       "most %d; raise `sample_n`. %s."),
-                .fmt_len(range_eff), floor_raw, n_support, support_what, n, ceiling_L,
-                if (levels_given) given_text()
-                else sprintf("The profile runs from 2 to %d", ceiling_L))
+      # A classed warning, as for the data's own ceiling: the floor is above
+      # every level, so it is not applied, and select_resolution() cannot
+      # hold `reliability` to it.  It was a log line alone, which reaches
+      # neither tryCatch() nor options(warn = 2).
+      .warn_classed("spatialkit_floor_above_ceiling",
+                    paste0("resolution_profile(): cells no wider than the autocorrelation ",
+                           "range (%s) need at least %.0f of them, which the %d %s ",
+                           "support, but k-means on the %d-point subsample can fit at ",
+                           "most %d; raise `sample_n`. %s."),
+                    .fmt_len(range_eff), floor_raw, n_support, support_what, n, ceiling_L,
+                    if (levels_given) given_text()
+                    else sprintf("The profile runs from 2 to %d", ceiling_L),
+                    data = list(reason = "sample_n", floor = floor_raw, ceiling = ceiling_L,
+                                n = n_support, n_sample = n))
     # With range_floor = FALSE, the default, the ladder starts at 2 whatever the
     # range, and the floor is only reported.  The range is an estimate.  It is
     # re-estimated on every subset, and a floor that applies on one fold and
@@ -3002,6 +3019,12 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # of them complete: read by .no_complete_row().  Recorded in that case
   # only, so the record of every other profile is as it was.
   if (no_complete) bounds$n_response_only <- n_resp_only
+  # A range floor above the ceiling is above every level, so nothing applies
+  # it, whatever `range_floor` says: the bounds said TRUE of such a floor
+  # under range_floor = TRUE, and a reader of `floor` alone could take it
+  # for the ladder's start.  Recorded in that case only, as above.
+  if (is.finite(range_eff) && range_eff > 0 && floor_raw > ceiling_L)
+    bounds$floor_applied <- FALSE
   # The sizes, largest first, and the level each gives: NA for a size that
   # was dropped.
   if (size_ladder) {
@@ -4303,7 +4326,10 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   the range floor in \code{attr(profile, "bounds")}.  It applies when the
 #'   layer supports the floor, some scored level
 #'   reaches it, and the profile built its own ladder (a ladder set with
-#'   \code{levels} is read as given).  \code{FALSE} reads every level.
+#'   \code{levels} is read as given).  A floor above every level scored
+#'   (above the ceiling, say) is not held: every level is read,
+#'   \code{range_floor} in the result is \code{NA}, and \code{note} says
+#'   so in an element named \code{floor}.  \code{FALSE} reads every level.
 #' @param diagnostic \code{criterion = "moran_z"} is refused, with an error
 #'   of class \code{spatialkit_diagnostic_criterion} that says what the
 #'   column measures, unless this is \code{TRUE}: \code{moran_z} is a
@@ -4361,14 +4387,18 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'       \code{NA}.}
 #'     \item{\code{note}}{What the flags mean, in words: a character vector,
 #'       one note an element; \code{NULL} when there is nothing to say.  The
-#'       notes written under \code{"loo"} and \code{"size"}, and for a
-#'       profile built with \code{estimate} or with one size, carry names:
+#'       notes written under \code{"loo"} and \code{"size"}, for a
+#'       profile built with \code{estimate} or with one size, and about the
+#'       range floor, carry names:
 #'       \code{size} (the size that set the count), \code{held} (a size the
 #'       profile held to the most cells k-means can place),
 #'       \code{structure} (why the count is not identified), \code{finest}
 #'       (the lowest error of pooled values is at the finest level scored),
 #'       \code{estimate} (\code{cp} scores plain means, on a profile of
-#'       pooled values) and \code{ladder} (the ladder is one size).  A note
+#'       pooled values), \code{ladder} (the ladder is one size) and
+#'       \code{floor} (under \code{reliability} with \code{range_floor =
+#'       TRUE}: the range floor lies above every level scored, so it was not
+#'       held; \code{structured} is \code{NA} there).  A note
 #'       of \code{cp} or \code{moran_z} about the criterion itself has no
 #'       name.  The warning of class \code{spatialkit_no_structure} that the
 #'       functions taking the selection as a count raise carries every note
@@ -4725,6 +4755,30 @@ select_resolution <- function(profile,
     ok <- ok & lv >= bounds$floor
     held_floor <- as.integer(bounds$floor)
   }
+  # A floor above every level scored cannot be held, and reliability is then
+  # read at every level, where its optimum is a count whose cells are wider
+  # than the range.  The result said nothing of it: `range_floor` was NA, as
+  # it is when the floor is not asked for.  A floor past the integer range
+  # is NA in the bounds and is read from the area and the range.
+  floor_note <- NULL
+  if (criterion == "reliability" && range_floor && is.na(held_floor) && is.list(bounds) &&
+      isFALSE(bounds$levels_given) && is.finite(bounds$range %||% NA_real_) &&
+      bounds$range > 0) {
+    fl <- if (is.finite(bounds$floor %||% NA_integer_)) as.numeric(bounds$floor)
+          else if (is.finite(bounds$area %||% NA_real_))
+            max(2, ceiling(bounds$area / bounds$range^2))
+          else NA_real_
+    if (is.finite(fl) && !any(ok & lv >= fl))
+      floor_note <- sprintf(
+        paste0("the range floor (%.0f cells, area / range^2) lies above every level %s, ",
+               "so it was not held: reliability was read at every level, and its ",
+               "optimum is a count whose cells are wider than the range."),
+        fl,
+        if (fl > max(lv))
+          sprintf("of the ladder (%d to %d cells)", as.integer(min(lv)), as.integer(max(lv)))
+        else sprintf("at which reliability is finite (the finest is %d cells)",
+                     as.integer(max(lv[ok]))))
+  }
   opt <- if (maximise) max(v[ok]) else min(v[ok])
   best <- lv[ok][if (maximise) which.max(v[ok]) else which.min(v[ok])]
   # Of levels with the same leave-one-out error, the one with the fewest
@@ -4916,6 +4970,7 @@ select_resolution <- function(profile,
              "from. Build the profile with obs_per_cell = NULL, or with several sizes, ",
              "for a ladder %s can choose on."),
       .got_text(ladder_sizes), criterion, criterion))
+  if (!is.null(floor_note)) note <- c(note, floor = floor_note)
   sel <- structure(list(best = as.integer(best), flat = sort(as.integer(flat)),
                  criterion = criterion, value = opt,
                  at_ceiling = at_ceiling, at_floor = at_floor, edge = edge,

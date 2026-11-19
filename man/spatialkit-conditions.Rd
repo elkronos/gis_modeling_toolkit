@@ -142,6 +142,12 @@ and some steps add \code{site}, \code{crs} or \code{auto_helps}.
 the interval (at 0.90, fewer than 100 residuals), so its ends are
 unstable. Ask for a lower \code{obs_level}, which needs fewer residuals.
 Fields: \code{columns}, \code{needed}, \code{level} and \code{n}.
+\item \code{spatialkit_floor_above_ceiling}. Raised by \code{\link[=resolution_profile]{resolution_profile()}}. The
+range floor lies above the ceiling that \code{sample_n} sets, though the
+layer supports it, so the floor is above every level and is not
+applied, and \code{\link[=select_resolution]{select_resolution()}} cannot hold \code{reliability} to it.
+\code{supported} stays \code{TRUE}. Raise \code{sample_n}. Fields: \code{reason}, \code{floor},
+\code{ceiling}, \code{n} and \code{n_sample}.
 \item \code{spatialkit_fold_args_ignored}. Raised by \code{\link[=cv_spatial]{cv_spatial()}}, \code{\link[=cv_rf]{cv_rf()}},
 \code{\link[=cv_gwr]{cv_gwr()}}, \code{\link[=cv_bayes]{cv_bayes()}} and \code{\link[=compare_models_cv]{compare_models_cv()}}. \code{block_size} or
 \code{auto_range = TRUE} was given beside \code{folds}, which leaves them nothing
