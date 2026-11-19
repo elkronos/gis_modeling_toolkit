@@ -202,6 +202,15 @@ condition that carries only its message.
   are unstable. Ask for a lower `obs_level`, which needs fewer
   residuals. Fields: `columns`, `needed`, `level` and `n`.
 
+- `spatialkit_floor_above_ceiling`. Raised by
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md).
+  The range floor lies above the ceiling that `sample_n` sets, though
+  the layer supports it, so the floor is above every level and is not
+  applied, and
+  [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+  cannot hold `reliability` to it. `supported` stays `TRUE`. Raise
+  `sample_n`. Fields: `reason`, `floor`, `ceiling`, `n` and `n_sample`.
+
 - `spatialkit_fold_args_ignored`. Raised by
   [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md),
   [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md),

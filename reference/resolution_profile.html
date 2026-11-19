@@ -507,7 +507,8 @@ level when no row of the selection half has a response
 <code>supported</code>,
 <code>area</code>, <code>range</code>, <code>n</code> (the points in the layer),
 <code>n_sample</code> (the points the k-means fits ran on),
-<code>n_distinct</code>, <code>min_cell_n</code>, <code>range_floor</code>,
+<code>n_distinct</code>, <code>min_cell_n</code>, <code>range_floor</code> (the
+argument),
 <code>n_response</code> (the rows of the layer that carry a response and,
 with <code>predictor_vars</code>, every predictor, which the support
 ceiling counts; <code>NA</code> without a <code>response_var</code>),
@@ -516,7 +517,9 @@ read; <code>NA</code> without a <code>response_var</code>), <code>levels_given</
 (whether <code>levels</code> set the ladder), <code>predictors</code> (whether
 <code>predictor_vars</code> were given) and, where rows have a response
 and none of them every predictor, <code>n_response_only</code> (the rows
-with a finite response).
+with a finite response), and, where the range floor lies above the
+ceiling, <code>floor_applied</code> (<code>FALSE</code>: the floor is above
+every level and is not applied, whatever <code>range_floor</code> is).
 On a ladder that <code>obs_per_cell</code> sets, <code>bounds</code> describes
 that ladder: <code>ceiling</code> is the finest level; <code>ceiling_from</code>
 is <code>"obs_per_cell"</code>, <code>"distinct locations"</code>,
@@ -911,7 +914,8 @@ it with, so that ladder starts at 2 as well.  On a layer larger than
 <code>sample_n</code> the ceiling is also held to half the subsample's scored
 rows (two per cell, the least a fitted cell can be scored on; half the
 subsample without a response); <code>ceiling_from</code> is then
-<code>"sample_n"</code>, a floor above that is logged with a request to raise
+<code>"sample_n"</code>, a floor above that raises a warning of class
+<code>spatialkit_floor_above_ceiling</code> with a request to raise
 <code>sample_n</code>, and it does not make <code>supported</code> <code>FALSE</code>.</p>
 <p>The floor moves with the range estimate, and the ceiling with \(n\).
 To compare profiles of similar data (the folds of a cross-validation,
@@ -1209,6 +1213,14 @@ package raises.</p><dl><dt><code>spatialkit_not_supported</code></dt>
 <dd><p><code>supported</code> is <code>FALSE</code>,
 because the range floor exceeds the
 ceiling or because fewer than two cells meet <code>min_cell_n</code>.</p></dd>
+
+<dt><code>spatialkit_floor_above_ceiling</code></dt>
+<dd><p>The range floor lies
+above the ceiling that <code>sample_n</code> sets on a layer that supports
+it, so the floor is above every level and is not applied;
+<code>supported</code> stays <code>TRUE</code>.  The condition carries
+<code>reason</code> (<code>"sample_n"</code>), <code>floor</code>, <code>ceiling</code>,
+<code>n</code> and <code>n_sample</code>.  Raise <code>sample_n</code>.</p></dd>
 
 <dt><code>spatialkit_response_ceiling</code></dt>
 <dd><p>Rows that are not scored (no

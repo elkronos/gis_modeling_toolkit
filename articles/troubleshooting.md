@@ -162,11 +162,11 @@ shows them on a real layer.
   folds <- make_folds(pts, k = 5, method = "block_kfold", seed = 1)
   cv <- cv_spatial(pts, "z", "w", folds = folds,
                    fit_fn = function(train) stop("the backend is not installed"))
-  #> WARN [2026-11-12 12:26:23] cross-validation: fold 1 fit failed; skipping. Cause: the backend is not installed
-  #> WARN [2026-11-12 12:26:23] cross-validation: fold 2 fit failed; skipping. Cause: the backend is not installed
-  #> WARN [2026-11-12 12:26:23] cross-validation: fold 3 fit failed; skipping. Cause: the backend is not installed
-  #> WARN [2026-11-12 12:26:23] cross-validation: fold 4 fit failed; skipping. Cause: the backend is not installed
-  #> WARN [2026-11-12 12:26:23] cross-validation: fold 5 fit failed; skipping. Cause: the backend is not installed
+  #> WARN [2026-11-19 06:24:25] cross-validation: fold 1 fit failed; skipping. Cause: the backend is not installed
+  #> WARN [2026-11-19 06:24:25] cross-validation: fold 2 fit failed; skipping. Cause: the backend is not installed
+  #> WARN [2026-11-19 06:24:25] cross-validation: fold 3 fit failed; skipping. Cause: the backend is not installed
+  #> WARN [2026-11-19 06:24:25] cross-validation: fold 4 fit failed; skipping. Cause: the backend is not installed
+  #> WARN [2026-11-19 06:24:25] cross-validation: fold 5 fit failed; skipping. Cause: the backend is not installed
   #> Warning: cv_spatial(): all folds failed (all 5 folds failed to produce
   #> predictions); cross-validation results contain no predictions. First error: the
   #> backend is not installed
@@ -367,7 +367,7 @@ above ended on:
 log_file <- file.path(tempdir(), "spatialkit_model_log.log")
 # The line is wrapped to fit the page.
 writeLines(strwrap(tail(readLines(log_file), 1), 76))
-#> WARN [2026-11-12 12:26:23] cv_spatial(): all folds failed (all 5 folds
+#> WARN [2026-11-19 06:24:25] cv_spatial(): all folds failed (all 5 folds
 #> failed to produce predictions); cross-validation results contain no
 #> predictions. First error: the backend is not installed
 ```

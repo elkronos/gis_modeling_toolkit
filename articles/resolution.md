@@ -367,6 +367,14 @@ ceiling so the cost of each level stays visible. The usual causes are
 too few points for the extent, or an autocorrelation range shorter than
 the spacing between observations.
 
+When the layer supports the floor but the ceiling that `sample_n` sets
+lies below it, the fault is the subsample, not the data. `supported`
+stays `TRUE`, and a warning of class `spatialkit_floor_above_ceiling`
+asks for a larger `sample_n`. In either case the bounds carry
+`floor_applied = FALSE`. On a ladder the profile built itself,
+`select_resolution(criterion = "reliability")` then says in its `note`
+that the floor was not held.
+
 ### Four criteria and a diagnostic
 
 | criterion | measures | needs | direction |

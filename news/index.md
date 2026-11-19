@@ -943,6 +943,28 @@ running analysis.
 - **[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
   returned 1 for a layer with no rows.** It is now an error.
 
+- **[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+  only logged a range floor above the ceiling that `sample_n` sets.**
+  The floor is then above every level and is not applied, and
+  [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+  cannot hold `reliability` to it. It is now an R warning of class
+  `spatialkit_floor_above_ceiling`, which asks for a larger `sample_n`.
+  `supported` stays `TRUE`, since the layer supports the floor.
+
+- **`attr(resolution_profile(), "bounds")` did not say that a range
+  floor above the ceiling was not applied.** Under `range_floor = TRUE`
+  it recorded `range_floor` as `TRUE` beside a floor above every level,
+  which nothing applied. The bounds of such a profile now carry
+  `floor_applied = FALSE`. The field is added in that case only, so the
+  bounds of every other profile are as they were.
+
+- **`select_resolution(criterion = "reliability")` said nothing when the
+  range floor lay above every level.** `range_floor = TRUE` could not
+  hold the floor, so every level was read and the optimum was a count
+  whose cells are wider than the range, while `range_floor` in the
+  result was `NA` as when no floor is asked for. `note` now says so, in
+  an element named `floor`.
+
 #### Build the cells
 
 - **[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)

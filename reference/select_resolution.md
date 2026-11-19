@@ -59,8 +59,10 @@ select_resolution(
   criterion at the levels at or above the range floor in
   `attr(profile, "bounds")`. It applies when the layer supports the
   floor, some scored level reaches it, and the profile built its own
-  ladder (a ladder set with `levels` is read as given). `FALSE` reads
-  every level.
+  ladder (a ladder set with `levels` is read as given). A floor above
+  every level scored (above the ceiling, say) is not held: every level
+  is read, `range_floor` in the result is `NA`, and `note` says so in an
+  element named `floor`. `FALSE` reads every level.
 
 - diagnostic:
 
@@ -157,17 +159,19 @@ A list of class `resolution_selection` with these elements:
 
   What the flags mean, in words: a character vector, one note an
   element; `NULL` when there is nothing to say. The notes written under
-  `"loo"` and `"size"`, and for a profile built with `estimate` or with
-  one size, carry names: `size` (the size that set the count), `held` (a
-  size the profile held to the most cells k-means can place),
-  `structure` (why the count is not identified), `finest` (the lowest
-  error of pooled values is at the finest level scored), `estimate`
-  (`cp` scores plain means, on a profile of pooled values) and `ladder`
-  (the ladder is one size). A note of `cp` or `moran_z` about the
-  criterion itself has no name. The warning of class
-  `spatialkit_no_structure` that the functions taking the selection as a
-  count raise carries every note but those named `size`, `held`,
-  `finest`, `estimate` and `ladder`.
+  `"loo"` and `"size"`, for a profile built with `estimate` or with one
+  size, and about the range floor, carry names: `size` (the size that
+  set the count), `held` (a size the profile held to the most cells
+  k-means can place), `structure` (why the count is not identified),
+  `finest` (the lowest error of pooled values is at the finest level
+  scored), `estimate` (`cp` scores plain means, on a profile of pooled
+  values), `ladder` (the ladder is one size) and `floor` (under
+  `reliability` with `range_floor = TRUE`: the range floor lies above
+  every level scored, so it was not held; `structured` is `NA` there). A
+  note of `cp` or `moran_z` about the criterion itself has no name. The
+  warning of class `spatialkit_no_structure` that the functions taking
+  the selection as a count raise carries every note but those named
+  `size`, `held`, `finest`, `estimate` and `ladder`.
 
 - `seeds`:
 

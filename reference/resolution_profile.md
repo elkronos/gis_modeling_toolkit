@@ -448,16 +448,19 @@ Attributes:
   `"fewer than two distinct locations"`, whichever bound it),
   `supported`, `area`, `range`, `n` (the points in the layer),
   `n_sample` (the points the k-means fits ran on), `n_distinct`,
-  `min_cell_n`, `range_floor`, `n_response` (the rows of the layer that
-  carry a response and, with `predictor_vars`, every predictor, which
-  the support ceiling counts; `NA` without a `response_var`), `n_scored`
-  (the rows of the subsample the response criteria read; `NA` without a
-  `response_var`), `levels_given` (whether `levels` set the ladder),
-  `predictors` (whether `predictor_vars` were given) and, where rows
-  have a response and none of them every predictor, `n_response_only`
-  (the rows with a finite response). On a ladder that `obs_per_cell`
-  sets, `bounds` describes that ladder: `ceiling` is the finest level;
-  `ceiling_from` is `"obs_per_cell"`, `"distinct locations"`,
+  `min_cell_n`, `range_floor` (the argument), `n_response` (the rows of
+  the layer that carry a response and, with `predictor_vars`, every
+  predictor, which the support ceiling counts; `NA` without a
+  `response_var`), `n_scored` (the rows of the subsample the response
+  criteria read; `NA` without a `response_var`), `levels_given` (whether
+  `levels` set the ladder), `predictors` (whether `predictor_vars` were
+  given) and, where rows have a response and none of them every
+  predictor, `n_response_only` (the rows with a finite response), and,
+  where the range floor lies above the ceiling, `floor_applied`
+  (`FALSE`: the floor is above every level and is not applied, whatever
+  `range_floor` is). On a ladder that `obs_per_cell` sets, `bounds`
+  describes that ladder: `ceiling` is the finest level; `ceiling_from`
+  is `"obs_per_cell"`, `"distinct locations"`,
   `"fewer than two cells of the size"` or
   `"fewer than two distinct locations"`; `supported` is `FALSE` when the
   finest size gives fewer than two cells or the range floor is above the
@@ -852,8 +855,9 @@ nothing to compare it with, so that ladder starts at 2 as well. On a
 layer larger than `sample_n` the ceiling is also held to half the
 subsample's scored rows (two per cell, the least a fitted cell can be
 scored on; half the subsample without a response); `ceiling_from` is
-then `"sample_n"`, a floor above that is logged with a request to raise
-`sample_n`, and it does not make `supported` `FALSE`.
+then `"sample_n"`, a floor above that raises a warning of class
+`spatialkit_floor_above_ceiling` with a request to raise `sample_n`, and
+it does not make `supported` `FALSE`.
 
 The floor moves with the range estimate, and the ceiling with \\n\\. To
 compare profiles of similar data (the folds of a cross-validation, say),
@@ -1162,6 +1166,14 @@ lists every class the package raises.
 
   `supported` is `FALSE`, because the range floor exceeds the ceiling or
   because fewer than two cells meet `min_cell_n`.
+
+- `spatialkit_floor_above_ceiling`:
+
+  The range floor lies above the ceiling that `sample_n` sets on a layer
+  that supports it, so the floor is above every level and is not
+  applied; `supported` stays `TRUE`. The condition carries `reason`
+  (`"sample_n"`), `floor`, `ceiling`, `n` and `n_sample`. Raise
+  `sample_n`.
 
 - `spatialkit_response_ceiling`:
 

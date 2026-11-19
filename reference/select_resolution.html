@@ -142,7 +142,10 @@ the ladder.  Under <code>"size"</code> there is no flat region, and
 the range floor in <code>attr(profile, "bounds")</code>.  It applies when the
 layer supports the floor, some scored level
 reaches it, and the profile built its own ladder (a ladder set with
-<code>levels</code> is read as given).  <code>FALSE</code> reads every level.</p></dd>
+<code>levels</code> is read as given).  A floor above every level scored
+(above the ceiling, say) is not held: every level is read,
+<code>range_floor</code> in the result is <code>NA</code>, and <code>note</code> says
+so in an element named <code>floor</code>.  <code>FALSE</code> reads every level.</p></dd>
 
 
 <dt id="arg-diagnostic">diagnostic<a class="anchor" aria-label="anchor" href="#arg-diagnostic"></a></dt>
@@ -233,14 +236,18 @@ leave-one-out error.</p></dd>
 <dt><code>note</code></dt>
 <dd><p>What the flags mean, in words: a character vector,
 one note an element; <code>NULL</code> when there is nothing to say.  The
-notes written under <code>"loo"</code> and <code>"size"</code>, and for a
-profile built with <code>estimate</code> or with one size, carry names:
+notes written under <code>"loo"</code> and <code>"size"</code>, for a
+profile built with <code>estimate</code> or with one size, and about the
+range floor, carry names:
 <code>size</code> (the size that set the count), <code>held</code> (a size the
 profile held to the most cells k-means can place),
 <code>structure</code> (why the count is not identified), <code>finest</code>
 (the lowest error of pooled values is at the finest level scored),
 <code>estimate</code> (<code>cp</code> scores plain means, on a profile of
-pooled values) and <code>ladder</code> (the ladder is one size).  A note
+pooled values), <code>ladder</code> (the ladder is one size) and
+<code>floor</code> (under <code>reliability</code> with <code>range_floor =
+      TRUE</code>: the range floor lies above every level scored, so it was not
+held; <code>structured</code> is <code>NA</code> there).  A note
 of <code>cp</code> or <code>moran_z</code> about the criterion itself has no
 name.  The warning of class <code>spatialkit_no_structure</code> that the
 functions taking the selection as a count raise carries every note

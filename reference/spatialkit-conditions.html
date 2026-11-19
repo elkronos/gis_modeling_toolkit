@@ -194,6 +194,12 @@ and some steps add <code>site</code>, <code>crs</code> or <code>auto_helps</code
 the interval (at 0.90, fewer than 100 residuals), so its ends are
 unstable. Ask for a lower <code>obs_level</code>, which needs fewer residuals.
 Fields: <code>columns</code>, <code>needed</code>, <code>level</code> and <code>n</code>.</p></li>
+<li><p><code>spatialkit_floor_above_ceiling</code>. Raised by <code><a href="resolution_profile.html">resolution_profile()</a></code>. The
+range floor lies above the ceiling that <code>sample_n</code> sets, though the
+layer supports it, so the floor is above every level and is not
+applied, and <code><a href="select_resolution.html">select_resolution()</a></code> cannot hold <code>reliability</code> to it.
+<code>supported</code> stays <code>TRUE</code>. Raise <code>sample_n</code>. Fields: <code>reason</code>, <code>floor</code>,
+<code>ceiling</code>, <code>n</code> and <code>n_sample</code>.</p></li>
 <li><p><code>spatialkit_fold_args_ignored</code>. Raised by <code><a href="cv_spatial.html">cv_spatial()</a></code>, <code><a href="cv_rf.html">cv_rf()</a></code>,
 <code><a href="cv_gwr.html">cv_gwr()</a></code>, <code><a href="cv_bayes.html">cv_bayes()</a></code> and <code><a href="compare_models_cv.html">compare_models_cv()</a></code>. <code>block_size</code> or
 <code>auto_range = TRUE</code> was given beside <code>folds</code>, which leaves them nothing

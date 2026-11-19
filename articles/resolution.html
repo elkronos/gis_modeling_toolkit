@@ -390,6 +390,14 @@ tessellation that respects their own correlation structure.
 ladder still runs from 2 to the ceiling so the cost of each level stays
 visible. The usual causes are too few points for the extent, or an
 autocorrelation range shorter than the spacing between observations.</p>
+<p>When the layer supports the floor but the ceiling that
+<code>sample_n</code> sets lies below it, the fault is the subsample,
+not the data. <code>supported</code> stays <code>TRUE</code>, and a
+warning of class <code>spatialkit_floor_above_ceiling</code> asks for a
+larger <code>sample_n</code>. In either case the bounds carry
+<code>floor_applied = FALSE</code>. On a ladder the profile built
+itself, <code>select_resolution(criterion = "reliability")</code> then
+says in its <code>note</code> that the floor was not held.</p>
 </div>
 <div class="section level3">
 <h3 id="four-criteria-and-a-diagnostic">Four criteria and a diagnostic<a class="anchor" aria-label="anchor" href="#four-criteria-and-a-diagnostic"></a>
