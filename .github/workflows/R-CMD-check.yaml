@@ -13,7 +13,7 @@ jobs:
   R-CMD-check:
     runs-on: ${{ matrix.config.os }}
     name: ${{ matrix.config.os }} (${{ matrix.config.r }})
-    timeout-minutes: 120
+    timeout-minutes: 150
 
     strategy:
       fail-fast: false
@@ -28,6 +28,9 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      # Every job runs the whole test suite except ubuntu release, which runs
+      # the CRAN subset (tests/cran-tests.txt) so its log shows CRAN's check time.
+      NOT_CRAN: ${{ !(matrix.config.os == 'ubuntu-latest' && matrix.config.r == 'release') }}
       # Every Suggests use in this package is requireNamespace()-guarded,
       # so an optional backend that will not install on one platform should
       # skip its tests, not fail the run.
@@ -107,6 +110,8 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      # The whole test suite, with the optional backends installed.
+      NOT_CRAN: true
       # Every Suggests use in this package is requireNamespace()-guarded,
       # so an optional backend that will not install on one platform should
       # skip its tests, not fail the run.
