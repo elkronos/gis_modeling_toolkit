@@ -11,19 +11,23 @@ lists the defaults that change results under "Breaking changes".
 ## Test environments
 
 * macOS (aarch64-apple-darwin23), R 4.6.1, `R CMD check --as-cran --run-donttest
-  --timings`: 0 errors, 0 warnings, 1 note. The check takes 5.0 minutes, of
-  which the tests take 2.8.
-* win-builder, R-devel and R-release: <!-- result after the run -->
-* macOS builder: <!-- result after the run -->
+  --timings`: 0 errors, 0 warnings, 1 note. The check takes 2.3 minutes, of
+  which the tests take 17 seconds.
+* win-builder, R-devel (2026-11-17 r90926) and R 4.6.2: 0 errors, 0 warnings, 1
+  note on each. The check takes 9.6 minutes on each, of which the tests take
+  about 100 seconds.
+* macOS builder: unavailable on 21 November 2026 (HTTP 502 on upload, twice).
+  macOS is covered by the local check above and the GitHub Actions macOS job.
 * GitHub Actions `R-CMD-check.yaml`, five jobs: macOS-latest R release;
   windows-latest R release; ubuntu-latest R devel; ubuntu-latest R release;
-  ubuntu-latest R oldrel-1: <!-- result after the run -->
+  ubuntu-latest R oldrel-1: all pass.
 * GitHub Actions `backends` job (ubuntu-latest, R release) with `ggplot2`, `sp`,
   `GWmodel`, `gstat`, `FNN`, `Matrix`, `geometry`, `ranger`, `tibble` and
   `spdep` installed, so those code paths execute rather than skip. It leaves
-  out `brms`, `cmdstanr`, `loo` and `patchwork`: <!-- result after the run -->
-* GitHub Actions `check-brms.yaml`, dispatched by hand on the submitted commit:
-  <!-- result after the run -->
+  out `brms`, `cmdstanr`, `loo` and `patchwork`: passes.
+* GitHub Actions `check-brms.yaml`, dispatched by hand on commit 2ea4ec0, whose
+  package files are those submitted: passes, with 79,963 expectations, none
+  failing.
 
 The last job runs on a schedule and on `workflow_dispatch` only, so "Run
 workflow" is the step that tests the submitted commit. The Stan tests in 11 test
@@ -33,9 +37,12 @@ confirms the Bayesian backend fits a posterior end to end.
 
 ## R CMD check results
 
-0 errors | 0 warnings | 1 note on macOS. The note is that this machine lacks a
-recent HTML Tidy and `V8` for "checking HTML version of manual"; win-builder
-checks both manuals.
+0 errors | 0 warnings | 1 note on each platform.
+
+On win-builder the note is the spell check of DESCRIPTION, which flags
+Linnenbrink and lon (see below). On macOS it is that this machine lacks a recent
+HTML Tidy and `V8` for "checking HTML version of manual"; win-builder checks both
+manuals.
 
 **Two check messages recur and are not the package.**
 
@@ -53,6 +60,18 @@ checks both manuals.
   NOTE. Where the repository is reachable the incoming check also reports
   `cmdstanr   yes`. See the standing note below.
 
+## Check results of the current release
+
+2.0.0 shows an ERROR on r-devel-linux-x86_64-fedora-gcc and fedora-clang and is
+OK on the other 11 flavors. In the fedora-gcc log the tests stop after about 51
+minutes (91 of CPU) with no failure reported, near the tests of
+`estimate_sac_range()`, which calls `gstat`. `gstat` 2.1-6 also shows an ERROR
+on both flavors. In its fedora-gcc log, `stars.R` runs for 49 minutes (90 of
+CPU) and `windst.R` for 41. I could not reproduce this on macOS, Windows or
+Ubuntu, or in a Fedora 44 x86_64 container with GCC 16 and R-devel (2026-11-21
+r90959, with R's internal LAPACK), where the tests of 2.0.0, the tests of 3.0.0
+and `stars.R` and `windst.R` all finish.
+
 ## Reverse dependencies
 
 spatialkit has no reverse dependencies on CRAN
@@ -61,9 +80,9 @@ November 2026).
 
 ## Standing notes
 
-* Test time. Under CRAN settings the tests run the 183 of 306 test files listed
-  in `tests/cran-tests.txt`. Every CI job but ubuntu release sets `NOT_CRAN=true`
-  and runs all 306.
+* Test time. Under CRAN settings the tests run the 56 of 306 test files listed
+  in `tests/cran-tests.txt`, which together call every exported function. Every
+  CI job but ubuntu release sets `NOT_CRAN=true` and runs all 306.
 
 * `cmdstanr` (Suggests) is not on CRAN; it is available from the repository
   declared in `Additional_repositories` (https://stan-dev.r-universe.dev). It is
