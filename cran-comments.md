@@ -11,10 +11,11 @@ lists the defaults that change results under "Breaking changes".
 ## Test environments
 
 * macOS (aarch64-apple-darwin23), R 4.6.1, `R CMD check --as-cran --run-donttest
-  --timings`: 0 errors, 0 warnings, 1 note. The check takes 5.0 minutes, of
-  which the tests take 2.8.
+  --timings`: 0 errors, 0 warnings, 1 note. The check takes 2.3 minutes, of
+  which the tests take 17 seconds.
 * win-builder, R-devel and R-release: <!-- result after the run -->
-* macOS builder: <!-- result after the run -->
+* macOS builder: unavailable on 21 November 2026 (HTTP 502 on upload, twice).
+  macOS is covered by the local check above and the GitHub Actions macOS job.
 * GitHub Actions `R-CMD-check.yaml`, five jobs: macOS-latest R release;
   windows-latest R release; ubuntu-latest R devel; ubuntu-latest R release;
   ubuntu-latest R oldrel-1: <!-- result after the run -->
@@ -53,6 +54,15 @@ checks both manuals.
   NOTE. Where the repository is reachable the incoming check also reports
   `cmdstanr   yes`. See the standing note below.
 
+## Check results of the current release
+
+2.0.0 shows an ERROR on r-devel-linux-x86_64-fedora-gcc and fedora-clang and is
+OK on the other 11 flavors. In the fedora-gcc log the tests stop after about 51
+minutes (91 of CPU) with no failure reported, near the tests of
+`estimate_sac_range()`, which calls `gstat`. `gstat` 2.1-6 also shows an ERROR
+on both flavors, with one of its own tests stopping after 49 minutes (90 of
+CPU). I could not reproduce this on macOS, Windows or Ubuntu.
+
 ## Reverse dependencies
 
 spatialkit has no reverse dependencies on CRAN
@@ -61,9 +71,9 @@ November 2026).
 
 ## Standing notes
 
-* Test time. Under CRAN settings the tests run the 183 of 306 test files listed
-  in `tests/cran-tests.txt`. Every CI job but ubuntu release sets `NOT_CRAN=true`
-  and runs all 306.
+* Test time. Under CRAN settings the tests run the 56 of 306 test files listed
+  in `tests/cran-tests.txt`, which together call every exported function. Every
+  CI job but ubuntu release sets `NOT_CRAN=true` and runs all 306.
 
 * `cmdstanr` (Suggests) is not on CRAN; it is available from the repository
   declared in `Additional_repositories` (https://stan-dev.r-universe.dev). It is
