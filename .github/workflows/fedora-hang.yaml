@@ -1,0 +1,116 @@
+# Temporary. Looks for the hang that CRAN's Fedora machines show in the tests
+# of spatialkit 2.0.0 and gstat 2.1-6. This branch is never merged.
+name: fedora-hang
+
+on:
+  push:
+    branches: [debug/fedora-hang]
+
+permissions:
+  contents: read
+
+jobs:
+  fedora:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    container:
+      image: fedora:44
+      options: --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
+    env:
+      LANG: en_GB.UTF-8
+      LC_COLLATE: C
+      TZ: Europe/London
+      _R_CHECK_LIMIT_CORES_: "true"
+      FEDORA_LOGS: /tmp/fedora-logs
+      R_LIBS_200: /opt/lib200
+      R_LIBS_300: /opt/lib300
+
+    steps:
+      - name: System packages
+        run: >
+          dnf -y --setopt=install_weak_deps=False install
+          gcc gcc-c++ gcc-gfortran make which perl tar gzip diffutils findutils
+          procps-ng gdb git-core cmake curl glibc-langpack-en
+          lapack-devel blas-devel gdal-devel geos-devel proj-devel sqlite-devel
+          udunits2-devel libcurl-devel openssl-devel libxml2-devel
+          fontconfig-devel freetype-devel harfbuzz-devel fribidi-devel
+          libpng-devel libjpeg-turbo-devel libtiff-devel zlib-ng-compat-devel
+          bzip2-devel xz-devel pcre2-devel readline-devel libicu-devel
+          netcdf-devel gmp-devel
+
+      - uses: actions/checkout@v5
+
+      - name: Build R-devel
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /opt/build && cd /opt/build
+          curl -fsSL https://cran.r-project.org/src/base-prerelease/R-devel.tar.gz | tar xz
+          cd R-devel
+          ./configure --prefix=/opt/R --with-lapack --without-x --without-tcltk \
+            --disable-java --without-recommended-packages \
+            CFLAGS="-g -O2 -Wp,-D_FORTIFY_SOURCE=3 -fexceptions -fstack-protector-strong" \
+            CXXFLAGS="-g -O2 -Wp,-D_FORTIFY_SOURCE=3 -fexceptions -fstack-protector-strong" \
+            FFLAGS="-g -O2" > /tmp/r-configure.log 2>&1 || { tail -40 /tmp/r-configure.log; exit 1; }
+          make -j4 > /tmp/r-make.log 2>&1 || { tail -40 /tmp/r-make.log; exit 1; }
+          make install > /tmp/r-install.log 2>&1 || { tail -40 /tmp/r-install.log; exit 1; }
+          echo /opt/R/bin >> "$GITHUB_PATH"
+
+      - name: Install R packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          Rscript --vanilla -e '
+            options(repos = "https://cran.r-project.org", Ncpus = 4L)
+            need <- c("sf", "dplyr", "logger", "digest", "FNN", "sp", "GWmodel", "ranger",
+                      "tibble", "geometry", "gstat", "ggplot2", "patchwork", "Matrix", "nlme",
+                      "spdep", "testthat", "knitr", "rmarkdown", "units", "vctrs", "withr",
+                      "stars", "spacetime", "sftime", "xts", "zoo", "maps", "mapdata")
+            install.packages(need, quiet = TRUE)
+            miss <- need[!vapply(need, requireNamespace, TRUE, quietly = TRUE)]
+            cat("not installed:", if (length(miss)) miss else "none", "\n")
+            core <- c("sf", "dplyr", "logger", "digest", "FNN", "gstat", "stars", "testthat")
+            if (any(core %in% miss)) stop("a core package did not install")
+          '
+
+      - name: Install the two spatialkit versions and gstat's tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /opt/src "$R_LIBS_200" "$R_LIBS_300"
+          cd /opt/src
+          curl -fsSLO https://cran.r-project.org/src/contrib/spatialkit_2.0.0.tar.gz
+          curl -fsSLO https://cran.r-project.org/src/contrib/gstat_2.1-6.tar.gz
+          mkdir sk200 && tar xzf spatialkit_2.0.0.tar.gz -C sk200
+          tar xzf gstat_2.1-6.tar.gz
+          R CMD INSTALL --no-docs --library="$R_LIBS_200" spatialkit_2.0.0.tar.gz
+          R CMD INSTALL --no-docs --library="$R_LIBS_300" "$GITHUB_WORKSPACE"
+          Rscript --vanilla -e '
+            print(R.version.string); print(sessionInfo()$running)
+            print(extSoftVersion()); print(La_library()); print(La_version())
+            print(sf::sf_extSoftVersion()); print(packageVersion("gstat"))'
+
+      - name: Probes
+        shell: bash
+        run: |
+          P="$GITHUB_WORKSPACE/.github/fedora-hang/probe.sh"
+          T2=/opt/src/sk200/spatialkit/tests/testthat
+          T3="$GITHUB_WORKSPACE/tests/testthat"
+          ONE='testthat::test_file("test-audit-pass5.R", package = "spatialkit", load_package = "installed", reporter = "location", stop_on_failure = FALSE)'
+          ALL='suppressMessages(library(spatialkit)); testthat::test_dir(".", package = "spatialkit", load_package = "installed", reporter = "location", stop_on_failure = FALSE)'
+          "$P" gstat-stars    600 /opt/src/gstat/tests Rscript --vanilla stars.R
+          "$P" gstat-windst   600 /opt/src/gstat/tests Rscript --vanilla windst.R
+          "$P" sk200-pass5    600 "$T2" env R_LIBS="$R_LIBS_200" Rscript --vanilla -e "$ONE"
+          "$P" sk200-all     1500 "$T2" env R_LIBS="$R_LIBS_200" Rscript --vanilla -e "$ALL"
+          "$P" sk300-pass5    600 "$T3" env R_LIBS="$R_LIBS_300" Rscript --vanilla -e "$ONE"
+          "$P" sk300-cran    1200 "$GITHUB_WORKSPACE/tests" env R_LIBS="$R_LIBS_300" Rscript --vanilla testthat.R
+          echo; echo "=== summary"; cat "$FEDORA_LOGS/summary.tsv"
+          { echo '```'; cat "$FEDORA_LOGS/summary.tsv"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fedora-logs
+          path: /tmp/fedora-logs
+          if-no-files-found: warn
