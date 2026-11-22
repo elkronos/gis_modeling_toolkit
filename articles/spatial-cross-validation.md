@@ -374,7 +374,7 @@ c(range  = as.numeric(sac),
 ```
 
     ##       range      nugget        sill 
-    ## 190.8824784   0.1404058   0.9942011
+    ## 190.8824820   0.1404058   0.9942012
 
 The estimated range, 190.9 m, is close to the 180 m the field was
 simulated with.

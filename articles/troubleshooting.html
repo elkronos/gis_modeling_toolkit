@@ -25,7 +25,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">spatialkit</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">3.0.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -238,11 +238,11 @@ that fold the same way. Here the learner stops on every fold:
 <code class="sourceCode R"><span><span class="va">folds</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
 <span><span class="va">cv</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="st">"w"</span>, folds <span class="op">=</span> <span class="va">folds</span>,</span>
 <span>                 fit_fn <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">train</span><span class="op">)</span> <span class="kw"><a href="https://rdrr.io/r/base/stop.html" class="external-link">stop</a></span><span class="op">(</span><span class="st">"the backend is not installed"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt; WARN [2026-11-19 06:24:25] cross-validation: fold 1 fit failed; skipping. Cause: the backend is not installed</span></span>
-<span><span class="co">#&gt; WARN [2026-11-19 06:24:25] cross-validation: fold 2 fit failed; skipping. Cause: the backend is not installed</span></span>
-<span><span class="co">#&gt; WARN [2026-11-19 06:24:25] cross-validation: fold 3 fit failed; skipping. Cause: the backend is not installed</span></span>
-<span><span class="co">#&gt; WARN [2026-11-19 06:24:25] cross-validation: fold 4 fit failed; skipping. Cause: the backend is not installed</span></span>
-<span><span class="co">#&gt; WARN [2026-11-19 06:24:25] cross-validation: fold 5 fit failed; skipping. Cause: the backend is not installed</span></span>
+<span><span class="co">#&gt; WARN [2026-11-22 00:04:43] cross-validation: fold 1 fit failed; skipping. Cause: the backend is not installed</span></span>
+<span><span class="co">#&gt; WARN [2026-11-22 00:04:43] cross-validation: fold 2 fit failed; skipping. Cause: the backend is not installed</span></span>
+<span><span class="co">#&gt; WARN [2026-11-22 00:04:43] cross-validation: fold 3 fit failed; skipping. Cause: the backend is not installed</span></span>
+<span><span class="co">#&gt; WARN [2026-11-22 00:04:43] cross-validation: fold 4 fit failed; skipping. Cause: the backend is not installed</span></span>
+<span><span class="co">#&gt; WARN [2026-11-22 00:04:43] cross-validation: fold 5 fit failed; skipping. Cause: the backend is not installed</span></span>
 <span><span class="co">#&gt; Warning: cv_spatial(): all folds failed (all 5 folds failed to produce</span></span>
 <span><span class="co">#&gt; predictions); cross-validation results contain no predictions. First error: the</span></span>
 <span><span class="co">#&gt; backend is not installed</span></span>
@@ -571,7 +571,7 @@ above ended on:</p>
 <code class="sourceCode R"><span><span class="va">log_file</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempdir</a></span><span class="op">(</span><span class="op">)</span>, <span class="st">"spatialkit_model_log.log"</span><span class="op">)</span></span>
 <span><span class="co"># The line is wrapped to fit the page.</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/writeLines.html" class="external-link">writeLines</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/strwrap.html" class="external-link">strwrap</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">tail</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/readLines.html" class="external-link">readLines</a></span><span class="op">(</span><span class="va">log_file</span><span class="op">)</span>, <span class="fl">1</span><span class="op">)</span>, <span class="fl">76</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt; WARN [2026-11-19 06:24:25] cv_spatial(): all folds failed (all 5 folds</span></span>
+<span><span class="co">#&gt; WARN [2026-11-22 00:04:43] cv_spatial(): all folds failed (all 5 folds</span></span>
 <span><span class="co">#&gt; failed to produce predictions); cross-validation results contain no</span></span>
 <span><span class="co">#&gt; predictions. First error: the backend is not installed</span></span></code></pre></div>
 <p><code><a href="../reference/spatialkit_quiet.html">spatialkit_quiet()</a></code> turns the console echo off and

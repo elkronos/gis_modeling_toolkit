@@ -10,14 +10,14 @@ Source:
 [`inst/CITATION`](https://github.com/elkronos/gis_modeling_toolkit/blob/main/inst/CITATION)
 
 Chase J (2026). *spatialkit: Spatial Tessellation, Modelling, and
-Cross-Validation Toolkit*. R package version 2.0.0.9000,
+Cross-Validation Toolkit*. R package version 3.0.0,
 <https://github.com/elkronos/gis_modeling_toolkit>.
 
     @Manual{,
       title = {spatialkit: Spatial Tessellation, Modelling, and Cross-Validation Toolkit},
       author = {Justin Chase},
       year = {2026},
-      note = {R package version 2.0.0.9000},
+      note = {R package version 3.0.0},
       url = {https://github.com/elkronos/gis_modeling_toolkit},
     }
 
