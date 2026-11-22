@@ -456,7 +456,7 @@ the separation, and suits a map that has to reach that far from the data
 <span>  nugget <span class="op">=</span> <span class="fu"><a href="../reference/sac_nugget.html">sac_nugget</a></span><span class="op">(</span><span class="va">sac</span><span class="op">)</span>,</span>
 <span>  sill   <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/sum.html" class="external-link">sum</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">sac</span>, <span class="st">"variogram_model"</span><span class="op">)</span><span class="op">$</span><span class="va">psill</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">##       range      nugget        sill </span></span>
-<span><span class="co">## 190.8824820   0.1404058   0.9942012</span></span></code></pre>
+<span><span class="co">## 190.8824784   0.1404058   0.9942011</span></span></code></pre>
 <p>The estimated range, 190.9 m, is close to the 180 m the field was
 simulated with. <code><a href="../reference/sac_nugget.html">sac_nugget()</a></code> reads the nugget off the same
 fitted model; here it is 14 percent of the sill. A nugget that is most
